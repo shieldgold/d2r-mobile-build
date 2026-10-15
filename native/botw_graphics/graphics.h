@@ -82,7 +82,7 @@ int botw_graphics_register_shader_with_profile(const void *control, size_t contr
     const void *code, size_t code_bytes, NVNshaderStage stage, const char *msl,
     const char *entry, const botw_graphics_shader_binding *bindings, size_t binding_count,
     const botw_graphics_shader_draw_profile *profile);
-/* Attach a bounded SPIR-V 1.3 local-memory proof to an exact registered shader.
+/* Attach a bounded SPIR-V 1.3/1.4 local-memory proof to an exact registered shader.
  * Initial support requires zero NVN SPH low/high/CRS and no Private variables.
  * Unknown/nonzero local memory, including the translator's implicit 128-byte
  * fallback, remains rejected until range/initialization semantics are proven. */

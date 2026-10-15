@@ -824,14 +824,16 @@ def shader_scratch_proof(code, spirv, stage):
     if len(spirv) < 20 or len(spirv) > 16 << 20 or len(spirv) % 4:
         raise ValueError('Scratch proof SPIR-V bounds')
     words = struct.unpack('<' + 'I' * (len(spirv) // 4), spirv)
-    if words[0] != 0x07230203 or words[1] != 0x10300 or not 0 < words[3] <= 1048576 or words[4]:
-        raise ValueError('Scratch proof requires SPIR-V 1.3')
+    if words[0] != 0x07230203 or words[1] not in (0x10300, 0x10400) or not 0 < words[3] <= 1048576 or words[4]:
+        raise ValueError('Scratch proof requires SPIR-V version 1.3 or 1.4')
     pos, entries, memory, shader, functions, private = 5, [], 0, 0, [], 0
     in_function, previous, starts, ends = False, 0, 0, 0
     while pos < len(words):
         count, op = words[pos] >> 16, words[pos] & 65535
-        if not count or count > len(words)-pos or op > 400:
+        if not count or count > len(words)-pos or (op > 400 and op != 5380):
             raise ValueError('Scratch proof malformed or unsupported SPIR-V instruction')
+        if op == 5380 and (count != 1 or not in_function or stage != 'fragment'):
+            raise ValueError('Scratch proof demote requires a fragment function')
         args = words[pos+1:pos+count]
         if op == 14:
             if args != (0, 1):
@@ -962,7 +964,7 @@ def main(argv=None):
                         help='Compile under explicit BNSH slot-based 2D requirements; runtime must check descriptors')
     parser.add_argument('--bundle-inputs', type=Path, help='Existing local extraction directory for private bundling')
     parser.add_argument('--bundle-compiled', type=Path, help='Existing local converted MSL directory for private bundling')
-    parser.add_argument('--scratch-proof-directory', type=Path, help='Exact code-SHA keyed SPIR-V 1.3 graphics local-memory proofs')
+    parser.add_argument('--scratch-proof-directory', type=Path, help='Exact code-SHA keyed SPIR-V 1.3/1.4 graphics local-memory proofs')
     parser.add_argument('--bundle-dir', type=Path, help='Fresh ignored directory for the private runtime bundle')
     args = parser.parse_args(argv)
     bundle_args = (args.bundle_inputs, args.bundle_compiled, args.bundle_dir)

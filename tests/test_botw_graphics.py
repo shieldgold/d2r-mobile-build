@@ -368,15 +368,18 @@ class ShaderBundleTests(unittest.TestCase):
             module.shader_binding_map(msl, 'fragment', {'uniforms': [], 'samplers': []})
 
 
-def synthetic_scratch_spirv(stage='vertex', private=False):
+def synthetic_scratch_spirv(stage='vertex', private=False, version=0x10300, extra_op=None):
     def op(code, *args):
         return [((len(args)+1) << 16) | code, *args]
-    words = [0x07230203, 0x10300, 0, 16, 0]
+    words = [0x07230203, version, 0, 16, 0]
     words += op(17, 1) + op(14, 0, 1) + op(15, 0 if stage == 'vertex' else 4, 3, 0x6e69616d, 0)
     words += op(19, 1) + op(33, 2, 1)
     if private:
         words += op(59, 8, 9, 6)
-    words += op(54, 1, 3, 0, 2) + op(248, 4) + op(253) + op(56)
+    words += op(54, 1, 3, 0, 2) + op(248, 4)
+    if extra_op is not None:
+        words += op(extra_op)
+    words += op(253) + op(56)
     return struct.pack('<' + 'I'*len(words), *words)
 
 
@@ -401,9 +404,15 @@ class ShaderScratchProofTests(unittest.TestCase):
         spv = synthetic_scratch_spirv()
         facts = shader_scratch_proof(code, spv, 'vertex')
         self.assertEqual((facts['backend'], facts['sph_low'], facts['private_variables']), ('metal_thread_private', 0, 0))
+        self.assertEqual(shader_scratch_proof(code, synthetic_scratch_spirv(version=0x10400), 'vertex'), facts)
+        fragment = bytearray(code);struct.pack_into('<I', fragment, 0x30, 5 << 10)
+        self.assertEqual(shader_scratch_proof(fragment, synthetic_scratch_spirv('fragment', version=0x10400, extra_op=5380), 'fragment'), facts)
         for payload, reason in ((spv[:20], 'incomplete'), (spv[:-1], 'bounds'), (spv[:-4], 'incomplete'),
                                 (synthetic_scratch_spirv('fragment'), 'stage'),
-                                (synthetic_scratch_spirv(private=True), 'fallback')):
+                                (synthetic_scratch_spirv(private=True), 'fallback'),
+                                (synthetic_scratch_spirv(version=0x10500), 'version'),
+                                (synthetic_scratch_spirv(extra_op=5380), 'fragment'),
+                                (synthetic_scratch_spirv(extra_op=5381), 'unsupported')):
             with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
                 shader_scratch_proof(code, payload, 'vertex')
         struct.pack_into('<I', code, 0x34, 64)
@@ -426,7 +435,12 @@ class ShaderScratchProofTests(unittest.TestCase):
             return 'unsigned char '+name+'[]={'+','.join(map(str, data))+'};\n'
         source = '#include "shader_scratch_proof.h"\n#include <stdio.h>\nint main(void){char e[256];\n'
         source += array('code', code) + array('spv', synthetic_scratch_spirv()) + array('fallback', synthetic_scratch_spirv(private=True))
+        source += array('demote', synthetic_scratch_spirv('fragment', version=0x10400, extra_op=5380))
         source += 'if(!bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,sizeof spv,e,sizeof e))return 1;\n'
+        source += 'spv[6]=1;spv[5]=4;if(!bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,sizeof spv,e,sizeof e))return 6;\n'
+        source += 'spv[5]=5;if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,sizeof spv,e,sizeof e)||!strstr(e,"version"))return 7;spv[5]=3;\n'
+        source += 'code[0x31]=20;if(!bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_FRAGMENT,demote,sizeof demote,e,sizeof e))return 8;code[0x31]=4;\n'
+        source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,demote,sizeof demote,e,sizeof e))return 9;\n'
         source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,fallback,sizeof fallback,e,sizeof e)||!strstr(e,"fallback"))return 2;\n'
         source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,20,e,sizeof e))return 3;\n'
         source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_FRAGMENT,spv,sizeof spv,e,sizeof e))return 4;\n'

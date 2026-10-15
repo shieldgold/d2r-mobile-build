@@ -19,8 +19,12 @@ completion, including error completion. Finalize/reinit cannot redirect an old
 record to a new pool at the same guest address. NULL unbind requires (0,0).
 
 The initial shader proof profile accepts graphics SPH low/high/CRS fields all
-zero and actual SPIR-V 1.3 with no Private variables. The bounded metadata walk
+zero and actual SPIR-V 1.3 or 1.4 with no Private variables. Other versions are
+rejected until their instructions and toolchain have been reviewed. The bounded metadata walk
 checks entry stage, memory model, instruction spans and complete functions. This
+also admits the operand-free fragment-only OpDemoteToHelperInvocationEXT, which
+the original fixed MSL compiler lowers to discard_fragment(). Other extension
+instructions remain rejected. This
 is not a full SPIR-V validator or a substitute for the pinned translator, resource
 environment and MSL validation. Zero declared size plus Private storage is rejected
 conservatively, including Ryujinx's silent 128-byte LDL/STL fallback. Nonzero local
@@ -35,6 +39,9 @@ there. No compiler fallback is treated as an observed game property.
 Private bundles may add exact code-SHA keyed SPIR-V files via
 `--scratch-proof-directory`. The loader verifies bounded relative assets and
 hashes, recomputes the proof against the original code, then attaches it to the
-exact registered identity. Legacy registration does not assert this fact: a draw
+exact registered identity. The offline caller must use the SPIR-V that produced
+that identity's MSL through the pinned SPIRV-Cross command and the bundle stager's
+documented specializations; this metadata check cannot prove compiler equivalence
+between unrelated SPIR-V and MSL. Legacy registration does not assert this fact: a draw
 after a scratch binding fails unless all active stages have validated evidence.
 All game input, SPIR-V and derived MSL remain local ignored assets.
