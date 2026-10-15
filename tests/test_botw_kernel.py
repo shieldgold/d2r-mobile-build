@@ -1072,6 +1072,83 @@ int main(int argc, char **argv) {
 }
 '''
 
+ROLLBACK_FIXTURE = r'''
+#define _DARWIN_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdint.h>
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+static uintptr_t reject_address;
+static uintptr_t reject_second_address;
+static unsigned rejection_count;
+static void *injected_mmap(void *address, size_t size, int prot, int flags, int fd, off_t offset) {
+    if ((flags & MAP_FIXED) && ((uintptr_t)address == reject_address ||
+            (uintptr_t)address == reject_second_address) && rejection_count) {
+        rejection_count--; errno = ENOMEM; return MAP_FAILED;
+    }
+    return mmap(address, size, prot, flags, fd, offset);
+}
+#define mmap injected_mmap
+#include "KERNEL_SOURCE"
+#undef mmap
+static void denied(int signal_number) { (void)signal_number; _exit(44); }
+static int readable(uint64_t address) {
+    pid_t child = fork(); assert(child >= 0);
+    if (!child) {
+        signal(SIGBUS, denied); signal(SIGSEGV, denied);
+        volatile unsigned char value = *(volatile unsigned char *)(uintptr_t)address;
+        (void)value; _exit(0);
+    }
+    int status; assert(waitpid(child, &status, 0) == child);
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+static uint64_t info(botw_kernel *k, unsigned id) {
+    uint64_t r[32] = {0, id, BOTW_KERNEL_CURRENT_PROCESS}; char error[512];
+    assert(botw_kernel_dispatch(k, 0x29, r, error, sizeof error) == BOTW_KERNEL_HANDLED && !r[0]); return r[1];
+}
+int main(void) {
+    botw_kernel *k = botw_kernel_create(NULL, NULL); char error[512]; assert(k);
+    const size_t unit = 0x200000, page = (size_t)sysconf(_SC_PAGESIZE);
+    assert(!botw_kernel_configure_memory(k, unit, unit, unit, unit, 0, error, sizeof error));
+    uint64_t heap = info(k, 4), stack = info(k, 14), r[32] = {0, unit};
+    assert(botw_kernel_dispatch(k, 1, r, error, sizeof error) == BOTW_KERNEL_HANDLED && !r[0]);
+    memset((void *)(uintptr_t)heap, 0x39, page);
+    reject_address = heap; rejection_count = 1;
+    r[0] = stack; r[1] = heap; r[2] = page;
+    assert(botw_kernel_dispatch(k, 4, r, error, sizeof error) == BOTW_KERNEL_ERROR && !rejection_count);
+    assert(readable(heap) && !readable(stack));
+    assert(botw_kernel_memory(k, heap, page, 1) && !botw_kernel_memory(k, stack, page, 0));
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(heap + i) == 0x39);
+    r[0] = stack; r[1] = heap; r[2] = page;
+    assert(botw_kernel_dispatch(k, 4, r, error, sizeof error) == BOTW_KERNEL_HANDLED && !r[0]);
+    memset((void *)(uintptr_t)stack, 0xa5, page);
+    reject_address = stack; rejection_count = 1;
+    r[0] = stack; r[1] = heap; r[2] = page;
+    assert(botw_kernel_dispatch(k, 5, r, error, sizeof error) == BOTW_KERNEL_ERROR && !rejection_count);
+    assert(!readable(heap) && readable(stack));
+    assert(!botw_kernel_memory(k, heap, page, 0) && botw_kernel_memory(k, stack, page, 1));
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(stack + i) == 0xa5);
+    r[0] = stack; r[1] = heap; r[2] = page;
+    assert(botw_kernel_dispatch(k, 5, r, error, sizeof error) == BOTW_KERNEL_HANDLED && !r[0]);
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(heap + i) == 0xa5);
+    assert(!readable(stack));
+    reject_address = heap; reject_second_address = stack; rejection_count = 2;
+    r[0] = stack; r[1] = heap; r[2] = page;
+    assert(botw_kernel_dispatch(k, 4, r, error, sizeof error) == BOTW_KERNEL_ERROR && !rejection_count);
+    assert(strstr(error, "rollback failed") && k->stopping);
+    assert(readable(heap) && readable(stack)); /* bytes retained pending safe destruction */
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(heap + i) == 0xa5);
+    assert(botw_kernel_dispatch(k, 0x1e, r, error, sizeof error) == BOTW_KERNEL_ERROR);
+    assert(strstr(error, "rollback failed"));
+    botw_kernel_destroy(k); puts("ok");
+}
+'''
+
 
 class KernelTests(unittest.TestCase):
     @classmethod
@@ -1107,6 +1184,20 @@ class KernelTests(unittest.TestCase):
 
     def test_heap_budget_alias_permissions_and_4k_16k_boundaries(self):
         self.check_case('memory')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Apple public VM backing move')
+    def test_map_and_unmap_vm_failure_roll_back_bytes_permissions_and_registry(self):
+        with tempfile.TemporaryDirectory(prefix='botw-kernel-rollback-') as temporary:
+            source = Path(temporary) / 'fixture.c'
+            binary = Path(temporary) / 'fixture'
+            source.write_text(ROLLBACK_FIXTURE.replace('KERNEL_SOURCE', str(ROOT / 'native/botw_host/kernel.c')))
+            compiled = subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
+                                       '-Werror', '-pthread', str(source), '-o', str(binary)],
+                                      capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'ok')
 
     def test_explicit_39bit_reservation_supports_real_sdk_heap_and_independent_budget(self):
         self.check_case('address39')

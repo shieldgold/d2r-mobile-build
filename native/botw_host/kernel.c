@@ -777,7 +777,6 @@ static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t cap
 static int move_owned_pages(botw_kernel *k, uint64_t destination, uint64_t source,
                             size_t size, char *error, size_t capacity) {
 #ifdef __APPLE__
-    (void)k;
     vm_address_t target = (vm_address_t)destination; vm_prot_t current = 0, maximum = 0;
     kern_return_t result = vm_remap(mach_task_self(), &target, (vm_size_t)size, 0,
         VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), (vm_address_t)source, FALSE,
@@ -785,8 +784,27 @@ static int move_owned_pages(botw_kernel *k, uint64_t destination, uint64_t sourc
     if (result != KERN_SUCCESS || target != destination ||
         (current & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE))
         return diagnostic(error, capacity, "move owned memory backing failed: kernel=%d protection=0x%x", result, current);
-    if (mmap((void *)(uintptr_t)source, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED)
-        return diagnostic(error, capacity, "reset moved source placeholder: %s", strerror(errno));
+    if (mmap((void *)(uintptr_t)source, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) {
+        int saved = errno;
+        /* The successful shared remap retained the original bytes. Restore
+         * that view even if the failed MAP_FIXED reset disturbed its source,
+         * then remove the uncommitted destination before returning failure.
+         * Mapping metadata has not changed, so both directions are retryable. */
+        target = (vm_address_t)source;
+        result = vm_remap(mach_task_self(), &target, (vm_size_t)size, 0,
+            VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), (vm_address_t)destination, FALSE,
+            &current, &maximum, VM_INHERIT_COPY);
+        if (result != KERN_SUCCESS || target != source ||
+            (current & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE) ||
+            mmap((void *)(uintptr_t)destination, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) {
+            k->stopping = 1;
+            snprintf(k->thread_failure, sizeof k->thread_failure,
+                "memory move rollback failed; owned mappings retained: kernel=%d protection=0x%x", result, current);
+            pthread_cond_broadcast(&k->changed);
+            return diagnostic(error, capacity, "%s", k->thread_failure);
+        }
+        return diagnostic(error, capacity, "reset moved source placeholder: %s; original mapping restored", strerror(saved));
+    }
 #else
     /* Portable fallback limits transient duplication to one host page and
      * removes each old page before copying the next. */
