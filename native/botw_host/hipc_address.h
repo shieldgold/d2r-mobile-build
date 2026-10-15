@@ -27,6 +27,13 @@ void botw_hipc_set_receive_list(void *accessor, int index, uint64_t address,
  * before guest symbol lookup, only for the explicitly selected host39 profile.
  * Unknown names (including NULL) return zero. No process-global state. */
 uintptr_t botw_hipc_address_resolve(const char *symbol);
+/* Validate the actual mapped image before enabling Host39 or executing guest
+ * code. Checks every fixed inline branch and its exact generated instructions,
+ * including the nested virtual-x18 path; no marker/JSON is trusted. 0 accepts,
+ * -1 rejects with a diagnostic. image must name a readable image_size range. */
+int botw_hipc_address_audit_image(const char *name, const void *image,
+    size_t image_size, size_t text_end, size_t patch_off,
+    char *error, size_t error_capacity);
 #ifdef __cplusplus
 }
 #endif

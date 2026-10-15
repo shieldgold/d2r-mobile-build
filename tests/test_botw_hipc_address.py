@@ -80,7 +80,7 @@ def synthetic_image(module, rewritten=False):
         image[site.offset - 8:site.offset + 12] = bytes.fromhex(site.context)
     if module == 'sdk' and rewritten:
         # Pinned generic rewriter site_plain, S=x0, T=x1, K18 index=0.
-        site, target, key = 0x93af4, 0xa0000, 0xb0000
+        site, target, key = 0x93af4, 0xa0000, 0x98000
         delta = (key & ~0xfff) - (target + 8 & ~0xfff)
         imm = delta >> 12
         adrp = 0x90000000 | (imm & 3) << 29 | ((imm >> 2) & 0x7ffff) << 5
@@ -184,10 +184,56 @@ class HostHelperTests(unittest.TestCase):
             getattr(cls.lib, name).restype = BufferResult
         cls.lib.botw_hipc_address_resolve.argtypes = [C.c_char_p]
         cls.lib.botw_hipc_address_resolve.restype = C.c_size_t
+        cls.lib.botw_hipc_address_audit_image.argtypes = [C.c_char_p, C.c_void_p, C.c_size_t, C.c_size_t, C.c_size_t, C.c_char_p, C.c_size_t]
 
     @classmethod
     def tearDownClass(cls):
         cls.directory.cleanup()
+
+    def test_actual_image_audit_rejects_missing_transport_or_corrupt_code(self):
+        error = C.create_string_buffer(256)
+        def audit(module, image, text, patch):
+            buffer = C.create_string_buffer(bytes(image), len(image))
+            return self.lib.botw_hipc_address_audit_image(module.encode(), buffer, len(image),
+                                                        text, patch, error, len(error))
+        for module in ('sdk', 'subsdk0', 'subsdk1'):
+            source = synthetic_image(module, rewritten=True)
+            text = 0x94000 if module == 'sdk' else 0x4e000 if module == 'subsdk0' else 0xc000
+            patch = 0xa0000 if module == 'sdk' else 0x50000 if module == 'subsdk0' else 0x10000
+            generic = source.ljust(max(len(source), patch + 0x4000), b'\0')
+            updated, records = patch_inline_addresses(module, generic)
+            self.assertEqual(audit(module, updated, text, patch), 0, error.value)
+            self.assertEqual(audit(module, generic, text, patch), -1)
+            self.assertIn(b'Host39 HIPC', error.value)
+            for row in records:
+                for offset in (row['offset'], row['thunk_offset'] + 4, row['thunk_offset'] + 20):
+                    changed = bytearray(updated)
+                    changed[offset + 3] ^= 1
+                    self.assertEqual(audit(module, changed, text, patch), -1,
+                                     (module, hex(offset), error.value))
+            if module == 'sdk':
+                word, = struct.unpack_from('<I', generic, 0x93af4)
+                immediate = word & 0x3ffffff
+                if immediate & 0x2000000:
+                    immediate -= 0x4000000
+                block = 0x93af4 + immediate * 4
+                for i in range(10):
+                    changed = bytearray(updated)
+                    changed[block + i * 4 + 3] ^= 1
+                    self.assertEqual(audit(module, changed, text, patch), -1,
+                                     ('nested x18', i, error.value))
+                # Preserve the ADRP opcode but point away from the actual key
+                # page; a structurally valid outer thunk is insufficient.
+                changed = bytearray(updated)
+                changed[block + 11] ^= 0x20
+                self.assertEqual(audit(module, changed, text, patch), -1)
+            self.assertEqual(audit(module, updated, text, len(updated)), -1)
+            self.assertEqual(audit(module, updated, 0x100, patch), -1)
+        unchanged = bytes(0x200)
+        for module in ('main', 'rtld', 'subsdk2', 'subsdk3'):
+            self.assertEqual(audit(module, unchanged, 0x80, 0x100), 0, error.value)
+        self.assertEqual(audit('unknown', unchanged, 0x80, 0x100), -1)
+        self.assertEqual(audit('main', unchanged, 0x101, 0x100), -1)
 
     def test_only_the_five_proven_symbols_are_overridden(self):
         for path in HELPER_PATHS:
@@ -360,7 +406,7 @@ class Arm64InlineTests(unittest.TestCase):
                         expected = expected & ~(63 << 6) | ((address >> 36) & 63) << 6
                         expected &= 0xffffffff
                         uc = cpu(patched)
-                        uc.mem_write(base + 0xb0000, struct.pack('<Q', 0x100))
+                        uc.mem_write(base + 0x98000, struct.pack('<Q', 0x100))
                         uc.mem_write(tls + 0x100, struct.pack('<Q', original_header))
                         expected_registers = initial
                     else:
