@@ -163,6 +163,14 @@ class GuestFrameworkTests(unittest.TestCase):
         self.assertEqual(info['CFBundleIdentifier'], 'local.test.botw')
         self.assertEqual(info['MinimumOSVersion'], '26.1')
 
+    def test_default_target_is_ios18_in_binary_and_plist(self):
+        build_framework(self.report, self.rewrite, self.output)
+        binary = (self.output / 'Guest.framework/Guest').read_bytes()
+        _, _, commands = macho(binary)
+        self.assertEqual(struct.unpack('<IIIIII', commands[0x32][0])[2:5], (2, 0x120000, 0x120000))
+        info = plistlib.loads((self.output / 'Guest.framework/Info.plist').read_bytes())
+        self.assertEqual(info['MinimumOSVersion'], '18.0')
+
     def test_report_hashes_all_inputs_and_published_loader_tables(self):
         result = build_framework(self.report, self.rewrite, self.output)
         self.assertEqual(json.loads((self.output / 'guest-framework-report.json').read_text()), result)

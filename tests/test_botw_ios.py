@@ -97,6 +97,26 @@ class IOSAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Local shell source SHA256 mismatch: ' + relative):
             self.assemble()
 
+    def use_ios18_shell(self):
+        command = struct.pack('<IIIIII', 0x32, 24, 2, 18 << 16, 26 << 16, 0)
+        self.executable = struct.pack('<IiiIIIII', 0xfeedfacf, 0x0100000c, 0, 2, 1, 24, 0, 0) + command
+        self.info['MinimumOSVersion'] = '18.0'
+        self.manifest['executable_sha256'] = hashlib.sha256(self.executable).hexdigest()
+        self.write_shell()
+
+    def test_ios18_shell_and_rebuilt_guest_have_matching_real_load_commands(self):
+        self.use_ios18_shell()
+        result = self.assemble()
+        self.assertEqual(plistlib.loads((result / 'Info.plist').read_bytes())['MinimumOSVersion'], '18.0')
+        self.assertEqual(plistlib.loads((result / 'Frameworks/Guest.framework/Info.plist').read_bytes())['MinimumOSVersion'], '18.0')
+
+    def test_guest_requiring_newer_ios_than_host_is_rejected(self):
+        self.use_ios18_shell()
+        self.guest = self.root / 'ios26-guest'
+        build_framework(self.report, self.rewrite, self.guest, minimum_ios='26.0')
+        with self.assertRaisesRegex(ValueError, 'Guest minimum iOS exceeds host minimum'):
+            self.assemble()
+
     def test_shell_rejects_traversal_duplicate_case_collision_symlink_and_extra_payload(self):
         link = zipfile.ZipInfo('Payload/BOTWNative.app/link')
         link.create_system = 3

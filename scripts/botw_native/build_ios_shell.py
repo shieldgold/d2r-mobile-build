@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import zipfile
 
+MINIMUM_IOS = '18.0'
 SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/services.c', 'native/botw_host/kernel.c',
            'native/botw_host/hipc_address.c',
            'native/botw_host/address_space.c',
@@ -70,7 +71,7 @@ def build_shell(repo_root, output_dir):
         app = work / 'BOTWNative.app'
         app.mkdir()
         objects = []
-        base = [clang, '-target', 'arm64-apple-ios26.0', '-isysroot', sdk,
+        base = [clang, '-target', 'arm64-apple-ios' + MINIMUM_IOS, '-isysroot', sdk,
                 '-O2', '-Wall', '-Wextra', '-Werror', '-DBOTW_WITH_GRAPHICS=1', '-fblocks',
                 *[argument for directory in SOURCE_DIRECTORIES for argument in ('-I', str(root / 'native' / directory))]]
         for index, source in enumerate(SOURCES):
@@ -85,7 +86,7 @@ def build_shell(repo_root, output_dir):
         info = {'CFBundleIdentifier': 'local.botw.native', 'CFBundleExecutable': 'BOTWNative',
                 'CFBundleName': 'BOTWNative', 'CFBundleDisplayName': 'BOTW Native',
                 'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1', 'CFBundleShortVersionString': '0.1',
-                'MinimumOSVersion': '26.0', 'LSRequiresIPhoneOS': True,
+                'MinimumOSVersion': MINIMUM_IOS, 'LSRequiresIPhoneOS': True,
                 'UIDeviceFamily': [1, 2], 'UILaunchScreen': {},
                 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False},
                 'UIFileSharingEnabled': True, 'LSSupportsOpeningDocumentsInPlace': True,

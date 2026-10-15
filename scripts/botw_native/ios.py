@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_ID = 'local.botw.native'
 SHELL_BASE = 'Payload/BOTWNative.app/'
 SHELL_FILES = {'Info.plist', 'BOTWNative', 'shell-manifest.json'}
+SUPPORTED_HOST_MINIMUMS = {'18.0': (18, 0, 0), '26.0': (26, 0, 0)}
 REQUIRED_SOURCES = {'native/botw_host/runtime.c', 'native/botw_host/runtime.h',
                     'native/botw_host/entry.S', 'native/botw_app/main.m'}
 
@@ -139,12 +140,14 @@ def _shell(archive_path, source_root, limit, expected_digest):
     except Exception as exc:
         raise ValueError('Invalid shell Info.plist') from exc
     if (not isinstance(info, dict) or info.get('CFBundleIdentifier') != BUNDLE_ID or
-            info.get('CFBundleExecutable') != 'BOTWNative' or info.get('MinimumOSVersion') != '26.0' or
+            info.get('CFBundleExecutable') != 'BOTWNative' or not isinstance(info.get('MinimumOSVersion'), str) or
+            info['MinimumOSVersion'] not in SUPPORTED_HOST_MINIMUMS or
             info.get('CFBundlePackageType') != 'APPL'):
         raise ValueError('Shell bundle identifier, executable or minimum iOS mismatch')
     binary = files['BOTWNative']
-    if macho_minimum_os(binary) != (26, 0, 0) or struct.unpack_from('<I', binary, 12)[0] != 2:
-        raise ValueError('Shell must be a thin arm64 iOS 26 executable')
+    if (macho_minimum_os(binary) != SUPPORTED_HOST_MINIMUMS[info['MinimumOSVersion']] or
+            struct.unpack_from('<I', binary, 12)[0] != 2):
+        raise ValueError('Shell must be a thin arm64 iOS executable with matching minimum OS metadata')
     manifest = _json(files['shell-manifest.json'])
     if (not isinstance(manifest, dict) or manifest.get('schema') != 1 or
             manifest.get('role') != 'botw-native-host' or manifest.get('game_content_included') is not False or
@@ -202,12 +205,23 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
     expected_paths.update(f'dm/{name}.{kind}.tsv' for name in names for kind in ('fixups', 'gates'))
     if set(published) != expected_paths:
         raise ValueError('Unexpected or missing files in local guest output')
+    guest_info = plistlib.loads(_read(guest_dir / 'Guest.framework/Info.plist', MAX_METADATA_BYTES))
+    if not isinstance(guest_info, dict):
+        raise ValueError('Invalid guest Info.plist')
+    minimum_ios = guest_info.get('MinimumOSVersion')
+    if not isinstance(minimum_ios, str) or not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?', minimum_ios):
+        raise ValueError('Invalid guest minimum iOS metadata')
+    guest_minimum = tuple(map(int, minimum_ios.split('.')))
+    guest_minimum += (0,) * (3 - len(guest_minimum))
+    host_minimum = SUPPORTED_HOST_MINIMUMS[plistlib.loads(shell['Info.plist'])['MinimumOSVersion']]
+    if guest_minimum > host_minimum:
+        raise ValueError('Guest minimum iOS exceeds host minimum')
     report_bytes = _read(report_path, MAX_METADATA_BYTES)
     output_app.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.botw-assembly-', dir=output_app.parent))
     try:
         regenerated = staging / 'verified-guest'
-        expected = build_framework(report_path, rewrite_dir, regenerated, module_names=names)
+        expected = build_framework(report_path, rewrite_dir, regenerated, module_names=names, minimum_ios=minimum_ios)
         if metadata != expected:
             raise ValueError('Guest metadata or source digest mismatch; regenerate from audited inputs')
         if not any(s['path'] == 'report.json' and s['sha256'] == _digest(report_bytes) for s in expected['sources']):
@@ -301,7 +315,8 @@ def sign_app(app, profile_path, identity, udid, output_ipa):
     files = _tree(app)
     info = plistlib.loads(_read(app / 'Info.plist', MAX_METADATA_BYTES))
     if (app.name != 'BOTWNative.app' or info.get('CFBundleIdentifier') != BUNDLE_ID or
-            info.get('CFBundleExecutable') != 'BOTWNative' or info.get('MinimumOSVersion') != '26.0' or
+            info.get('CFBundleExecutable') != 'BOTWNative' or not isinstance(info.get('MinimumOSVersion'), str) or
+            info['MinimumOSVersion'] not in SUPPORTED_HOST_MINIMUMS or
             'BOTWNative' not in files or 'Frameworks/Guest.framework/Guest' not in files):
         raise ValueError('Unexpected development app layout or bundle identifier')
     profile_bytes = _read(profile_path, 1024**2)

@@ -277,7 +277,7 @@ def _macho(modules, minimum):
 
 
 def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
-                    bundle_id='local.botw.guest', minimum_ios='26.0'):
+                    bundle_id='local.botw.guest', minimum_ios='18.0'):
     """Atomically publish Guest.framework, dm loader tables, and a digest report.
 
     output_dir must not exist. Default includes all seven modules; module_names
@@ -380,7 +380,7 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--modules', nargs='+', choices=MODULE_NAMES)
     parser.add_argument('--bundle-id', default='local.botw.guest')
-    parser.add_argument('--minimum-ios', default='26.0')
+    parser.add_argument('--minimum-ios', default='18.0')
     args = parser.parse_args(argv)
     try:
         result = build_framework(args.report, args.rewrite, args.output, module_names=args.modules,
