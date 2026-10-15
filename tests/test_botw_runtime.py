@@ -181,7 +181,8 @@ class NativeRuntimeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.build = tempfile.TemporaryDirectory(prefix='botw-runtime-tests-')
         cls.exe = Path(cls.build.name) / 'botw-host'
-        sources = [ROOT / 'native/botw_host' / f for f in ('runtime.c', 'entry.S', 'cli.c')]
+        sources = [ROOT / 'native/botw_host' / f for f in ('runtime.c', 'entry.S', 'cli.c', 'services.c', 'kernel.c')]
+        sources += [ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c']
         built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
                                 '-O1', '-g', *(str(s) for s in sources), '-o', str(cls.exe)],
                                text=True, capture_output=True)
@@ -327,7 +328,9 @@ int main(void) {
 }
 ''')
         built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
-                                str(source), str(ROOT / 'native/botw_host/entry.S'), '-o', str(executable)],
+                                str(source), str(ROOT / 'native/botw_host/entry.S'),
+                                str(ROOT / 'native/botw_host/services.c'), str(ROOT / 'native/botw_host/kernel.c'),
+                                str(ROOT / 'native/botw_input/input.c'), str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(executable)],
                                capture_output=True, text=True)
         self.assertEqual(built.returncode, 0, built.stderr)
         ran = subprocess.run([str(executable)], capture_output=True, text=True, timeout=10)

@@ -157,7 +157,9 @@ def _shell(archive_path, source_root, limit, expected_digest):
     source_root = Path(source_root).resolve()
     for relative, digest in sources.items():
         parts = _relative(relative)
-        if len(parts.parts) < 3 or parts.parts[:2] not in (('native', 'botw_host'), ('native', 'botw_app')):
+        if len(parts.parts) < 3 or parts.parts[:2] not in (
+                ('native', 'botw_host'), ('native', 'botw_app'), ('native', 'botw_graphics'),
+                ('native', 'botw_input'), ('native', 'botw_resources')):
             raise ValueError('Shell manifest references an unexpected source path')
         path = source_root.joinpath(*parts.parts)
         if not path.resolve().is_relative_to(source_root) or any(

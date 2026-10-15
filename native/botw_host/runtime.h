@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 typedef void (*botw_host_event)(const char *message);
+typedef struct botw_input botw_input;
 enum botw_host_mode {
     BOTW_HOST_LOAD_ONLY = 0,
     BOTW_HOST_SDK_PROBE = 1,
@@ -17,6 +18,12 @@ enum botw_host_mode {
 int botw_host_run(const char *bundle_root, const char *documents_root, botw_host_event event);
 int botw_host_run_mode(const char *bundle_root, const char *documents_root,
                        botw_host_event event, enum botw_host_mode mode);
+/* The caller retains layer through the run; NULL selects an offscreen backend.
+ * Call before run. Lifecycle notifications may be supplied from the main UI. */
+int botw_host_set_graphics_layer(void *layer);
+/* Input is owned by the frontend and must outlive all guest threads. */
+int botw_host_set_input(botw_input *input);
+void botw_host_set_applet_state(int foreground, int focused);
 #ifdef __cplusplus
 }
 #endif

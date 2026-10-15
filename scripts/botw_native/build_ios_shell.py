@@ -9,8 +9,11 @@ import subprocess
 import tempfile
 import zipfile
 
-SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/entry.S',
-           'native/botw_app/main.m')
+SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/services.c', 'native/botw_host/kernel.c',
+           'native/botw_host/entry.S', 'native/botw_resources/romfs.c',
+           'native/botw_input/input.c', 'native/botw_input/BOTWInputOverlay.m',
+           'native/botw_graphics/graphics.m', 'native/botw_app/main.m')
+SOURCE_DIRECTORIES = ('botw_host', 'botw_app', 'botw_resources', 'botw_input', 'botw_graphics')
 
 
 def package_shell(app_dir, output_ipa, source_sha256, sdk_version):
@@ -54,20 +57,25 @@ def build_shell(repo_root, output_dir):
     version = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
     clang = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--find', 'clang'], text=True).strip()
     hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in SOURCES}
-    hashes['native/botw_host/runtime.h'] = hashlib.sha256((root / 'native/botw_host/runtime.h').read_bytes()).hexdigest()
+    for directory in SOURCE_DIRECTORIES:
+        for path in sorted((root / 'native' / directory).rglob('*')):
+            if path.is_file() and path.suffix in ('.h', '.inc', '.c', '.m', '.S') and 'tools' not in path.relative_to(root).parts:
+                hashes[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory(prefix='botw-ios-shell-') as directory:
         work = Path(directory)
         app = work / 'BOTWNative.app'
         app.mkdir()
         objects = []
         base = [clang, '-target', 'arm64-apple-ios26.0', '-isysroot', sdk,
-                '-O2', '-Wall', '-Wextra', '-Werror', '-I', str(root / 'native/botw_host')]
+                '-O2', '-Wall', '-Wextra', '-Werror', '-DBOTW_WITH_GRAPHICS=1', '-fblocks',
+                *[argument for directory in SOURCE_DIRECTORIES for argument in ('-I', str(root / 'native' / directory))]]
         for index, source in enumerate(SOURCES):
             obj = work / f'{index}.o'
             language = ['-fobjc-arc'] if source.endswith('.m') else (['-std=c11'] if source.endswith('.c') else [])
             subprocess.run([*base, *language, '-c', str(root / source), '-o', str(obj)], check=True)
             objects.append(str(obj))
         subprocess.run([*base, *objects, '-framework', 'UIKit', '-framework', 'Foundation',
+                        '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'GameController', '-lobjc',
                         '-Wl,-rpath,@executable_path/Frameworks', '-o', str(app / 'BOTWNative')], check=True)
         info = {'CFBundleIdentifier': 'local.botw.native', 'CFBundleExecutable': 'BOTWNative',
                 'CFBundleName': 'BOTWNative', 'CFBundleDisplayName': 'BOTW Native',
@@ -76,8 +84,8 @@ def build_shell(repo_root, output_dir):
                 'UIDeviceFamily': [1, 2], 'UILaunchScreen': {},
                 'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': False},
                 'UIFileSharingEnabled': True, 'LSSupportsOpeningDocumentsInPlace': True,
-                'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait',
-                    'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight']}
+                'UISupportedInterfaceOrientations': ['UIInterfaceOrientationLandscapeLeft',
+                    'UIInterfaceOrientationLandscapeRight']}
         (app / 'Info.plist').write_bytes(plistlib.dumps(info))
         return package_shell(app, output / 'BOTWNative-shell.ipa', hashes, version)
 
