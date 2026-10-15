@@ -300,16 +300,50 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
     for (unsigned i = 0; i < state.gate_count; i++) {
         Gate *g = &state.gates[i]; if (g->ret != ret) continue;
         if (g->kind) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); regs[g->arg] = (uint64_t)ts.tv_sec * 19200000ull + (uint64_t)ts.tv_nsec * 12 / 625; return; }
+        if (g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 || (uint32_t)regs[1] == 0xffff8000)) {
+            /* main.npdm for fixed BOTW base v0: main_thread_priority = 0x2c. */
+            regs[0] = 0; regs[1] = 44; report("main_thread_priority=44"); return;
+        }
         if (g->arg == 0x06) {
+            if (!writable_guest_range(regs[0], 40)) fail("QueryMemory output is not guest writable memory");
+            uint64_t address = regs[2], lower = 0, upper = 1ull << 39;
             uint64_t top = (uint64_t)pthread_get_stackaddr_np(pthread_self());
-            size_t size = pthread_get_stacksize_np(pthread_self());
-            if (regs[2] < top && regs[2] >= top - size) {
-                if (!writable_guest_range(regs[0], 40)) fail("QueryMemory output is not guest writable memory");
-                struct { uint64_t base, size; uint32_t type, attr, permission, ipc, device, padding; } info = {top - size, size, 0xb, 0, 3, 0, 0, 0};
-                memcpy((void *)regs[0], &info, sizeof info);
-                regs[0] = 0; regs[1] = 0; report("query_memory=stack bytes=%zu", size); return;
+            size_t stack_size = pthread_get_stacksize_np(pthread_self());
+            struct { uint64_t base, size; uint32_t type, attr, permission, ipc, device, padding; } info = {0};
+            const char *kind = "free";
+            if (address >= upper) { info.base = upper; info.size = 0 - upper; info.type = 0x10; kind = "inaccessible"; }
+            else {
+                /* Query the guest-visible map, not unrelated host libraries. The
+                   signed module page protections and actual stack are known. */
+                struct { uint64_t base, size; unsigned type, permission; } regions[MODULE_COUNT * 5 + 1];
+                unsigned count = 0;
+                for (unsigned mindex = 0; mindex < MODULE_COUNT; mindex++) {
+                    Module *m = &state.modules[mindex];
+                    size_t starts[5] = {0, ROUND_PAGE(m->text_end), m->key_off, m->key_off + PAGE, m->patch_off};
+                    size_t ends[5] = {ROUND_PAGE(m->text_end), m->key_off, m->key_off + PAGE, m->patch_off, m->size};
+                    for (unsigned segment = 0; segment < 5; segment++) if (ends[segment] > starts[segment]) {
+                        regions[count].base = (uint64_t)m->base + starts[segment];
+                        regions[count].size = ends[segment] - starts[segment];
+                        regions[count].type = segment == 0 || segment == 4 ? 3 : 4;
+                        regions[count++].permission = segment == 0 || segment == 4 ? 5 : segment == 2 ? 1 : 3;
+                    }
+                }
+                regions[count].base = top - stack_size; regions[count].size = stack_size;
+                regions[count].type = 0xb; regions[count++].permission = 3;
+                for (unsigned region = 0; region < count; region++) {
+                    uint64_t base = regions[region].base, size = regions[region].size;
+                    unsigned type = regions[region].type, permission = regions[region].permission;
+                    if (address >= base && address - base < size) {
+                        info.base = base; info.size = size; info.type = type; info.permission = permission;
+                        kind = type == 0xb ? "stack" : "module"; break;
+                    }
+                    if (base + size <= address && base + size > lower) lower = base + size;
+                    if (base > address && base < upper) upper = base;
+                }
+                if (!info.size) { info.base = lower; info.size = upper - lower; }
             }
-            fail("QueryMemory address outside supported guest regions: 0x%llx", (unsigned long long)regs[2]);
+            memcpy((void *)regs[0], &info, sizeof info); regs[0] = 0; regs[1] = 0;
+            report("query_memory=%s bytes=%llu", kind, (unsigned long long)info.size); return;
         }
         if (g->arg == 0x29 && regs[1] == 11) {
             /* Horizon GetInfo(RandomEntropy). A cryptographic host random value,
@@ -334,7 +368,7 @@ static void initialize_keys(void) {
     if (*(uint64_t *)((tsd & ~7ull) + state.keys[0] * 8) != 0x1234) fail("Apple pthread TSD layout differs from rewrite ABI");
     pthread_setspecific(state.keys[0], NULL);
     /* The SDK owns its eventual ThreadType. Initial context matches Horizon's
-       0x200-byte TLR ABI; no D2R resolution/aspect/TLS constants are copied. */
+       0x200-byte TLR ABI; no D2R resolution or aspect parameters are installed. */
     state.tls = calloc(1, 8192); state.tlr = calloc(1, 0x600);
     if (!state.tls || !state.tlr) fail("allocate guest initial thread context");
     *(void **)((uint8_t *)state.tlr + 0x1f8) = (uint8_t *)state.tlr + 0x200;
