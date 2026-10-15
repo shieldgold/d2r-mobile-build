@@ -125,6 +125,18 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_storage_address_cancellation_requires_exact_unsigned_identity(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'cancel_u32_storage_bases'), 'Storage address cancellation proof is missing')
+        expression = 'uint(max(int(((_20+16u)+base)-(base & 4294967295u)),int(0u))) >> 4u'
+        reduced = module.cancel_u32_storage_bases(expression, {'base'}, {'_20'})
+        self.assertNotIn('base', reduced)
+        self.assertIn('_20+16u', reduced)
+        with self.assertRaisesRegex(ValueError, 'unsigned'):
+            module.cancel_u32_storage_bases(expression, {'base'}, set())
+        mismatched = module.cancel_u32_storage_bases(expression.replace('base &', 'other &'), {'base'}, {'_20'})
+        self.assertIn('base', mismatched)
+
     def test_dynamic_c1_probe_closes_dependencies_and_rejects_other_inputs(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'build_dynamic_c1_probe'), 'Finite c1 proof generation is missing')

@@ -311,6 +311,71 @@ def audit_storage_resources(msl, stage, reflection, descriptors):
             'access_bounds_validated': False}
 
 
+def cancel_u32_storage_bases(value, bases, unsigned_variables):
+    """Apply (unsigned_term + base) - base == unsigned_term modulo 2**32.
+
+    Only the exact identity (including an optional all-ones base mask) is
+    accepted; floating/signed terms and mismatched addresses are not guessed.
+    """
+    def outer(text):
+        text = text.strip()
+        while text.startswith('(') and text.endswith(')'):
+            depth = 0
+            for i, char in enumerate(text):
+                depth += (char == '(') - (char == ')')
+                if depth == 0:
+                    break
+            if i != len(text)-1:
+                break
+            text = text[1:-1].strip()
+        return text
+
+    def split(text, operator):
+        depth = 0
+        for i in range(len(text)-1, -1, -1):
+            depth += (text[i] == ')') - (text[i] == '(')
+            if depth == 0 and text[i] == operator and i:
+                return text[:i].strip(), text[i+1:].strip()
+        return None
+
+    def unsigned(term):
+        if not re.fullmatch(r'[\w\s()+*/%<>&|^~,-]+', term):
+            return False
+        if any(not match[1] for match in re.finditer(r'(?<!\w)(?:0[xX][0-9a-fA-F]+|\d+)([uU]?)(?!\w)', term)):
+            return False
+        names = re.findall(r'\b[A-Za-z_]\w*\b', term)
+        return all(name in unsigned_variables or name in {'uint', 'extract_bits'} for name in names)
+
+    def rewrite(text, depth=0):
+        if depth > 128:
+            raise ValueError('Storage expression nesting exceeds limit')
+        parts, at = [], 0
+        while at < len(text):
+            if text[at] != '(':
+                parts.append(text[at]);at += 1;continue
+            end, level = at+1, 1
+            while end < len(text) and level:
+                level += (text[end] == '(') - (text[end] == ')');end += 1
+            if level:
+                raise ValueError('Unbalanced storage expression')
+            parts.append('(' + rewrite(text[at+1:end-1], depth+1) + ')');at = end
+        result = ''.join(parts).strip()
+        masked = split(outer(result), '&')
+        if masked and outer(masked[0]) in bases and outer(masked[1]).lower() in ('4294967295u', '0xffffffffu'):
+            return outer(masked[0])
+        subtract = split(outer(result), '-')
+        if subtract and outer(subtract[1]) in bases:
+            base = outer(subtract[1]);add = split(outer(subtract[0]), '+')
+            if add:
+                term = add[0] if outer(add[1]) == base else add[1] if outer(add[0]) == base else None
+                if term is not None:
+                    if not unsigned(term):
+                        raise ValueError('Storage address cancellation requires an unsigned term')
+                    return 'uint(' + term + ')'
+        return result
+    return rewrite(value)
+
+
 def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
     """Build an offline Metal probe for a finite, closed c1-index input set.
 
