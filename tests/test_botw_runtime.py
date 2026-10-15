@@ -1,8 +1,6 @@
 """Real native loader boundary tests using tiny synthetic NSO memory images."""
-import os
 import platform
 from pathlib import Path
-import shutil
 import struct
 import subprocess
 import tempfile
@@ -12,7 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('main', 'subsdk0', 'subsdk1', 'subsdk2', 'subsdk3', 'sdk')
 
 
-def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False, entropy_service=False, query_stack=False, priority_service=False, query_zero=False, corrupt_stack=False, symbol_interposition=False, protected_override=False, signal_condition=False, invalid_condition=False, constructors=False, failing_constructor=False):
+def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
+          entropy_service=False, query_stack=False, priority_service=False,
+          query_zero=False, corrupt_stack=False, symbol_interposition=False,
+          protected_override=False, signal_condition=False, invalid_condition=False,
+          constructors=False, failing_constructor=False, check_condition_clear=False,
+          entropy_check=None, query_address=None):
     out = root / 'botw'
     out.mkdir(exist_ok=True)
     raw = bytearray(0x14000)
@@ -44,16 +47,84 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
         gate = (0xa9bf7bfd, 0xd53bd07e, adrp, 0xf9400fbd, 0x8b1d03de,
                 0xf94003de, 0xf94003fd, 0xd63f03c0, 0xa8c17bfd, 0x17ffc039)
         struct.pack_into('<' + 'I' * len(gate), raw, 0x10000, *gate)
-    if name == 'sdk' and (query_stack or query_zero or signal_condition):
+    if name == 'sdk' and (query_stack or query_zero or signal_condition or query_address is not None):
         literal = 0x58000000 | (((0x8208 - 0x104) // 4) << 5)
         branch = 0x14000000 | ((0x10000 - 0x108) // 4)
-        struct.pack_into('<IIII', raw, 0x100, 0x92800001 if signal_condition else 0xaa1f03e2 if query_zero else 0x910003e2, literal, branch, 0xd65f03c0)
+        first = 0x92800001 if signal_condition else 0xaa1f03e2 if query_zero else 0x910003e2
+        if query_address is not None:
+            struct.pack_into('<Q', raw, 0x8230, query_address)
+            first = 0x58000002 | (((0x8230 - 0x100) // 4) << 5)
+        struct.pack_into('<IIII', raw, 0x100, first, literal, branch, 0xd65f03c0)
         imm = (-4) & ((1 << 21) - 1)
         adrp = 0x9000001d | ((imm & 3) << 29) | ((imm >> 2) << 5)
         back = 0x14000000 | (((0x10c - 0x10024) // 4) & 0x3ffffff)
         gate = (0xa9bf7bfd, 0xd53bd07e, adrp, 0xf9400fbd, 0x8b1d03de,
                 0xf94003de, 0xf94003fd, 0xd63f03c0, 0xa8c17bfd, back)
         struct.pack_into('<' + 'I' * len(gate), raw, 0x10000, *gate)
+    if name == 'sdk' and (entropy_service or entropy_check):
+        # Run several calls through one genuine TSD host gate, preserving the
+        # caller's callee-saved registers and LR across the generated probe.
+        words = [0xa9bf7bfd, 0xa9bf53f3]
+        def call_entropy(index, handle=0):
+            words.extend((0xd2800161, 0xd2800002 | (handle << 5), 0xd2800003 | (index << 5)))
+            pc = 0x400 + len(words) * 4
+            words.append(0x94000000 | (((0x10000 - pc) // 4) & 0x3ffffff))
+        def require_equal(register):
+            words.extend((0xeb00003f | (register << 16), 0x54000040, 0xd4200000))
+        if entropy_check == 'invalid_handle':
+            call_entropy(0, 1)
+        elif entropy_check == 'invalid_index':
+            call_entropy(4)
+        else:
+            call_entropy(0)
+            words.append(0xaa0103f3)  # mov x19,x1
+            call_entropy(0)
+            require_equal(19)
+            if entropy_check == 'slots':
+                call_entropy(1)
+                words.append(0xaa0103f4)  # mov x20,x1
+                words.extend((0xeb13003f, 0x54000041, 0xd4200000))  # slot 1 differs
+                call_entropy(0)
+                require_equal(19)
+                call_entropy(1)
+                require_equal(20)
+        words.extend((0xa8c153f3, 0xa8c17bfd, 0xd65f03c0))
+        struct.pack_into('<I', raw, 0x100, 0x140000c0)
+        struct.pack_into('<' + 'I' * len(words), raw, 0x400, *words)
+        imm = (-4) & ((1 << 21) - 1)
+        adrp = 0x9000001d | ((imm & 3) << 29) | ((imm >> 2) << 5)
+        gate = (0xa9bf7bfd, 0xd53bd07e, adrp, 0xf9400fbd, 0x8b1d03de,
+                0xf94003de, 0xf94003fd, 0xd63f03c0, 0xa8c17bfd, 0xd65f03c0)
+        struct.pack_into('<' + 'I' * len(gate), raw, 0x10000, *gate)
+    if name == 'sdk' and check_condition_clear:
+        struct.pack_into('<I', raw, 0x8220, 1)
+        literal = 0x58000002 | (((0x8208 - 0x110) // 4) << 5)
+        struct.pack_into('<IIII', raw, 0x110, literal, 0xb9400042, 0x34000042, 0xd4200000)
+    if name == 'sdk' and query_address is not None:
+        # The following SDK entry reads the QueryMemory record written by the
+        # guest SVC. Validate state and the interval endpoint without ASLR guesses.
+        upper = 1 << 36
+        expected_type = 0x10 if query_address >= upper else 0
+        expected_end = 0 if query_address >= upper else upper
+        struct.pack_into('<QQQ', raw, 0x8280, expected_type, expected_end, upper)
+        words = []
+        def load_expected(register, offset):
+            pc = 0x600 + len(words) * 4
+            words.append(0x58000000 | register | (((offset - pc) // 4) << 5))
+        load_expected(2, 0x8208)
+        words.append(0xf9400843)  # ldr x3,[x2,#16]: state+zero attributes
+        load_expected(4, 0x8280)
+        words.extend((0xeb04007f, 0x54000040, 0xd4200000))
+        words.extend((0xf9400043, 0xf9400444, 0x8b040063))
+        load_expected(4, 0x8288)
+        words.extend((0xeb04007f, 0x54000040, 0xd4200000))
+        if query_address >= upper:
+            words.append(0xf9400043)
+            load_expected(4, 0x8290)
+            words.extend((0xeb04007f, 0x54000040, 0xd4200000))
+        words.append(0xd65f03c0)
+        struct.pack_into('<I', raw, 0x110, 0x1400013c)
+        struct.pack_into('<' + 'I' * len(words), raw, 0x600, *words)
     override_index = None
     if symbol_interposition and name in ('main', 'sdk'):
         names.append('application_override')
@@ -75,7 +146,7 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
               (0x8218, ((len(symbols) - 1) << 32) | 1025, 0)]
     if symbol_interposition and name == 'sdk':
         relocs.append((0x8200, (override_index << 32) | 1025, 0))
-    if query_stack or query_zero or signal_condition:
+    if query_stack or query_zero or signal_condition or query_address is not None:
         relocs.append((0x8208, 1027, 0x100 if invalid_condition else 0x8220))
     if invoke_missing:
         relocs.append((0x8200, ((len(symbols) - 2) << 32) | 1026, 0))
@@ -94,7 +165,7 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
     hdr.update({f'KEY_{n}_IDX': str(i) for i, n in enumerate(
         ('K18', 'KTLS', 'KTLR', 'KGATE', 'KRES0', 'KRES1', 'KASPECT', 'KASPECTUI'))})
     (out / f'{name}.fixups.tsv').write_text(''.join(f'# {k}\t{v}\n' for k, v in hdr.items()))
-    (out / f'{name}.gates.tsv').write_text('0x10020\tsvc\t12\t0x104\n' if name == 'sdk' and priority_service else '0x10020\tsvc\t41\t0x104\n' if name == 'sdk' and entropy_service else '0x10020\tsvc\t29\t0x108\n' if name == 'sdk' and signal_condition else '0x10020\tsvc\t6\t0x108\n' if name == 'sdk' and (query_stack or query_zero) else '')
+    (out / f'{name}.gates.tsv').write_text('0x10020\tsvc\t12\t0x104\n' if name == 'sdk' and priority_service else '0x10020\tsvc\t41\t0x104\n' if name == 'sdk' and (entropy_service or entropy_check) else '0x10020\tsvc\t29\t0x108\n' if name == 'sdk' and signal_condition else '0x10020\tsvc\t6\t0x108\n' if name == 'sdk' and (query_stack or query_zero or query_address is not None) else '')
 
 
 class RuntimeSourceTests(unittest.TestCase):
@@ -196,6 +267,71 @@ class NativeRuntimeTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn('condition_signal requested=-1 waiters=0 woken=0', p.stdout)
         self.assertIn('sdk_probe_completed=true', p.stdout)
+
+    def test_condition_signal_clears_guest_has_waiter_flag(self):
+        p = self.run_host('--sdk-probe', signal_condition=True, check_condition_clear=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('sdk_probe_completed=true', p.stdout)
+
+    def test_entropy_slots_are_stable_and_selected_by_subtype(self):
+        p = self.run_host('--sdk-probe', entropy_service=True, entropy_check='slots')
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('sdk_probe_completed=true', p.stdout)
+
+    def test_entropy_rejects_nonzero_handle(self):
+        p = self.run_host('--sdk-probe', entropy_service=True, entropy_check='invalid_handle')
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('RandomEntropy requires handle=0 and subtype<4', p.stdout)
+
+    def test_entropy_rejects_invalid_subtype(self):
+        p = self.run_host('--sdk-probe', entropy_service=True, entropy_check='invalid_index')
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('RandomEntropy requires handle=0 and subtype<4', p.stdout)
+
+    def test_query_memory_36_bit_boundary_is_inaccessible(self):
+        p = self.run_host('--sdk-probe', query_address=1 << 36)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('query_memory=inaccessible', p.stdout)
+
+    def test_query_memory_last_36_bit_address_free_interval_ends_at_boundary(self):
+        p = self.run_host('--sdk-probe', query_address=(1 << 36) - 1)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('query_memory=free', p.stdout)
+
+    def test_partial_condition_signal_preserves_flag_until_last_waiter(self):
+        # Exercise the production registry with two registered condition nodes.
+        # Guest WaitProcessWideKeyAtomic remains deliberately unsupported.
+        source = Path(self.build.name) / 'condition-registry.c'
+        executable = Path(self.build.name) / 'condition-registry'
+        source.write_text('#include "' + str(ROOT / 'native/botw_host/runtime.c') + '"\n' + r'''
+int main(void) {
+    uint32_t flag = 1;
+    ConditionWaiter first = {.key = (uint64_t)&flag};
+    ConditionWaiter second = {.key = (uint64_t)&flag};
+    pthread_cond_init(&first.condition, NULL);
+    pthread_cond_init(&second.condition, NULL);
+    first.next = &second;
+    state.condition_waiters = &first;
+    state.gates[0] = (Gate){.ret = 0x100, .kind = 0, .arg = 0x1d};
+    state.gate_count = 1;
+    if (sigsetjmp(state.recovery, 1)) return 15;
+    uint64_t regs[31] = {(uint64_t)&flag, 1};
+    botw_gate_dispatch(0x100, regs);
+    if (flag != 1 || !first.signalled || second.signalled) return 11;
+    regs[0] = (uint64_t)&flag; regs[1] = (uint64_t)-1;
+    botw_gate_dispatch(0x100, regs);
+    if (flag != 0 || !second.signalled) return 12;
+    pthread_cond_destroy(&first.condition);
+    pthread_cond_destroy(&second.condition);
+    return 0;
+}
+''')
+        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                                str(source), str(ROOT / 'native/botw_host/entry.S'), '-o', str(executable)],
+                               capture_output=True, text=True)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        ran = subprocess.run([str(executable)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
     def test_condition_key_cannot_point_to_signed_code(self):
         p = self.run_host('--sdk-probe', signal_condition=True, invalid_condition=True)

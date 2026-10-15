@@ -32,6 +32,9 @@
 #define MAX_STUB 256
 #define MAX_GATES 4096
 #define MAX_SYMBOLS 1000000u
+/* Fixed base-v0 main.npdm META flags[0x0c]=0x03: 64BitOld/36-bit AS.
+ * nnosInitialize also initializes its allocator with upper bound 0x1000000000. */
+#define BOTW_ADDRESS_SPACE_SIZE (1ull << 36)
 #define ROUND_PAGE(n) (((n) + PAGE - 1) & ~(size_t)(PAGE - 1))
 typedef struct { int64_t tag; uint64_t value; } Dyn;
 typedef struct { uint32_t name; uint8_t info, other; uint16_t section; uint64_t value, size; } Sym;
@@ -67,6 +70,7 @@ static struct {
     pthread_key_t keys[8];
     void *framework, *tls, *tlr;
     ConditionWaiter *condition_waiters;
+    uint64_t random_entropy[4];
     botw_host_event event;
     sigjmp_buf recovery;
     pthread_t owner;
@@ -334,9 +338,15 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
                 if (requested > 0 && woken >= (unsigned)requested) continue;
                 waiter->signalled = 1; woken++; pthread_cond_signal(&waiter->condition);
             }
+            unsigned remaining = 0;
+            for (ConditionWaiter *waiter = state.condition_waiters; waiter; waiter = waiter->next)
+                if (waiter->key == key && !waiter->signalled) remaining++;
+            /* Horizon clears the guest HasWaiterFlag when its condition tree no
+               longer contains this key, including an initially empty queue. */
+            if (!remaining) __atomic_store_n((uint32_t *)key, 0, __ATOMIC_RELEASE);
             pthread_mutex_unlock(&condition_lock);
             regs[0] = 0;
-            report("condition_signal requested=%d waiters=%u woken=%u", requested, waiters, woken); return;
+            report("condition_signal requested=%d waiters=%u woken=%u remaining=%u", requested, waiters, woken, remaining); return;
         }
         if (g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 || (uint32_t)regs[1] == 0xffff8000)) {
             /* main.npdm for fixed BOTW base v0: main_thread_priority = 0x2c. */
@@ -344,7 +354,7 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
         }
         if (g->arg == 0x06) {
             if (!writable_guest_range(regs[0], 40)) fail("QueryMemory output is not guest writable memory");
-            uint64_t address = regs[2], lower = 0, upper = 1ull << 39;
+            uint64_t address = regs[2], lower = 0, upper = BOTW_ADDRESS_SPACE_SIZE;
             uint64_t top = (uint64_t)pthread_get_stackaddr_np(pthread_self());
             size_t stack_size = pthread_get_stacksize_np(pthread_self());
             struct { uint64_t base, size; uint32_t type, attr, permission, ipc, device, padding; } info = {0};
@@ -384,10 +394,9 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
             report("query_memory=%s bytes=%llu", kind, (unsigned long long)info.size); return;
         }
         if (g->arg == 0x29 && regs[1] == 11) {
-            /* Horizon GetInfo(RandomEntropy). A cryptographic host random value,
-               not a copied user/device identifier or a successful placeholder. */
-            uint64_t random_value; arc4random_buf(&random_value, sizeof random_value);
-            regs[0] = 0; regs[1] = random_value; return;
+            /* Horizon exposes four random values fixed for the process. */
+            if ((uint32_t)regs[2] != 0 || regs[3] >= 4) fail("RandomEntropy requires handle=0 and subtype<4");
+            unsigned index = (unsigned)regs[3]; regs[0] = 0; regs[1] = state.random_entropy[index]; return;
         }
         if (g->arg == 0x1f) {
             const char *port = "<outside guest module>"; size_t length = strlen(port);
@@ -522,6 +531,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         report("host_stage=stopped guest_execution_started=%s phone_ready=false nnMain_completed=false", state.guest_started ? "true" : "false");
     } else {
         install_signal_boundary(); state.active = 1;
+        arc4random_buf(state.random_entropy, sizeof state.random_entropy);
         if (!root || !*root || mode < BOTW_HOST_LOAD_ONLY || mode > BOTW_HOST_BOOT_GAME) fail("invalid host run arguments");
         report("host_stage=loading phone_ready=false guest_execution_tested=false");
 #if TARGET_OS_IPHONE
