@@ -1,6 +1,6 @@
 # BOTW 原生图形桥
 
-这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 117 个 NVN 接口；完整游戏需要更多状态、资源和命令。
+这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 121 个 NVN 接口；完整游戏需要更多状态、资源和命令。
 
 ## 宿主接入
 
@@ -11,13 +11,15 @@
 
 接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空；布尔接口出错返回 0，不以无操作成功代替实现。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
 
-纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理的逐 mip 解排布和 GPU 上传；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、数组/立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArraysInstanced 已验证非零 first/baseInstance 下的相对顶点/实例编号与两块不同颜色的实际像素；实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
+纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArraysInstanced 已验证非零 first/baseInstance 下的相对顶点/实例编号与两块不同颜色的实际像素；实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
+
+数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。
 
 提交立即 commit；围栏只在 GPU 实际完成后放行。`shutdown` 使用全局提交完成组等待全部已提交命令后才释放零拷贝客体内存。异步 GPU/呈现回调只更新加锁状态，不调用宿主错误回调，避免跨线程 longjmp。内存池优先零拷贝共享映射；不能验证页范围的非对齐 uncached 池拒绝创建，cached 池的复制路径需要显式 flush/invalidate。
 
 `CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
 
-117 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
+121 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 
@@ -102,7 +104,7 @@ int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof erro
 
 `directory` 在手机为用户私有 `Documents/botw-shaders`。loader 只读有界相对文件名，拒绝 symlink 和路径穿越，核验文件长度/摘要、NVN 原始头、入口阶段及全部阶段引用。所有 ready 项先完成 Metal 编译预检，逐项从实际 MSL 声明反推资源槽，再与清单和 BNSH 反射交叉核对。成功后 `declared_entries` 是 unique 身份总数，`registered_entries` 是已登记数量，`unsupported_entries` 是仅诊断数量；每个未支持项都在 stderr 记录完整身份和原因。遇到未知 shader 的 `ProgramSetShaders` 仍明确失败。
 
-本机严格编译并实际 Metal 加载新私有包的结果为 `REGISTERED=37 UNSUPPORTED=0 TOTAL=37`。此前 `ranges-v2`/`storage-audit` 的 35/2 包保留用于旧版本兼容核验。登记全部身份不等于游戏图形功能齐备；字体片元所需的数组纹理等仍有独立运行时限制。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
+本机严格编译并实际 Metal 加载新私有包的结果为 `REGISTERED=37 UNSUPPORTED=0 TOTAL=37`。此前 `ranges-v2`/`storage-audit` 的 35/2 包保留用于旧版本兼容核验。登记全部身份不等于游戏图形功能齐备；字体片元的二维数组采样已由人工 GPU 夹具验证；实际游戏的纹理格式、view、混合及命令仍须逐项验收。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
 
 ## 验证
 

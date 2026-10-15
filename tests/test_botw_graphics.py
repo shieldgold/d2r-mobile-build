@@ -370,6 +370,32 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_array_texture_layers_mips_scalar_types_and_cpu_updates_reach_gpu_pixels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'array.c'
+            smoke = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', ARRAY_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
+            harness.write_text(smoke.replace('free(memory);', 'free(arrayMemory);free(memory);'))
+            exe = path / 'array'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for args in ([], ['r8']):
+                result = subprocess.run([str(exe), *args], capture_output=True, text=True)
+                if result.returncode == 77:
+                    self.skipTest('No Metal device')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('GPU_ARRAY_LAYER_MIP_COLORS_OK', result.stdout)
+            for mode in ('linear-array', 'bad-layers', 'bad-levels'):
+                result = subprocess.run([str(exe), mode], capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, mode + result.stderr)
+                self.assertIn('Unsupported texture dimension', result.stdout)
+            for mode, expected in (('array-target', 'array render targets'), ('wrong-scalar', 'texture scalar type')):
+                result = subprocess.run([str(exe), mode], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+
     def test_finite_bundle_recomputes_bounds_and_draws_with_nonzero_base_ids(self):
         import hashlib
         import json
@@ -1076,3 +1102,58 @@ int main(void){
 
 if __name__ == '__main__':
     unittest.main()
+
+
+ARRAY_FEATURE = r"""
+    API(nvnTextureBuilderSetTarget);API(nvnTextureBuilderSetSize3D);API(nvnTextureBuilderSetDepth);API(nvnTextureBuilderSetLevels);
+    API(nvnTextureBuilderGetStorageSize);API(nvnTextureBuilderGetStorageAlignment);API(nvnTextureGetDepth);API(nvnTextureGetLevels);API(nvnTextureGetTarget);API(nvnTextureFinalize);
+    API(nvnTexturePoolInitialize);API(nvnTexturePoolRegisterTexture);API(nvnSamplerPoolInitialize);API(nvnSamplerPoolRegisterSampler);
+    API(nvnSamplerBuilderSetDefaults);API(nvnSamplerBuilderSetDevice);API(nvnSamplerBuilderSetMinMagFilter);API(nvnSamplerInitialize);
+    API(nvnDeviceGetTextureHandle);API(nvnCommandBufferSetTexturePool);API(nvnCommandBufferSetSamplerPool);API(nvnCommandBufferBindTexture);
+    unsigned char *arrayMemory=NULL;CHECK(posix_memalign((void**)&arrayMemory,page,page*4)==0);memset(arrayMemory,0,page*4);
+    NVNmemoryPool arrayPool;nvnMemoryPoolBuilderSetStorage(&mb,arrayMemory,page*4);CHECK(nvnMemoryPoolInitialize(&arrayPool,&mb));
+    int r8=(argc>1&&!strcmp(argv[1],"r8")),integer=(argc>1&&!strcmp(argv[1],"wrong-scalar"));
+    const unsigned char gray[2][3]={{32,64,96},{128,160,192}};
+    const unsigned char colors[2][3][4]={{{255,0,0,255},{0,0,255,255},{255,0,255,255}},{{0,255,0,255},{255,255,0,255},{0,255,255,255}}};
+    /* Independent GOB address calculation: one 64-byte-wide GOB, base mip
+       two GOBs high; RGBA base mip two GOBs wide, lower mips one GOB.
+       RGBA layer stride = 2048+512+512; R8 stride = 1024+512+512. */
+    size_t layerStride=(r8||integer)?2048:3072;const size_t levelOffsets[]={0,(r8||integer)?1024:2048,(r8||integer)?1536:2560};
+    for(unsigned layer=0;layer<2;layer++)for(unsigned level=0;level<3;level++)for(unsigned y=0;y<(16u>>level);y++)for(unsigned x=0;x<(32u>>level);x++){
+      unsigned xb=x*((r8||integer)?1:4);size_t gob=(xb/64)*(level?512:1024)+(y/8)*512+(xb%64/32)*256+(y%8/2)*64+(xb%32/16)*32+(y%2)*16+xb%16;
+      if(r8||integer)arrayMemory[layer*layerStride+levelOffsets[level]+gob]=gray[layer][level];else memcpy(arrayMemory+layer*layerStride+levelOffsets[level]+gob,colors[layer][level],4);
+    }
+    NVNtexture arrayTexture;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);
+    nvnTextureBuilderSetTarget(&tb,NVN_TEXTURE_TARGET_2D_ARRAY);nvnTextureBuilderSetSize3D(&tb,32,16,2);nvnTextureBuilderSetLevels(&tb,3);
+    nvnTextureBuilderSetFormat(&tb,integer?NVN_FORMAT_R8UI:r8?NVN_FORMAT_R8:NVN_FORMAT_RGBA8);nvnTextureBuilderSetStorage(&tb,&arrayPool,0);
+    if(argc>1&&!strcmp(argv[1],"linear-array")){nvnTextureBuilderSetFlags(&tb,NVN_TEXTURE_FLAGS_LINEAR);nvnTextureBuilderSetStride(&tb,256);CHECK(!nvnTextureInitialize(&arrayTexture,&tb));puts(botw_graphics_last_error());goto array_done;}
+    if(argc>1&&!strcmp(argv[1],"bad-layers")){nvnTextureBuilderSetDepth(&tb,-1);CHECK(nvnTextureBuilderGetStorageSize(&tb)==0);CHECK(nvnTextureBuilderGetStorageAlignment(&tb)==0);CHECK(!nvnTextureInitialize(&arrayTexture,&tb));puts(botw_graphics_last_error());goto array_done;}
+    if(argc>1&&!strcmp(argv[1],"bad-levels")){nvnTextureBuilderSetLevels(&tb,16);CHECK(nvnTextureBuilderGetStorageSize(&tb)==0);CHECK(nvnTextureBuilderGetStorageAlignment(&tb)==0);CHECK(!nvnTextureInitialize(&arrayTexture,&tb));puts(botw_graphics_last_error());goto array_done;}
+    CHECK(nvnTextureBuilderGetStorageSize(&tb)==((r8||integer)?4096:6144));CHECK(nvnTextureBuilderGetStorageAlignment(&tb)==512);CHECK(nvnTextureInitialize(&arrayTexture,&tb));
+    CHECK(nvnTextureGetDepth(&arrayTexture)==2&&nvnTextureGetLevels(&arrayTexture)==3&&nvnTextureGetTarget(&arrayTexture)==NVN_TEXTURE_TARGET_2D_ARRAY);
+    if(argc>1&&!strcmp(argv[1],"array-target")){const NVNtexture *badTargets[]={&arrayTexture};nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,badTargets,NULL,NULL,NULL);return 2;}
+    unsigned char mipPixels[32*16*4];if(!r8&&!integer){
+    for(unsigned layer=0;layer<2;layer++)for(unsigned level=0;level<3;level++){CHECK(botw_graphics_read_texture_subresource(&arrayTexture,level,layer,mipPixels,sizeof mipPixels));for(unsigned pixel=0;pixel<((32u>>level)*(16u>>level));pixel++)CHECK(!memcmp(mipPixels+pixel*4,colors[layer][level],4));}
+    CHECK(!botw_graphics_read_texture_subresource(&arrayTexture,3,0,mipPixels,sizeof mipPixels));CHECK(!botw_graphics_read_texture_subresource(&arrayTexture,0,2,mipPixels,sizeof mipPixels));}
+    NVNtexturePool tp;NVNsamplerPool sp;CHECK(nvnTexturePoolInitialize(&tp,&pool,0,16));CHECK(nvnSamplerPoolInitialize(&sp,&pool,1024,16));
+    nvnTexturePoolRegisterTexture(&tp,3,&arrayTexture,NULL);NVNsamplerBuilder sb;NVNsampler sampler;
+    nvnSamplerBuilderSetDefaults(&sb);nvnSamplerBuilderSetDevice(&sb,&device);nvnSamplerBuilderSetMinMagFilter(&sb,NVN_MIN_FILTER_NEAREST_MIPMAP_NEAREST,NVN_MAG_FILTER_NEAREST);
+    CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&sampler);uint64_t textureHandle=nvnDeviceGetTextureHandle(&device,3,4);
+    controls[0][8]=8;controls[1][8]=9;codes[0][8]=8;codes[1][8]=9;memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    char arrayMSL[1200];snprintf(arrayMSL,sizeof arrayMSL,"#include <metal_stdlib>\nusing namespace metal;vertex float4 av(uint v [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[v],0,1);}"
+      "fragment float4 af(float4 pos [[position]],texture2d_array<float> t [[texture(3)]],sampler s [[sampler(0)]]){float4 color=t.sample(s,float2(.01),uint(pos.x)>=2u?1u:0u,level(float(min(uint(pos.y),2u))));return float4(%s,1);}",r8?"color.rrr":"color.rgb");
+    botw_graphics_shader_binding bindings[]={{BOTW_GRAPHICS_TEXTURE,0,3},{BOTW_GRAPHICS_SAMPLER,0,0}};
+    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,arrayMSL,"av"));
+    CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,arrayMSL,"af",bindings,2));CHECK(nvnProgramSetShaders(&program,2,sd));
+    for(unsigned pass=0;pass<2;pass++){
+      if(pass){if(r8)arrayMemory[layerStride]=gray[0][0];else memcpy(arrayMemory+layerStride,colors[0][0],4);}
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);
+      nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,textureHandle);
+      nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+      CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+      for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++){unsigned char *pixel=pixels+(y*4+x)*4;unsigned layer=x>=2,level=y<3?y:2;if(pass&&!y&&layer)layer=0;if(r8)CHECK(pixel[0]==gray[layer][level]&&pixel[1]==gray[layer][level]&&pixel[2]==gray[layer][level]&&pixel[3]==255);else CHECK(!memcmp(pixel,colors[layer][level],4));}
+    }
+    nvnTextureFinalize(&arrayTexture);puts("GPU_ARRAY_LAYER_MIP_COLORS_OK");
+array_done:
+    nvnMemoryPoolFinalize(&arrayPool);
+"""

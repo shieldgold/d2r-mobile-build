@@ -61,8 +61,10 @@ uint64_t botw_graphics_presented_frame_count(void);
 void botw_graphics_set_capture_enabled(int enabled);
 int botw_graphics_copy_latest_frame(void *rgba, size_t capacity, uint32_t *width,
                                     uint32_t *height, uint64_t *frame_number);
-/* Wait for GPU completion and read a supported linear 2D color texture. */
+/* Wait for GPU completion and read level 0, layer 0 of an RGBA8/BGRA8 texture. */
 int botw_graphics_read_texture(const NVNtexture *texture, void *pixels, size_t bytes);
+int botw_graphics_read_texture_subresource(const NVNtexture *texture,
+    unsigned level, unsigned layer, void *pixels, size_t bytes);
 #ifdef __cplusplus
 }
 #endif

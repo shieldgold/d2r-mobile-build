@@ -263,6 +263,7 @@ static void finishBuffer(id<MTLCommandBuffer> buffer) {
 /* Completion handlers must be registered before commit. Sync waits retain the
  * group through the command buffer rather than registering a late handler. */
 static void commitBuffer(id<MTLCommandBuffer> cb) {
+    if(!cb)fatal("Metal command allocation failed");
     BWCompletion *completion=[BWCompletion new];completion.group=dispatch_group_create();
     dispatch_group_enter(completion.group);
     objc_setAssociatedObject(cb,&completionKey,completion,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -319,15 +320,18 @@ static int registerShaderImpl(const void *control,size_t cs,const void *code,siz
     if(profile){shader.maxVertices=profile->max_vertex_count;shader.maxInstances=profile->max_instance_count;shader.storageSlot=profile->storage_slot;shader.storageMinimum=[NSData dataWithBytes:profile->minimum_storage_bytes length:(profile->max_instance_count+1)*sizeof(size_t)];}
     [shaders addObject:shader];return 1;
 }
-static int readTextureImpl(const NVNtexture *raw,void *pixels,size_t bytes) {
+static void uploadTexture(BWTexture *texture,id<MTLCommandBuffer> command);
+static int readTextureImpl(const NVNtexture *raw,unsigned level,unsigned layer,void *pixels,size_t bytes) {
     BWTexture *t=get(raw,[BWTexture class]);
     if(t.format!=NVN_FORMAT_RGBA8 && t.format!=NVN_FORMAT_BGRA8)return report("Readback requires RGBA8/BGRA8 color texture");
-    size_t size=(size_t)t.width*t.height*4,pitch=((size_t)t.width*4+255)&~255ull;
+    if(level>=t.descriptor.levels||layer>=t.layout.layers)return report("Texture readback level/layer bounds");
+    unsigned width=MAX(1,t.width>>level),height=MAX(1,t.height>>level);
+    size_t size=(size_t)width*height*4,pitch=((size_t)width*4+255)&~255ull;
     if(!pixels || bytes<size)return report("Texture readback buffer bounds");
-    id<MTLBuffer> buffer=[gpu newBufferWithLength:pitch*t.height options:MTLResourceStorageModeShared];
-    id<MTLCommandBuffer> cb=[commandQueue commandBuffer];id<MTLBlitCommandEncoder> b=[cb blitCommandEncoder];
-    [b copyFromTexture:t.texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(t.width,t.height,1) toBuffer:buffer destinationOffset:0 destinationBytesPerRow:pitch destinationBytesPerImage:pitch*t.height];[b endEncoding];commitBuffer(cb);finishBuffer(cb);
-    for(int y=0;y<t.height;y++)memcpy((char*)pixels+(size_t)y*t.width*4,(char*)buffer.contents+(size_t)y*pitch,t.width*4);return 1;
+    id<MTLBuffer> buffer=[gpu newBufferWithLength:pitch*height options:MTLResourceStorageModeShared];if(!buffer)return report("Texture readback allocation failed");
+    id<MTLCommandBuffer> cb=[commandQueue commandBuffer];if(!cb)return report("Texture readback command allocation failed");uploadTexture(t,cb);id<MTLBlitCommandEncoder> b=[cb blitCommandEncoder];if(!b){t.uploadHash=nil;return report("Texture readback encoder allocation failed");}
+    [b copyFromTexture:t.texture sourceSlice:layer sourceLevel:level sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(width,height,1) toBuffer:buffer destinationOffset:0 destinationBytesPerRow:pitch destinationBytesPerImage:pitch*height];[b endEncoding];commitBuffer(cb);finishBuffer(cb);
+    for(unsigned y=0;y<height;y++)memcpy((char*)pixels+(size_t)y*width*4,(char*)buffer.contents+(size_t)y*pitch,width*4);return 1;
 }
 
 #define NVN(name,ret,...) static ret h_##name(__VA_ARGS__); \
@@ -404,6 +408,7 @@ NVN(nvnTextureBuilderSetDevice,void,NVNtextureBuilder *b,NVNdevice *d){((Texture
 NVN(nvnTextureBuilderSetFlags,void,NVNtextureBuilder *b,int f){((TextureBuilder*)b)->flags=f;}
 NVN(nvnTextureBuilderSetTarget,void,NVNtextureBuilder *b,NVNtextureTarget t){((TextureBuilder*)b)->target=t;}
 NVN(nvnTextureBuilderSetSize2D,void,NVNtextureBuilder *b,int w,int h){((TextureBuilder*)b)->width=w;((TextureBuilder*)b)->height=h;}
+NVN(nvnTextureBuilderSetSize3D,void,NVNtextureBuilder *raw,int w,int h,int d){TextureBuilder *b=(TextureBuilder*)raw;b->width=w;b->height=h;b->depth=d;}
 NVN(nvnTextureBuilderSetWidth,void,NVNtextureBuilder *b,int w){((TextureBuilder*)b)->width=w;}
 NVN(nvnTextureBuilderSetHeight,void,NVNtextureBuilder *b,int h){((TextureBuilder*)b)->height=h;}
 NVN(nvnTextureBuilderSetDepth,void,NVNtextureBuilder *b,int d){((TextureBuilder*)b)->depth=d;}
@@ -413,13 +418,18 @@ NVN(nvnTextureBuilderSetFormat,void,NVNtextureBuilder *b,NVNformat f){((TextureB
 NVN(nvnTextureBuilderSetStride,void,NVNtextureBuilder *b,ptrdiff_t s){((TextureBuilder*)b)->stride=s;}
 NVN(nvnTextureBuilderSetStorage,void,NVNtextureBuilder *b,NVNmemoryPool *p,ptrdiff_t o){((TextureBuilder*)b)->pool=p;((TextureBuilder*)b)->offset=o;}
 static nvn_texdesc textureDescriptor(const TextureBuilder *b){return (nvn_texdesc){b->target,b->format,b->flags|((b->flags&0x40)?0x10:0),b->samples,b->width,b->height,b->depth,b->levels,b->stride,b->pkgBlockHeight};}
-static size_t textureBytes(const TextureBuilder *b){if(b->width<1 || b->height<1 || b->width>16384 || b->height>16384 || b->levels<1 || b->levels>15 || b->stride<0)return 0;nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;}
+static size_t textureBytes(const TextureBuilder *b){
+    BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
+    if((b->target!=NVN_TEXTURE_TARGET_2D&&!array)||b->width<1||b->height<1||b->width>16384||b->height>16384||b->depth<1||b->depth>(array?2048:1)||b->levels<1||b->levels>15||b->stride<0||(uint64_t)b->stride>UINT32_MAX||b->samples<0||b->samples>1||b->pkgBlockHeight<0||b->pkgBlockHeight>6||(array&&(b->flags&(0x10|0x40))))return 0;
+    unsigned dimension=MAX(b->width,b->height),levels=1;while(dimension>1){dimension>>=1;levels++;}if((unsigned)b->levels>levels)return 0;
+    nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;
+}
 NVN(nvnTextureBuilderSetPackagedTextureLayout,void,NVNtextureBuilder *raw,const NVNpackagedTextureLayout *layout){TextureBuilder *b=(TextureBuilder*)raw;if(!layout || ((const uint8_t*)layout)[0]>5)fatal("invalid packaged block height");b->pkgBlockHeight=((const uint8_t*)layout)[0]+1;}
 NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){return textureBytes((const TextureBuilder*)raw);}
-NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){nvn_texdesc d=textureDescriptor((const TextureBuilder*)raw);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
+NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){const TextureBuilder *b=(const TextureBuilder*)raw;if(!textureBytes(b))return 0;nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
     const TextureBuilder *b=(const TextureBuilder*)builder;get(b->device,[BWDevice class]);
-    if(!b->pool || b->target!=NVN_TEXTURE_TARGET_2D || b->depth!=1 || b->samples>1 || (b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE)))return report("Unsupported texture dimension/flags/samples");
+    if(!b->pool || !textureBytes(b) || (b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE)))return report("Unsupported texture dimension/flags/samples/levels");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1 || (b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
     if(swz[0]!=NVN_SWZ_R||swz[1]!=NVN_SWZ_G||swz[2]!=NVN_SWZ_B||swz[3]!=NVN_SWZ_A)return report("Texture component swizzle is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);
@@ -427,7 +437,9 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     BWTexture *t=[BWTexture new];t.descriptor=textureDescriptor(b);nvn_texlayout layout;nvn_texdesc td=t.descriptor;nvn_tex_layout(&td,&layout);t.layout=layout;
     t.blockLinear=!(t.descriptor.flags&0x10);t.depth=b->format>=NVN_FORMAT_DEPTH16&&b->format<=NVN_FORMAT_DEPTH32F_STENCIL8;
     if(t.depth && b->format!=NVN_FORMAT_DEPTH16 && b->format!=NVN_FORMAT_DEPTH32F)return report("Combined depth/stencil storage not implemented");
+    if(t.depth&&b->target==NVN_TEXTURE_TARGET_2D_ARRAY)return report("Array depth texture semantics are not yet validated");
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)format width:b->width height:b->height mipmapped:b->levels>1];desc.mipmapLevelCount=b->levels;
+    if(b->target==NVN_TEXTURE_TARGET_2D_ARRAY){desc.textureType=MTLTextureType2DArray;desc.arrayLength=b->depth;}
     desc.storageMode=t.blockLinear?MTLStorageModePrivate:MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;if(!(b->format>=0x79&&b->format<=0x94))desc.usage|=MTLTextureUsageRenderTarget;
     if(!t.blockLinear){if(b->levels!=1||b->stride<(ptrdiff_t)b->width*4)return report("Invalid linear texture stride/levels");t.texture=[pool.buffer newTextureWithDescriptor:desc offset:pool.bufferOffset+b->offset bytesPerRow:b->stride];}
     else t.texture=[gpu newTextureWithDescriptor:desc];
@@ -435,13 +447,13 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
 static void uploadTexture(BWTexture *t,id<MTLCommandBuffer> cb){
     if(!t.blockLinear||t.gpuWritten)return;
     const void *source=(char*)t.pool.memory+t.offset;NSData *hash=digest(source,t.layout.size);if([hash isEqual:t.uploadHash])return;
-    for(unsigned level=0;level<t.descriptor.levels;level++){
+    for(unsigned layer=0;layer<t.layout.layers;layer++)for(unsigned level=0;level<t.descriptor.levels;level++){
         uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;nvn_texdesc d=t.descriptor;
-        if(nvn_deswizzle_geom(&d,level,0,&row,&rows,&slices,&base,&th,&td,&bpb))fatal("block-linear texture geometry");
+        if(nvn_deswizzle_geom(&d,level,layer,&row,&rows,&slices,&base,&th,&td,&bpb)||slices!=1)fatal("block-linear texture geometry");
         size_t pitch=(row+255)&~255u;id<MTLBuffer> staging=[gpu newBufferWithLength:pitch*rows options:MTLResourceStorageModeShared];
-        if(!staging || nvn_deswizzle(&d,level,0,source,staging.contents,pitch))fatal("block-linear texture decode");
-        id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];
-        [blit copyFromBuffer:staging sourceOffset:0 sourceBytesPerRow:pitch sourceBytesPerImage:pitch*rows sourceSize:MTLSizeMake(MAX(1,t.width>>level),MAX(1,t.height>>level),1) toTexture:t.texture destinationSlice:0 destinationLevel:level destinationOrigin:MTLOriginMake(0,0,0)];[blit endEncoding];
+        if(!staging || nvn_deswizzle(&d,level,layer,source,staging.contents,pitch))fatal("block-linear texture decode");
+        id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];if(!blit)fatal("block-linear texture upload encoder allocation failed");
+        [blit copyFromBuffer:staging sourceOffset:0 sourceBytesPerRow:pitch sourceBytesPerImage:pitch*rows sourceSize:MTLSizeMake(MAX(1,t.width>>level),MAX(1,t.height>>level),1) toTexture:t.texture destinationSlice:layer destinationLevel:level destinationOrigin:MTLOriginMake(0,0,0)];[blit endEncoding];
     }
     t.uploadHash=hash;
 }
@@ -449,6 +461,9 @@ static void uploadTexture(BWTexture *t,id<MTLCommandBuffer> cb){
 NVN(nvnTextureFinalize,void,NVNtexture *t){get(t,[BWTexture class]);removeObject(t);}
 NVN(nvnTextureGetWidth,int,const NVNtexture *t){return ((BWTexture*)get(t,[BWTexture class])).width;}
 NVN(nvnTextureGetHeight,int,const NVNtexture *t){return ((BWTexture*)get(t,[BWTexture class])).height;}
+NVN(nvnTextureGetDepth,int,const NVNtexture *t){return ((BWTexture*)get(t,[BWTexture class])).descriptor.depth;}
+NVN(nvnTextureGetLevels,int,const NVNtexture *t){return ((BWTexture*)get(t,[BWTexture class])).descriptor.levels;}
+NVN(nvnTextureGetTarget,NVNtextureTarget,const NVNtexture *t){return (NVNtextureTarget)((BWTexture*)get(t,[BWTexture class])).descriptor.target;}
 NVN(nvnTextureGetFormat,NVNformat,const NVNtexture *t){return (NVNformat)((BWTexture*)get(t,[BWTexture class])).format;}
 NVN(nvnProgramInitialize,NVNboolean,NVNprogram *p,NVNdevice *d){get(d,[BWDevice class]);put(p,[BWProgram new]);return 1;}
 NVN(nvnProgramFinalize,void,NVNprogram *p){get(p,[BWProgram class]);removeObject(p);}
@@ -471,7 +486,7 @@ NVN(nvnCommandBufferBeginRecording,void,NVNcommandBuffer *c){BWCommands *cmd=get
 NVN(nvnCommandBufferEndRecording,NVNcommandHandle,NVNcommandBuffer *c){BWCommands *cmd=get(c,[BWCommands class]);if(!cmd.recording)fatal("end without recording");cmd.recording=NO;uint64_t h=++serial;handles[@(h)]=[cmd.commands copy];cmd.commands=nil;return h;}
 static void record(NVNcommandBuffer *raw,NSDictionary *command){BWCommands *cmd=get(raw,[BWCommands class]);if(!cmd.recording)fatal("command outside recording");[cmd.commands addObject:command];}
 NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress src,NVNbufferAddress dst,size_t bytes,int flags){if(flags || !bytes)fatal("nvnCommandBufferCopyBufferToBuffer flags/size");record(c,@{@"op":@"copy",@"src":@(src),@"dst":@(dst),@"size":@(bytes)});}
-NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){if(n!=1||!colors||dv||(views&&views[0]))fatal("nvnCommandBufferSetRenderTargets supports one color/default view");get(colors[0],[BWTexture class]);if(depth)get(depth,[BWTexture class]);record(c,@{@"op":@"target",@"id":@(((const BWObject*)colors[0])->serial),@"depth":depth?@(((const BWObject*)depth)->serial):@0});}
+NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){if(n!=1||!colors||dv||(views&&views[0]))fatal("nvnCommandBufferSetRenderTargets supports one color/default view");BWTexture *color=get(colors[0],[BWTexture class]);BWTexture *z=depth?get(depth,[BWTexture class]):nil;if(color.texture.textureType!=MTLTextureType2D||(z&&z.texture.textureType!=MTLTextureType2D))fatal("array render targets require unimplemented explicit layer/view semantics");record(c,@{@"op":@"target",@"id":@(((const BWObject*)colors[0])->serial),@"depth":depth?@(((const BWObject*)depth)->serial):@0});}
 NVN(nvnCommandBufferClearColor,void,NVNcommandBuffer *c,int index,const float *color,int mask){if(index||!color||mask!=15)fatal("nvnCommandBufferClearColor color index/mask");record(c,@{@"op":@"clear",@"color":[NSData dataWithBytes:color length:16]});}
 NVN(nvnCommandBufferBindProgram,void,NVNcommandBuffer *c,const NVNprogram *p,int stages){if(stages!=NVN_SHADER_STAGE_ALL_GRAPHICS_BITS && stages!=(NVN_SHADER_STAGE_VERTEX_BIT|NVN_SHADER_STAGE_FRAGMENT_BIT))fatal("nvnCommandBufferBindProgram stages");get(p,[BWProgram class]);record(c,@{@"op":@"program",@"id":@(((const BWObject*)p)->serial)});}
 NVN(nvnCommandBufferDrawArrays,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,int first,int count){if(mode!=NVN_DRAW_PRIMITIVE_TRIANGLES||first<0||count<0)fatal("nvnCommandBufferDrawArrays primitive/range");record(c,@{@"op":@"draw",@"first":@(first),@"count":@(count),@"baseInstance":@0,@"instances":@1});}
@@ -569,6 +584,13 @@ static void validateDrawProfiles(BWReplay *state,NSDictionary *draw){
         if([bound[@"size"] unsignedLongLongValue]<need||!address([bound[@"address"] unsignedLongLongValue],[bound[@"size"] unsignedLongLongValue],&offset))fatal("draw profile storage range is too short or outside memory pool");
     }
 }
+static BOOL textureScalarType(BWTexture *texture,MTLDataType scalar){
+    switch(texture.format){
+        case NVN_FORMAT_R8UI:case NVN_FORMAT_R16UI:case NVN_FORMAT_R32UI:case NVN_FORMAT_RG8UI:case NVN_FORMAT_RG16UI:case NVN_FORMAT_RG32UI:case NVN_FORMAT_RGBA8UI:case NVN_FORMAT_RGBA16UI:case NVN_FORMAT_RGBA32UI:return scalar==MTLDataTypeUInt;
+        case NVN_FORMAT_R8I:case NVN_FORMAT_R16I:case NVN_FORMAT_R32I:case NVN_FORMAT_RG8I:case NVN_FORMAT_RG16I:case NVN_FORMAT_RG32I:case NVN_FORMAT_RGBA8I:case NVN_FORMAT_RGBA16I:case NVN_FORMAT_RGBA32I:return scalar==MTLDataTypeInt;
+        default:return scalar==MTLDataTypeFloat||scalar==MTLDataTypeHalf;
+    }
+}
 static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEncoder> encoder,NSDictionary *draw){
     const VertexAttribute *attributes=state.attributes.bytes;const VertexStream *streams=state.streams.bytes;
     for(size_t i=0;i<state.attributes.length/sizeof *attributes;i++)if(attributes[i].format){
@@ -593,7 +615,7 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
                 NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;
                 for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot){id<MTLBufferBinding> buffer=(id<MTLBufferBinding>)argument;if([r[@"size"] unsignedLongLongValue]<buffer.bufferDataSize || (pool.bufferOffset+offset)%MAX(1,buffer.bufferAlignment))fatal(storage?"storage range size/alignment does not satisfy the shader":"uniform range size/alignment does not satisfy the shader");}
                 if(vertex)[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];else[encoder setFragmentBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];}
-            else{NSNumber *h=state.textures[key];if(!h)fatal("unbound combined texture handle");if(b[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!t)fatal("texture descriptor missing");NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;for(id<MTLBinding> a in args)if(a.used&&a.type==MTLBindingTypeTexture&&a.index==b[i].metal_slot&&((id<MTLTextureBinding>)a).textureType!=t.texture.textureType)fatal("shader texture type differs from actual NVN descriptor");if(vertex)[encoder setVertexTexture:t.texture atIndex:b[i].metal_slot];else[encoder setFragmentTexture:t.texture atIndex:b[i].metal_slot];}
+            else{NSNumber *h=state.textures[key];if(!h)fatal("unbound combined texture handle");if(b[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!t)fatal("texture descriptor missing");NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;for(id<MTLBinding> a in args)if(a.used&&a.type==MTLBindingTypeTexture&&a.index==b[i].metal_slot){id<MTLTextureBinding> reflected=(id<MTLTextureBinding>)a;if(reflected.textureType!=t.texture.textureType)fatal("shader texture type differs from actual NVN descriptor");if(!textureScalarType(t,reflected.textureDataType))fatal("shader texture scalar type differs from actual NVN format");}if(vertex)[encoder setVertexTexture:t.texture atIndex:b[i].metal_slot];else[encoder setFragmentTexture:t.texture atIndex:b[i].metal_slot];}
                 else{BWSampler *s=state.samplerPool.entries[@(h.unsignedLongLongValue>>20)];if(!s)fatal("sampler descriptor missing");if(vertex)[encoder setVertexSamplerState:s.state atIndex:b[i].metal_slot];else[encoder setFragmentSamplerState:s.state atIndex:b[i].metal_slot];}}
         }
     }
@@ -642,7 +664,7 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
 NVN(nvnWindowBuilderSetDefaults,void,NVNwindowBuilder *raw){memset(raw,0,sizeof *raw);((WindowBuilder*)raw)->interval=1;}
 NVN(nvnWindowBuilderSetDevice,void,NVNwindowBuilder *b,NVNdevice *d){((WindowBuilder*)b)->device=d;}
 NVN(nvnWindowBuilderSetNativeWindow,void,NVNwindowBuilder *b,NVNnativeWindow w){((WindowBuilder*)b)->native=w;}
-NVN(nvnWindowBuilderSetTextures,void,NVNwindowBuilder *raw,int n,NVNtexture *const *textures){WindowBuilder *b=(WindowBuilder*)raw;if(n<2||n>4||!textures)fatal("swapchain texture count");b->count=n;for(int i=0;i<n;i++){get(textures[i],[BWTexture class]);b->textures[i]=textures[i];}}
+NVN(nvnWindowBuilderSetTextures,void,NVNwindowBuilder *raw,int n,NVNtexture *const *textures){WindowBuilder *b=(WindowBuilder*)raw;if(n<2||n>4||!textures)fatal("swapchain texture count");b->count=n;for(int i=0;i<n;i++){BWTexture *t=get(textures[i],[BWTexture class]);if(t.texture.textureType!=MTLTextureType2D)fatal("swapchain requires non-array 2D textures");b->textures[i]=textures[i];}}
 NVN(nvnWindowBuilderSetPresentInterval,void,NVNwindowBuilder *b,int interval){if(interval<0||interval>4)fatal("present interval");((WindowBuilder*)b)->interval=interval;}
 NVN(nvnWindowInitialize,NVNboolean,NVNwindow *raw,const NVNwindowBuilder *builder){const WindowBuilder *b=(const WindowBuilder*)builder;get(b->device,[BWDevice class]);if(!displayLayer || b->count<2)return report("No host CAMetalLayer or valid swapchain");BWWindow *w=[BWWindow new];NSMutableArray *textures=[NSMutableArray new];for(int i=0;i<b->count;i++)[textures addObject:@(((BWObject*)b->textures[i])->serial)];w.textures=textures;w.busy=[NSMutableDictionary new];w.native=b->native;w.interval=b->interval;put(raw,w);return 1;}
 NVN(nvnWindowFinalize,void,NVNwindow *raw){BWWindow *w=get(raw,[BWWindow class]);for(id<MTLCommandBuffer> b in w.busy.allValues)finishBuffer(b);removeObject(raw);}
@@ -687,7 +709,8 @@ WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_g
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
 WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,NULL))
 WRAP_VALUE(,botw_graphics_register_shader_with_profile,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count,const botw_graphics_shader_draw_profile *profile),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,profile))
-WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,pixels,bytes))
+WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,0,0,pixels,bytes))
+WRAP_VALUE(,botw_graphics_read_texture_subresource,int,(const NVNtexture *texture,unsigned level,unsigned layer,void *pixels,size_t bytes),readTextureImpl(texture,level,layer,pixels,bytes))
 #define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}graphicsEnd();abort();}
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED

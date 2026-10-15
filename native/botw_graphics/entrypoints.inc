@@ -116,3 +116,7 @@ NVN_VOID(nvnWindowSetPresentInterval,(NVNwindow *raw,int interval),(raw,interval
 NVN_VALUE(nvnQueueAcquireTexture,NVNqueueAcquireTextureResult,(NVNqueue *q,NVNwindow *raw,int *index),(q,raw,index))
 NVN_VALUE(nvnWindowAcquireTexture,NVNwindowAcquireTextureResult,(NVNwindow *raw,NVNsync *s,int *index),(raw,s,index))
 NVN_VOID(nvnQueuePresentTexture,(NVNqueue *q,NVNwindow *raw,int index),(q,raw,index))
+NVN_VOID(nvnTextureBuilderSetSize3D,(NVNtextureBuilder *raw,int w,int h,int d),(raw,w,h,d))
+NVN_VALUE(nvnTextureGetDepth,int,(const NVNtexture *t),(t))
+NVN_VALUE(nvnTextureGetLevels,int,(const NVNtexture *t),(t))
+NVN_VALUE(nvnTextureGetTarget,NVNtextureTarget,(const NVNtexture *t),(t))
