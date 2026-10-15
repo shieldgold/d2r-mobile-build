@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include "runtime.h"
 #include "graphics.h"
@@ -45,6 +46,37 @@ static void hostEvent(const char *message) {
     NSString *text = [NSString stringWithUTF8String:message];
     if (!text) text = @"日志含无法解码的字节";
     dispatch_async(dispatch_get_main_queue(), ^{ [activeController appendEvent:text]; });
+}
+
+static void saveFirstPresentedFrame(void) {
+    uint32_t width = 0, height = 0; uint64_t number = 0;
+    botw_graphics_copy_latest_frame(NULL, 0, &width, &height, &number);
+    if (!width || !height || width > 4096 || height > 4096) {
+        hostEvent("game_draw_capture_saved=false reason=no-bounded-presented-image"); return;
+    }
+    size_t bytes = (size_t)width * height * 4;
+    void *rgba = malloc(bytes);
+    if (!rgba) { hostEvent("game_draw_capture_saved=false reason=allocation"); return; }
+    if (!botw_graphics_copy_latest_frame(rgba, bytes, &width, &height, &number)) {
+        free(rgba); hostEvent("game_draw_capture_saved=false reason=frame-changed"); return;
+    }
+    NSData *pixels = [NSData dataWithBytesNoCopy:rgba length:bytes freeWhenDone:YES];
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)pixels);
+    CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
+    CGImageRef image = provider && color ? CGImageCreate(width, height, 8, 32, (size_t)width * 4, color,
+        kCGImageAlphaNoneSkipLast, provider, NULL, false, kCGRenderingIntentDefault) : NULL;
+    NSData *png = image ? UIImagePNGRepresentation([UIImage imageWithCGImage:image]) : nil;
+    NSString *path = [documentsRoot stringByAppendingPathComponent:@"first-game-frame.png"];
+    NSError *error = nil;
+    BOOL saved = png && [png writeToFile:path options:NSDataWritingAtomic error:&error];
+    char result[256];
+    snprintf(result, sizeof result, "game_draw_capture_saved=%s frame=%llu width=%u height=%u gameplay_verified=false",
+        saved ? "true" : "false", (unsigned long long)number, width, height);
+    hostEvent(result);
+    if (error) hostEvent(error.localizedDescription.UTF8String);
+    if (image) CGImageRelease(image);
+    if (color) CGColorSpaceRelease(color);
+    if (provider) CGDataProviderRelease(provider);
 }
 
 static void *runGuest(void *unused) {
@@ -94,6 +126,8 @@ static void *runGuest(void *unused) {
     if (!self.firstFrameObserved && botw_graphics_presented_frame_count()) {
         self.firstFrameObserved = YES;
         hostEvent("first_translated_game_draw_presented=true gameplay_verified=false");
+        saveFirstPresentedFrame();
+        botw_graphics_set_capture_enabled(0);
         self.logView.hidden = YES;
     }
 }

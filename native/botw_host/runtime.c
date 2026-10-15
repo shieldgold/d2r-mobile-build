@@ -40,6 +40,7 @@
  * actual backend; an absent symbol is a link failure rather than a stub. */
 #if defined(BOTW_WITH_GRAPHICS)
 #include "../botw_graphics/shader_bundle.h"
+#include "../botw_graphics/graphics.h"
 extern int botw_graphics_init(void *, void (*)(const char *), int (*)(const void *, size_t));
 extern void botw_graphics_shutdown(void);
 extern void *botw_nvn_bootstrap_loader(const char *);
@@ -1017,6 +1018,8 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         char priority_error[512];
         if (botw_kernel_configure_thread_priority_mask(state.kernel, UINT64_C(0x0ffffffff0000000),
                 priority_error, sizeof priority_error)) fail("configure guest priorities: %s", priority_error);
+        if (botw_kernel_configure_core_mask(state.kernel, 7, priority_error, sizeof priority_error))
+            fail("configure guest processor capabilities: %s", priority_error);
         configure_kernel_memory();
         pthread_mutex_lock(&lifecycle_lock);
         state.services = botw_services_create(services_log, services_memory, NULL);
@@ -1042,6 +1045,9 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                 if (!graphics_backend_init(configured_graphics_layer, graphics_error, graphics_memory)) fail("initialize Metal graphics backend");
                 state.graphics_started = 1;
 #if defined(BOTW_WITH_GRAPHICS)
+                /* Preserve the first actual presented draw for device review.
+                 * The frontend disables capture after saving that frame. */
+                botw_graphics_set_capture_enabled(1);
                 char path[4096]; int length = snprintf(path, sizeof path, "%s/botw-shaders", documents);
                 if (length < 0 || (size_t)length >= sizeof path) fail("shader bundle path exceeds limit");
                 if (!access(path, F_OK)) {
