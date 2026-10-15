@@ -39,6 +39,9 @@ typedef struct botw_romfs botw_romfs;
 /* Borrowed backends must outlive services. Input is already bound to this kernel
  * shared-memory handle; root retains the original handle until services stop. */
 void botw_services_set_input(botw_services *services, botw_input *input, uint32_t shared_memory_handle);
+/* Invoke after host input sampling to signal actual Npad style changes. Lock
+ * order is services -> input/kernel; frontend callbacks must release input first. */
+int botw_services_refresh_input(botw_services *services, char *error, size_t error_capacity);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
 /* Host audio mixer reads the same gain policy queried/set by IAudioController.
  * Values are finite [0,1], initialized to unity. Each output is optional. */

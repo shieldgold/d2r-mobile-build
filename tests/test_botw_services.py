@@ -484,6 +484,50 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(generation.value, 2)
         self.send(debug, self.request(0xbad), good=False)
 
+    def test_hid_maps_same_input_backing_and_applies_real_npad_configuration(self):
+        self.applet_kernel()
+        self.applet_state()
+        self.lib.botw_input_create.restype = C.c_void_p
+        self.lib.botw_input_destroy.argtypes = [C.c_void_p]
+        self.lib.botw_input_set_source.argtypes = [C.c_void_p, C.c_int, C.c_uint64, C.c_int32, C.c_int32, C.c_int32, C.c_int32, C.c_int]
+        self.lib.botw_input_shared_memory.argtypes = [C.c_void_p, C.POINTER(C.c_size_t)]
+        self.lib.botw_input_shared_memory.restype = C.c_void_p
+        input = self.lib.botw_input_create()
+        self.assertTrue(input)
+        self.addCleanup(self.lib.botw_input_destroy, input)
+        self.kernel_handles[0x30000] = {'shared_memory': True}
+        self.lib.botw_services_set_input.argtypes = [C.c_void_p, C.c_void_p, C.c_uint32]
+        self.lib.botw_services_set_input(self.ctx, input, 0x30000)
+        hid = self.service(self.initialized_sm(), b'hid')
+        self.send(hid, self.request(0, struct.pack('<Q', 0xbad), pid=True), good=False)
+        raw, _ = self.send(hid, self.request(0, struct.pack('<Q', 0x12345678), pid=True))
+        _, handles, _ = self.response(raw)
+        resource = handles[0]
+        raw, _ = self.send(resource, self.request(0))
+        _, handles, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 2)
+        self.assertIs(self.kernel_handles[handles[0]], self.kernel_handles[0x30000])
+        self.send(hid, self.request(100, struct.pack('<IIQ', 3, 0, 0x12345678), pid=True))
+        ids = C.create_string_buffer(struct.pack('<II', 0, 0x20))
+        self.ranges.append((C.addressof(ids), len(ids), False))
+        self.send(hid, self.request(102, struct.pack('<Q', 0x12345678), static=(C.addressof(ids), 8), pid=True))
+        self.assertEqual(self.lib.botw_input_set_source(input, 0, 1, 123, -234, 0, 0, 1), 0)
+        self.send(hid, self.request(103, struct.pack('<Q', 0x12345678), pid=True))
+        memory = self.lib.botw_input_shared_memory(input, None)
+        raw = C.string_at(memory + 0x9a00 + 8 * 0x5000, 0x700)
+        self.assertEqual(struct.unpack_from('<I', raw)[0], 2)
+        ring = 0x28 + 0x350
+        tail = struct.unpack_from('<Q', raw, ring + 16)[0]
+        self.assertEqual(struct.unpack_from('<Q', raw, ring + 32 + tail * 0x30 + 16)[0], 1)
+        event_request = struct.pack('<IIQQ', 0x20, 0, 0x12345678, 0)
+        raw, _ = self.send(hid, self.request(106, event_request, pid=True))
+        _, handles, _ = self.response(raw)
+        event = self.kernel_handles[handles[0]]
+        event['signaled'] = False
+        self.send(hid, self.request(107, struct.pack('<IIQ', 0x20, 0, 0x12345678), pid=True))
+        self.assertTrue(event['signaled'])
+        self.send(hid, self.request(100, struct.pack('<IIQ', 0x80000000, 0, 0x12345678), pid=True), good=False)
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)

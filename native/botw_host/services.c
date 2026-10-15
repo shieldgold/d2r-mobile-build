@@ -10,6 +10,7 @@
  */
 #include "services.h"
 #include "../botw_resources/romfs.h"
+#include "../botw_input/input.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -31,7 +32,7 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
-    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE };
+    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -67,6 +68,11 @@ struct botw_services {
     botw_input *input;
     botw_romfs *romfs;
     uint32_t input_shared_memory_handle;
+    uint32_t hid_supported_styles, hid_npad_ids[10], hid_last_style[10];
+    uint32_t hid_style_event_write[10], hid_style_event_read[10];
+    size_t hid_npad_count;
+    unsigned hid_npad_active;
+    uint64_t hid_joy_hold;
     size_t storage_bytes;
     float audio_main_gain, audio_library_gain, audio_transparent_rate;
     uint8_t *capture_images[3], *transition_image;
@@ -130,6 +136,8 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_ROMFS_STORAGE: return "fs.IStorage(RomFS)";
         case OBJECT_ROMFS_FILESYSTEM: return "fs.IFileSystem(RomFS)";
         case OBJECT_ROMFS_FILE: return "fs.IFile(RomFS)";
+        case OBJECT_HID: return "hid";
+        case OBJECT_HID_APPLET_RESOURCE: return "hid.IAppletResource";
     }
     return "<invalid>";
 }
@@ -181,7 +189,7 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     if (!memory) return NULL;
     botw_services *s = calloc(1, sizeof *s);
     if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
-    if (s) { s->next_handle = 0x10000; s->log_destination = 0xffff; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
+    if (s) { s->next_handle = 0x10000; s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
@@ -195,7 +203,26 @@ void botw_services_set_kernel_api(botw_services *s, const botw_services_kernel_a
 }
 void botw_services_set_input(botw_services *s, botw_input *input, uint32_t shared_memory_handle) {
     if (!s) return;
-    pthread_mutex_lock(&s->lock); s->input = input; s->input_shared_memory_handle = shared_memory_handle; pthread_mutex_unlock(&s->lock);
+    pthread_mutex_lock(&s->lock); s->input = input; s->input_shared_memory_handle = shared_memory_handle;
+    if (input) (void)botw_input_configure(input, s->hid_npad_active ? s->hid_supported_styles : 0, s->hid_npad_ids, s->hid_npad_count);
+    pthread_mutex_unlock(&s->lock);
+}
+static uint32_t npad_id(unsigned index) { return index < 8 ? index : index == 8 ? 0x20 : 0x10; }
+static int npad_index(uint32_t id) { return id < 8 ? (int)id : id == 0x20 ? 8 : id == 0x10 ? 9 : -1; }
+static int refresh_input(botw_services *s, char *error, size_t cap) {
+    if (!s->input) return 0;
+    for (unsigned index = 0; index < 10; index++) {
+        uint32_t style = botw_input_style(s->input, npad_id(index));
+        if (style != s->hid_last_style[index]) {
+            if (s->hid_style_event_write[index] && s->kernel.signal_event(s->kernel.opaque, s->hid_style_event_write[index], error, cap)) return -1;
+            s->hid_last_style[index] = style;
+        }
+    }
+    return 0;
+}
+int botw_services_refresh_input(botw_services *s, char *error, size_t cap) {
+    if (!s) return problem(error, cap, "refresh input requires service context");
+    pthread_mutex_lock(&s->lock); int result = refresh_input(s, error, cap); pthread_mutex_unlock(&s->lock); return result;
 }
 void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
     if (!s) return;
@@ -240,6 +267,11 @@ static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, 
     s->applet_ready = 1; s->applet_resource_user_id = user_id;
     s->applet_foreground = (unsigned)foreground; s->applet_focus = focus; s->applet_operation = operation;
     if (!foreground) s->applet_foreground_rights = 0;
+    if (s->input) {
+        botw_input_set_active(s->input, foreground && focused);
+        botw_input_sample(s->input, botw_input_monotonic_ticks());
+        if (refresh_input(s, error, cap)) return -1;
+    }
     return 0;
 }
 int botw_services_set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
@@ -257,6 +289,10 @@ void botw_services_destroy(botw_services *s) {
     char error[128];
     if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, error, sizeof error);
     if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
+    for (unsigned index = 0; index < 10; index++) {
+        if (s->hid_style_event_read[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_read[index], error, sizeof error);
+        if (s->hid_style_event_write[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_write[index], error, sizeof error);
+    }
     pthread_mutex_unlock(&s->lock); pthread_mutex_destroy(&s->lock); free(s);
 }
 static int services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
@@ -695,6 +731,70 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
     }
     return problem(error, cap, "unsupported read-only IPC service=%s command=%u", kind_name(o->kind), r->command);
 }
+static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->input || !s->input_shared_memory_handle || !s->applet_ready) return problem(error, cap, "hid requires real host input, shared-memory handle and applet resource identity");
+    if (r->copy_count || r->output_count) return problem(error, cap, "hid unexpected copy handle/output buffer");
+    if (o->kind == OBJECT_HID_APPLET_RESOURCE && r->command == 0) {
+        if (r->pid || r->input_count || !s->kernel.duplicate_handle) return problem(error, cap, "hid.GetSharedMemoryHandle requires kernel duplicate API and no inputs");
+        uint32_t handle = 0;
+        if (s->kernel.duplicate_handle(s->kernel.opaque, s->input_shared_memory_handle, &handle, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, handle, 0); store32(ipc + 8, 1u << 1); return 0;
+    }
+    if (o->kind != OBJECT_HID) return problem(error, cap, "unsupported hid applet resource command=%u", r->command);
+    size_t user_offset = (r->command == 100 || r->command == 106 || r->command == 107 || r->command == 109) ? 8 : 0;
+    if (!r->pid || r->payload_size < user_offset + 8 || load64(r->payload + user_offset) != s->applet_resource_user_id)
+        return problem(error, cap, "hid command=%u requires PID and matching applet resource user ID", r->command);
+    if (r->input_count && r->command != 102) return problem(error, cap, "unexpected hid input buffer command=%u", r->command);
+    if (r->command == 0) {
+        Object *resource = new_object(OBJECT_HID_APPLET_RESOURCE);
+        if (!resource) return problem(error, cap, "allocate hid.IAppletResource failed");
+        return return_object(s, session, resource, ipc, capacity, r, 0, error, cap);
+    }
+    if (r->command == 100 || r->command == 102 || r->command == 103 || r->command == 104 || r->command == 109) {
+        uint32_t styles = s->hid_supported_styles, ids[10]; size_t count = s->hid_npad_count;
+        memcpy(ids, s->hid_npad_ids, sizeof ids); unsigned active = s->hid_npad_active;
+        if (r->command == 100) { styles = load32(r->payload); if (styles & ~31u) return problem(error, cap, "hid invalid supported Npad style set=0x%x", styles); }
+        if (r->command == 102) {
+            if (r->input_size > sizeof ids || r->input_size % 4) return problem(error, cap, "hid Npad ID buffer must contain at most ten u32 IDs");
+            count = r->input_size / 4;
+            if (count) memcpy(ids, (const void *)(uintptr_t)r->input_address, r->input_size);
+        }
+        if (r->command == 103 || r->command == 109) active = 1;
+        if (r->command == 109 && load32(r->payload) != 0) return problem(error, cap, "HID backend supports old SDK Npad revision=0, requested=%u", load32(r->payload));
+        if (r->command == 104) active = 0;
+        if (botw_input_configure(s->input, active ? styles : 0, ids, count)) return problem(error, cap, "host input rejected Npad styles/duplicate or invalid IDs");
+        s->hid_supported_styles = styles; memcpy(s->hid_npad_ids, ids, sizeof ids); s->hid_npad_count = count; s->hid_npad_active = active;
+        botw_input_sample(s->input, botw_input_monotonic_ticks());
+        if (refresh_input(s, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (r->command == 101) { response(ipc, capacity, r, &s->hid_supported_styles, 4, 0, 0); return 0; }
+    if (r->command == 106) {
+        if (r->payload_size < 24 || !s->kernel.create_event || !s->kernel.duplicate_handle || !s->kernel.signal_event || !s->kernel.close_handle)
+            return problem(error, cap, "AcquireNpadStyleSetUpdateEventHandle requires Npad ID, reserved event pointer and kernel event API");
+        int index = npad_index(load32(r->payload));
+        if (index < 0) return problem(error, cap, "invalid Npad style event ID=0x%x", load32(r->payload));
+        if (!s->hid_style_event_read[index]) {
+            if (s->kernel.create_event(s->kernel.opaque, 1, &s->hid_style_event_write[index], &s->hid_style_event_read[index], error, cap)) return -1;
+            s->hid_last_style[index] = botw_input_style(s->input, load32(r->payload));
+        }
+        uint32_t handle = 0;
+        if (s->kernel.duplicate_handle(s->kernel.opaque, s->hid_style_event_read[index], &handle, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, handle, 0); store32(ipc + 8, 1u << 1); return 0;
+    }
+    if (r->command == 107) {
+        if (botw_input_disconnect(s->input, load32(r->payload))) return problem(error, cap, "DisconnectNpad invalid ID=0x%x", load32(r->payload));
+        botw_input_sample(s->input, botw_input_monotonic_ticks());
+        if (refresh_input(s, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (r->command == 120) {
+        if (r->payload_size < 16 || load64(r->payload + 8) > 1) return problem(error, cap, "NpadJoyHoldType requires Vertical=0 or Horizontal=1");
+        s->hid_joy_hold = load64(r->payload + 8); response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (r->command == 121) { response(ipc, capacity, r, &s->hid_joy_hold, 8, 0, 0); return 0; }
+    return problem(error, cap, "unsupported IPC service=hid command=%u", r->command);
+}
 static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
@@ -738,10 +838,13 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "apm\0\0\0\0\0", 8)) service_kind = OBJECT_APM;
             else if (!memcmp(name, "appletOE", 8)) service_kind = OBJECT_APPLET_OE;
             else if (!memcmp(name, "fsp-srv\0", 8)) service_kind = OBJECT_FSP;
+            else if (!memcmp(name, "hid\0\0\0\0\0", 8)) service_kind = OBJECT_HID;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_HID || o->kind == OBJECT_HID_APPLET_RESOURCE) {
+        return hid_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind >= OBJECT_FSP && o->kind <= OBJECT_ROMFS_FILE) {
         return fs_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_DEBUG_FUNCTIONS) {
