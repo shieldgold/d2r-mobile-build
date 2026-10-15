@@ -57,6 +57,15 @@ void botw_kernel_destroy(botw_kernel *kernel);
  * and the runtime must stop guest execution and show error. */
 int botw_kernel_dispatch(botw_kernel *kernel, unsigned number, uint64_t *regs,
                          char *error, size_t error_capacity);
+/* GetInfo(8): current native process debugger attachment. Handle must be 0
+ * (a process pseudo-handle is invalid), then subtype must be 0. Darwin reads
+ * public sysctl KERN_PROC_PID/P_TRACED on each query; it reflects the host
+ * debugger observing this same process's native guest threads, not permission
+ * to debug and not a separate Horizon KDebug session. A failed/short/wrong-PID
+ * query is ERROR with registers untouched. Other hosts return UNSUPPORTED for
+ * valid queries until a matching backend exists; invalid arguments are still
+ * validated. The implemented process-info group (0..7,12..15,21,22) requires
+ * subtype=0 before process-handle lookup; invalid subtype is 0xe801. */
 /* SetThreadPriority(0x0d) changes base priority; GetThreadPriority(0x0c) reads
  * effective priority including mutex donation. Apple self updates apply and
  * read back a coarse QoS class. A remote live thread requiring a different

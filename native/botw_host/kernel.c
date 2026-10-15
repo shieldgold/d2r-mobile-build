@@ -18,6 +18,8 @@
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
+#include <sys/sysctl.h>
+#include <sys/proc.h>
 _Static_assert(sizeof(vm_address_t) == sizeof(uint64_t) && sizeof(vm_size_t) == sizeof(size_t),
     "guest mappings require the 64-bit public Mach VM ABI");
 #endif
@@ -1062,14 +1064,47 @@ static int map_transfer_memory(botw_kernel *k, int unmap, uint64_t *regs, char *
     }
     pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
 }
+/* Native execution shares the host process with the guest threads. This
+ * query reports an actually attached native debugger, not the NPDM permission
+ * to allow debugging, and does not create a Horizon KDebug object.
+ * Apple public contract: QA1361 Detecting the Debugger. Query failures and
+ * incomplete records cannot be interpreted as a false debugger state. */
+static int native_debugger_attached(uint64_t *value, char *error, size_t capacity) {
+#ifdef __APPLE__
+    const pid_t pid = getpid();
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    struct kinfo_proc info; memset(&info, 0, sizeof info);
+    size_t size = sizeof info;
+    if (sysctl(mib, 4, &info, &size, NULL, 0))
+        return diagnostic(error, capacity, "query current native debugger: %s", strerror(errno));
+    if (size != sizeof info || info.kp_proc.p_pid != pid)
+        return diagnostic(error, capacity, "query current native debugger returned an incomplete process record");
+    *value = (info.kp_proc.p_flag & P_TRACED) != 0;
+    return BOTW_KERNEL_HANDLED;
+#else
+    (void)value; (void)error; (void)capacity;
+    return BOTW_KERNEL_UNSUPPORTED;
+#endif
+}
 static int get_info(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     unsigned id = (uint32_t)regs[1];
+    if (id == 8) {
+        /* This current-process query requires InvalidHandle, not a process
+         * pseudo-handle. Its error ordering differs from process info below. */
+        if ((uint32_t)regs[2]) { regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
+        if (regs[3]) { regs[0] = BOTW_KERNEL_RESULT_INVALID_COMBINATION; return BOTW_KERNEL_HANDLED; }
+        uint64_t value = 0; int result = native_debugger_attached(&value, error, capacity);
+        if (result != BOTW_KERNEL_HANDLED) return result;
+        regs[0] = 0; regs[1] = value; return BOTW_KERNEL_HANDLED;
+    }
     switch (id) { case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
         case 12: case 13: case 14: case 15: case 21: case 22: break;
         default: return BOTW_KERNEL_UNSUPPORTED;
     }
+    /* All implemented process-info types share subtype==0, validated before
+     * looking up the process handle, per the kernel's GetInfo contract. */
+    if (regs[3]) { regs[0] = BOTW_KERNEL_RESULT_INVALID_COMBINATION; return BOTW_KERNEL_HANDLED; }
     if (!botw_kernel_is_process_handle(k, (uint32_t)regs[2])) { regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
-    if (regs[3]) { regs[0] = BOTW_KERNEL_RESULT_OUT_OF_RANGE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock);
     if (id == 0 || id == 1) {
         regs[0] = 0; regs[1] = id ? k->priority_mask : k->core_mask;

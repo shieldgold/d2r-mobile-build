@@ -25,6 +25,11 @@ FIXTURE = r'''
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sys/ptrace.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#endif
 static botw_kernel *ctx;
 static char error[512];
 static pthread_key_t test_tls;
@@ -151,10 +156,70 @@ static void process_core_mask(void) {
     uint64_t r[32] = {0, 0, 0x1234, 0}; svc(0x29, r);
     assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
     r[1] = 0; r[2] = BOTW_KERNEL_CURRENT_PROCESS; r[3] = 1; svc(0x29, r);
-    assert(r[0] == BOTW_KERNEL_RESULT_OUT_OF_RANGE);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_COMBINATION);
     assert(info(0) == 7 && !botw_kernel_reservation(ctx, &base, &size));
     assert(!botw_kernel_shutdown(ctx, error, sizeof error));
     assert(botw_kernel_configure_core_mask(ctx, 15, error, sizeof error) == -1);
+}
+#ifdef __APPLE__
+static unsigned get_debugger_state(void) {
+    uint64_t r[32] = {0x12345678, 8, 0, 0}; svc(0x29, r);
+    assert(!r[0] && r[1] <= 1); return (unsigned)r[1];
+}
+#endif
+static void debug_info(void) {
+    uint64_t base=0,size=0; assert(!botw_kernel_reservation(ctx,&base,&size));
+#ifdef __APPLE__
+    unsigned original=get_debugger_state(); assert(get_debugger_state()==original);
+#else
+    uint64_t current[32]={0x1234,8,0,0},snapshot[32];memcpy(snapshot,current,sizeof snapshot);
+    assert(botw_kernel_dispatch(ctx,0x29,current,error,sizeof error)==BOTW_KERNEL_UNSUPPORTED);
+    assert(!memcmp(current,snapshot,sizeof snapshot));
+#endif
+    const uint32_t bad_handles[]={BOTW_KERNEL_CURRENT_PROCESS,BOTW_KERNEL_CURRENT_THREAD,BOTW_KERNEL_INITIAL_THREAD,0x10000,0x20000,1};
+    const uint64_t bad_subids[]={1,UINT64_MAX,UINT64_C(1)<<32};
+    for(unsigned h=0;h<sizeof bad_handles/sizeof*bad_handles;h++) {
+        for(unsigned t=0;t<4;t++) {
+            uint64_t r[32]={0x1234,8,bad_handles[h],t?bad_subids[t-1]:0}; svc(0x29,r);
+            assert(r[0]==BOTW_KERNEL_RESULT_INVALID_HANDLE && r[1]==8); /* handle before subtype */
+        }
+    }
+    for(unsigned t=0;t<sizeof bad_subids/sizeof*bad_subids;t++) {
+        uint64_t r[32]={0x1234,8,0,bad_subids[t]}; svc(0x29,r);
+        assert(r[0]==BOTW_KERNEL_RESULT_INVALID_COMBINATION && r[1]==8);
+    }
+    /* SVC's InfoType/Handle are u32; upper input register bits are not part of them. */
+    uint64_t r[32]={0,UINT64_C(0x100000008),UINT64_C(0x100000000),0};
+#ifdef __APPLE__
+    svc(0x29,r);assert(!r[0]&&r[1]==original);
+#else
+    assert(botw_kernel_dispatch(ctx,0x29,r,error,sizeof error)==BOTW_KERNEL_UNSUPPORTED);
+#endif
+    const unsigned process_ids[]={0,1,2,3,4,5,6,7,12,13,14,15,21,22};
+    for(unsigned i=0;i<sizeof process_ids/sizeof*process_ids;i++) {
+        r[1]=process_ids[i];r[2]=0;r[3]=1;svc(0x29,r);assert(r[0]==BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+        r[1]=process_ids[i];r[2]=0;r[3]=0;svc(0x29,r);assert(r[0]==BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    }
+    const unsigned unknown[]={9,10,11,16,17,18,19,20,23,0xf0000002,0x7fffffff};
+    for(unsigned i=0;i<sizeof unknown/sizeof*unknown;i++) {
+        uint64_t saved[32]={0x1234,unknown[i],0,0};memcpy(r,saved,sizeof saved);
+        assert(botw_kernel_dispatch(ctx,0x29,r,error,sizeof error)==BOTW_KERNEL_UNSUPPORTED);
+        assert(!memcmp(r,saved,sizeof saved));
+    }
+    assert(!botw_kernel_reservation(ctx,&base,&size));
+}
+static void debug_traced_child(void) {
+#ifdef __APPLE__
+    assert(get_debugger_state()==0);
+    pid_t child=fork();assert(child>=0);
+    if(!child) {
+        assert(get_debugger_state()==0);
+        assert(!ptrace(PT_TRACE_ME,0,NULL,0));
+        assert(get_debugger_state()==1); assert(get_debugger_state()==1); _exit(0);
+    }
+    int status;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&!WEXITSTATUS(status));
+    assert(get_debugger_state()==0);
+#endif
 }
 static void protection_fault(int number) { (void)number; _exit(44); }
 static int readable(uint64_t address) {
@@ -1083,6 +1148,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "virtualaffinity")) virtual_core_affinity();
     else if (!strcmp(argv[1], "workeraffinity")) worker_virtual_affinity();
     else if (!strcmp(argv[1], "threads")) threads();
+    else if (!strcmp(argv[1], "debuginfo")) debug_info();
+    else if (!strcmp(argv[1], "debugtraced")) debug_traced_child();
     else if (!strcmp(argv[1], "sdkheader")) sdk_header_stack();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
@@ -1242,6 +1309,26 @@ class KernelTests(unittest.TestCase):
     def test_process_core_capability_is_configured_without_a_memory_reservation(self):
         self.check_case('coremask')
 
+    def test_debugger_info_uses_its_exact_current_process_handle_and_subtype_contract(self):
+        self.check_case('debuginfo')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin native debugger backend')
+    def test_debugger_info_observes_real_traced_child_and_unchanged_parent(self):
+        self.check_case('debugtraced')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin sysctl failure contract')
+    def test_debugger_query_failure_short_record_and_wrong_pid_cannot_be_false(self):
+        with tempfile.TemporaryDirectory(prefix='botw-debug-query-failures-') as folder:
+            folder = Path(folder)
+            driver = folder / 'driver.c'; driver.write_text(DEBUG_QUERY_FAILURE_FIXTURE)
+            source = ROOT / 'native/botw_host/kernel.c'; obj = folder / 'kernel.o'; binary = folder / 'probe'
+            subprocess.run(['clang', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
+                            '-Dsysctl=botw_test_sysctl', '-I', str(source.parent), '-c', str(source), '-o', str(obj)], check=True)
+            subprocess.run(['clang', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
+                            '-I', str(source.parent), str(driver), str(obj), '-o', str(binary)], check=True)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_thread_core_requests_enforce_same_npdm_mask_and_freeze_after_creation(self):
         self.check_case('threadcoremask')
 
@@ -1330,6 +1417,44 @@ class KernelTests(unittest.TestCase):
                                       capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
 
+
+
+DEBUG_QUERY_FAILURE_FIXTURE = r'''
+#include "kernel.h"
+#include <assert.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#include <unistd.h>
+static unsigned mode,calls;
+int botw_test_sysctl(int *mib, u_int count, void *output, size_t *length, void *input, size_t input_size) {
+ calls++; assert(count==4 && mib[0]==CTL_KERN && mib[1]==KERN_PROC && mib[2]==KERN_PROC_PID && mib[3]==getpid());
+ assert(output && length && *length==sizeof(struct kinfo_proc) && !input && !input_size);
+ if(mode==0){errno=EIO;return -1;}
+ struct kinfo_proc*p=output;memset(p,0,sizeof *p);p->kp_proc.p_pid=getpid();
+ if(mode==1)*length=sizeof *p-1;
+ else if(mode==2)p->kp_proc.p_pid++;
+ else if(mode==3)*length=sizeof *p+1;
+ else assert(0);
+ return 0;
+}
+int main(void){
+ botw_kernel*k=botw_kernel_create(NULL,NULL);assert(k);char error[512];
+ for(mode=0;mode<4;mode++) {
+  uint64_t r[32]={0x12345678,8,0,0},original[32];memcpy(original,r,sizeof r);calls=0;
+  assert(botw_kernel_dispatch(k,0x29,r,error,sizeof error)==BOTW_KERNEL_ERROR);
+  assert(calls==1 && !memcmp(r,original,sizeof r) && strstr(error,"native debugger"));
+ }
+ calls=0;uint64_t r[32]={0,8,BOTW_KERNEL_CURRENT_PROCESS,1};
+ assert(botw_kernel_dispatch(k,0x29,r,error,sizeof error)==BOTW_KERNEL_HANDLED);
+ assert(!calls && r[0]==BOTW_KERNEL_RESULT_INVALID_HANDLE);
+ r[1]=8;r[2]=0;r[3]=1;assert(botw_kernel_dispatch(k,0x29,r,error,sizeof error)==BOTW_KERNEL_HANDLED);
+ assert(!calls && r[0]==BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+ botw_kernel_destroy(k);
+}
+'''
 
 if __name__ == '__main__':
     unittest.main()
