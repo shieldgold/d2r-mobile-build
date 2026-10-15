@@ -1,0 +1,31 @@
+name: Build BOTW generic iOS host
+on:
+  push:
+    paths:
+      - 'native/botw_host/**'
+      - 'native/botw_app/**'
+      - 'scripts/botw_native/build_ios_shell.py'
+      - '.github/workflows/botw-native-ios.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select iPhoneOS SDK
+        run: python3 scripts/source/select_xcode.py
+      - name: Test native host using synthetic programs
+        run: python3 -m unittest discover -s tests -p 'test_botw_runtime.py' -v
+      - name: Compile generic shell without game content
+        run: python3 -m scripts.botw_native.build_ios_shell --output outputs/botw-ios-shell
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: BOTWNative-generic-ios-host
+          path: outputs/botw-ios-shell/BOTWNative-shell.ipa
+          if-no-files-found: error
+          retention-days: 7

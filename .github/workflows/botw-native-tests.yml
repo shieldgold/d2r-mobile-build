@@ -3,14 +3,16 @@ on:
   push:
     paths:
       - 'scripts/botw_native/**'
-      - 'tests/test_botw_native.py'
+      - 'tests/test_botw*.py'
+      - 'native/botw_host/**'
       - 'requirements.botw.txt'
       - 'profiles/botw-*.json'
       - '.github/workflows/botw-native-tests.yml'
   pull_request:
     paths:
       - 'scripts/botw_native/**'
-      - 'tests/test_botw_native.py'
+      - 'tests/test_botw*.py'
+      - 'native/botw_host/**'
       - 'requirements.botw.txt'
       - 'profiles/botw-*.json'
       - '.github/workflows/botw-native-tests.yml'
