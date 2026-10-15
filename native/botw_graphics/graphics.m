@@ -93,6 +93,8 @@
 @property NVNshaderStage stage;
 @property(strong) id<MTLFunction> function;
 @property(strong) NSData *bindings;
+@property unsigned maxVertices,maxInstances,storageSlot;
+@property(strong) NSData *storageMinimum;
 @end
 @implementation BWShader
 @end
@@ -292,7 +294,7 @@ int botw_graphics_register_shader(const void *control,size_t cs,const void *code
     return botw_graphics_register_shader_with_bindings(control,cs,code,ds,stage,source,entry,NULL,0);
 }
 static int registerShaderImpl(const void *control,size_t cs,const void *code,size_t ds,
-    NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count){
+    NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count,const botw_graphics_shader_draw_profile *profile){
     if(count>64 || (count&&!bindings))return report("Invalid shader binding metadata");
     for(size_t i=0;i<count;i++){if(bindings[i].kind<0 || bindings[i].kind>BOTW_GRAPHICS_STORAGE_ADDRESS_LOW || bindings[i].nvn_slot>=(bindings[i].kind>=BOTW_GRAPHICS_STORAGE?16:128) || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:16))return report("Shader binding metadata exceeds Metal limits");
         for(size_t j=0;j<i;j++){BOOL same=(bindings[i].kind==bindings[j].kind)||((bindings[i].kind==BOTW_GRAPHICS_UNIFORM||bindings[i].kind>=BOTW_GRAPHICS_STORAGE)&&(bindings[j].kind==BOTW_GRAPHICS_UNIFORM||bindings[j].kind>=BOTW_GRAPHICS_STORAGE));if(same&&bindings[i].metal_slot==bindings[j].metal_slot)return report("Duplicate Metal resource binding map slot");}}
@@ -301,13 +303,21 @@ static int registerShaderImpl(const void *control,size_t cs,const void *code,siz
         return report("Invalid shader registration or unsupported shader stage");
     uint32_t cm,dm;memcpy(&cm,control,4);memcpy(&dm,code,4);
     if(cm!=0x98761234 || dm!=0x12345678)return report("Invalid shader input magic");
+    if(profile){
+        if(stage!=NVN_SHADER_STAGE_VERTEX||!profile->max_vertex_count||profile->max_vertex_count>64||!profile->max_instance_count||profile->max_instance_count>64||profile->storage_slot>=16||!profile->minimum_storage_bytes||profile->minimum_storage_bytes[0])return report("Invalid shader draw profile");
+        BOOL matched=NO;for(size_t i=0;i<count;i++)if(bindings[i].kind==BOTW_GRAPHICS_STORAGE&&bindings[i].nvn_slot==profile->storage_slot)matched=YES;
+        if(!matched)return report("Shader draw profile has no matching storage binding");
+        for(unsigned i=1;i<=profile->max_instance_count;i++)if(!profile->minimum_storage_bytes[i]||profile->minimum_storage_bytes[i]<profile->minimum_storage_bytes[i-1]||profile->minimum_storage_bytes[i]>gpu.maxBufferLength)return report("Invalid shader draw profile storage minimum");
+    }
     NSError *error=nil; id<MTLLibrary> library=[gpu newLibraryWithSource:@(source) options:nil error:&error];
     if(!library)return report("Metal shader compilation failed: %s",error.localizedDescription.UTF8String);
     id<MTLFunction> function=[library newFunctionWithName:@(entry)];
     if(!function || (stage==NVN_SHADER_STAGE_VERTEX?function.functionType!=MTLFunctionTypeVertex:
                     function.functionType!=MTLFunctionTypeFragment))return report("Metal shader entry/stage mismatch");
     BWShader *shader=[BWShader new];shader.controlHash=digest(control,cs);shader.codeHash=digest(code,ds);
-    shader.controlSize=cs;shader.codeSize=ds;shader.stage=stage;shader.function=function;shader.bindings=[NSData dataWithBytes:bindings length:count*sizeof *bindings];[shaders addObject:shader];return 1;
+    shader.controlSize=cs;shader.codeSize=ds;shader.stage=stage;shader.function=function;shader.bindings=[NSData dataWithBytes:bindings length:count*sizeof *bindings];
+    if(profile){shader.maxVertices=profile->max_vertex_count;shader.maxInstances=profile->max_instance_count;shader.storageSlot=profile->storage_slot;shader.storageMinimum=[NSData dataWithBytes:profile->minimum_storage_bytes length:(profile->max_instance_count+1)*sizeof(size_t)];}
+    [shaders addObject:shader];return 1;
 }
 static int readTextureImpl(const NVNtexture *raw,void *pixels,size_t bytes) {
     BWTexture *t=get(raw,[BWTexture class]);
@@ -547,6 +557,18 @@ static void prepareResources(BWReplay *state,id<MTLCommandBuffer> cb){
     for(NSNumber *stage in state.program.stageShaders){BWShader *s=state.program.stageShaders[stage];const botw_graphics_shader_binding *b=s.bindings.bytes;size_t n=s.bindings.length/sizeof *b;
         for(size_t i=0;i<n;i++)if(b[i].kind==BOTW_GRAPHICS_TEXTURE){NSNumber *h=state.textures[resourceKey(stage,@(b[i].nvn_slot))];BWTexture *texture=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!h||!texture)fatal("unbound texture descriptor");uploadTexture(texture,cb);}}
 }
+static void validateDrawProfiles(BWReplay *state,NSDictionary *draw){
+    for(BWShader *shader in state.program.stageShaders.allValues){
+        if(!shader.maxVertices)continue;
+        uint64_t vertices=[draw[@"count"] unsignedLongLongValue],instances=[draw[@"instances"] unsignedLongLongValue];
+        if(vertices>shader.maxVertices)fatal("draw profile vertex count exceeded");
+        if(instances>shader.maxInstances)fatal("draw profile instance count exceeded");
+        const size_t *minimum=shader.storageMinimum.bytes;size_t need=minimum[instances];
+        NSDictionary *bound=state.storage[resourceKey(@(shader.stage),@(shader.storageSlot))];size_t offset=0;
+        if(!bound)fatal("draw profile has unbound storage");
+        if([bound[@"size"] unsignedLongLongValue]<need||!address([bound[@"address"] unsignedLongLongValue],[bound[@"size"] unsignedLongLongValue],&offset))fatal("draw profile storage range is too short or outside memory pool");
+    }
+}
 static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEncoder> encoder,NSDictionary *draw){
     const VertexAttribute *attributes=state.attributes.bytes;const VertexStream *streams=state.streams.bytes;
     for(size_t i=0;i<state.attributes.length/sizeof *attributes;i++)if(attributes[i].format){
@@ -596,8 +618,9 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
             if([op isEqual:@"draw"]&&(![c[@"count"] unsignedLongLongValue]||![c[@"instances"] unsignedLongLongValue]))continue;
             BWTexture *target=state.target;NSDictionary *viewport=state.viewport,*scissor=state.scissor;
             if(!target)fatal("render operation without target");BOOL clear=[op isEqual:@"clear"],depthClear=[op isEqual:@"depthClear"];
+            if(!clear&&!depthClear){if(![op isEqual:@"draw"]||!state.program)fatal("unsupported replay operation / missing program");validateDrawProfiles(state,c);}
             if(!clear)uploadTexture(target,cb);if(state.depth&&!depthClear)uploadTexture(state.depth,cb);
-            if(!clear&&!depthClear){if(![op isEqual:@"draw"]||!state.program)fatal("unsupported replay operation / missing program");prepareResources(state,cb);}
+            if(!clear&&!depthClear)prepareResources(state,cb);
             MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];pass.colorAttachments[0].texture=target.texture;pass.colorAttachments[0].storeAction=MTLStoreActionStore;pass.colorAttachments[0].loadAction=clear?MTLLoadActionClear:MTLLoadActionLoad;
             if(state.depth){pass.depthAttachment.texture=state.depth.texture;pass.depthAttachment.loadAction=depthClear?MTLLoadActionClear:MTLLoadActionLoad;pass.depthAttachment.storeAction=MTLStoreActionStore;if(depthClear)pass.depthAttachment.clearDepth=[c[@"depth"] doubleValue];}
             else if(depthClear)fatal("depth clear without depth attachment");
@@ -662,7 +685,8 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
 #undef NVN_VOID
 WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_graphics_memory_range validator),initializeGraphicsImpl(layer,error,validator))
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
-WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count))
+WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,NULL))
+WRAP_VALUE(,botw_graphics_register_shader_with_profile,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count,const botw_graphics_shader_draw_profile *profile),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,profile))
 WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,pixels,bytes))
 #define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}graphicsEnd();abort();}
 #include "unsupported.inc"

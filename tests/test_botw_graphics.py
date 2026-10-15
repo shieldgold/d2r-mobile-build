@@ -150,6 +150,9 @@ class ShaderBundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'external'):
             module.build_storage_index_probe(source.replace('gl_InstanceIndex-gl_BaseInstance', 'in.in_attr0.x'),
                                             control, code, 'vertex', reflection, descriptors, 4)
+        with self.assertRaisesRegex(ValueError, 'external'):
+            module.build_storage_index_probe(source.replace('gl_InstanceIndex-gl_BaseInstance', 'gl_InstanceIndex'),
+                                            control, code, 'vertex', reflection, descriptors, 4)
     def test_storage_address_cancellation_requires_exact_unsigned_identity(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'cancel_u32_storage_bases'), 'Storage address cancellation proof is missing')
@@ -183,6 +186,8 @@ class ShaderBundleTests(unittest.TestCase):
         self.assertEqual(probe['relative_vertex_count'], 4)
         with self.assertRaisesRegex(ValueError, 'external|input'):
             module.build_dynamic_c1_probe(source.replace('_1*4u', 'in.in_attr0.x'), control, code, 4)
+        with self.assertRaisesRegex(ValueError, 'external|input'):
+            module.build_dynamic_c1_probe(source.replace('gl_VertexIndex-gl_BaseVertex', 'gl_VertexIndex'), control, code, 4)
         with self.assertRaisesRegex(ValueError, 'ambiguous|assignment'):
             module.build_dynamic_c1_probe(source.replace('return float4', '_2=0u;return float4'), control, code, 4)
 
@@ -332,7 +337,9 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertIn('GPU_STORAGE_INSTANCING_BASE_IDS_OK', result.stdout)
             for mode, expected in (('short-storage', 'storage range'), ('unbound-storage', 'unbound storage'),
                                    ('negative-instance', 'instance range'), ('duplicate-storage', 'Duplicate Metal'),
-                                   ('wide-driver', 'exactly 32 bits'), ('unbound-driver', 'unbound storage driver')):
+                                   ('wide-driver', 'exactly 32 bits'), ('unbound-driver', 'unbound storage driver'),
+                                   ('profile-vertices', 'draw profile vertex count'), ('profile-instances', 'draw profile instance count'),
+                                   ('profile-storage', 'draw profile storage range'), ('invalid-profile', 'Invalid shader draw profile storage minimum')):
                 result = subprocess.run([str(exe), mode], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0, mode)
                 self.assertIn(expected, result.stderr)
@@ -773,7 +780,14 @@ STORAGE_FEATURE = r"""
     if(argc>1&&!strcmp(argv[1],"duplicate-storage"))sb[2].metal_slot=3;
     if(argc>1&&!strcmp(argv[1],"wide-driver"))sb[0].kind=BOTW_GRAPHICS_STORAGE_ADDRESS_LOW;
     if(argc>1&&!strcmp(argv[1],"unbound-driver"))sb[3].nvn_slot=7;
-    CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,storageMSL,"sv",sb,4));
+    size_t storageMinimum[]={0,16,32};
+    botw_graphics_shader_draw_profile profile={6,2,3,storageMinimum};
+    if(argc>1&&!strcmp(argv[1],"profile-vertices"))profile.max_vertex_count=5;
+    if(argc>1&&!strcmp(argv[1],"profile-instances"))profile.max_instance_count=1;
+    if(argc>1&&!strcmp(argv[1],"profile-storage"))storageMinimum[2]=64;
+    if(argc>1&&!strcmp(argv[1],"invalid-profile"))storageMinimum[2]=8;
+    CHECK(botw_graphics_register_shader_with_profile(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,storageMSL,"sv",sb,4,&profile));
+    storageMinimum[1]=storageMinimum[2]=0;
     CHECK(botw_graphics_register_shader(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,storageMSL,"sf"));
     CHECK(nvnProgramSetShaders(&program,2,sd));
     nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);

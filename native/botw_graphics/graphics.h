@@ -43,6 +43,18 @@ typedef struct {
 int botw_graphics_register_shader_with_bindings(const void *control, size_t control_bytes,
     const void *code, size_t code_bytes, NVNshaderStage stage, const char *msl,
     const char *entry, const botw_graphics_shader_binding *bindings, size_t binding_count);
+/* An offline-verified finite input profile for non-indexed vertex shaders.
+ * minimum_storage_bytes has max_instance_count+1 entries; entry N covers all
+ * accesses from relative instances 0..N-1. The registration copies this table.
+ * Never install a profile unless every dynamic access is independently proven. */
+typedef struct {
+    unsigned max_vertex_count, max_instance_count, storage_slot;
+    const size_t *minimum_storage_bytes;
+} botw_graphics_shader_draw_profile;
+int botw_graphics_register_shader_with_profile(const void *control, size_t control_bytes,
+    const void *code, size_t code_bytes, NVNshaderStage stage, const char *msl,
+    const char *entry, const botw_graphics_shader_binding *bindings, size_t binding_count,
+    const botw_graphics_shader_draw_profile *profile);
 /* Counts only completed on-screen presents containing a new translated draw.
  * Clear-only and offscreen submits do not count. Screenshot capture is opt-in. */
 uint64_t botw_graphics_presented_frame_count(void);
