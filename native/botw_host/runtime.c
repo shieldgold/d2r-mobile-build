@@ -17,6 +17,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
@@ -127,6 +128,11 @@ static struct {
     void *graphics_workspace;
     size_t graphics_workspace_size;
     int host39_transport_audited;
+    /* Accessed by the real frontend display callback under lifecycle_lock. */
+    void *vi_display, *vi_layer;
+    uint32_t vi_vsync_write, vi_vsync_read;
+    double vi_last_target_timestamp;
+    int vi_initialized, vi_display_live;
     botw_host_event event;
     sigjmp_buf recovery;
     pthread_t owner;
@@ -384,27 +390,31 @@ static uint64_t host_allocator_allocate(void *object, uint64_t bytes, uint64_t a
 }
 #if defined(BOTW_WITH_GRAPHICS)
 static const char *const graphics_platform_initialize = "_ZN2nv18InitializeGraphicsEPvm";
-static void audit_graphics_platform(void) {
-    /* Fixed base-v0 ABI: main+0x9fc4b8 calls through its PLT, and no other
-     * module directly branches to this entry. Keep the original allocator APIs
-     * and SDK/NVIDIA state untouched; only this platform transport is replaced. */
-    Module *m = &state.modules[1];
+static uint64_t audited_platform_export(unsigned index, const char *name, uint64_t offset, size_t bytes) {
+    Module *m = &state.modules[index];
     if (state.address_bits != 39 || !state.host39_transport_audited)
         fail("graphics platform requires the completed host39 transport audit");
-    if (!m->name || strcmp(m->name, "subsdk0") || !m->base ||
-            !in_range(0xc794, 0x94, m->text_end) || !in_range(0xc794, 0x94, m->size))
-        fail("graphics platform profile requires subsdk0 index=1 text entry=0xc794 bytes=0x94");
+    if (!m->name || strcmp(m->name, module_names[index]) || !m->base ||
+            !in_range(offset, bytes, m->text_end) || !in_range(offset, bytes, m->size))
+        fail("graphics platform profile requires %s index=%u text entry=0x%llx bytes=0x%zx",
+            module_names[index], index, (unsigned long long)offset, bytes);
     const Sym *entry = NULL;
     for (unsigned i = 1; i < m->sym_count; i++) {
         const Sym *s = symbol_at(m, i);
-        if (strcmp(symbol_name(m, s), graphics_platform_initialize)) continue;
+        if (strcmp(symbol_name(m, s), name)) continue;
         if (entry || s->section != 1 || s->info != 0x12 || (s->other & 3) ||
-                s->value != 0xc794 || s->size != 0x94)
-            fail("graphics platform symbol does not match the audited subsdk0 profile");
+                s->value != offset || s->size != bytes)
+            fail("graphics platform symbol does not match the audited %s profile: %s", m->name, name);
         entry = s;
     }
-    if (!entry || find_raw_symbol(graphics_platform_initialize) != (uint64_t)m->base + 0xc794)
-        fail("graphics platform symbol resolution does not match the audited subsdk0 profile");
+    if (!entry || find_raw_symbol(name) != (uint64_t)m->base + offset)
+        fail("graphics platform symbol resolution does not match the audited %s profile: %s", m->name, name);
+    return (uint64_t)m->base + offset;
+}
+static void audit_graphics_platform(void) {
+    /* main+0x9fc4b8 uses its PLT; seven-module text audit found no direct call.
+     * Original allocator APIs and NVIDIA globals are deliberately preserved. */
+    (void)audited_platform_export(1, graphics_platform_initialize, 0xc794, 0x94);
 }
 static void host_initialize_graphics(void *workspace, size_t bytes) {
     audit_graphics_platform();
@@ -427,6 +437,126 @@ static void host_initialize_graphics(void *workspace, size_t bytes) {
     report("graphics_platform=Metal initialized=true workspace=0x%llx bytes=%zu nvidia_transport=false",
         (unsigned long long)address, bytes);
 }
+enum { VI_INITIALIZE, VI_OPEN_DEFAULT, VI_CREATE_LAYER, VI_SCALING_MODE, VI_VSYNC_EVENT, VI_NATIVE_WINDOW };
+static const struct { const char *name; uint64_t offset; size_t size; } vi_exports[] = {
+    {"_ZN2nn2vi10InitializeEv", 0x288c, 0x9b0},
+    {"_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE", 0xce70, 0x20},
+    {"_ZN2nn2vi11CreateLayerEPPNS0_5LayerEPNS0_7DisplayE", 0xdda0, 0x288},
+    {"_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE", 0xe20c, 0x64},
+    {"_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE", 0xd118, 0xa0},
+    {"_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE", 0xe270, 0x2c}
+};
+static void audit_vi_export(unsigned which) {
+    (void)audited_platform_export(2, vi_exports[which].name, vi_exports[which].offset, vi_exports[which].size);
+}
+static void require_vi_output(void *out, size_t bytes) {
+    if (!out || (uintptr_t)out % 8 || !services_memory(NULL, (uintptr_t)out, bytes, 1))
+        fail("VI output is not an aligned, completely writable guest range (%zu bytes)", bytes);
+}
+/* Backend platform methods only update last_error, never reenter this runtime.
+ * Release lifecycle_lock before a failing guest call unwinds its boundary. */
+static void vi_failure(char *error, size_t bytes, const char *message) {
+    snprintf(error, bytes, "%s", message && *message ? message : "VI backend rejected request");
+}
+static void host_vi_initialize(void) {
+    audit_vi_export(VI_INITIALIZE);
+    char error[512] = {0};
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.graphics_started || !state.graphics_workspace)
+        vi_failure(error, sizeof error, "VI requires the initialized Metal platform workspace");
+    else if (state.vi_initialized) vi_failure(error, sizeof error, "VI is already initialized");
+    else if (!botw_graphics_platform_initialize()) vi_failure(error, sizeof error, botw_graphics_last_error());
+    else state.vi_initialized = 1;
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI Initialize: %s", error);
+    report("vi_platform_initialized=true backend=Metal");
+}
+static uint32_t host_vi_open_default_display(void **out) {
+    audit_vi_export(VI_OPEN_DEFAULT); require_vi_output(out, sizeof *out);
+    char error[512] = {0}; uintptr_t display = 0; uint32_t width = 0, height = 0;
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.vi_initialized) vi_failure(error, sizeof error, "VI is not initialized");
+    else if (state.vi_display) vi_failure(error, sizeof error, "default display is already open");
+    else if (!botw_graphics_platform_open_default_display(&display) ||
+            !botw_graphics_platform_display_size(display, &width, &height) ||
+            !width || !height || !botw_graphics_platform_display_is_live(display))
+        vi_failure(error, sizeof error, botw_graphics_last_error());
+    else { state.vi_display = (void *)display; state.vi_display_live = 1; }
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI OpenDefaultDisplay: %s", error);
+    *out = (void *)display;
+    report("vi_display_opened=true drawable_width=%u drawable_height=%u", width, height); return 0;
+}
+static uint32_t host_vi_create_layer(void **out, void *display) {
+    audit_vi_export(VI_CREATE_LAYER); require_vi_output(out, sizeof *out);
+    char error[512] = {0}; uintptr_t layer = 0;
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.vi_initialized || !state.vi_display_live || !display || display != state.vi_display)
+        vi_failure(error, sizeof error, "display is not the live host display");
+    else if (state.vi_layer) vi_failure(error, sizeof error, "host display layer is already created");
+    else if (!botw_graphics_platform_create_layer((uintptr_t)display, &layer) || !layer)
+        vi_failure(error, sizeof error, botw_graphics_last_error());
+    else state.vi_layer = (void *)layer;
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI CreateLayer: %s", error);
+    *out = (void *)layer; report("vi_layer_created=true backend=CAMetalLayer"); return 0;
+}
+static uint32_t host_vi_set_scaling_mode(void *layer, int mode) {
+    audit_vi_export(VI_SCALING_MODE); char error[512] = {0};
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.vi_initialized || !layer || layer != state.vi_layer)
+        vi_failure(error, sizeof error, "layer is not the host display layer");
+    else if (!botw_graphics_platform_set_scaling_mode((uintptr_t)layer, mode))
+        vi_failure(error, sizeof error, botw_graphics_last_error());
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI SetLayerScalingMode: %s", error);
+    report("vi_layer_scaling_mode=%d host_policy_applied=true", mode); return 0;
+}
+static uint32_t host_vi_get_native_window(void **out, void *layer) {
+    audit_vi_export(VI_NATIVE_WINDOW); require_vi_output(out, sizeof *out);
+    char error[512] = {0}; uintptr_t native = 0;
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.vi_initialized || !layer || layer != state.vi_layer)
+        vi_failure(error, sizeof error, "layer is not the host display layer");
+    else if (!botw_graphics_platform_get_native_window((uintptr_t)layer, &native) || !native)
+        vi_failure(error, sizeof error, botw_graphics_last_error());
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI GetNativeWindow: %s", error);
+    *out = (void *)native; return 0;
+}
+static uint32_t host_vi_get_vsync_event(void *out, void *display) {
+    audit_vi_export(VI_VSYNC_EVENT);
+    /* Original AttachReadable writes through +0x28; 48 is the conservative
+     * 8-aligned span covering all those writes, not an invented SDK layout. */
+    require_vi_output(out, 48);
+    const char *name = "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE";
+    uint64_t attach = audited_platform_export(5, name, 0x851c8, 0x3c);
+    char error[512] = {0}; uint32_t reader = 0;
+    pthread_mutex_lock(&lifecycle_lock);
+    if (!state.vi_initialized || !state.vi_display_live || !display || display != state.vi_display ||
+            !state.kernel || !botw_graphics_platform_display_is_live((uintptr_t)display))
+        vi_failure(error, sizeof error, "display is not the live host display");
+    else if ((!state.vi_vsync_write && botw_kernel_create_event(state.kernel, 0,
+                &state.vi_vsync_write, &state.vi_vsync_read, error, sizeof error)) ||
+            botw_kernel_duplicate_handle(state.kernel, state.vi_vsync_read, &reader, error, sizeof error)) {
+        if (!*error) vi_failure(error, sizeof error, "kernel did not create an independent vsync reader");
+    }
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) fail("VI GetDisplayVsyncEvent: %s", error);
+    /* Exact original VI+d188..d198 ABI: owned reader, EventClearMode=1.
+     * Call the actual mapped SDK to construct its intrusive links and tags. */
+    ((void (*)(void *, uint32_t, _Bool, int))attach)(out, reader, 1, 1);
+    report("vi_vsync_event_attached=true source=host_display_callback reader=0x%x", reader); return 0;
+}
+static uint64_t find_vi_symbol(const char *name) {
+    const uint64_t wrappers[] = {(uint64_t)host_vi_initialize, (uint64_t)host_vi_open_default_display,
+        (uint64_t)host_vi_create_layer, (uint64_t)host_vi_set_scaling_mode,
+        (uint64_t)host_vi_get_vsync_event, (uint64_t)host_vi_get_native_window};
+    for (unsigned i = 0; i < sizeof vi_exports / sizeof vi_exports[0]; i++) {
+        if (!strcmp(name, vi_exports[i].name)) { audit_vi_export(i); return wrappers[i]; }
+    }
+    return 0;
+}
 #endif
 static uint64_t find_symbol(const char *name) {
     if (!strcmp(name, "nvnBootstrapLoader") && graphics_backend_loader)
@@ -436,6 +566,7 @@ static uint64_t find_symbol(const char *name) {
         if (!strcmp(name, graphics_platform_initialize)) {
             audit_graphics_platform(); return (uint64_t)host_initialize_graphics;
         }
+        uint64_t vi = find_vi_symbol(name); if (vi) return vi;
 #endif
         if (!strcmp(name, allocator_constructor) || !strcmp(name, allocator_constructor_alias))
             return (uint64_t)host_allocator_constructor;
@@ -688,6 +819,24 @@ static void configure_resource_backends(const char *documents) {
 int botw_host_set_graphics_layer(void *layer) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     configured_graphics_layer = layer; pthread_mutex_unlock(&run_lock); return 0;
+}
+void botw_host_display_tick(double target_timestamp_seconds) {
+#if defined(BOTW_WITH_GRAPHICS)
+    if (!isfinite(target_timestamp_seconds) || target_timestamp_seconds <= 0) return;
+    char error[512] = {0};
+    pthread_mutex_lock(&lifecycle_lock);
+    if (state.vi_display_live && state.graphics_started && state.vi_initialized && state.vi_display &&
+            state.vi_vsync_write && state.kernel && target_timestamp_seconds > state.vi_last_target_timestamp &&
+            botw_graphics_platform_display_is_live((uintptr_t)state.vi_display)) {
+        state.vi_last_target_timestamp = target_timestamp_seconds;
+        if (botw_kernel_signal_event(state.kernel, state.vi_vsync_write, error, sizeof error))
+            state.vi_display_live = 0;
+    }
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (*error) report("error=VI host display event signal: %s", error);
+#else
+    (void)target_timestamp_seconds;
+#endif
 }
 int botw_host_set_input(botw_input *input) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
@@ -1008,6 +1157,9 @@ static void install_signal_boundary(void) {
 }
 static int cleanup(void) {
     char error[512];
+    pthread_mutex_lock(&lifecycle_lock);
+    state.vi_display_live = 0;
+    pthread_mutex_unlock(&lifecycle_lock);
     pthread_mutex_lock(&focus_lock); focus_stopping = 1;
     pthread_cond_broadcast(&focus_changed); pthread_mutex_unlock(&focus_lock);
     int pending = 0;
@@ -1023,11 +1175,17 @@ static int cleanup(void) {
     }
     pthread_mutex_lock(&lifecycle_lock);
     botw_services_destroy(state.services); state.services = NULL;
+    if (state.vi_vsync_write && botw_kernel_close_handle(state.kernel, state.vi_vsync_write, error, sizeof error))
+        report("error=close VI vsync write endpoint: %s", error);
+    if (state.vi_vsync_read && botw_kernel_close_handle(state.kernel, state.vi_vsync_read, error, sizeof error))
+        report("error=close VI vsync read endpoint: %s", error);
+    state.vi_vsync_write = state.vi_vsync_read = 0;
     pthread_mutex_unlock(&lifecycle_lock);
     if (state.graphics_started && graphics_backend_shutdown) graphics_backend_shutdown();
     pthread_mutex_lock(&lifecycle_lock);
     state.graphics_started = 0; state.graphics_workspace = NULL; state.graphics_workspace_size = 0;
     state.host39_transport_audited = 0;
+    state.vi_initialized = 0; state.vi_display = state.vi_layer = NULL; state.vi_last_target_timestamp = 0;
     pthread_mutex_unlock(&lifecycle_lock);
     if (state.input) botw_input_unbind_shared_memory(state.input);
     if (state.input_owned) botw_input_destroy(state.input);
@@ -1049,8 +1207,10 @@ static int cleanup(void) {
 }
 int botw_host_run_mode(const char *root, const char *documents, botw_host_event event, enum botw_host_mode mode) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
+    pthread_mutex_lock(&lifecycle_lock);
     memset(&state, 0, sizeof state); state.event = event; state.owner = pthread_self();
     state.address_bits = configured_address_bits;
+    pthread_mutex_unlock(&lifecycle_lock);
     pthread_mutex_lock(&focus_lock); focus_suspended = 0; focus_stopping = 0;
     pthread_mutex_unlock(&focus_lock);
     int result = 0;
