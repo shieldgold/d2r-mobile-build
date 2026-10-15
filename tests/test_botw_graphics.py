@@ -370,6 +370,31 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_all_astc_formats_upload_partial_blocks_and_cross_gobs_to_gpu_pixels(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); graphics = ROOT / 'native/botw_graphics'
+            exe = path / 'astc'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(graphics / 'tools/probe_astc.m'),
+                '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            if result.returncode in (77, 78):
+                self.skipTest('No Metal device with ASTC family support')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            cases = [json.loads(row) for row in result.stdout.splitlines()]
+            self.assertEqual(len(cases), 112)
+            self.assertEqual(sum(row['pixels'] for row in cases), 81634)
+            self.assertEqual(len({tuple(row['footprint']) for row in cases}), 14)
+            self.assertEqual({(row['srgb'], row['size_case']) for row in cases},
+                             {(srgb, size) for srgb in (False, True) for size in range(4)})
+            self.assertTrue(all(row['pool_end_exact'] and row['max_channel_error'] <= 1 for row in cases))
+            self.assertEqual({tuple(row['first_rgba']) for row in cases if not row['srgb']}, {(64, 128, 192, 255)})
+            self.assertEqual({tuple(row['first_rgba']) for row in cases if row['srgb']}, {(13, 55, 134, 255)})
+            self.assertIn('ASTC_NVN_METAL_SAMPLING_OK cases=112 pixels=81634', result.stderr)
+
     def test_capability_queries_report_unsupported_features_and_preserve_unknown_output(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'

@@ -239,6 +239,9 @@ __attribute__((noreturn)) static void fatal(const char *name) {
     @throw [[BWGraphicsFailure alloc] initWithName:@"BWGraphicsFailure" reason:nil userInfo:nil];
 }
 const char *botw_graphics_last_error(void) { return lastError; }
+/* Apple Feature Set Tables specify ASTC LDR/sRGB from Apple2 onward.
+ * The NVN upload/sample path is verified for every supported block footprint. */
+static BOOL supportsASTC(void){return gpu&&[gpu supportsFamily:MTLGPUFamilyApple2];}
 static NSData *digest(const void *bytes,size_t size) {
     unsigned char hash[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(bytes,(CC_LONG)size,hash);
     return [NSData dataWithBytes:hash length:sizeof hash];
@@ -428,6 +431,7 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     case NVN_DEVICE_INFO_SAMPLER_DESCRIPTOR_SIZE:*value=BWDescriptorBytes;break;
     case NVN_DEVICE_INFO_RESERVED_TEXTURE_DESCRIPTORS:
     case NVN_DEVICE_INFO_RESERVED_SAMPLER_DESCRIPTORS:*value=BWReservedDescriptors;break;
+    case NVN_DEVICE_INFO_SUPPORTS_ASTC_FORMATS:*value=supportsASTC()?1:0;break;
     /* These are bridge capabilities, not claims about the host GPU. Their
      * NVN state/command/shader semantics are not implemented. Querying false
      * lets applications select a supported path; executing them still fails. */
@@ -525,6 +529,7 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     const TextureBuilder *b=(const TextureBuilder*)builder;get(b->device,[BWDevice class]);
     if(!b->pool || !textureBytes(b) || (b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE)))return report("Unsupported texture dimension/flags/samples/levels");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1 || (b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
+    if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");
     if(swz[0]!=NVN_SWZ_R||swz[1]!=NVN_SWZ_G||swz[2]!=NVN_SWZ_B||swz[3]!=NVN_SWZ_A)return report("Texture component swizzle is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return report("Texture storage bounds");

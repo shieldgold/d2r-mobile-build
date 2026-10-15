@@ -15,7 +15,7 @@
 
 运行时负责核验客体输出地址并复制 host 局部结果，也负责通过原 SDK `AttachReadableHandleToSystemEvent` 将真实 kernel reader handle 构造成 SystemEvent。原 VI 使用 EventClearMode=1；写端由宿主 CADisplayLink 的真实帧时钟驱动。图形后端不生成事件句柄或合成 vsync，关闭显示/清理事件由运行时在同一生命周期锁下协调。
 
-`DeviceGetInteger` 的 feature 查询描述桥接层可执行的能力。以下已确认缺少对应状态、命令或着色器语义的项返回0，允许客体选择回退；不会复制原 NVIDIA 驱动的支持位。ASTC 有独立纹理路径，仍需单独验证，不归入这组缺失能力。未知查询保留输出原值，诊断包含十六进制 query。
+`DeviceGetInteger` 的 feature 查询描述桥接层可执行的能力。以下已确认缺少对应状态、命令或着色器语义的项返回0，允许客体选择回退；不会复制原 NVIDIA 驱动的支持位。ASTC 使用下述独立设备 gate 和实际像素验证，不归入这组缺失能力。未知查询保留输出原值，诊断包含十六进制 query。
 
 | query | `SUPPORTS_` 名称 | 当前实现缺口 |
 |---|---|---|
@@ -33,6 +33,8 @@
 | 0x4a | POST_DEPTH_COVERAGE | 无 post-depth coverage 着色器语义 |
 | 0x4b | IMAGES_USING_TEXTURE_HANDLES | 无 image handle/register/bind |
 | 0x4c | SAMPLE_LOCATIONS | 无 sample-location 状态 |
+
+`SUPPORTS_ASTC_FORMATS` (0x2a) 依据真实设备 `supportsFamily(Apple2)` 返回支持状态，ASTC 纹理创建使用同一 gate。[Apple 官方能力表](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf) 明确 ASTC LDR/sRGB 从 Apple2 起可用。纯人工 void-extent 常量块探针验证全部14种footprint×UNORM/sRGB×4种尺寸，共112例、81634像素，包含1×1、整块、部分块和跨横纵GOB；压缩输入精确位于NVN池末端。真实上传、采样、RGBA8读回最大通道误差1，UNORM首色(64,128,192,255)与sRGB解码(13,55,134,255)区分清楚。该夹具不含游戏输入或派生着色器。
 
 描述符查询0x0f/0x10返回真实 pool 使用的32-byte跨度，0x11/0x12返回原 NVN ABI 保留数256；原客体分配器因此从索引256开始。人工 GPU 测试使用查询值创建池并从texture256、sampler4095真实采样；索引等于实际count、sampler4096及sampler count4097均拒绝。低索引旧人工夹具仍可直接调用；reserved 查询没有把它们改写为客体实际分配行为。
 
