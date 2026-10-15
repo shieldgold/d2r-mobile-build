@@ -7,6 +7,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = r'''
+#define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "kernel.h"
 #include <assert.h>
@@ -19,6 +20,7 @@ FIXTURE = r'''
 #include <string.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <unistd.h>
 static botw_kernel *ctx;
 static char error[512];
@@ -124,6 +126,15 @@ static int readable(uint64_t address) {
     int status; assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status)); return WEXITSTATUS(status) == 0;
 }
+static int resident(uint64_t address) {
+#ifdef __APPLE__
+    char vector = 0;
+#else
+    unsigned char vector = 0;
+#endif
+    assert(!mincore((void *)(uintptr_t)address, (size_t)sysconf(_SC_PAGESIZE), &vector));
+    return vector & 1;
+}
 static void memory_mapping(void) {
     const size_t unit = 0x200000;
     uint64_t base, size;
@@ -146,6 +157,7 @@ static void memory_mapping(void) {
     svc(4, mapping); assert(!mapping[0]);
     assert(!readable(heap + 0x4000) && readable(heap) && readable(heap + 0x8000));
     assert(*(unsigned char *)(uintptr_t)(stack + 0x4000) == 0x6a);
+    assert(resident(stack + 0x4000) && !resident(heap + 0x4000));
     *(unsigned char *)(uintptr_t)(stack + 0x4000) = 0xb7;
     assert(!botw_kernel_memory(ctx, heap + 0x4000, 1, 0));
     botw_kernel_memory_info region;
@@ -160,6 +172,7 @@ static void memory_mapping(void) {
     mapping[0] = stack + 0x4000; mapping[1] = heap + 0x4000; svc(5, mapping); assert(!mapping[0]);
     assert(!readable(stack + 0x4000) && readable(heap + 0x4000));
     assert(*(unsigned char *)(uintptr_t)(heap + 0x4000) == 0xb7);
+    assert(resident(heap + 0x4000) && !resident(stack + 0x4000));
     /* A valid Horizon 4K page cannot revoke just one quarter of an Apple 16K
        page. Refuse it without changing either neighboring 4K region. */
     mapping[0] = stack + 0x1000; mapping[1] = heap + 0x1000; mapping[2] = 0x1000;

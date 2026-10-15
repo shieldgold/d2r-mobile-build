@@ -16,6 +16,10 @@
 #include <time.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 
 #define MAX_HANDLES 2048
 #define MAX_WAIT 64
@@ -559,6 +563,38 @@ static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     k->heap_size = size; regs[0] = 0; regs[1] = k->heap_base;
     pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
 }
+/* Both ranges are whole host pages inside this kernel's reservation. Moving
+ * their backing is necessary for the physical-memory budget: protecting the
+ * old pages after memcpy would retain a second resident copy of every stack.
+ * The old address becomes a new empty PROT_NONE placeholder. */
+static int move_owned_pages(botw_kernel *k, uint64_t destination, uint64_t source,
+                            size_t size, char *error, size_t capacity) {
+#ifdef __APPLE__
+    (void)k;
+    mach_vm_address_t target = destination; vm_prot_t current = 0, maximum = 0;
+    kern_return_t result = mach_vm_remap(mach_task_self(), &target, size, 0,
+        VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), source, FALSE,
+        &current, &maximum, VM_INHERIT_COPY);
+    if (result != KERN_SUCCESS || target != destination ||
+        (current & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE))
+        return diagnostic(error, capacity, "move owned memory backing failed: kernel=%d protection=0x%x", result, current);
+    if (mmap((void *)(uintptr_t)source, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED)
+        return diagnostic(error, capacity, "reset moved source placeholder: %s", strerror(errno));
+#else
+    /* Portable fallback limits transient duplication to one host page and
+     * removes each old page before copying the next. */
+    for (size_t offset = 0; offset < size; offset += k->host_page) {
+        void *to = (void *)(uintptr_t)(destination + offset);
+        void *from = (void *)(uintptr_t)(source + offset);
+        if (mprotect(to, k->host_page, PROT_READ | PROT_WRITE))
+            return diagnostic(error, capacity, "commit moved destination page: %s", strerror(errno));
+        memcpy(to, from, k->host_page);
+        if (mmap(from, k->host_page, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED)
+            return diagnostic(error, capacity, "release moved source page: %s", strerror(errno));
+    }
+#endif
+    return 0;
+}
 static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, size_t capacity) {
     uint64_t destination = regs[0], source = regs[1], length = regs[2];
     if ((destination | source) & (GUEST_PAGE - 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
@@ -592,23 +628,13 @@ static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, si
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
     if (unmap) {
-        if (mprotect((void *)(uintptr_t)source, size, PROT_READ | PROT_WRITE)) {
-            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "restore borrowed heap: %s", strerror(errno));
-        }
-        memcpy((void *)(uintptr_t)source, (const void *)(uintptr_t)destination, size);
-        if (mmap((void *)(uintptr_t)destination, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) {
-            mprotect((void *)(uintptr_t)source, size, PROT_NONE);
-            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "release owned stack mapping: %s", strerror(errno));
+        if (move_owned_pages(k, source, destination, size, error, capacity)) {
+            pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR;
         }
         memset(mapping, 0, sizeof *mapping);
     } else {
-        if (mprotect((void *)(uintptr_t)destination, size, PROT_READ | PROT_WRITE)) {
-            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "commit guest stack: %s", strerror(errno));
-        }
-        memcpy((void *)(uintptr_t)destination, (const void *)(uintptr_t)source, size);
-        if (mprotect((void *)(uintptr_t)source, size, PROT_NONE)) {
-            mprotect((void *)(uintptr_t)destination, size, PROT_NONE);
-            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "protect borrowed heap: %s", strerror(errno));
+        if (move_owned_pages(k, destination, source, size, error, capacity)) {
+            pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR;
         }
         *free_slot = (Mapping){destination, source, size, 0};
     }
