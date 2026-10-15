@@ -90,6 +90,7 @@ static void *runGuest(void *unused) {
 }
 - (void)observeFrame:(CADisplayLink *)sender {
     (void)sender;
+    botw_host_refresh_input();
     if (!self.firstFrameObserved && botw_graphics_presented_frame_count()) {
         self.firstFrameObserved = YES;
         hostEvent("first_translated_game_draw_presented=true gameplay_verified=false");

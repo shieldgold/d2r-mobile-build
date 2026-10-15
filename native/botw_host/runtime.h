@@ -24,6 +24,8 @@ int botw_host_set_graphics_layer(void *layer);
 /* Input is owned by the frontend and must outlive all guest threads. */
 int botw_host_set_input(botw_input *input);
 void botw_host_set_applet_state(int foreground, int focused);
+/* Call after frontend sampling to publish controller style notifications. */
+void botw_host_refresh_input(void);
 #ifdef __cplusplus
 }
 #endif

@@ -76,6 +76,9 @@ static const char *const module_names[MODULE_COUNT] = {"main", "subsdk0", "subsd
 static const char *const key_names[8] = {"K18", "KTLS", "KTLR", "KGATE", "KRES0", "KRES1", "KASPECT", "KASPECTUI"};
 static pthread_mutex_t run_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t focus_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t focus_changed = PTHREAD_COND_INITIALIZER;
+static int focus_suspended, focus_stopping;
 static void *configured_graphics_layer;
 static botw_input *configured_input;
 static int host_foreground = 1, host_focused = 1;
@@ -520,7 +523,33 @@ int botw_host_set_input(botw_input *input) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     configured_input = input; pthread_mutex_unlock(&run_lock); return 0;
 }
+void botw_host_refresh_input(void) {
+    pthread_mutex_lock(&lifecycle_lock);
+    if (state.services) {
+        char error[512];
+        if (botw_services_refresh_input(state.services, error, sizeof error)) report("input_notification_error=%s", error);
+    }
+    pthread_mutex_unlock(&lifecycle_lock);
+}
 static int graphics_memory(const void *address, size_t length) { return services_memory(NULL, (uint64_t)address, length, 0); }
+static int services_focus(void *opaque, uint32_t mode, int foreground, int focused,
+                          int suspended, char *error, size_t capacity) {
+    (void)opaque; (void)error; (void)capacity;
+    pthread_mutex_lock(&focus_lock);
+    focus_suspended = !!suspended; pthread_cond_broadcast(&focus_changed);
+    pthread_mutex_unlock(&focus_lock);
+    report("focus_policy mode=%u foreground=%d focused=%d suspended=%d gate_boundary=true",
+        mode, foreground, focused, suspended);
+    return 0;
+}
+static int wait_for_focus(void) {
+    pthread_mutex_lock(&focus_lock);
+    int result = 0;
+    while (focus_suspended && !focus_stopping && !result) result = pthread_cond_wait(&focus_changed, &focus_lock);
+    int stopped = focus_stopping;
+    pthread_mutex_unlock(&focus_lock);
+    return result || stopped ? -1 : 0;
+}
 static void graphics_error(const char *message) {
     if (child_context || pthread_equal(pthread_self(), state.owner)) fail("NVN: %s", message);
     report("graphics_async_error=%s", message);
@@ -552,15 +581,20 @@ static int services_performance(void *opaque, uint32_t mode, uint32_t configurat
     return 0;
 }
 void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
+    if (wait_for_focus()) fail("guest execution stopped at focus boundary");
     for (unsigned i = 0; i < state.gate_count; i++) {
         Gate *g = &state.gates[i]; if (g->ret != ret) continue;
         if (g->kind) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); regs[g->arg] = (uint64_t)ts.tv_sec * 19200000ull + (uint64_t)ts.tv_nsec * 12 / 625; return; }
         if (state.kernel && g->arg != 0x06 && g->arg != 0x16 &&
-            !(g->arg == 0x29 && regs[1] == 11) &&
-            !(g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 || (uint32_t)regs[1] == 0xffff8000))) {
+            !(g->arg == 0x29 && regs[1] == 11)) {
+            int main_priority = g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 ||
+                ((uint32_t)regs[1] == 0xffff8000 && pthread_equal(pthread_self(), state.owner)));
             char error[512]; int handled = botw_kernel_dispatch(state.kernel, (unsigned)g->arg, regs, error, sizeof error);
             if (handled == BOTW_KERNEL_ERROR) fail("kernel: %s", error);
-            if (handled == BOTW_KERNEL_HANDLED) return;
+            if (handled == BOTW_KERNEL_HANDLED) {
+                if (main_priority && !regs[0]) report("main_thread_priority=%llu", (unsigned long long)regs[1]);
+                return;
+            }
         }
         if (g->arg == 0x1d) { /* SignalProcessWideKey(key, count). */
             uint64_t key = regs[0]; int32_t requested = (int32_t)regs[1];
@@ -582,10 +616,6 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
             pthread_mutex_unlock(&condition_lock);
             regs[0] = 0;
             report("condition_signal requested=%d waiters=%u woken=%u remaining=%u", requested, waiters, woken, remaining); return;
-        }
-        if (g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 || (uint32_t)regs[1] == 0xffff8000)) {
-            /* main.npdm for fixed BOTW base v0: main_thread_priority = 0x2c. */
-            regs[0] = 0; regs[1] = 44; report("main_thread_priority=44"); return;
         }
         if (g->arg == 0x06) {
             if (!services_memory(NULL, regs[0], 40, 1)) fail("QueryMemory output is not guest writable memory");
@@ -783,7 +813,17 @@ static void install_signal_boundary(void) {
 }
 static int cleanup(void) {
     char error[512];
-    if (state.kernel && botw_kernel_shutdown(state.kernel, error, sizeof error)) {
+    pthread_mutex_lock(&focus_lock); focus_stopping = 1;
+    pthread_cond_broadcast(&focus_changed); pthread_mutex_unlock(&focus_lock);
+    int pending = 0;
+    if (state.kernel) {
+        for (unsigned attempt = 0; attempt < 20; attempt++) {
+            pending = botw_kernel_shutdown(state.kernel, error, sizeof error);
+            if (!pending) break;
+            struct timespec interval = {.tv_nsec = 10000000}; nanosleep(&interval, NULL);
+        }
+    }
+    if (pending) {
         report("error=guest workers still active; retaining code and host resources: %s", error); return -1;
     }
     pthread_mutex_lock(&lifecycle_lock);
@@ -810,6 +850,8 @@ static int cleanup(void) {
 int botw_host_run_mode(const char *root, const char *documents, botw_host_event event, enum botw_host_mode mode) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     memset(&state, 0, sizeof state); state.event = event; state.owner = pthread_self();
+    pthread_mutex_lock(&focus_lock); focus_suspended = 0; focus_stopping = 0;
+    pthread_mutex_unlock(&focus_lock);
     int result = 0;
     if (sigsetjmp(state.recovery, 1)) {
         result = 1;
@@ -846,6 +888,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         pthread_mutex_unlock(&lifecycle_lock);
         if (!state.services) fail("allocate Horizon service sessions");
         botw_services_set_performance_handler(state.services, services_performance, NULL);
+        botw_services_set_focus_handler(state.services, services_focus, NULL);
         const botw_services_kernel_api kernel_api = {.opaque = state.kernel,
             .create_event = kernel_event_create, .duplicate_handle = kernel_duplicate,
             .signal_event = kernel_signal, .clear_event = kernel_clear, .close_handle = kernel_close,
