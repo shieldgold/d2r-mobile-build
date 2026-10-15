@@ -1,0 +1,3 @@
+NVN_BIND(nvnCommandBufferReportCounter)
+NVN_BIND(nvnDeviceGetTimestampInNanoseconds)
+NVN_BIND(nvnDeviceGetCurrentTimestampInNanoseconds)

@@ -16,6 +16,7 @@ static void validateAddressSubmission(BWQueue *queue,NSArray<NSArray *> *groups)
     BWProgram *program=queue.replay.program;
     for(NSArray *commands in groups)for(NSDictionary *c in commands){NSString *op=c[@"op"];
         if([op isEqual:@"copy"]){validateBufferAddress(c[@"source"],queue.device);validateBufferAddress(c[@"destination"],queue.device);}
+        else if([op isEqual:@"counter"]){BWAddressRecord *r=c[@"destination"];validateCounterAddress(r,queue.device);texturePrepareWrite((char*)r.pool.memory+r.offset,r.bytes);}
         else if([op isEqual:@"vertex"]){vertices[c[@"slot"]]=c;}
         else if([op isEqual:@"uniform"]){uniforms[resourceKey(c[@"stage"],c[@"slot"])]=c;}
         else if([op isEqual:@"storage"]){storage[resourceKey(c[@"stage"],c[@"slot"])]=c;}

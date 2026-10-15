@@ -33,6 +33,9 @@
 @interface BWDevice : NSObject
 @property int flags;
 @property NVNwindowOriginMode windowOrigin;
+@property(strong) id<MTLCounterSet> timestampSet;
+@property BOOL timestampStages;
+@property unsigned timestampReports;
 @end
 @implementation BWDevice
 @end
@@ -253,6 +256,8 @@ static BOOL textureTrackingAvailable;
 static void texturePrepareWrite(void *dst,size_t bytes);
 static void textureWriteBytes(void *destination,const void *source,size_t bytes,const char *reason);
 static void textureReadBytes(const void *source,void *destination,size_t bytes,const char *reason);
+static void counterConfigureDevice(BWDevice *device);
+static void validateCounterAddress(BWAddressRecord *record,BWDevice *device);
 static _Thread_local char lastError[1024];
 static _Thread_local const char *currentEntry;
 static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
@@ -573,7 +578,7 @@ static int readTextureImpl(const NVNtexture *raw,unsigned level,unsigned layer,v
     static ret h_##name(__VA_ARGS__)
 NVN(nvnDeviceBuilderSetDefaults,void,NVNdeviceBuilder *b){memset(b,0,sizeof *b);}
 NVN(nvnDeviceBuilderSetFlags,void,NVNdeviceBuilder *b,int flags){((DeviceBuilder*)b)->flags=flags;}
-NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;put(d,device);return 1;}
+NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;counterConfigureDevice(device);put(d,device);return 1;}
 NVN(nvnDeviceFinalize,void,NVNdevice *d){get(d,[BWDevice class]);removeObject(d);}
 NVN(nvnDeviceSetWindowOriginMode,void,NVNdevice *raw,NVNwindowOriginMode mode){
     BWDevice *device=get(raw,[BWDevice class]);
@@ -588,6 +593,7 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=52;break;
     case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=32;break;
     case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=4096;break;
+    case NVN_DEVICE_INFO_COUNTER_ALIGNMENT:*value=16;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT:*value=BW_COMMAND_MEMORY_ALIGNMENT;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT:*value=BW_CONTROL_MEMORY_ALIGNMENT;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:*value=BW_MIN_COMMAND_MEMORY;break;
@@ -738,6 +744,7 @@ NVN(nvnProgramSetShaders,NVNboolean,NVNprogram *raw,int count,const NVNshaderDat
 #include "command_memory.inc"
 #include "shader_scratch.inc"
 #include "buffer_addresses.inc"
+#include "counter.inc"
 NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress src,NVNbufferAddress dst,size_t bytes,int flags){if(flags || !bytes)fatal("nvnCommandBufferCopyBufferToBuffer flags/size");BWAddressRecord *source=captureBufferAddress(c,src,bytes,"GPU copy bounds/overlap"),*destination=captureBufferAddress(c,dst,bytes,"GPU copy bounds/overlap");if(source.pool==destination.pool&&source.offset<destination.offset+bytes&&destination.offset<source.offset+bytes)fatal("GPU copy bounds/overlap");record(c,@{@"op":@"copy",@"src":@(src),@"dst":@(dst),@"size":@(bytes),@"source":source,@"destination":destination});}
 NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){
     if(n!=1||!colors)fatal("nvnCommandBufferSetRenderTargets supports one color");textureMemory(colors,sizeof *colors,NO);if(views)textureMemory(views,sizeof *views,NO);
@@ -890,6 +897,7 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
     BWQueue *queue=get(raw,[BWQueue class]);NSArray *commands=queueSubmissionCommands(queue,count,input);
     id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;BWScratchRecord *initialScratch=state.scratch;NSArray *initialAddresses=addressReplayResources(state);
     for(NSDictionary *c in commands){NSString *op=c[@"op"];
+            if([op isEqual:@"counter"]){cb=counterReplay(queue,cb,c,commands,initialScratch,initialAddresses,state);continue;}
             if([op isEqual:@"target"]){if(![objects[c[@"id"]] isKindOfClass:[BWTexture class]]||([c[@"depth"] unsignedLongLongValue]&&![objects[c[@"depth"]] isKindOfClass:[BWTexture class]]))fatal("stale/incompatible render targets");state.target=c[@"selected"];state.depth=c[@"depthSelected"];textureLive(state.target);if(state.depth)textureLive(state.depth);continue;}
             if([op isEqual:@"scratch"]){state.scratch=c[@"record"];continue;}
             if([op isEqual:@"program"]){state.program=objects[c[@"id"]];if(![state.program isKindOfClass:[BWProgram class]])fatal("stale program");continue;}
@@ -1006,6 +1014,7 @@ static void *lookupNVNImpl(const char *name){if(!name)return NULL;
     const char *name_=name;
     if(!strcmp(name,"nvnBootstrapLoader"))return (void*)botw_nvn_bootstrap_loader;
 #include "implemented.inc"
+#include "counter_bindings.inc"
 #undef NVN_BIND
 #define NVN_UNSUPPORTED(name) if(!strcmp(#name,name_))return (void*)unsupported_##name;
 #include "unsupported.inc"

@@ -238,3 +238,6 @@ NVN_VOID(nvnTextureReadTexels,(const NVNtexture* a0,const NVNtextureView* a1,con
 NVN_VOID(nvnTextureReadTexelsStrided,(const NVNtexture* a0,const NVNtextureView* a1,const NVNcopyRegion* a2,void* a3,ptrdiff_t a4,ptrdiff_t a5),(a0,a1,a2,a3,a4,a5))
 NVN_VOID(nvnTextureFlushTexels,(const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r),(t,v,r))
 NVN_VOID(nvnTextureInvalidateTexels,(const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r),(t,v,r))
+NVN_VOID(nvnCommandBufferReportCounter,(NVNcommandBuffer *c,NVNcounterType type,NVNbufferAddress address),(c,type,address))
+NVN_VALUE(nvnDeviceGetTimestampInNanoseconds,uint64_t,(const NVNdevice *d,const NVNcounterData *counter),(d,counter))
+NVN_VALUE(nvnDeviceGetCurrentTimestampInNanoseconds,uint64_t,(const NVNdevice *d),(d))
