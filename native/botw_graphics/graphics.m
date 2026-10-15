@@ -680,7 +680,9 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
         BWPool *empty=[BWPool new];empty.memory=b->memory;empty.flags=b->flags;empty.device=get(b->device,[BWDevice class]);empty.live=YES;
         put(raw,empty);empty.generation=((BWObject*)raw)->serial;[pools addObject:empty];return 1;
     }
-    if(!b->memory || !b->size || b->size>gpu.maxBufferLength || (b->flags&(NVN_MEMORY_POOL_FLAGS_VIRTUAL|NVN_MEMORY_POOL_FLAGS_PHYSICAL)))return report("Unsupported/invalid memory pool");
+    if(!b->memory || !b->size || b->size>gpu.maxBufferLength || (b->flags&(NVN_MEMORY_POOL_FLAGS_VIRTUAL|NVN_MEMORY_POOL_FLAGS_PHYSICAL)))
+        return report("Unsupported/invalid memory pool flags=0x%x bytes=%zu memory_is_null=%d max_buffer_bytes=%zu",
+            (unsigned)b->flags,b->size,b->memory==NULL,(size_t)gpu.maxBufferLength);
     if(overlapsQueueArena(b->memory,b->size)||overlapsCommandMemory(b->memory,b->size))return report("Memory pool overlaps live CPU queue arena/recording memory");
     for(BWPool *p in pools){if(!p.size)continue;uintptr_t a=(uintptr_t)p.memory,c=(uintptr_t)b->memory;if(c<=a?a-c<b->size:c-a<p.size)return report("Memory pool ranges overlap");}
     if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))return report("Memory pool object is not fully writable");
