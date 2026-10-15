@@ -30,12 +30,14 @@ static pthread_key_t test_tls;
 static _Atomic unsigned entered;
 static _Atomic int validation_pause, validation_entered, validation_release;
 static unsigned affinity_logs;
+static unsigned mapping_frame_logs;
 static void kernel_log(void *opaque, const char *message) {
     (void)opaque;
     if (strstr(message, "guest_virtual_affinity")) {
         affinity_logs++;
         assert(strstr(message, "physical_binding=false") && strstr(message, "qos_preserved=true"));
     }
+    if (strstr(message, "map_memory_frame")) mapping_frame_logs++;
 }
 static uint64_t validation_key;
 static uint64_t callback_stack_low, callback_stack_top;
@@ -258,12 +260,18 @@ static void memory_mapping(void) {
     /* A valid Horizon 4K page cannot revoke just one quarter of an Apple 16K
        page. Refuse it without changing either neighboring 4K region. */
     mapping[0] = stack + 0x1000; mapping[1] = heap + 0x1000; mapping[2] = 0x1000;
+    uint64_t *frames = (void *)(uintptr_t)(heap + 0x18000);
+    frames[0] = (uintptr_t)(frames + 2); frames[1] = 0x123456;
+    frames[2] = 0; frames[3] = 0x987654; mapping[29] = (uintptr_t)frames;
     int result = botw_kernel_dispatch(ctx, 4, mapping, error, sizeof error);
     if (sysconf(_SC_PAGESIZE) > 4096) {
         assert(result == BOTW_KERNEL_ERROR && strstr(error, "host page"));
         char request[160]; snprintf(request, sizeof request, "destination=0x%llx source=0x%llx size=0x1000",
             (unsigned long long)(stack + 0x1000), (unsigned long long)(heap + 0x1000));
         assert(strstr(error, "svc=0x4") && strstr(error, request));
+#ifdef __APPLE__
+        assert(mapping_frame_logs == 2);
+#endif
         assert(readable(heap) && readable(heap + 0x1000) && !readable(stack + 0x1000));
     } else {
         assert(result == BOTW_KERNEL_HANDLED && !mapping[0]);

@@ -802,6 +802,29 @@ static int move_owned_pages(botw_kernel *k, uint64_t destination, uint64_t sourc
 #endif
     return 0;
 }
+/* Only a rejected map request uses this bounded diagnostic. Public Mach reads
+ * fail safely for inaccessible/corrupt frames; no guest pointer is dereferenced.
+ * Follow ascending A64 frame records within 1 MiB of the first frame. */
+static void log_rejected_map_frames(botw_kernel *k, uint64_t frame) {
+#ifdef __APPLE__
+    if (!k->callbacks.log || !frame || (frame & 15) || frame > UINT64_MAX - UINT64_C(0x100000)) return;
+    uint64_t end = frame + UINT64_C(0x100000);
+    for (unsigned depth = 0; depth < 12 && frame <= end - 16; depth++) {
+        uint64_t record[2] = {0}; vm_size_t bytes = 0;
+        kern_return_t result = vm_read_overwrite(mach_task_self(), (vm_address_t)frame, sizeof record,
+            (vm_address_t)(uintptr_t)record, &bytes);
+        if (result != KERN_SUCCESS || bytes != sizeof record) break;
+        char message[192]; snprintf(message, sizeof message,
+            "map_memory_frame depth=%u fp=0x%llx lr=0x%llx previous=0x%llx",
+            depth, (unsigned long long)frame, (unsigned long long)record[1], (unsigned long long)record[0]);
+        k->callbacks.log(k->opaque, message);
+        if (record[0] <= frame || (record[0] & 15)) break;
+        frame = record[0];
+    }
+#else
+    (void)k; (void)frame;
+#endif
+}
 static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, size_t capacity) {
     uint64_t destination = regs[0], source = regs[1], length = regs[2];
     if ((destination | source) & (GUEST_PAGE - 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
@@ -821,6 +844,7 @@ static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, si
     }
     if ((destination | source | size) & (k->host_page - 1)) {
         size_t page = k->host_page; pthread_mutex_unlock(&k->lock);
+        log_rejected_map_frames(k, regs[29]);
         return diagnostic(error, capacity, "guest %s requires complete host page boundaries (%zu bytes); "
             "svc=0x%x destination=0x%llx source=0x%llx size=0x%llx lr=0x%llx; refusing partial protection",
             unmap ? "UnmapMemory" : "MapMemory", page, unmap ? 5u : 4u,
