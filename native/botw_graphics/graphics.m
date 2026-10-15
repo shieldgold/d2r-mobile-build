@@ -170,6 +170,7 @@ static uint64_t serial;
 static botw_graphics_error errorCallback;
 static botw_graphics_memory_range memoryValidator;
 static botw_graphics_memory_access memoryAccessValidator;
+static botw_graphics_command_memory_invoker commandMemoryInvoker;
 static _Thread_local char lastError[1024];
 static _Thread_local const char *currentEntry;
 static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
@@ -336,7 +337,7 @@ static void commitBuffer(id<MTLCommandBuffer> cb) {
 }
 static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_graphics_memory_range validator) {
     if(gpu)return report("Graphics already initialized");
-    errorCallback=error; memoryValidator=validator;memoryAccessValidator=NULL;lastError[0]=0;
+    errorCallback=error; memoryValidator=validator;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;lastError[0]=0;
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
@@ -351,7 +352,7 @@ static void shutdownGraphicsImpl(void) {
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     objects=nil;objectSpans=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
-    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;allGPU=nil;replacePresentation(nil);
+    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);
 }
 /* The runtime owns guest output validation and the real kernel event. Keep
  * these failures return-only: its lifecycle mutex must never be bypassed by
@@ -904,6 +905,7 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
 WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_graphics_memory_range validator),initializeGraphicsImpl(layer,error,validator))
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
 WRAP_VOID(,botw_graphics_set_memory_access_validator,(botw_graphics_memory_access validator),memoryAccessValidator=validator)
+WRAP_VOID(,botw_graphics_set_command_memory_invoker,(botw_graphics_command_memory_invoker invoker),commandMemoryInvoker=invoker)
 /* Platform calls may run under the runtime lifecycle lock. Never dispatch a
  * host error here, including Objective-C exceptions from the layer. */
 #define PLATFORM_VALUE(name,parameters,operation) \

@@ -17,12 +17,22 @@ extern "C" {
 typedef void (*botw_graphics_error)(const char *message);
 typedef int (*botw_graphics_memory_range)(const void *address, size_t bytes);
 typedef int (*botw_graphics_memory_access)(const void *address, size_t bytes, int writable);
+/* The host contains guest failures inside this call and always returns to the
+ * bridge: 1 on normal return, 0 with a bounded diagnostic on failure. Called
+ * only with the graphics mutex released and the thread's graphics depth zero;
+ * the guest callback may reenter AddCommandMemory/AddControlMemory. */
+typedef int (*botw_graphics_command_memory_invoker)(
+    PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC, NVNcommandBuffer*,
+    NVNcommandBufferMemoryEvent, size_t, void*, char*, size_t);
 int botw_graphics_init(void *layer, botw_graphics_error error,
                        botw_graphics_memory_range validator);
 void botw_graphics_shutdown(void);
 /* Configure after init and before guest entry. A readable-range validator
  * never authorizes writes. Init/shutdown clear this callback. */
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access validator);
+/* Configure after init. Init/shutdown clear this callback. A memory callback
+ * that needs to run without a safe host invoker is rejected explicitly. */
+void botw_graphics_set_command_memory_invoker(botw_graphics_command_memory_invoker invoker);
 void *botw_nvn_bootstrap_loader(const char *name);
 const char *botw_graphics_last_error(void);
 /* Host VI backend. These return 1 only for a live configured CAMetalLayer,
