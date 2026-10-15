@@ -27,16 +27,16 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `973b131`：
+2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `db10e44`：
 
 - 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
 - `devicectl` 确认安装与解锁后启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、230 个门登记，以及实际映像的 Host39 HIPC 传输检查通过。
 - 真机已分配游戏初始堆 `0xc2600000`（3,261,071,360 字节），完成 SDK 初始化及模块构造，并真实进入游戏 `nnMain`。这仍不是已进入可操作游戏画面的证据。
 - 完整本体 RomFS 已重新传入手机 Documents，14,420,017,152 字节；手机应用真实读到 `/System/Version.txt` 为 `1.0.0`，随后通过 FSP 读取原始镜像头部。升级前后需核验资源与用户数据，不能仅凭安装成功推断容器内容仍完整。
-- 该次真机已通过缺失补丁的正常回退，读取 RomFS 目录与文件元数据，并通过 16MiB TransferMemory 创建；目前停止在原平台初始化请求 `nvdrv`。37 个私有着色器均经实际 Metal 装载通过，尚无原游戏绘制呈现。
-- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-973b131/`。开发界面和报告保持 `gameplay_verified=false`。
+- 该次真机已通过缺失补丁的正常回退，读取 RomFS 目录与文件元数据；Metal 平台、实际 2556×1179 显示层、FitToLayer 策略和原 SDK SystemEvent 构造均已完成，继续进入 NVN 设备调用。当前停止在未接入的图形能力查询。37 个私有着色器均经实际 Metal 装载通过，尚无原游戏绘制呈现。较早 `973b131` 真机版本还独立验证了原 SDK 16MiB TransferMemory 创建路径。
+- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-db10e44/`。开发界面和报告保持 `gameplay_verified=false`。
 
-该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38751650877) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38751650855) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
+该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38754530568) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38754530561) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
 
 后续 Mac ARM64 原生执行已读取 RomFS 目录与文件元数据，继续在新触发的兼容层边界逐项验证。最新启动日志保留在 `outputs/botw-host39-probe/`。图形、触摸/手柄、线程、只读资源和存档后端已有独立实现与测试，实际画面、操作及游戏存档验收仍未完成。
 
