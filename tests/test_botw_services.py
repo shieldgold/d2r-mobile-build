@@ -627,6 +627,46 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<Q', data)[0], 0x01007ef00011f000)
         self.send(aoc, self.request(0, struct.pack('<Q', 0xbad)), good=False)
 
+    def parental_policy(self, communication=0, sns=0, stereo=0):
+        self.lib.botw_services_set_parental_policy.argtypes = [C.c_void_p, C.c_char_p,
+            C.c_int, C.c_int, C.c_int, C.c_char_p, C.c_size_t]
+        return self.lib.botw_services_set_parental_policy(self.ctx, b'local-user-profile',
+            communication, sns, stereo, self.error, 1024)
+
+    def test_parental_service_reflects_local_policy_without_claiming_account_rights(self):
+        self.applet_kernel()
+        factory = self.service(self.initialized_sm(), b'pctl:a')
+        self.send(factory, self.request(0, b'\0' * 8, pid=True), good=False)
+        self.assertEqual(self.parental_policy(), 0)
+        raw, _ = self.send(factory, self.request(0, b'\0' * 8, pid=True))
+        _, handles, _ = self.response(raw)
+        service = handles[0]
+        for command in (1006, 1031, 1403):
+            raw, _ = self.send(service, self.request(command))
+            data, _, _ = self.response(raw)
+            self.assertEqual(data[0], 0)
+        self.send(service, self.request(1001))
+        raw, _ = self.send(service, self.request(1432))
+        _, handles, _ = self.response(raw)
+        event = self.kernel_handles[handles[0]]
+        self.assertFalse(event['signaled'])
+        self.assertEqual(self.parental_policy(communication=1, sns=1, stereo=1), 0)
+        self.assertTrue(event['signaled'])
+        raw, _ = self.send(service, self.request(1031))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 1)
+        raw, _ = self.send(service, self.request(1001))
+        self.assertEqual(struct.unpack_from('<I', raw, 24)[0], 142 | (133 << 9))
+        raw, _ = self.send(service, self.request(1013))
+        self.assertEqual(struct.unpack_from('<I', raw, 24)[0], 142 | (104 << 9))
+        raw, _ = self.send(factory, self.request(1, b'\0' * 8, pid=True))
+        _, handles, _ = self.response(raw)
+        uninitialized = handles[0]
+        self.send(uninitialized, self.request(1031), good=False)
+        self.send(uninitialized, self.request(1))
+        self.send(uninitialized, self.request(1031))
+        self.send(service, self.request(1201), good=False)  # no fabricated PIN unlock
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)

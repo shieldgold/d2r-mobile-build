@@ -32,7 +32,7 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
-    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC };
+    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -81,6 +81,9 @@ struct botw_services {
     uint64_t aoc_application_id, aoc_base_id;
     uint32_t aoc_installed_ids[128], aoc_event_write, aoc_event_read;
     size_t aoc_installed_count;
+    unsigned parental_ready, parental_communication, parental_sns, parental_stereo;
+    char parental_source[128];
+    uint32_t parental_event_write, parental_event_read;
     size_t storage_bytes;
     float audio_main_gain, audio_library_gain, audio_transparent_rate;
     uint8_t *capture_images[3], *transition_image;
@@ -147,6 +150,8 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_HID: return "hid";
         case OBJECT_HID_APPLET_RESOURCE: return "hid.IAppletResource";
         case OBJECT_AOC: return "aoc:u";
+        case OBJECT_PCTL_FACTORY: return "pctl:a.IParentalControlServiceFactory";
+        case OBJECT_PCTL_SERVICE: return "pctl.IParentalControlService";
     }
     return "<invalid>";
 }
@@ -272,6 +277,19 @@ int botw_services_set_addon_content(botw_services *s, uint64_t application_id, u
     s->aoc_installed_count = count; memcpy(s->aoc_installed_ids, installed, sizeof installed);
     pthread_mutex_unlock(&s->lock); return 0;
 }
+int botw_services_set_parental_policy(botw_services *s, const char *source, int communication, int sns, int stereo, char *error, size_t cap) {
+    if (!s || !source || !*source || (communication != 0 && communication != 1) || (sns != 0 && sns != 1) || (stereo != 0 && stereo != 1))
+        return problem(error, cap, "parental policy requires explicit source and boolean local restrictions");
+    size_t length = 0; while (length < 128 && source[length]) length++;
+    if (length >= 128) return problem(error, cap, "parental policy source exceeds limit");
+    pthread_mutex_lock(&s->lock);
+    int changed = s->parental_ready && (s->parental_communication != (unsigned)communication || s->parental_sns != (unsigned)sns || s->parental_stereo != (unsigned)stereo);
+    if (changed && s->parental_event_write && s->kernel.signal_event(s->kernel.opaque, s->parental_event_write, error, cap)) { pthread_mutex_unlock(&s->lock); return -1; }
+    s->parental_ready = 1; s->parental_communication = (unsigned)communication; s->parental_sns = (unsigned)sns; s->parental_stereo = (unsigned)stereo;
+    memcpy(s->parental_source, source, length + 1);
+    emit(s, "parental_policy source=%s communication_restricted=%d sns_restricted=%d stereo_restricted=%d nintendo_account_linked=false", source, communication, sns, stereo);
+    pthread_mutex_unlock(&s->lock); return 0;
+}
 void botw_services_get_audio_gain(botw_services *s, float *main_applet, float *library_applet, float *transparent_rate) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
@@ -336,6 +354,8 @@ void botw_services_destroy(botw_services *s) {
     if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
     if (s->aoc_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_read, error, sizeof error);
     if (s->aoc_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_write, error, sizeof error);
+    if (s->parental_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_read, error, sizeof error);
+    if (s->parental_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_write, error, sizeof error);
     for (unsigned index = 0; index < 10; index++) {
         if (s->hid_style_event_read[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_read[index], error, sizeof error);
         if (s->hid_style_event_write[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_write[index], error, sizeof error);
@@ -893,6 +913,47 @@ static int aoc_request(botw_services *s, uint8_t *ipc, size_t capacity, const Re
     }
     return problem(error, cap, "unsupported aoc:u command=%u installed_count=%zu (no DLC entitlement inferred)", r->command, s->aoc_installed_count);
 }
+static int parental_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->parental_ready) return problem(error, cap, "pctl:a requires explicit user-controlled local parental policy");
+    if (r->input_count || r->output_count || r->copy_count) return problem(error, cap, "pctl unexpected buffers/handles command=%u", r->command);
+    if (o->kind == OBJECT_PCTL_FACTORY && (r->command == 0 || r->command == 1)) {
+        if (!r->pid || r->payload_size < 8) return problem(error, cap, "CreateParentalControlService requires PID descriptor and u64 placeholder");
+        Object *service = new_object(OBJECT_PCTL_SERVICE);
+        if (!service) return problem(error, cap, "allocate parental control service failed");
+        service->initialized = r->command == 0;
+        return return_object(s, session, service, ipc, capacity, r, 0, error, cap);
+    }
+    if (o->kind != OBJECT_PCTL_SERVICE || r->pid) return problem(error, cap, "unsupported parental factory command=%u or unexpected PID", r->command);
+    if (r->command == 1) {
+        if (o->initialized) return problem(error, cap, "parental control service already initialized");
+        o->initialized = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (!o->initialized) return problem(error, cap, "parental control service is not initialized");
+    if (r->command == 1001 || r->command == 1004 || r->command == 1013) {
+        unsigned denied = r->command == 1001 ? s->parental_communication : r->command == 1004 ? s->parental_sns : s->parental_stereo;
+        response(ipc, capacity, r, NULL, 0, 0, 0);
+        if (denied) store32(ipc + 16 + (r->domain ? 16 : 0) + 8, 142u | ((r->command == 1013 ? 104u : 133u) << 9));
+        return 0;
+    }
+    if (r->command == 1006 || r->command == 1031 || r->command == 1062 || r->command == 1065 || r->command == 1403 || r->command == 1018) {
+        uint8_t value = 0;
+        if (r->command == 1031) value = !!(s->parental_communication || s->parental_sns || s->parental_stereo);
+        if (r->command == 1062) value = (uint8_t)s->parental_stereo;
+        if (r->command == 1065) value = !s->parental_stereo;
+        if (r->command == 1018) value = !s->parental_communication;
+        /* No PIN unlock or Nintendo pairing is created by a local policy. */
+        response(ipc, capacity, r, &value, 1, 0, 0); return 0;
+    }
+    if (r->command == 1432) {
+        if (!s->kernel.create_event || !s->kernel.duplicate_handle || !s->kernel.signal_event || !s->kernel.close_handle)
+            return problem(error, cap, "parental policy synchronization requires real kernel event API");
+        if (!s->parental_event_read && s->kernel.create_event(s->kernel.opaque, 0, &s->parental_event_write, &s->parental_event_read, error, cap)) return -1;
+        uint32_t handle = 0;
+        if (s->kernel.duplicate_handle(s->kernel.opaque, s->parental_event_read, &handle, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, handle, 0); store32(ipc + 8, 1u << 1); return 0;
+    }
+    return problem(error, cap, "unsupported pctl command=%u policy_source=%s (no external account/PIN authorization inferred)", r->command, s->parental_source);
+}
 static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
@@ -938,10 +999,13 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "fsp-srv\0", 8)) service_kind = OBJECT_FSP;
             else if (!memcmp(name, "hid\0\0\0\0\0", 8)) service_kind = OBJECT_HID;
             else if (!memcmp(name, "aoc:u\0\0\0", 8)) service_kind = OBJECT_AOC;
+            else if (!memcmp(name, "pctl:a\0\0", 8)) service_kind = OBJECT_PCTL_FACTORY;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_PCTL_FACTORY || o->kind == OBJECT_PCTL_SERVICE) {
+        return parental_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_AOC) {
         return aoc_request(s, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_HID || o->kind == OBJECT_HID_APPLET_RESOURCE) {

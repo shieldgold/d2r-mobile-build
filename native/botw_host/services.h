@@ -57,6 +57,11 @@ void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
 int botw_services_set_addon_content(botw_services *services, uint64_t application_id,
     uint64_t base_id, const uint32_t *installed_ids, size_t count,
     char *error, size_t error_capacity);
+/* Explicit host-local policy, independent of Nintendo accounts/entitlements.
+ * source identifies the user-controlled profile/default that supplied it. */
+int botw_services_set_parental_policy(botw_services *services, const char *source,
+    int restrict_communication, int restrict_sns, int restrict_stereo,
+    char *error, size_t error_capacity);
 /* Host audio mixer reads the same gain policy queried/set by IAudioController.
  * Values are finite [0,1], initialized to unity. Each output is optional. */
 void botw_services_get_audio_gain(botw_services *services, float *main_applet,
