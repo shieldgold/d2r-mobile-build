@@ -261,6 +261,9 @@ static void memory_mapping(void) {
     int result = botw_kernel_dispatch(ctx, 4, mapping, error, sizeof error);
     if (sysconf(_SC_PAGESIZE) > 4096) {
         assert(result == BOTW_KERNEL_ERROR && strstr(error, "host page"));
+        char request[160]; snprintf(request, sizeof request, "destination=0x%llx source=0x%llx size=0x1000",
+            (unsigned long long)(stack + 0x1000), (unsigned long long)(heap + 0x1000));
+        assert(strstr(error, "svc=0x4") && strstr(error, request));
         assert(readable(heap) && readable(heap + 0x1000) && !readable(stack + 0x1000));
     } else {
         assert(result == BOTW_KERNEL_HANDLED && !mapping[0]);

@@ -821,7 +821,11 @@ static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, si
     }
     if ((destination | source | size) & (k->host_page - 1)) {
         size_t page = k->host_page; pthread_mutex_unlock(&k->lock);
-        return diagnostic(error, capacity, "guest MapMemory requires complete host page boundaries (%zu bytes); refusing partial protection", page);
+        return diagnostic(error, capacity, "guest %s requires complete host page boundaries (%zu bytes); "
+            "svc=0x%x destination=0x%llx source=0x%llx size=0x%llx lr=0x%llx; refusing partial protection",
+            unmap ? "UnmapMemory" : "MapMemory", page, unmap ? 5u : 4u,
+            (unsigned long long)destination, (unsigned long long)source,
+            (unsigned long long)length, (unsigned long long)regs[30]);
     }
     Mapping *mapping = NULL, *free_slot = NULL;
     for (unsigned i = 0; i < MAX_MAPS; i++) {
