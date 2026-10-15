@@ -1,6 +1,6 @@
 # BOTW 原生图形桥
 
-这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 121 个 NVN 接口；完整游戏需要更多状态、资源和命令。
+这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 122 个 NVN 接口；完整游戏需要更多状态、资源和命令。
 
 ## 宿主接入
 
@@ -15,7 +15,7 @@
 
 运行时负责核验客体输出地址并复制 host 局部结果，也负责通过原 SDK `AttachReadableHandleToSystemEvent` 将真实 kernel reader handle 构造成 SystemEvent。原 VI 使用 EventClearMode=1；写端由宿主 CADisplayLink 的真实帧时钟驱动。图形后端不生成事件句柄或合成 vsync，关闭显示/清理事件由运行时在同一生命周期锁下协调。
 
-纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
+纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。设备窗口原点仅接受 UpperLeft=1，与 Metal 的上左渲染目标、viewport 和 scissor 坐标对应；非对称三角形及顶部裁剪的实际像素已验证，其他原点模式明确拒绝。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
 数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。
 
@@ -23,7 +23,7 @@
 
 `CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
 
-121 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
+122 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 

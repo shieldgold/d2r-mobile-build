@@ -24,6 +24,7 @@
 
 @interface BWDevice : NSObject
 @property int flags;
+@property NVNwindowOriginMode windowOrigin;
 @end
 @implementation BWDevice
 @end
@@ -403,8 +404,15 @@ static int readTextureImpl(const NVNtexture *raw,unsigned level,unsigned layer,v
     static ret h_##name(__VA_ARGS__)
 NVN(nvnDeviceBuilderSetDefaults,void,NVNdeviceBuilder *b){memset(b,0,sizeof *b);}
 NVN(nvnDeviceBuilderSetFlags,void,NVNdeviceBuilder *b,int flags){((DeviceBuilder*)b)->flags=flags;}
-NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;put(d,device);return 1;}
+NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;put(d,device);return 1;}
 NVN(nvnDeviceFinalize,void,NVNdevice *d){get(d,[BWDevice class]);removeObject(d);}
+NVN(nvnDeviceSetWindowOriginMode,void,NVNdevice *raw,NVNwindowOriginMode mode){
+    BWDevice *device=get(raw,[BWDevice class]);
+    if(mode!=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT)fatal("window origin requires UpperLeft=1; other raster transforms are unverified");
+    /* Metal's render-target, viewport and scissor coordinates already use
+     * this origin. Preserve the actual device state without an extra Y flip. */
+    device.windowOrigin=mode;
+}
 NVN(nvnDeviceGetProcAddress,PFNNVNGENERICFUNCPTRPROC,const NVNdevice *d,const char *name){if(d)get(d,[BWDevice class]);return (PFNNVNGENERICFUNCPTRPROC)botw_nvn_bootstrap_loader(name);}
 NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     get(d,[BWDevice class]);if(!value)fatal("nvnDeviceGetInteger null output");

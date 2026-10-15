@@ -370,6 +370,30 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_upper_left_window_origin_matches_ndc_viewport_and_scissor_pixels(self):
+        smoke = METAL_SMOKE.replace('API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);',
+            'API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize); API(nvnDeviceSetWindowOriginMode); API(nvnCommandBufferSetViewport);')
+        smoke = smoke.replace('CHECK(nvnDeviceInitialize(&device,&db));',
+            'CHECK(nvnDeviceInitialize(&device,&db)); nvnDeviceSetWindowOriginMode(&device,argc>1?NVN_WINDOW_ORIGIN_MODE_LOWER_LEFT:NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT);')
+        smoke = smoke.replace('float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};',
+            'float2 p[3]={float2(-1,-1),float2(1,1),float2(-1,1)};')
+        smoke = smoke.replace('    nvnMemoryPoolFinalize(&pool);', ORIGIN_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'origin.c'; harness.write_text(smoke); exe = path / 'origin'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_UPPER_LEFT_NDC_VIEWPORT_SCISSOR_OK', result.stdout)
+            result = subprocess.run([str(exe), 'lower-left'], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('UpperLeft=1', result.stderr)
+
     def test_vi_display_lifetime_and_generic_nvn_lookup_match_game_boot_abi(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
@@ -857,6 +881,20 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('symlink', result.stderr)
 
+
+ORIGIN_FEATURE = r"""
+    CHECK(pixels[0]==255 && pixels[1]==0);
+    CHECK(pixels[60]==0 && pixels[61]==255);
+    nvnCommandBufferBeginRecording(&cb);
+    nvnCommandBufferClearColor(&cb,0,color,15);
+    nvnCommandBufferSetViewport(&cb,0,0,4,2);
+    nvnCommandBufferSetScissor(&cb,0,0,4,1);
+    nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);
+    handle=nvnCommandBufferEndRecording(&cb); nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+    CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    for(unsigned y=0;y<4;y++){unsigned p=y*16;CHECK(pixels[p]==(y?0:255));CHECK(pixels[p+1]==(y?255:0));}
+    puts("GPU_UPPER_LEFT_NDC_VIEWPORT_SCISSOR_OK");
+"""
 
 PLATFORM_SMOKE = r"""
 #import <Foundation/Foundation.h>
