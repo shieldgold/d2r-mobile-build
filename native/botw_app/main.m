@@ -64,7 +64,7 @@ static void saveFirstPresentedFrame(void) {
     CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)pixels);
     CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
     CGImageRef image = provider && color ? CGImageCreate(width, height, 8, 32, (size_t)width * 4, color,
-        kCGImageAlphaNoneSkipLast, provider, NULL, false, kCGRenderingIntentDefault) : NULL;
+        (CGBitmapInfo)kCGImageAlphaNoneSkipLast, provider, NULL, false, kCGRenderingIntentDefault) : NULL;
     NSData *png = image ? UIImagePNGRepresentation([UIImage imageWithCGImage:image]) : nil;
     NSString *path = [documentsRoot stringByAppendingPathComponent:@"first-game-frame.png"];
     NSError *error = nil;
