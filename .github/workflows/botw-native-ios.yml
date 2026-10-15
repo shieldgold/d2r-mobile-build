@@ -16,6 +16,8 @@ on:
       - 'tests/test_botw_input.py'
       - 'tests/test_botw_audio.py'
       - 'tests/test_botw_graphics.py'
+      - 'tests/test_botw_counter*.py'
+      - 'tests/botw_metal_counter_capability.py'
       - 'tests/test_botw_romfs*.py'
       - '.github/workflows/botw-native-ios.yml'
   pull_request:
@@ -34,6 +36,8 @@ on:
       - 'tests/test_botw_input.py'
       - 'tests/test_botw_audio.py'
       - 'tests/test_botw_graphics.py'
+      - 'tests/test_botw_counter*.py'
+      - 'tests/botw_metal_counter_capability.py'
       - 'tests/test_botw_romfs*.py'
       - '.github/workflows/botw-native-ios.yml'
   workflow_dispatch:

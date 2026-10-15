@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from botw_metal_counter_capability import require_counter_sampling, require_metal
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = r'''
@@ -65,6 +67,14 @@ int main(int argc,char **argv){
  nvnQueueBuilderSetDevice(&qb,&d);CHECK(nvnQueueInitialize(&queue,&qb));
  NVNcommandBuffer command;CHECK(nvnCommandBufferInitialize(&command,&d));
  unsigned char untouched[32];memset(untouched,0xa5,sizeof untouched);
+ if(!strcmp(mode,"unavailable")){
+  nvnCommandBufferBeginRecording(&command);
+  REJECT(nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,address),"stage sampling is unavailable");
+  REJECT(nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP,address+16),"stage sampling is unavailable");
+  for(size_t i=0;i<page*4;i++)CHECK(memory[i]==0xa5);
+  nvnMemoryPoolFinalize(&pool);botw_graphics_shutdown();free(memory);
+  puts("COUNTER_UNAVAILABLE_SAMPLING_REJECTED_WITH_CANARY_OK");return 0;
+ }
  if(!strcmp(mode,"cpu-noaccess")||!strcmp(mode,"noncoherent")){
   nvnCommandBufferBeginRecording(&command);
   REJECT(nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,address),"coherent CPU-accessible");
@@ -194,36 +204,80 @@ int main(int argc,char **argv){
 '''
 
 
+# This test-only wrapper changes public capability responses, never timestamps.
+NO_SAMPLING_DEVICE = r'''
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+/* Only the two public capability responses differ; real Metal does all other work. */
+@interface CounterUnavailableDevice : NSObject
+@property(strong) id<MTLDevice> actual;
+@end
+@implementation CounterUnavailableDevice
+- (NSArray<id<MTLCounterSet>> *)counterSets { return @[]; }
+- (BOOL)supportsCounterSampling:(MTLCounterSamplingPoint)point { (void)point; return NO; }
+- (id)forwardingTargetForSelector:(SEL)selector { (void)selector; return self.actual; }
+@end
+static id<MTLDevice> counterUnavailableDevice(void) {
+ id<MTLDevice> actual=MTLCreateSystemDefaultDevice(); if(!actual)return nil;
+ CounterUnavailableDevice *proxy=[CounterUnavailableDevice new];proxy.actual=actual;
+ return (id<MTLDevice>)proxy;
+}
+#define MTLCreateSystemDefaultDevice counterUnavailableDevice
+#include "graphics.m"
+#undef MTLCreateSystemDefaultDevice
+'''
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class CounterContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.build = tempfile.TemporaryDirectory(prefix='botw-counter-contract-')
         cls.executable = Path(cls.build.name) / 'counter'
-        source = Path(cls.build.name) / 'counter.c'
-        source.write_text(FIXTURE)
+        cls.no_sampling_executable = Path(cls.build.name) / 'no-sampling'
         graphics = ROOT / 'native/botw_graphics'
-        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
-                                '-Wall', '-Wextra', '-Werror', '-I', str(graphics),
-                                str(graphics / 'graphics.m'), str(source),
-                                '-framework', 'Foundation', '-framework', 'Metal',
-                                '-framework', 'QuartzCore', '-o', str(cls.executable)],
-                               capture_output=True, text=True, timeout=120)
-        if built.returncode:
-            cls.build.cleanup()
-            raise AssertionError(built.stdout + built.stderr)
+        for name, contents, extra_sources, executable in (
+                ('counter.c', FIXTURE, [str(graphics / 'graphics.m')], cls.executable),
+                ('no-sampling.m', NO_SAMPLING_DEVICE + FIXTURE, [], cls.no_sampling_executable)):
+            source = Path(cls.build.name) / name
+            source.write_text(contents)
+            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
+                                    '-Wall', '-Wextra', '-Werror', '-I', str(graphics),
+                                    *extra_sources, str(source),
+                                    '-framework', 'Foundation', '-framework', 'Metal',
+                                    '-framework', 'QuartzCore', '-o', str(executable)],
+                                   capture_output=True, text=True, timeout=120)
+            if built.returncode:
+                cls.build.cleanup()
+                raise AssertionError(built.stdout + built.stderr)
 
     @classmethod
     def tearDownClass(cls):
         cls.build.cleanup()
 
-    def run_mode(self, mode, marker):
-        run = subprocess.run([str(self.executable), mode], capture_output=True,
+    def run_mode(self, mode, marker, *, executable=None):
+        if mode in ('clock-read', 'unavailable'):
+            require_metal()
+        else:
+            require_counter_sampling()
+        run = subprocess.run([str(executable or self.executable), mode], capture_output=True,
                              text=True, timeout=30)
-        if run.returncode == 77:
-            self.skipTest('Metal unavailable')
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn(marker, run.stdout)
+
+    def test_missing_hardware_sampling_rejects_reports_without_publication(self):
+        capabilities = require_metal()
+        if capabilities['timestamp_counter'] and capabilities['stage_boundary']:
+            self.skipTest('public Metal query supports sampling; unavailable-device contract tested by public proxy')
+        self.run_mode('unavailable', 'COUNTER_UNAVAILABLE_SAMPLING_REJECTED_WITH_CANARY_OK')
+
+    def test_public_capability_absence_rejects_reports_and_keeps_reader_available(self):
+        # Real production initialization sees only public capability absence.
+        # Other selectors forward to the actual device; no sample is fabricated.
+        self.run_mode('unavailable', 'COUNTER_UNAVAILABLE_SAMPLING_REJECTED_WITH_CANARY_OK',
+                      executable=self.no_sampling_executable)
+        self.run_mode('clock-read', 'COUNTER_TIMESTAMP_NONE_AND_CROSS_PAGE_READ_REJECTED_OK',
+                      executable=self.no_sampling_executable)
 
     def test_report_then_gpu_copy_and_replay_use_fresh_calibrated_samples(self):
         self.run_mode('ordered', 'COUNTER_ORDERED_COPY_REPLAY_AND_RAW_NS_OK')
@@ -232,11 +286,13 @@ class CounterContractTests(unittest.TestCase):
         self.run_mode('stale', 'COUNTER_POOL_ABA_REJECTED_OK')
 
     def test_actual_readonly_and_inaccessible_destinations_are_controlled_errors(self):
+        require_counter_sampling()
         for mode in ('readonly', 'none'):
             with self.subTest(mode=mode):
                 self.run_mode(mode, 'COUNTER_INACCESSIBLE_DESTINATION_REJECTED_OK')
 
     def test_live_and_current_segment_private_texture_authority_are_preserved(self):
+        require_counter_sampling()
         for mode in ('private-live', 'private-pending'):
             with self.subTest(mode=mode):
                 self.run_mode(mode, 'COUNTER_PRIVATE_TEXTURE_ALIAS_REJECTED_OK')
@@ -252,6 +308,7 @@ class CounterContractTests(unittest.TestCase):
         self.run_mode('logical-ro', 'COUNTER_LOGICAL_READONLY_REJECTED_OK')
 
     def test_cpu_inaccessible_and_noncoherent_pools_are_explicitly_rejected(self):
+        require_counter_sampling()
         for mode in ('cpu-noaccess', 'noncoherent'):
             with self.subTest(mode=mode):
                 self.run_mode(mode, 'COUNTER_UNPUBLISHABLE_POOL_REJECTED_OK')

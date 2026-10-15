@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from botw_metal_counter_capability import require_counter_sampling
+
 ROOT = Path(__file__).resolve().parents[1]
 CALIBRATION = r'''
 #include "counter_clock.h"
@@ -124,10 +126,9 @@ class CounterTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def probe(self, mode=''):
+        require_counter_sampling()
         result = subprocess.run([str(self.executable)] + ([mode] if mode else []),
                                 capture_output=True, text=True, timeout=30)
-        if result.returncode == 77:
-            self.skipTest('Metal unavailable')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('REAL_GPU_TIMESTAMP_PAIR_ORDER_COPY_AND_CANARIES_OK', result.stdout)
         return result
@@ -151,6 +152,7 @@ class CounterTests(unittest.TestCase):
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class CounterRenderTests(unittest.TestCase):
     def test_counter_segments_preserve_real_clear_draw_and_bound_pipeline_state(self):
+        require_counter_sampling()
         import test_botw_graphics as baseline
         source = baseline.METAL_SMOKE.replace(
             '    API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);',
@@ -162,6 +164,8 @@ class CounterRenderTests(unittest.TestCase):
                 'nvnCommandBufferReportCounter(&cb,NVN_COUNTER_TYPE_TIMESTAMP_TOP,gpu+3008);'
                 + operation +
                 'nvnCommandBufferReportCounter(&cb,NVN_COUNTER_TYPE_TIMESTAMP,gpu+3024);')
+        # Independent query already established a device; initialization failure must fail.
+        source = source.replace('return 77;', 'return 76;')
         baseline.MetalBridgeTests.compile_render_probe(
             self, source, [('', 'GPU_COPY_CLEAR_DRAW_OK', True)])
 
@@ -256,6 +260,7 @@ class CounterFailureTests(unittest.TestCase):
         cls.temp.cleanup()
 
     def test_metal_failures_never_publish_counter_and_drain_publication_group(self):
+        require_counter_sampling()
         cases = {'sample-allocation': 'sample-buffer allocation failed',
                  'resolve-short': 'invalid byte count', 'resolve-error': 'sample is invalid',
                  'resolve-unordered': 'sample is invalid', 'calibration-zero': 'calibration span is invalid',
@@ -264,17 +269,14 @@ class CounterFailureTests(unittest.TestCase):
         for mode, message in cases.items():
             with self.subTest(mode=mode):
                 result = subprocess.run([str(self.executable), mode], capture_output=True, text=True, timeout=30)
-                if result.returncode == 77:
-                    self.skipTest('Metal unavailable')
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('COUNTER_FAILURE_NO_PUBLICATION_AND_GROUP_DRAINED', result.stdout)
                 self.assertIn(message, result.stderr)
 
     def test_delayed_cpu_resolution_does_not_become_gpu_time_or_finish_early(self):
+        require_counter_sampling()
         result = subprocess.run([str(self.executable), 'resolve-delay'], capture_output=True,
                                 text=True, timeout=30)
-        if result.returncode == 77:
-            self.skipTest('Metal unavailable')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('REAL_GPU_TIMESTAMP_PAIR_ORDER_COPY_AND_CANARIES_OK', result.stdout)
 
