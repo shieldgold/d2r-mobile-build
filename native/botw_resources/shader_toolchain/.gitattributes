@@ -1,0 +1,2 @@
+# Preserve pinned third-party bytes, including upstream whitespace and line endings.
+dm/** -text -whitespace
