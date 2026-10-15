@@ -78,6 +78,7 @@ struct botw_kernel {
     SyncWaiter *sync_waiters;
     uint64_t next_wait_sequence;
     uint64_t next_thread_id;
+    uint64_t priority_mask;
     char thread_failure[512];
     uint32_t next_handle;
     unsigned active_waits;
@@ -152,6 +153,7 @@ botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *op
     if (callbacks) k->callbacks = *callbacks;
     k->opaque = opaque; k->owner = pthread_self(); k->next_handle = HANDLE_BASE;
     k->next_thread_id = 2;
+    k->priority_mask = UINT64_MAX;
     k->address_limit = UINT64_C(1) << 36;
     k->initial_thread.kernel = k; k->initial_thread.host = pthread_self();
     k->initial_thread.handle = BOTW_KERNEL_INITIAL_THREAD; k->initial_thread.id = 1;
@@ -323,7 +325,8 @@ static Thread *thread_from_handle_locked(botw_kernel *k, uint32_t handle, int ps
 }
 /* Recompute the fixed point of virtual Horizon priority donation, including
  * chains of owners blocked on another mutex. Queue selection uses these
- * effective priorities; host QoS remains the pthread policy requested at start. */
+ * effective priorities. Host QoS represents coarse base-priority policy, not
+ * a claim of exact host scheduling or physical priority donation. */
 static void recompute_priorities_locked(botw_kernel *k) {
     k->initial_thread.effective_priority = k->initial_thread.priority;
     unsigned count = 1;
@@ -336,6 +339,54 @@ static void recompute_priorities_locked(botw_kernel *k) {
         }
         if (!changed) break;
     }
+}
+#ifdef __APPLE__
+static qos_class_t host_qos_for_priority(int priority) {
+    return priority < 16 ? QOS_CLASS_USER_INTERACTIVE : priority < 32 ? QOS_CLASS_USER_INITIATED :
+        priority < 48 ? QOS_CLASS_DEFAULT : QOS_CLASS_UTILITY;
+}
+#endif
+static int set_thread_priority(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    pthread_mutex_lock(&k->lock);
+    Thread *t = thread_from_handle_locked(k, (uint32_t)regs[0], 1);
+    if (!t) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
+    int32_t priority = (int32_t)regs[1];
+    if (priority < 0 || priority > 63 || !(k->priority_mask & (UINT64_C(1) << priority))) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED;
+    }
+    if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
+    /* A not-yet-started worker uses the new class in pthread attributes. An
+     * exited thread has no remaining host execution to reprioritize. */
+    if (t == &k->initial_thread || (t->started && !t->finished)) {
+        int result;
+#ifdef __APPLE__
+        qos_class_t requested = host_qos_for_priority(priority), actual;
+        int relative;
+        if (pthread_equal(pthread_self(), t->host)) {
+            result = pthread_set_qos_class_self_np(requested, 0);
+            if (!result) result = pthread_get_qos_class_np(t->host, &actual, &relative);
+            if (!result && (actual != requested || relative != 0)) result = EINVAL;
+        } else {
+            result = pthread_get_qos_class_np(t->host, &actual, &relative);
+            if (!result && (actual != requested || relative != 0)) {
+                pthread_mutex_unlock(&k->lock);
+                diagnostic(error, capacity, "remote thread priority requires unsupported host QoS class change");
+                return BOTW_KERNEL_UNSUPPORTED;
+            }
+        }
+#else
+        /* Portable timesharing has no 64-level QoS equivalent. Request its
+         * real available policy; exact guest ordering is enforced by queues. */
+        struct sched_param parameter = {0};
+        result = pthread_setschedparam(t->host, SCHED_OTHER, &parameter);
+#endif
+        if (result) {
+            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "apply guest thread priority host policy: %s", strerror(result));
+        }
+    }
+    t->priority = priority; recompute_priorities_locked(k);
+    pthread_cond_broadcast(&k->changed);
+    pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
 }
 static void link_sync_waiter_locked(botw_kernel *k, SyncWaiter *w) {
     w->sequence = k->next_wait_sequence++; w->next = k->sync_waiters; k->sync_waiters = w;
@@ -729,13 +780,16 @@ static int map_shared_memory(botw_kernel *k, int unmap, uint64_t *regs, char *er
 }
 static int get_info(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     unsigned id = (uint32_t)regs[1];
-    switch (id) { case 2: case 3: case 4: case 5: case 6: case 7:
+    switch (id) { case 1: case 2: case 3: case 4: case 5: case 6: case 7:
         case 12: case 13: case 14: case 15: case 21: case 22: break;
         default: return BOTW_KERNEL_UNSUPPORTED;
     }
     if (!botw_kernel_is_process_handle(k, (uint32_t)regs[2])) { regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
     if (regs[3]) { regs[0] = BOTW_KERNEL_RESULT_OUT_OF_RANGE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock);
+    if (id == 1) {
+        regs[0] = 0; regs[1] = k->priority_mask; pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+    }
     if (!k->memory_configured) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_UNSUPPORTED; }
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
     uint64_t value = 0;
@@ -778,7 +832,7 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     if (!k->callbacks.execute_thread || !k->callbacks.executable) return BOTW_KERNEL_UNSUPPORTED;
     uint64_t entry = regs[1], argument = regs[2], stack_top = regs[3];
     int32_t priority = (int32_t)regs[4], core = (int32_t)regs[5];
-    if (priority < 0 || priority > 63) { regs[0] = 0xe001; return BOTW_KERNEL_HANDLED; }
+    if (priority < 0 || priority > 63) { regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED; }
     if (core < -2 || core == -1 || core > 3) { regs[0] = 0xe201; return BOTW_KERNEL_HANDLED; }
     if ((entry & 3) || (stack_top & 15) || !k->callbacks.executable(k->opaque, entry)) {
         regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED;
@@ -786,6 +840,9 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     Thread *t = calloc(1, sizeof *t);
     if (!t) return diagnostic(error, capacity, "allocate guest thread: %s", strerror(errno));
     pthread_mutex_lock(&k->lock); Mapping *mapping = NULL;
+    if (!(k->priority_mask & (UINT64_C(1) << priority))) {
+        pthread_mutex_unlock(&k->lock); free(t); regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED;
+    }
     for (unsigned i = 0; i < MAX_MAPS; i++) {
         Mapping *m = &k->mappings[i];
         if (m->size && stack_top > m->destination && stack_top <= m->destination + m->size &&
@@ -822,9 +879,7 @@ static int start_thread(botw_kernel *k, uint64_t *regs, char *error, size_t capa
 #ifdef __APPLE__
     /* Horizon priorities remain virtual scheduler metadata. Request the closest
      * host scheduling class rather than claiming physical-core affinity. */
-    if (!result) result = pthread_attr_set_qos_class_np(&attr,
-        t->priority < 16 ? QOS_CLASS_USER_INTERACTIVE : t->priority < 32 ? QOS_CLASS_USER_INITIATED :
-        t->priority < 48 ? QOS_CLASS_DEFAULT : QOS_CLASS_UTILITY, 0);
+    if (!result) result = pthread_attr_set_qos_class_np(&attr, host_qos_for_priority(t->priority), 0);
 #endif
     if (!result) result = pthread_create(&t->host, &attr, thread_main, t);
     pthread_attr_destroy(&attr);
@@ -847,6 +902,7 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
     case 0x14: return map_shared_memory(k, 1, regs, error, capacity);
     case 8: return create_thread(k, regs, error, capacity);
     case 9: return start_thread(k, regs, error, capacity);
+    case 0xd: return set_thread_priority(k, regs, error, capacity);
     case 0xc: {
         pthread_mutex_lock(&k->lock); Thread *t = thread_from_handle_locked(k, (uint32_t)regs[1], 1);
         if (t) { regs[0] = 0; regs[1] = (uint64_t)t->effective_priority; }
@@ -1009,6 +1065,14 @@ uint64_t botw_kernel_address_space_limit(botw_kernel *k) {
     if (!k) return 0;
     pthread_mutex_lock(&k->lock); uint64_t limit = k->address_limit;
     pthread_mutex_unlock(&k->lock); return limit;
+}
+int botw_kernel_configure_thread_priority_mask(botw_kernel *k, uint64_t mask, char *error, size_t capacity) {
+    if (!k) return diagnostic(error, capacity, "thread priority mask requires kernel context");
+    pthread_mutex_lock(&k->lock);
+    if (!mask || !(mask & (UINT64_C(1) << k->initial_thread.priority)) || k->threads || k->stopping) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "invalid priority mask or active/stopping thread context");
+    }
+    k->priority_mask = mask; pthread_mutex_unlock(&k->lock); return 0;
 }
 int botw_kernel_configure_memory(botw_kernel *k, size_t heap, size_t stack, size_t alias, size_t budget, size_t image, char *error, size_t capacity) {
     if (!k || !heap || !stack || !alias || ((heap | stack | alias) & (HEAP_UNIT - 1)) || budget < image)

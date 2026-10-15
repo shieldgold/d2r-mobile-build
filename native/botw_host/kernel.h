@@ -19,7 +19,8 @@ enum {
     BOTW_KERNEL_RESULT_INVALID_HANDLE = 0xe401,
     BOTW_KERNEL_RESULT_TIMED_OUT = 0xea01,
     BOTW_KERNEL_RESULT_CANCELLED = 0xec01,
-    BOTW_KERNEL_RESULT_INVALID_STATE = 0xfa01
+    BOTW_KERNEL_RESULT_INVALID_STATE = 0xfa01,
+    BOTW_KERNEL_RESULT_INVALID_PRIORITY = 0xe001
 };
 #define BOTW_KERNEL_CURRENT_THREAD UINT32_C(0xffff8000)
 #define BOTW_KERNEL_CURRENT_PROCESS UINT32_C(0xffff8001)
@@ -51,6 +52,10 @@ void botw_kernel_destroy(botw_kernel *kernel);
  * and the runtime must stop guest execution and show error. */
 int botw_kernel_dispatch(botw_kernel *kernel, unsigned number, uint64_t *regs,
                          char *error, size_t error_capacity);
+/* SetThreadPriority(0x0d) changes base priority; GetThreadPriority(0x0c) reads
+ * effective priority including mutex donation. Apple self updates apply and
+ * read back a coarse QoS class. A remote live thread requiring a different
+ * class is explicitly unsupported; no registers or priority state change. */
 /* Synchronization ABI: 0x1a(owner,mutex,self_tag), 0x1b(mutex),
  * 0x1c(mutex,condition_key,self_tag,timeout_ns), 0x1d(condition_key,count).
  * Mutex tags are real thread handles plus MUTEX_HAS_WAITERS; condition keys
@@ -95,6 +100,11 @@ int botw_kernel_configure_address_space(botw_kernel *kernel, unsigned bits,
     char *error, size_t error_capacity);
 /* Exclusive guest address bound. Does not allocate a reservation; null => 0. */
 uint64_t botw_kernel_address_space_limit(botw_kernel *kernel);
+/* Default allows 0..63. Configure the verified process/NPDM priority mask
+ * before creating workers; it must include the initial thread's priority.
+ * GetInfo(1) returns this mask; CreateThread/SetThreadPriority enforce it. */
+int botw_kernel_configure_thread_priority_mask(botw_kernel *kernel, uint64_t mask,
+    char *error, size_t error_capacity);
 /* Configure reservation before first memory SVC. All capacities must be
  * multiples of 2 MiB. physical_budget includes heap and image_bytes. */
 int botw_kernel_configure_memory(botw_kernel *kernel, size_t heap_capacity,

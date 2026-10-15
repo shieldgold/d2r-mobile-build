@@ -2,6 +2,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -387,6 +388,19 @@ static uint32_t sync_order[4], sync_observed_words[4];
 static uint32_t thread_priority(uint32_t handle) {
     uint64_t r[32] = {0, handle}; svc(0xc, r); assert(!r[0]); return (uint32_t)r[1];
 }
+static uint32_t set_priority(uint32_t handle, int32_t priority) {
+    uint64_t r[32] = {handle, (uint64_t)(int64_t)priority}; svc(0xd, r); return (uint32_t)r[0];
+}
+static void assert_host_priority(int priority) {
+#ifdef __APPLE__
+    qos_class_t qos; int relative;
+    assert(!pthread_get_qos_class_np(pthread_self(), &qos, &relative));
+    assert(qos == (priority < 16 ? QOS_CLASS_USER_INTERACTIVE : priority < 32 ? QOS_CLASS_USER_INITIATED :
+        priority < 48 ? QOS_CLASS_DEFAULT : QOS_CLASS_UTILITY) && relative == 0);
+#else
+    (void)priority;
+#endif
+}
 static void mutex_lock(uint32_t self) {
     for (;;) {
         uint32_t value = atomic_load(&guest_mutex);
@@ -433,6 +447,116 @@ static void until_priority(unsigned value) {
     uint64_t deadline = now() + 1000000000;
     while (thread_priority(BOTW_KERNEL_INITIAL_THREAD) != value && now() < deadline) sched_yield();
     assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == value);
+}
+static void *unregistered_priority_caller(void *unused) {
+    (void)unused;
+    uint64_t r[32] = {0, BOTW_KERNEL_CURRENT_THREAD}; svc(0xc, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(set_priority(BOTW_KERNEL_CURRENT_THREAD, 44) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    return NULL;
+}
+static void initial_thread_priority(void) {
+    assert(info(1) == UINT64_MAX);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44)); assert_host_priority(44);
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 40)); assert_host_priority(40);
+    assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 40);
+    assert(set_priority(0xdead, -1) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(set_priority(BOTW_KERNEL_CURRENT_PROCESS, 44) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(set_priority(BOTW_KERNEL_INITIAL_THREAD, -1) == BOTW_KERNEL_RESULT_INVALID_PRIORITY);
+    assert(set_priority(BOTW_KERNEL_INITIAL_THREAD, 64) == BOTW_KERNEL_RESULT_INVALID_PRIORITY);
+    assert(thread_priority(BOTW_KERNEL_CURRENT_THREAD) == 40);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44));
+    uint32_t w, read; assert(!botw_kernel_create_event(ctx, 0, &w, &read, error, sizeof error));
+    assert(set_priority(w, 44) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    pthread_t caller; assert(!pthread_create(&caller, NULL, unregistered_priority_caller, NULL));
+    assert(!pthread_join(caller, NULL)); assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 44);
+    const uint64_t mask = UINT64_C(0x0ffffffff0000000); /* audited BOTW NPDM 28..59 */
+    assert(botw_kernel_configure_thread_priority_mask(ctx, 0, error, sizeof error) == -1);
+    assert(botw_kernel_configure_thread_priority_mask(ctx, 1, error, sizeof error) == -1);
+    assert(info(1) == UINT64_MAX);
+    assert(!botw_kernel_configure_thread_priority_mask(ctx, mask, error, sizeof error));
+    assert(info(1) == mask);
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 28)); assert_host_priority(28);
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 59)); assert_host_priority(59);
+    assert(set_priority(BOTW_KERNEL_CURRENT_THREAD, 27) == BOTW_KERNEL_RESULT_INVALID_PRIORITY);
+    assert(set_priority(BOTW_KERNEL_CURRENT_THREAD, 60) == BOTW_KERNEL_RESULT_INVALID_PRIORITY);
+    assert(thread_priority(BOTW_KERNEL_CURRENT_THREAD) == 59);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44)); assert_host_priority(44);
+}
+static void rejected_host_priority(void) {
+#ifdef __APPLE__
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44));
+    /* Apple's documented scheduling interface permanently opts this fixture
+       pthread out of QoS. A later self QoS request must fail, preserving the
+       accepted guest base priority rather than reporting fabricated success. */
+    int policy; struct sched_param parameter;
+    assert(!pthread_getschedparam(pthread_self(), &policy, &parameter));
+    assert(!pthread_setschedparam(pthread_self(), policy, &parameter));
+    uint64_t r[32] = {BOTW_KERNEL_INITIAL_THREAD, 40};
+    assert(botw_kernel_dispatch(ctx, 0xd, r, error, sizeof error) == BOTW_KERNEL_ERROR);
+    assert(strstr(error, "host policy") && thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 44);
+#endif
+}
+static _Atomic unsigned priority_stage;
+static void priority_worker(uint64_t argument, uint32_t self) {
+    (void)argument;
+    assert(thread_priority(BOTW_KERNEL_CURRENT_THREAD) == 28); assert_host_priority(28);
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 30)); assert_host_priority(30);
+    atomic_store(&priority_stage, 1);
+    while (atomic_load(&priority_stage) != 2) sched_yield();
+    assert(thread_priority(self) == 29);
+    assert(!set_priority(self, 40)); assert_host_priority(40);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 42));
+    assert(thread_priority(BOTW_KERNEL_CURRENT_THREAD) == 40);
+    assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 42);
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 44)); assert_host_priority(44);
+    atomic_store(&priority_stage, 3);
+    while (atomic_load(&priority_stage) != 4) sched_yield();
+    assert(thread_priority(self) == 46); exit_worker();
+}
+static void until_priority_stage(unsigned stage) {
+    uint64_t deadline = now() + 1000000000;
+    while (atomic_load(&priority_stage) != stage && now() < deadline) sched_yield();
+    assert(atomic_load(&priority_stage) == stage);
+}
+static void worker_thread_priority(void) {
+    assert(!botw_kernel_configure_thread_priority_mask(ctx, UINT64_C(0x0ffffffff0000000), error, sizeof error));
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44));
+    uint64_t stack = prepare_sync(1);
+    uint64_t r[32] = {0, (uintptr_t)priority_worker, 0, stack + 0x200000, 27, (uint64_t)-2};
+    svc(8, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_PRIORITY);
+    uint32_t worker = create_worker((uintptr_t)priority_worker, 0, stack + 0x200000);
+    assert(!set_priority(worker, 28) && thread_priority(worker) == 28); /* applied at pthread creation */
+    assert(botw_kernel_configure_thread_priority_mask(ctx, UINT64_MAX, error, sizeof error) == -1);
+    r[0] = worker; svc(9, r); assert(!r[0]); until_priority_stage(1);
+    assert(thread_priority(worker) == 30 && thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 44);
+    assert(!set_priority(worker, 29));
+#ifdef __APPLE__
+    uint64_t changed[32] = {worker, 44}, saved[32]; memcpy(saved, changed, sizeof saved);
+    assert(botw_kernel_dispatch(ctx, 0xd, changed, error, sizeof error) == BOTW_KERNEL_UNSUPPORTED);
+    assert(!memcmp(changed, saved, sizeof saved) && thread_priority(worker) == 29);
+#endif
+    atomic_store(&priority_stage, 2); until_priority_stage(3);
+    assert(thread_priority(worker) == 44 && thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 42);
+    assert(!set_priority(worker, 46)); atomic_store(&priority_stage, 4);
+    assert(wait_one(worker, 1000000000) == 0);
+    assert(!botw_kernel_close_handle(ctx, worker, error, sizeof error));
+    assert(set_priority(worker, 44) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44)); assert(!pthread_key_delete(test_tls));
+}
+static void changed_priority_donation(void) {
+    uint64_t stack = prepare_sync(2);
+    atomic_store(&guest_mutex, BOTW_KERNEL_INITIAL_THREAD);
+    uint32_t first = sync_worker(stack, 0, (uintptr_t)mutex_contender, 10, 10); until_priority(10);
+    uint32_t second = sync_worker(stack, 1, (uintptr_t)mutex_contender, 12, 12);
+    while (atomic_load(&sync_prepared) != 2) sched_yield();
+    assert(!set_priority(second, 5)); until_priority(5);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 50)); until_priority(5);
+    mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    assert(wait_one(first, 1000000000) == 0 && wait_one(second, 1000000000) == 0);
+    assert(sync_order[0] == 12 && sync_order[1] == 10);
+    assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 50);
+    assert(!set_priority(BOTW_KERNEL_INITIAL_THREAD, 44)); assert(!pthread_key_delete(test_tls));
 }
 static void mutex_arbitration(void) {
     uint64_t stack = prepare_sync(2);
@@ -633,6 +757,10 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "stopsync")) shutdown_sync_waits();
     else if (!strcmp(argv[1], "retainwait")) pending_wait_memory_is_retained();
     else if (!strcmp(argv[1], "validationrace")) revalidate_before_wait_registration();
+    else if (!strcmp(argv[1], "priorityinitial")) initial_thread_priority();
+    else if (!strcmp(argv[1], "priorityworker")) worker_thread_priority();
+    else if (!strcmp(argv[1], "prioritydonation")) changed_priority_donation();
+    else if (!strcmp(argv[1], "priorityhostfailure")) rejected_host_priority();
     else abort();
     botw_kernel_destroy(ctx); puts("ok"); return 0;
 }
@@ -715,6 +843,19 @@ class KernelTests(unittest.TestCase):
 
     def test_wait_revalidates_owned_mutex_after_concurrent_heap_shrink(self):
         self.check_case('validationrace')
+
+    def test_set_initial_priority_enforces_npdm_mask_and_applies_actual_self_qos(self):
+        self.check_case('priorityinitial')
+
+    def test_set_worker_priority_distinguishes_current_identity_and_host_capability(self):
+        self.check_case('priorityworker')
+
+    def test_changed_base_priority_reorders_mutex_waiters_and_recomputes_donation(self):
+        self.check_case('prioritydonation')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Apple QoS opt-out behavior')
+    def test_host_qos_rejection_preserves_previously_accepted_guest_priority(self):
+        self.check_case('priorityhostfailure')
 
 
 if __name__ == '__main__':
