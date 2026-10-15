@@ -26,6 +26,8 @@ static botw_kernel *ctx;
 static char error[512];
 static pthread_key_t test_tls;
 static _Atomic unsigned entered;
+static _Atomic int validation_pause, validation_entered, validation_release;
+static uint64_t validation_key;
 static uint64_t callback_stack_low, callback_stack_top;
 static uint64_t now(void) {
     struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC, &t));
@@ -33,6 +35,11 @@ static uint64_t now(void) {
 }
 static int memory(void *o, uint64_t a, size_t n, int w) {
     (void)o; (void)w;
+    if (atomic_load(&validation_pause) && a == validation_key) {
+        atomic_store(&validation_entered, 1); uint64_t deadline = now() + 1000000000;
+        while (!atomic_load(&validation_release) && now() < deadline) sched_yield();
+        assert(atomic_load(&validation_release));
+    }
     return a > 0x10000 && n <= 4096 && a <= UINT64_MAX - n;
 }
 static void svc(unsigned number, uint64_t *r) {
@@ -538,6 +545,28 @@ static void pending_wait_memory_is_retained(void) {
     while (rc && now() < deadline);
     assert(!rc);
 }
+static void *shrink_during_validation(void *opaque) {
+    (void)opaque; uint64_t deadline = now() + 1000000000;
+    while (!atomic_load(&validation_entered) && now() < deadline) sched_yield();
+    assert(atomic_load(&validation_entered));
+    uint64_t r[32] = {0, 0x200000}; char message[512];
+    assert(botw_kernel_dispatch(ctx, 1, r, message, sizeof message) == BOTW_KERNEL_HANDLED && !r[0]);
+    atomic_store(&validation_release, 1); return NULL;
+}
+static void revalidate_before_wait_registration(void) {
+    const size_t unit = 0x200000;
+    assert(!botw_kernel_configure_memory(ctx, unit * 2, unit, unit, unit * 2, 0, error, sizeof error));
+    uint64_t heap = info(4), r[32] = {0, unit * 2}; svc(1, r); assert(!r[0]);
+    uint64_t mutex = heap + unit;
+    __atomic_store_n((uint32_t *)(uintptr_t)mutex, BOTW_KERNEL_INITIAL_THREAD, __ATOMIC_RELEASE);
+    validation_key = (uintptr_t)&guest_condition; atomic_store(&validation_pause, 1);
+    pthread_t mutation; assert(!pthread_create(&mutation, NULL, shrink_during_validation, NULL));
+    r[0] = mutex; r[1] = validation_key; r[2] = BOTW_KERNEL_INITIAL_THREAD; r[3] = 0;
+    /* The external key validator pauses after owned-mutex validation. Another
+       real pthread removes that heap page before the kernel takes its lock. */
+    svc(0x1c, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    assert(!pthread_join(mutation, NULL) && atomic_load(&guest_condition) == 0);
+}
 int main(int argc, char **argv) {
     assert(argc == 2); botw_kernel_callbacks callbacks = {0}; callbacks.memory = memory;
     callbacks.executable = executable; callbacks.execute_thread = execute_thread;
@@ -558,6 +587,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "defercancel")) condition_cancel_is_deferred();
     else if (!strcmp(argv[1], "stopsync")) shutdown_sync_waits();
     else if (!strcmp(argv[1], "retainwait")) pending_wait_memory_is_retained();
+    else if (!strcmp(argv[1], "validationrace")) revalidate_before_wait_registration();
     else abort();
     botw_kernel_destroy(ctx); puts("ok"); return 0;
 }
@@ -634,6 +664,9 @@ class KernelTests(unittest.TestCase):
 
     def test_pending_wait_addresses_cannot_be_removed_or_borrowed(self):
         self.check_case('retainwait')
+
+    def test_wait_revalidates_owned_mutex_after_concurrent_heap_shrink(self):
+        self.check_case('validationrace')
 
 
 if __name__ == '__main__':

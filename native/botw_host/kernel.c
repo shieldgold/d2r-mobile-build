@@ -92,6 +92,7 @@ struct botw_kernel {
     SharedMapping shared_mappings[MAX_SHARED_MAPS];
     Handle handles[MAX_HANDLES];
 };
+static int memory_owned_locked(botw_kernel *k, uint64_t address, size_t length, int writable);
 static int diagnostic(char *error, size_t capacity, const char *format, ...) {
     if (error && capacity) {
         va_list ap; va_start(ap, format); vsnprintf(error, capacity, format, ap); va_end(ap);
@@ -299,6 +300,16 @@ static int guest_memory(botw_kernel *k, uint64_t address, size_t length, int wri
     return botw_kernel_memory(k, address, length, writable) ||
         (k->callbacks.memory && k->callbacks.memory(k->opaque, address, length, writable));
 }
+/* External validators run without the kernel lock. A heap shrink or unmap can
+ * interleave between that validation and lock acquisition, so recheck every
+ * owned range while mutations are excluded before touching guest bytes. */
+static int validated_memory_still_accessible_locked(botw_kernel *k, uint64_t address,
+                                                    size_t length, int writable) {
+    uint64_t base = (uintptr_t)k->reservation;
+    if (k->reservation && address < base + k->reservation_size && base < address + length)
+        return memory_owned_locked(k, address, length, writable);
+    return 1;
+}
 static Thread *current_guest_thread(botw_kernel *k) {
     Thread *thread = pthread_getspecific(k->current_thread);
     return thread ? thread : pthread_equal(pthread_self(), k->owner) ? &k->initial_thread : NULL;
@@ -376,6 +387,9 @@ static int arbitrate_lock(botw_kernel *k, uint64_t *regs, char *error, size_t ca
     if (address & 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
     if (!guest_memory(k, address, 4, 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!validated_memory_still_accessible_locked(k, address, 4, 1)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
     if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "mutex arbitration requires a registered guest thread"); }
     if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
     if (__atomic_load_n((uint32_t *)(uintptr_t)address, __ATOMIC_ACQUIRE) != (owner_handle | BOTW_KERNEL_MUTEX_HAS_WAITERS)) {
@@ -395,6 +409,9 @@ static int arbitrate_unlock(botw_kernel *k, uint64_t *regs, char *error, size_t 
     if (address & 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
     if (!guest_memory(k, address, 4, 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!validated_memory_still_accessible_locked(k, address, 4, 1)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
     if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "mutex unlock requires a registered guest thread"); }
     release_guest_mutex_locked(k, address, current); pthread_mutex_unlock(&k->lock);
     regs[0] = 0; return BOTW_KERNEL_HANDLED;
@@ -407,6 +424,10 @@ static int wait_process_key(botw_kernel *k, uint64_t *regs, char *error, size_t 
         regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
     pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!validated_memory_still_accessible_locked(k, address, 4, 1) ||
+        !validated_memory_still_accessible_locked(k, key, 4, 1)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
     if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "condition wait requires a registered guest thread"); }
     if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
     __atomic_store_n((uint32_t *)(uintptr_t)key, 1, __ATOMIC_RELEASE);
@@ -435,6 +456,9 @@ static int signal_process_key(botw_kernel *k, uint64_t *regs, char *error, size_
     uint64_t key = regs[0] & ~UINT64_C(3); int32_t requested = (int32_t)regs[1];
     if (!guest_memory(k, key, 4, 1)) return diagnostic(error, capacity, "condition key is not aligned guest writable memory");
     pthread_mutex_lock(&k->lock);
+    if (!validated_memory_still_accessible_locked(k, key, 4, 1)) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "condition key mapping changed during validation");
+    }
     unsigned waiting = 0, woken = 0, remaining = 0;
     for (SyncWaiter *w = k->sync_waiters; w; w = w->next) if (w->phase == WAIT_CONDITION && w->condition_key == key) waiting++;
     while (requested <= 0 || woken < (unsigned)requested) {
@@ -460,8 +484,14 @@ static int wait_synchronization(botw_kernel *k, uint64_t *regs, char *error, siz
         regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED;
     }
     uint32_t handles[MAX_WAIT]; Object *objects[MAX_WAIT];
-    if (count) memcpy(handles, (const void *)(uintptr_t)regs[1], (size_t)count * 4);
     pthread_mutex_lock(&k->lock);
+    if (count) {
+        size_t length = (size_t)count * 4;
+        if (!validated_memory_still_accessible_locked(k, regs[1], length, 0)) {
+            pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED;
+        }
+        memcpy(handles, (const void *)(uintptr_t)regs[1], length);
+    }
     for (int32_t i = 0; i < count; i++) {
         Handle *handle = find_handle(k, handles[i]);
         if (!handle || (handle->kind != EVENT_READ && handle->kind != THREAD)) {
@@ -887,9 +917,7 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
     default: return BOTW_KERNEL_UNSUPPORTED;
     }
 }
-int botw_kernel_memory(botw_kernel *k, uint64_t address, size_t length, int writable) {
-    if (!k || !address || address > UINT64_MAX - length) return 0;
-    pthread_mutex_lock(&k->lock);
+static int memory_owned_locked(botw_kernel *k, uint64_t address, size_t length, int writable) {
     int valid = k->reservation && region_contains(k->heap_base, k->heap_size, address, length);
     for (unsigned i = 0; i < MAX_MAPS; i++) {
         Mapping *m = &k->mappings[i]; if (!m->size) continue;
@@ -902,6 +930,12 @@ int botw_kernel_memory(botw_kernel *k, uint64_t address, size_t length, int writ
             valid = !writable || m->permission == 3; break;
         }
     }
+    return valid;
+}
+int botw_kernel_memory(botw_kernel *k, uint64_t address, size_t length, int writable) {
+    if (!k || !address || address > UINT64_MAX - length) return 0;
+    pthread_mutex_lock(&k->lock);
+    int valid = memory_owned_locked(k, address, length, writable);
     pthread_mutex_unlock(&k->lock); return valid;
 }
 int botw_kernel_query_memory(botw_kernel *k, uint64_t address, botw_kernel_memory_info *info) {
