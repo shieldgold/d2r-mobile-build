@@ -7,6 +7,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <objc/runtime.h>
 #include "graphics.h"
+#include "queue_arena.h"
 #include "nvn_protos.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -69,8 +70,15 @@
 @property(strong) id<MTLCommandBuffer> latest;
 @property(strong) BWReplay *replay;
 @property int flags;
+@property void *ownedArena;
+@property void *arena,*guestObject;
+@property size_t arenaBytes;
+@property BWQueueArenaLayout arenaLayout;
+@property BOOL borrowedArena;
+@property uint64_t arenaIdentity,preparedSubmissions,commandUsed,controlUsed;
 @end
 @implementation BWQueue
+- (void)dealloc { free(_ownedArena); }
 @end
 @interface BWSync : NSObject
 @property(strong) id<MTLCommandBuffer> buffer;
@@ -137,7 +145,7 @@
 typedef struct { uint64_t serial; } BWObject;
 typedef struct { NVNdevice *device; void *memory; size_t size; int flags; } PoolBuilder;
 typedef struct { NVNdevice *device; int flags; } DeviceBuilder;
-typedef struct { NVNdevice *device; int flags; size_t command, control, compute; } QueueBuilder;
+typedef struct { NVNdevice *device; int flags; size_t command, control, compute; void *memory; size_t memoryBytes; } QueueBuilder;
 typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset; size_t size; } BufferBuilder;
 typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset, stride; int width,height,depth,levels,samples,format,target,flags; int pkgBlockHeight; } TextureBuilder;
 typedef struct { NVNdevice *device; void *native; NVNtexture *textures[4]; int count, interval; } WindowBuilder;
@@ -145,12 +153,14 @@ enum { BWDescriptorBytes=32, BWReservedDescriptors=256, BWMaxSamplerDescriptors=
 _Static_assert(sizeof(PoolBuilder)<=sizeof(NVNmemoryPoolBuilder),"pool builder ABI");
 _Static_assert(sizeof(TextureBuilder)<=sizeof(NVNtextureBuilder),"texture builder ABI");
 _Static_assert(sizeof(WindowBuilder)<=sizeof(NVNwindowBuilder),"window builder ABI");
+_Static_assert(sizeof(QueueBuilder)<=sizeof(NVNqueueBuilder),"queue builder ABI");
 static id<MTLDevice> gpu;
 static id<MTLCommandQueue> commandQueue;
 static CAMetalLayer *displayLayer;
 static BOOL platformInitialized;
 static uintptr_t platformDisplay,platformLayer,platformSequence;
 static NSMutableDictionary<NSNumber *, id> *objects;
+static NSMutableDictionary<NSNumber *, NSValue *> *objectSpans;
 static NSMutableDictionary<NSNumber *, NSArray *> *handles;
 static NSMutableDictionary<NSString *, BWPipeline *> *pipelines;
 static dispatch_group_t allGPU;
@@ -249,13 +259,32 @@ static NSData *digest(const void *bytes,size_t size) {
     unsigned char hash[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(bytes,(CC_LONG)size,hash);
     return [NSData dataWithBytes:hash length:sizeof hash];
 }
-static void put(void *raw,id value) { ((BWObject*)raw)->serial=++serial; objects[@(serial)]=value; }
+static BOOL overlapsQueueArena(const void *memory,size_t bytes);
+static size_t objectStorageSize(id value){
+    if([value isKindOfClass:[BWDevice class]])return sizeof(NVNdevice);
+    if([value isKindOfClass:[BWPool class]])return sizeof(NVNmemoryPool);
+    if([value isKindOfClass:[BWQueue class]])return sizeof(NVNqueue);
+    if([value isKindOfClass:[BWTexture class]])return sizeof(NVNtexture);
+    if([value isKindOfClass:[BWProgram class]])return sizeof(NVNprogram);
+    if([value isKindOfClass:[BWCommands class]])return sizeof(NVNcommandBuffer);
+    if([value isKindOfClass:[BWSync class]])return sizeof(NVNsync);
+    if([value isKindOfClass:[BWSampler class]])return sizeof(NVNsampler);
+    if([value isKindOfClass:[BWWindow class]])return sizeof(NVNwindow);
+    if([value isKindOfClass:[BWDescriptors class]])return ((BWDescriptors*)value).sampler?sizeof(NVNsamplerPool):sizeof(NVNtexturePool);
+    fatal("unknown object storage type");
+}
+static void put(void *raw,id value) {
+    size_t bytes=objectStorageSize(value);
+    if(!raw||overlapsQueueArena(raw,bytes))fatal("NVN object storage overlaps live CPU queue arena");
+    ((BWObject*)raw)->serial=++serial;objects[@(serial)]=value;
+    objectSpans[@(serial)]=[NSValue valueWithRange:NSMakeRange((NSUInteger)raw,bytes)];
+}
 static id get(const void *raw,Class expected) {
     id value=raw?objects[@(((const BWObject*)raw)->serial)]:nil;
     if(!value || ![value isKindOfClass:expected])fatal("object lifetime/type"); return value;
 }
 static void removeObject(void *raw) {
-    [objects removeObjectForKey:@(((BWObject*)raw)->serial)]; ((BWObject*)raw)->serial=0;
+    NSNumber *key=@(((BWObject*)raw)->serial);[objects removeObjectForKey:key];[objectSpans removeObjectForKey:key];((BWObject*)raw)->serial=0;
 }
 static BWPool *address(uint64_t addr,size_t bytes,size_t *offset) {
     for(BWPool *pool in pools) {
@@ -267,6 +296,17 @@ static BWPool *address(uint64_t addr,size_t bytes,size_t *offset) {
     return nil;
 }
 static BOOL range(size_t offset,size_t bytes,size_t size) { return offset<=size && bytes<=size-offset; }
+static BOOL memoryOverlap(const void *a,size_t na,const void *b,size_t nb){
+    uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;
+    if(na>UINTPTR_MAX-x||nb>UINTPTR_MAX-y)return YES;
+    return na&&nb&&(x<=y?y-x<na:x-y<nb);
+}
+static BOOL overlapsQueueArena(const void *memory,size_t bytes){
+    for(id value in objects.allValues)if([value isKindOfClass:[BWQueue class]]){
+        BWQueue *queue=value;if(memoryOverlap(memory,bytes,queue.arena,queue.arenaBytes))return YES;
+    }
+    return NO;
+}
 static void finishBuffer(id<MTLCommandBuffer> buffer) {
     if(!buffer)return; [buffer waitUntilCompleted];
     if(buffer.status==MTLCommandBufferStatusError)fatal(buffer.error.localizedDescription.UTF8String);
@@ -289,7 +329,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
-    objects=[NSMutableDictionary new]; handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];
+    objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];
     pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
@@ -298,7 +338,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
 static void shutdownGraphicsImpl(void) {
     BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
-    objects=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
+    objects=nil;objectSpans=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
     displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;allGPU=nil;replacePresentation(nil);
 }
@@ -439,6 +479,14 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     case NVN_DEVICE_INFO_RESERVED_TEXTURE_DESCRIPTORS:
     case NVN_DEVICE_INFO_RESERVED_SAMPLER_DESCRIPTORS:*value=BWReservedDescriptors;break;
     case NVN_DEVICE_INFO_SUPPORTS_ASTC_FORMATS:*value=supportsASTC()?1:0;break;
+    /* Actual CPU arena policy. Metal owns its separate driver allocations. */
+    case NVN_DEVICE_INFO_QUEUE_COMMAND_MEMORY_DEFAULT_SIZE:*value=BW_QUEUE_DEFAULT_COMMAND_BYTES;break;
+    case NVN_DEVICE_INFO_QUEUE_CONTROL_MEMORY_DEFAULT_SIZE:*value=BW_QUEUE_DEFAULT_CONTROL_BYTES;break;
+    case NVN_DEVICE_INFO_QUEUE_COMPUTE_MEMORY_DEFAULT_SIZE:*value=0;break;
+    case NVN_DEVICE_INFO_QUEUE_COMMAND_MEMORY_GRANULARITY:
+    case NVN_DEVICE_INFO_QUEUE_COMMAND_MEMORY_MIN_SIZE:
+    case NVN_DEVICE_INFO_QUEUE_CONTROL_MEMORY_MIN_SIZE:
+    case NVN_DEVICE_INFO_QUEUE_CONTROL_MEMORY_GRANULARITY:*value=BW_QUEUE_ARENA_PAGE;break;
     /* These are bridge capabilities, not claims about the host GPU. Their
      * NVN state/command/shader semantics are not implemented. Querying false
      * lets applications select a supported path; executing them still fails. */
@@ -463,8 +511,11 @@ NVN(nvnMemoryPoolBuilderSetDevice,void,NVNmemoryPoolBuilder *b,NVNdevice *d){((P
 NVN(nvnMemoryPoolBuilderSetStorage,void,NVNmemoryPoolBuilder *b,void *memory,size_t size){((PoolBuilder*)b)->memory=memory;((PoolBuilder*)b)->size=size;}
 NVN(nvnMemoryPoolBuilderSetFlags,void,NVNmemoryPoolBuilder *b,int flags){((PoolBuilder*)b)->flags=flags;}
 NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBuilder *builder){
-    const PoolBuilder *b=(const PoolBuilder*)builder;get(b->device,[BWDevice class]);
+    if(!builder||(memoryAccessValidator&&!memoryAccessValidator(builder,sizeof(PoolBuilder),0)))return report("Memory pool builder is not fully readable");
+    PoolBuilder snapshot;memcpy(&snapshot,builder,sizeof snapshot);const PoolBuilder *b=&snapshot;get(b->device,[BWDevice class]);
+    if(overlapsQueueArena(raw,sizeof *raw))return report("NVN object storage overlaps live CPU queue arena");
     if(!b->memory || !b->size || b->size>gpu.maxBufferLength || (b->flags&(NVN_MEMORY_POOL_FLAGS_VIRTUAL|NVN_MEMORY_POOL_FLAGS_PHYSICAL)))return report("Unsupported/invalid memory pool");
+    if(overlapsQueueArena(b->memory,b->size))return report("Memory pool overlaps live CPU queue arena");
     for(BWPool *p in pools){uintptr_t a=(uintptr_t)p.memory,c=(uintptr_t)b->memory;if(c<=a?a-c<b->size:c-a<p.size)return report("Memory pool ranges overlap");}
     BWPool *p=[BWPool new];p.memory=b->memory;p.size=b->size;p.flags=b->flags;
     size_t page=(size_t)getpagesize();uintptr_t begin=(uintptr_t)b->memory;
@@ -487,22 +538,26 @@ NVN(nvnMemoryPoolGetSize,size_t,const NVNmemoryPool *p){return ((BWPool*)get(p,[
 NVN(nvnMemoryPoolGetFlags,NVNmemoryPoolFlags,const NVNmemoryPool *p){return (NVNmemoryPoolFlags)((BWPool*)get(p,[BWPool class])).flags;}
 NVN(nvnMemoryPoolFlushMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolFlushMappedRange bounds");if(!p.coherent)memcpy((char*)p.buffer.contents+p.bufferOffset+offset,(char*)p.memory+offset,bytes);}
 NVN(nvnMemoryPoolInvalidateMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolInvalidateMappedRange bounds");for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);if(!p.coherent)memcpy((char*)p.memory+offset,(char*)p.buffer.contents+p.bufferOffset+offset,bytes);}
-NVN(nvnQueueBuilderSetDefaults,void,NVNqueueBuilder *b){memset(b,0,sizeof *b);}
+NVN(nvnQueueBuilderSetDefaults,void,NVNqueueBuilder *raw){NVNdevice *device=((QueueBuilder*)raw)->device;memset(raw,0,sizeof *raw);QueueBuilder *b=(QueueBuilder*)raw;b->device=device;b->command=BW_QUEUE_DEFAULT_COMMAND_BYTES;b->control=BW_QUEUE_DEFAULT_CONTROL_BYTES;}
 NVN(nvnQueueBuilderSetDevice,void,NVNqueueBuilder *b,NVNdevice *d){((QueueBuilder*)b)->device=d;}
 static BOOL queueFlagsSupported(int flags){return flags==NVN_QUEUE_BUILDER_FLAGS_NONE||flags==NVN_QUEUE_BUILDER_FLAGS_NO_FRAGMENT_INTERLOCK;}
 NVN(nvnQueueBuilderSetFlags,void,NVNqueueBuilder *raw,int flags){
     if(!queueFlagsSupported(flags))fatal("queue flags require NONE or NO_FRAGMENT_INTERLOCK=1; other policies are unverified");
     ((QueueBuilder*)raw)->flags=flags;
 }
+#include "queue_arena.inc"
 NVN(nvnQueueInitialize,NVNboolean,NVNqueue *raw,const NVNqueueBuilder *builder){
-    const QueueBuilder *b=(const QueueBuilder*)builder;get(b->device,[BWDevice class]);
+    if(!builder||(memoryAccessValidator&&!memoryAccessValidator(builder,sizeof(QueueBuilder),0)))return report("CPU queue builder is not fully readable");
+    QueueBuilder snapshot;memcpy(&snapshot,builder,sizeof snapshot);const QueueBuilder *b=&snapshot;get(b->device,[BWDevice class]);
+    if(overlapsQueueArena(raw,sizeof *raw))return report("NVN object storage overlaps live CPU queue arena");
     if(!queueFlagsSupported(b->flags))return report("Unsupported queue flags");
     BWQueue *queue=[BWQueue new];queue.flags=b->flags;
     /* Each NVN queue has its own ordered Metal submission stream. Normal
      * Metal fragment execution has no raster-order-group interlock; the
      * NO_FRAGMENT_INTERLOCK policy needs no added synchronization primitive. */
     queue.native=[gpu newCommandQueue];if(!queue.native)return report("Metal queue creation failed");
-    queue.replay=[BWReplay new];put(raw,queue);return 1;
+    queue.replay=[BWReplay new];if(!configureQueueArena(queue,b,raw,builder))return 0;
+    put(raw,queue);return 1;
 }
 NVN(nvnQueueFinish,void,NVNqueue *q){finishBuffer(((BWQueue*)get(q,[BWQueue class])).latest);}
 NVN(nvnQueueFlush,void,NVNqueue *q){/* Submission commits immediately; no deferred queue exists. */get(q,[BWQueue class]);}
@@ -742,11 +797,9 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
 }
 
 NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *input){
-    BWQueue *queue=get(raw,[BWQueue class]);if(count<0||(!input&&count))fatal("nvnQueueSubmitCommands handle bounds");
+    BWQueue *queue=get(raw,[BWQueue class]);NSArray *commands=queueSubmissionCommands(queue,count,input);
     id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;
-    for(int i=0;i<count;i++){
-        NSArray *commands=handles[@(input[i])];if(!commands)fatal("invalid/finalized command handle");
-        for(NSDictionary *c in commands){NSString *op=c[@"op"];
+    for(NSDictionary *c in commands){NSString *op=c[@"op"];
             if([op isEqual:@"target"]){state.target=objects[c[@"id"]];state.depth=objects[c[@"depth"]];if(![state.target isKindOfClass:[BWTexture class]] || state.target.depth || (state.depth&&!state.depth.depth))fatal("stale/incompatible render targets");continue;}
             if([op isEqual:@"program"]){state.program=objects[c[@"id"]];if(![state.program isKindOfClass:[BWProgram class]])fatal("stale program");continue;}
             if([op isEqual:@"viewport"]){state.viewport=c;continue;}if([op isEqual:@"scissor"]){state.scissor=c;continue;}
@@ -776,7 +829,6 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
                 [encoder drawPrimitives:[c[@"primitive"] unsignedIntegerValue] vertexStart:[c[@"first"] unsignedIntegerValue] vertexCount:[c[@"count"] unsignedIntegerValue] instanceCount:[c[@"instances"] unsignedIntegerValue] baseInstance:[c[@"baseInstance"] unsignedIntegerValue]];target.drawEpoch=++serial;
             }else if(clear)target.drawEpoch=0;
             [encoder endEncoding];target.gpuWritten=YES;if(state.depth)state.depth.gpuWritten=YES;
-        }
     }
     queue.latest=cb;commitBuffer(cb);
 }

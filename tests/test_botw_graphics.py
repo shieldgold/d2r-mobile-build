@@ -370,6 +370,26 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def run_queue_arena_probe(self, name, expected):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); graphics = ROOT / 'native/botw_graphics'; exe = path / 'queue'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(graphics / 'tools' / name),
+                '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(expected, result.stdout)
+
+    def test_queue_budgets_use_real_validated_storage_for_gpu_copy_and_draw(self):
+        self.run_queue_arena_probe('probe_queue_arena_gpu.c', 'GPU_COPY_CLEAR_DRAW_OK')
+
+    def test_queue_arena_exact_capacity_rw_snapshot_overlap_and_preflight(self):
+        self.run_queue_arena_probe('probe_queue_arena.c', 'CPU_QUEUE_ARENA_EXACT_CAPACITY_RW_OVERLAP_AND_PREFLIGHT_OK')
+
     def test_queue_flags_use_real_ordered_metal_queue_and_reject_unimplemented_policies(self):
         smoke = METAL_SMOKE.replace('API(nvnQueueBuilderSetDefaults);', 'API(nvnQueueBuilderSetDefaults);API(nvnQueueBuilderSetFlags);')
         smoke = smoke.replace('nvnQueueBuilderSetDevice(&qb,&device);',
