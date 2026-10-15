@@ -25,6 +25,7 @@
 #define BUFFER_LIMIT (16u * 1024u * 1024u)
 #define STORAGE_TOTAL_LIMIT (64u * 1024u * 1024u)
 #define CAPTURE_SIZE (1280u * 720u * 4u)
+#define TRACE_LIMIT 256u
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
@@ -98,6 +99,9 @@ struct botw_services {
     botw_services_log_fn log;
     botw_services_memory_fn memory;
     void *opaque;
+    struct { enum ObjectKind kind; uint32_t command; } trace_seen[TRACE_LIMIT];
+    unsigned trace_seen_count;
+    uint64_t trace_suppressed;
 };
 typedef struct {
     uint32_t type, command, token;
@@ -155,6 +159,20 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_PCTL_SERVICE: return "pctl.IParentalControlService";
     }
     return "<invalid>";
+}
+static void trace_request(botw_services *s, enum ObjectKind kind, const Request *r, uint32_t handle_id) {
+    for (unsigned i = 0; i < s->trace_seen_count; i++) {
+        if (s->trace_seen[i].kind == kind && s->trace_seen[i].command == r->command) {
+            s->trace_suppressed++; return;
+        }
+    }
+    /* Exhausting the fixed cache keeps tracing new commands; arbitrary guest
+     * command IDs cannot grow host memory or hide the first diagnostic. */
+    if (s->trace_seen_count < TRACE_LIMIT) {
+        s->trace_seen[s->trace_seen_count].kind = kind;
+        s->trace_seen[s->trace_seen_count++].command = r->command;
+    }
+    emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(kind), r->command, handle_id, r->domain, r->object_id, r->payload_size);
 }
 static Object *new_object(enum ObjectKind kind) {
     Object *o = calloc(1, sizeof *o);
@@ -351,6 +369,7 @@ int botw_services_set_applet_state(botw_services *s, uint64_t user_id, int foreg
 void botw_services_destroy(botw_services *s) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
+    if (s->trace_suppressed) emit(s, "ipc_trace_summary unique_commands=%u repeated_requests=%llu", s->trace_seen_count, (unsigned long long)s->trace_suppressed);
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) release_session(s->handles[i].session);
     for (unsigned i = 0; i < 3; i++) free(s->capture_images[i]);
     free(s->transition_image);
@@ -987,7 +1006,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
     if (!o) return problem(error, cap, "CMIF session has no live root object");
     if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
-    emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
+    trace_request(s, o->kind, &r, handle_id);
     if (o->kind == OBJECT_SM) {
         if (r.input_count) return problem(error, cap, "sm: command=%u unexpected input buffer", r.command);
         if (r.command == 0) {

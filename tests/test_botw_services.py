@@ -207,6 +207,20 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(len(handles), 1)
         return handles[0]
 
+    def test_repeated_ipc_trace_is_bounded_without_hiding_command_errors(self):
+        sm = self.initialized_sm()
+        for _ in range(3):
+            apm = self.service(sm, b'apm')
+            self.send(apm, self.request(1))
+            self.send(apm, self.request(1))
+        matching = [line for line in self.logs if line.startswith(
+            'ipc_request service=apm.IPerformanceManager command=1 ')]
+        self.assertEqual(len(matching), 1, matching)
+        for _ in range(2):
+            _, error = self.send(apm, self.request(0xffffffff), good=False)
+            self.assertIn('4294967295', error)
+            self.assertIn('apm.IPerformanceManager', error)
+
     def test_apm_mode_and_configuration_have_host_backed_state(self):
         calls = self.performance_handler()
         apm = self.service(self.initialized_sm(), b'apm')
@@ -739,7 +753,8 @@ class ServicesTests(unittest.TestCase):
         packet = self.static_buffer(struct.pack('<QQBBBBI', 1, 2, 7, 0, 1, 0, len(chunks)) + chunks)
         self.ranges.append((C.addressof(packet), len(packet), False))
         self.send(handles[0], self.request(0, static=(C.addressof(packet), len(packet) - 1)))
-        self.assertTrue(any(text.decode() in line for line in self.logs), self.logs)
+        self.send(handles[0], self.request(0, static=(C.addressof(packet), len(packet) - 1)))
+        self.assertEqual(sum(text.decode() in line for line in self.logs), 2, self.logs)
 
     def test_sm_get_service_returns_kernel_move_handle_even_in_domain(self):
         sm = self.initialized_sm()
