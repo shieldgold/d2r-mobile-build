@@ -359,8 +359,8 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         _audit_tables(files, image, layout, rewrites[name])
         address_image = image
         if name == 'main' and not thread_stack_policy:
-            from .thread_stack import SITE, REPLACEMENT, CAPACITY_SITE
-            if (image[SITE:SITE + 4] == REPLACEMENT or
+            from .thread_stack import SITE, REPLACEMENT, CAPACITY_SITE, VOLANTE_SITE, VOLANTE_REPLACEMENT
+            if (image[SITE:SITE + 4] == REPLACEMENT or image[VOLANTE_SITE:VOLANTE_SITE + 4] == VOLANTE_REPLACEMENT or
                     (len(image) > CAPACITY_SITE + 4 and int.from_bytes(image[CAPACITY_SITE:CAPACITY_SITE + 4], 'little') & 0xfc000000 == 0x14000000)):
                 raise ValueError('Loaded thread stack instruction requires its explicit policy')
         if thread_stack_policy and name == 'main':

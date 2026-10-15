@@ -21,6 +21,7 @@ from botw_native import heap_policy as hp
 
 def fixture():
     original = bytearray(0xa1db20)
+    struct.pack_into('<I', original, 0x7268d8, 0x321203e0)  # Original Volante heap remains unchanged in v1/v2.
     original[ts.CONTEXT_OFFSET:ts.CONTEXT_OFFSET + len(ts.CONTEXT)] = ts.CONTEXT
     original[ts.CAPACITY_CONTEXT_OFFSET:ts.CAPACITY_CONTEXT_OFFSET + len(ts.CAPACITY_CONTEXT)] = ts.CAPACITY_CONTEXT
     for offset, data in ts.DATAFLOW_CONTEXTS:
@@ -127,10 +128,9 @@ class ThreadStackTests(unittest.TestCase):
         import test_botw_guest_framework as baseline
         from botw_native.guest_framework import build_framework, HOST39_POLICY
         from botw_native.hipc_address import apply as address_apply
-        for heap_enabled, native_enabled in [(False, False), (True, False), (False, True), (True, True)]:
-            policy_name = 'host-pthread-stack-v2' if native_enabled else 'host-page-alignment-v1'
+        for heap_enabled, policy_name in [(heap, name) for heap in (False, True) for name in ts.POLICIES]:
             policy = ts.POLICIES[policy_name]
-            with self.subTest(heap=heap_enabled, native=native_enabled), tempfile.TemporaryDirectory() as folder:
+            with self.subTest(heap=heap_enabled, policy=policy_name), tempfile.TemporaryDirectory() as folder:
                 folder = Path(folder); report_path, rewrite = baseline.fixture(folder)
                 report = json.loads(report_path.read_text())
                 fingerprints = json.loads((ROOT / 'profiles/botw-switch-base-v0.json').read_text())['modules']
@@ -138,23 +138,34 @@ class ThreadStackTests(unittest.TestCase):
                 for record in report['rewrites']: record['host_address_adaptation'] = {}
                 report['host_address_policy'] = HOST39_POLICY.copy()
                 report['guest_thread_stack_policy'] = policy.copy()
-                original, _, _ = fixture(); original = original.ljust(0xa24100, b'\0')
-                generic = bytearray(original.ljust(0xa30000, b'\0'))
-                struct.pack_into('<I', generic, 0, 0x14000000 | (0xa2c000 // 4))
-                struct.pack_into('<I', generic, 0xa2c000, 0xd65f03c0)
-                layout = {'KEY_PAGE_OFF': 0xa28000, 'PATCH_OFF': 0xa2c000,
-                          'KEY_PAGE_SIZE': 0x4000, 'TEXT_END': ts.SITE + 32,
-                          'RO_OFF': 0xa20000, 'DATA_OFF': 0xa24000}
+                original, _, _ = fixture()
+                if policy == ts.VOLANTE_POLICY:
+                    source = bytearray(original.ljust(0x1c04100, b'\0'))
+                    source[ts.VOLANTE_CONTEXT_OFFSET:ts.VOLANTE_CONTEXT_OFFSET + len(ts.VOLANTE_CONTEXT)] = ts.VOLANTE_CONTEXT
+                    for offset, context in ts.VOLANTE_DATAFLOW_CONTEXTS:
+                        source[offset:offset + len(context)] = context
+                    original = bytes(source)
+                    layout = {'KEY_PAGE_OFF': 0x1c08000, 'PATCH_OFF': 0x1c0c000,
+                              'KEY_PAGE_SIZE': 0x4000, 'TEXT_END': 23280432,
+                              'RO_OFF': 0x1b78000, 'DATA_OFF': 0x1c04000}
+                else:
+                    original = original.ljust(0xa24100, b'\0')
+                    layout = {'KEY_PAGE_OFF': 0xa28000, 'PATCH_OFF': 0xa2c000,
+                              'KEY_PAGE_SIZE': 0x4000, 'TEXT_END': ts.SITE + 32,
+                              'RO_OFF': 0xa20000, 'DATA_OFF': 0xa24000}
+                generic = bytearray(original.ljust(layout['PATCH_OFF'] + 0x4000, b'\0'))
+                struct.pack_into('<I', generic, 0, 0x14000000 | (layout['PATCH_OFF'] // 4))
+                struct.pack_into('<I', generic, layout['PATCH_OFF'], 0xd65f03c0)
                 for i, key in enumerate(('K18', 'KTLS', 'KTLR', 'KGATE', 'KRES0', 'KRES1', 'KASPECT', 'KASPECTUI')):
                     layout[f'KEY_{key}_IDX'] = i
                 (rewrite / 'main.fixups.tsv').write_text(''.join(
                     f'# {k}\t{v if k.endswith("_IDX") else hex(v)}\n' for k, v in layout.items()))
-                (rewrite / 'main.gates.tsv').write_text('0xa2c004\tsvc\t38\t0x0\n')
+                (rewrite / 'main.gates.tsv').write_text(f"{layout['PATCH_OFF'] + 4:#x}\tsvc\t38\t0x0\n")
                 main_source = next(record for record in report['modules'] if record['name'] == 'main')
-                main_source.update(memory_bytes=0xa28000, segments=[
-                    {'name': 'text', 'address': 0, 'bytes': ts.SITE + 32},
-                    {'name': 'rodata', 'address': 0xa20000, 'bytes': 0x100},
-                    {'name': 'data', 'address': 0xa24000, 'bytes': 0x100}])
+                main_source.update(memory_bytes=layout['KEY_PAGE_OFF'], segments=[
+                    {'name': 'text', 'address': 0, 'bytes': layout['TEXT_END']},
+                    {'name': 'rodata', 'address': layout['RO_OFF'], 'bytes': 0x1000},
+                    {'name': 'data', 'address': layout['DATA_OFF'], 'bytes': 0x100}])
                 image, am = address_apply('main', original, bytes(generic), {'generic_site_offsets': [0]})
                 main = report['rewrites'][0]
                 main.update(host_address_adaptation=am, generic_image_sha256=hashlib.sha256(generic).hexdigest())
@@ -169,7 +180,7 @@ class ThreadStackTests(unittest.TestCase):
                 report_path.write_text(json.dumps(report))
                 good = build_framework(report_path, rewrite, folder / 'good', module_names=['main'])
                 self.assertEqual(good['guest_thread_stack_policy'], policy)
-                for mode in ('drop_policy', 'drop_all_metadata', 'wrong_input', 'wrong_order'):
+                for mode in ('drop_policy', 'drop_all_metadata', 'wrong_input', 'wrong_order', 'wrong_source', 'wrong_policy'):
                     bad = copy.deepcopy(report)
                     if mode == 'drop_policy': del bad['guest_thread_stack_policy']
                     elif mode == 'drop_all_metadata':
@@ -177,6 +188,8 @@ class ThreadStackTests(unittest.TestCase):
                         del bad['rewrites'][0]['thread_stack_adaptation']
                         del bad['rewrites'][0]['thread_stack_input_image_sha256']
                     elif mode == 'wrong_input': bad['rewrites'][0]['thread_stack_input_image_sha256'] = '00' * 32
+                    elif mode == 'wrong_source': bad['modules'][-1]['sha256'] = '00' * 32
+                    elif mode == 'wrong_policy': bad['guest_thread_stack_policy'] = dict(policy, schema=True)
                     else: bad['rewrites'][0]['thread_stack_adaptation']['input_image_bytes'] -= 64
                     report_path.write_text(json.dumps(bad))
                     with self.assertRaises(ValueError):

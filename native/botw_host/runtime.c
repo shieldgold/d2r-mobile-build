@@ -1759,7 +1759,9 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                     find_raw_symbol("nnMain") != (uint64_t)stack_main->base + 0x735330)
                 fail("thread stack policy requires the fixed base-v0 Host39 entry profile");
             state.thread_stack_policy_active = 1;
-            if (stack_mode == 2)
+            if (stack_mode == 3)
+                report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-pthread-stack-v3 alignment=16384 capacity_round=16384 reserved_tail=16384 sdk_header=32 sites=3 volante_child_heap=65536 original_allocator=true");
+            else if (stack_mode == 2)
                 report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-pthread-stack-v2 alignment=16384 capacity_round=16384 reserved_tail=16384 sdk_header=32 sites=2 original_allocator=true");
             else
                 report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-thread-stack-alignment-v1 alignment=16384 sites=1 size_unchanged=true original_allocator=true");

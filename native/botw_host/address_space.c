@@ -72,6 +72,38 @@ int botw_address_space_validate_allocation(const botw_address_space_policy *poli
         return diagnostic(error, capacity, "SDK allocation or guard lies outside its host39 region/alignment");
     return 0;
 }
+/* V3 owns only this fixed child backing size. Its caller, parent array,
+ * original parent allocation, queue/thread allocations and name must match. */
+static int audit_volante_heap(const unsigned char *bytes, size_t size, char *error, size_t capacity) {
+    static const unsigned char context_0[] = "\x88\xa2\x00\xd0\x08\x41\x23\x91\x60\x0a\x01\xf9\xf4\xa3\x14\xa9\x68\xae\x80\xb9\xc2\x7a\x68\xf8\x20\x00\xa0\x52\xe1\x23\x05\x91\xe3\x03\x1d\x32\xe4\x03\x00\x32\xe5\x03\x1f\x2a\x14\x8a\x0b\x94\x60\x12\x01\xf9";
+    static const unsigned char context_1[] = "\xf5\xd9\x00\xd0\xb5\x46\x41\xf9\x88\xa2\x00\xd0\x08\x0d\x23\x91\x76\x22\x02\x91\x00\x40\x81\x52\xe1\x63\x05\x91\xe3\x03\x1d\x32\xe4\x03\x00\x32\xb4\x42\x00\x91\xf4\xa3\x15\xa9\x68\xae\x80\xb9\xc2\x7a\x68\xf8\xe5\x03\x1f\x2a\x20\x8a\x0b\x94";
+    static const unsigned char context_2[] = "\x61\x12\x41\xf9\x60\x0e\x01\xf9\x00\x21\x80\x52\xe2\x03\x1d\x32\x54\x32\x0b\x94\x88\xa2\x00\xd0\x08\x0d\x24\x91\x62\x12\x41\xf9\x77\x0e\x41\xf9\xb5\xa3\x30\xa9\xa8\xda\x00\x90\x08\x4d\x42\xf9\x03\x01\x40\xb9\xa1\xe3\x03\xd1\xe4\x03\x00\x32\xe5\x7b\x00\x32\xe6\x03\x13\x32\xe7\x03\x1b\x32\xf4\x03\x00\xaa\xe8\xda\x0b\x94";
+    static const unsigned char context_3[] = "\x68\x02\x40\xf9\x08\x19\x40\xf9\xa2\x7e\x14\x1b\xe0\x03\x13\xaa\xe1\x03\x18\xaa\x00\x01\x3f\xd6";
+    static const unsigned char context_4[] = "\xe0\x03\x14\xaa\xe1\x03\x16\xaa\xe2\x03\x13\xaa\xe3\x03\x14\xaa\xe4\x03\x18\xaa\x8a\x0e\x00\x94";
+    static const unsigned char context_5[] = "\x89\x22\x40\xf9\x29\xc1\x04\xd1\x09\x0d\x00\xf9";
+    static const unsigned char context_6[] = "\xe0\x03\x1c\xaa\xe1\x03\x17\x2a\xff\x0f\x00\xb9\xe9\x0f\x40\xb9\x08\x21\xc9\x1a\xe2\x03\x16\xaa\x7f\xfe\x0e\xa9\x68\xda\x00\xb9\x7f\x72\x00\xf9\x7b\xfa\x00\xb9\x73\x52\x00\xf9\xa1\x59\x00\x94";
+    static const unsigned char context_7[] = "\xea\x03\x1d\x32\x8a\x7e\xca\x9b\x29\x7c\x7d\x93\xff\x03\x0a\xeb\x0a\x00\x80\x92\x40\x11\x89\x9a\xe2\x03\x1d\x32\xe1\x03\x08\xaa\x94\xfd\xfe\x97";
+    static const unsigned char context_8[] = "\xe0\x0b\x1a\x32\xe2\x03\x1d\x32\xe1\x03\x16\xaa\x1e\x57\xff\x97\x60\x72\x00\xf9";
+    static const unsigned char context_9[] = "\x56\x6f\x6c\x61\x6e\x74\x65\x00";
+    const struct { size_t offset; const unsigned char *bytes; size_t size; } contexts[] = {
+        {0x7268c0, context_0, sizeof context_0 - 1},
+        {0x726884, context_1, sizeof context_1 - 1},
+        {0x726a90, context_2, sizeof context_2 - 1},
+        {0xa091e4, context_3, sizeof context_3 - 1},
+        {0xa09224, context_4, sizeof context_4 - 1},
+        {0xa093c8, context_5, sizeof context_5 - 1},
+        {0xa1d724, context_6, sizeof context_6 - 1},
+        {0xa33df4, context_7, sizeof context_7 - 1},
+        {0xa1d76c, context_8, sizeof context_8 - 1},
+        {0x1b788d0, context_9, sizeof context_9 - 1},
+    };
+    for (size_t i = 0; i < sizeof contexts / sizeof *contexts; i++) {
+        size_t offset = contexts[i].offset, count = contexts[i].size;
+        if (offset > size || count > size - offset || memcmp(bytes + offset, contexts[i].bytes, count))
+            return diagnostic(error, capacity, "Volante child-heap actual ownership/caller context differs at main+0x%zx", offset);
+    }
+    return 0;
+}
 int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     size_t text_end, char *error, size_t capacity) {
     const size_t site = 0xa1d758, capacity_site = 0xa1d6a0, original_text_end = 23280432;
@@ -82,6 +114,13 @@ int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     uint32_t size_word = 0;
     if (size >= capacity_site + 4) memcpy(&size_word, bytes + capacity_site, 4);
     int native = (size_word & 0xfc000000) == 0x14000000;
+    uint32_t heap_word = 0;
+    if (size >= 0x7268dc) memcpy(&heap_word, bytes + 0x7268d8, 4);
+    int volante = heap_word == 0x52a00020;
+    if (volante && !native)
+        return diagnostic(error, capacity, "Volante child-heap change requires the complete v3 stack policy");
+    if (text_end == original_text_end && size >= site + 4 && heap_word != 0x321203e0 && !volante)
+        return diagnostic(error, capacity, "Volante child-heap instruction differs from fixed base-v0 profile");
     if (size <= site && !native) return 0;
     if (size <= site || size - site < sizeof(uint32_t))
         return diagnostic(error, capacity, "thread stack allocation instruction is truncated");
@@ -144,5 +183,6 @@ int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     uint32_t expected = 0x14000000 | ((uint32_t)(delta / 4) & 0x03ffffff);
     memcpy(&word, bytes + (size_t)target + 64, 4);
     if (word != expected) return diagnostic(error, capacity, "thread stack capacity return branch differs");
-    return 2;
+    if (volante && audit_volante_heap(bytes, size, error, capacity)) return -1;
+    return volante ? 3 : 2;
 }
