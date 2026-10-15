@@ -49,6 +49,10 @@ void botw_services_get_audio_gain(botw_services *services, float *main_applet,
  * no screenshot is fabricated when no real snapshot has been published. */
 int botw_services_set_capture_image(botw_services *services, unsigned kind,
     const void *rgba, size_t size, char *error, size_t error_capacity);
+/* Transition compositor source: 1 copied, 0 invalid/absent, -1 insufficient
+ * capacity. generation changes on clear/invalidation; each output is optional. */
+int botw_services_get_transition_image(botw_services *services, void *rgba,
+    size_t capacity, uint64_t *generation);
 /* Supply measured host state. Focus/foreground are booleans; operation_mode is
  * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
 int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,

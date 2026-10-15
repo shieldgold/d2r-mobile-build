@@ -461,6 +461,23 @@ class ServicesTests(unittest.TestCase):
         data, _, _ = self.response(raw)
         self.assertEqual(struct.unpack_from('<Q', data)[0], 10)
 
+    def test_debug_invalidation_clears_actual_display_transition_backing(self):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        display, debug = self.proxy_child(proxy, 4), self.proxy_child(proxy, 1000)
+        self.send(display, self.request(21, struct.pack('<I', 0x44332211)))
+        self.lib.botw_services_get_transition_image.argtypes = [C.c_void_p, C.c_void_p, C.c_size_t, C.POINTER(C.c_uint64)]
+        pixels = C.create_string_buffer(1280 * 720 * 4)
+        generation = C.c_uint64()
+        self.assertEqual(self.lib.botw_services_get_transition_image(self.ctx, pixels, len(pixels), C.byref(generation)), 1)
+        self.assertEqual(bytes(pixels)[:8], bytes.fromhex('1122334411223344'))
+        self.assertEqual(generation.value, 1)
+        self.send(debug, self.request(20))
+        self.assertEqual(self.lib.botw_services_get_transition_image(self.ctx, pixels, len(pixels), C.byref(generation)), 0)
+        self.assertEqual(generation.value, 2)
+        self.send(debug, self.request(0xbad), good=False)
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)
