@@ -198,7 +198,7 @@ static struct {
     pthread_t owner;
     volatile sig_atomic_t active, fault_signal, guest_executing;
     volatile uintptr_t fault_pc;
-    volatile uintptr_t fault_address, fault_registers[29];
+    volatile uintptr_t fault_address, fault_registers[32]; /* x0..28, FP, LR, SP */
     stack_t previous_stack;
     void *signal_stack;
     unsigned signal_count;
@@ -213,7 +213,7 @@ typedef struct {
     sigjmp_buf recovery;
     volatile sig_atomic_t active, fault_signal;
     volatile uintptr_t fault_pc;
-    volatile uintptr_t fault_address, fault_registers[29];
+    volatile uintptr_t fault_address, fault_registers[32];
     void *tls, *tlr, *signal_stack, *autorelease_pool;
     stack_t previous_stack;
     int alternate_stack_installed;
@@ -226,7 +226,7 @@ static _Thread_local ChildContext *child_context;
 typedef struct CallbackContext {
     sigjmp_buf recovery;
     volatile sig_atomic_t active, fault_signal;
-    volatile uintptr_t fault_pc, fault_address, fault_registers[29];
+    volatile uintptr_t fault_pc, fault_address, fault_registers[32];
     char error[1536];
     struct CallbackContext *previous;
     sig_atomic_t previous_guest_executing;
@@ -1042,11 +1042,38 @@ static void describe_fault(char *output, size_t capacity, const char *scope, int
         if (base && pc >= base && pc - base < state.modules[i].size) { module = state.modules[i].name; offset = pc - base; break; }
     }
     snprintf(output, capacity,
-        "guest %sCPU fault signal=%d pc=0x%llx module=%s offset=0x%llx address=0x%llx x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x8=0x%llx x19=0x%llx x20=0x%llx x28=0x%llx",
+        "guest %sCPU fault signal=%d pc=0x%llx module=%s offset=0x%llx address=0x%llx x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x8=0x%llx x19=0x%llx x20=0x%llx x28=0x%llx fp=0x%llx lr=0x%llx sp=0x%llx",
         scope, number, (unsigned long long)pc, module, (unsigned long long)offset, (unsigned long long)address,
         (unsigned long long)regs[0], (unsigned long long)regs[1], (unsigned long long)regs[2],
         (unsigned long long)regs[3], (unsigned long long)regs[8], (unsigned long long)regs[19],
-        (unsigned long long)regs[20], (unsigned long long)regs[28]);
+        (unsigned long long)regs[20], (unsigned long long)regs[28],
+        (unsigned long long)regs[29], (unsigned long long)regs[30], (unsigned long long)regs[31]);
+}
+/* Called only after siglongjmp restored a host recovery frame, before cleanup.
+ * This is a separate observation: unavailable memory data never replaces the
+ * original CPU fault, and a short kernel record never exposes later fields. */
+static void report_fault_memory_snapshot(void) {
+    task_vm_info_data_t info = {0};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    kern_return_t result = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count);
+    char virtual_size[32] = "unavailable", resident_size[32] = "unavailable";
+    char footprint[32] = "unavailable", remaining[32] = "unavailable";
+    char available[32] = "not_applicable";
+    if (result == KERN_SUCCESS && count <= TASK_VM_INFO_COUNT) {
+        if (count >= TASK_VM_INFO_REV0_COUNT) {
+            snprintf(virtual_size, sizeof virtual_size, "%llu", (unsigned long long)info.virtual_size);
+            snprintf(resident_size, sizeof resident_size, "%llu", (unsigned long long)info.resident_size);
+        }
+        if (count >= TASK_VM_INFO_REV1_COUNT)
+            snprintf(footprint, sizeof footprint, "%llu", (unsigned long long)info.phys_footprint);
+        if (count >= TASK_VM_INFO_REV4_COUNT)
+            snprintf(remaining, sizeof remaining, "%llu", (unsigned long long)info.limit_bytes_remaining);
+    }
+#if TARGET_OS_IPHONE
+    snprintf(available, sizeof available, "%zu", os_proc_available_memory());
+#endif
+    report("fault_memory_snapshot timing=post_recovery task_info_result=%d returned_count=%u virtual_size=%s resident_size=%s phys_footprint=%s limit_bytes_remaining=%s os_proc_available_memory=%s",
+        result, count, virtual_size, resident_size, footprint, remaining, available);
 }
 static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64_t stack_top,
                           uint32_t handle, char *error, size_t error_capacity) {
@@ -1075,6 +1102,7 @@ static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64
     } else if (context->fault_signal) {
         describe_fault(context->error, sizeof context->error, "child ", context->fault_signal,
             context->fault_pc, context->fault_address, context->fault_registers);
+        report_fault_memory_snapshot();
     }
     snprintf(error, error_capacity, "%s", context->error);
     pthread_cleanup_pop(1);
@@ -1510,6 +1538,7 @@ static int invoke_guest_callback(uint64_t target, const char *entry, const char 
     } else if (context->fault_signal) {
         describe_fault(context->error, sizeof context->error, fault_prefix,
             context->fault_signal, context->fault_pc, context->fault_address, context->fault_registers);
+        report_fault_memory_snapshot();
     }
     context->active = 0;
     callback_context = context->previous;
@@ -1592,6 +1621,14 @@ static void call_entry(const char *name, int two_args) {
     state.current_entry = NULL;
     report("entry_returned=%s guest_execution_tested=true", name);
 }
+/* Signal-safe register copying only; no guest-memory dereferences or reporting.
+ * SDK accessors also handle the arm64e thread-state representation correctly. */
+static void capture_fault_registers(volatile uintptr_t *registers, const ucontext_t *uc) {
+    for (unsigned i = 0; i < 29; i++) registers[i] = uc->uc_mcontext->__ss.__x[i];
+    registers[29] = (uintptr_t)__darwin_arm_thread_state64_get_fp(uc->uc_mcontext->__ss);
+    registers[30] = (uintptr_t)__darwin_arm_thread_state64_get_lr(uc->uc_mcontext->__ss);
+    registers[31] = (uintptr_t)__darwin_arm_thread_state64_get_sp(uc->uc_mcontext->__ss);
+}
 static void signal_handler(int number, siginfo_t *info, void *context) {
     if (handle_memory_tracking_fault(number, info, context)) return;
     ucontext_t *uc = context;
@@ -1609,19 +1646,19 @@ static void signal_handler(int number, siginfo_t *info, void *context) {
     if (callback_context && callback_context->active && guest_pc) {
         callback_context->fault_signal = number; callback_context->fault_pc = pc;
         callback_context->fault_address = (uintptr_t)info->si_addr;
-        for (unsigned i = 0; i < 29; i++) callback_context->fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
+        capture_fault_registers(callback_context->fault_registers, uc);
         siglongjmp(callback_context->recovery, 1);
     }
     if (current_is_owner && state.active && state.guest_executing && guest_pc) {
         state.fault_signal = number; state.fault_pc = pc;
         state.fault_address = (uintptr_t)info->si_addr;
-        for (unsigned i = 0; i < 29; i++) state.fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
+        capture_fault_registers(state.fault_registers, uc);
         state.guest_executing = 0; siglongjmp(state.recovery, 1);
     }
     if (child_context && child_context->active && guest_pc) {
         child_context->fault_signal = number; child_context->fault_pc = pc;
         child_context->fault_address = (uintptr_t)info->si_addr;
-        for (unsigned i = 0; i < 29; i++) child_context->fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
+        capture_fault_registers(child_context->fault_registers, uc);
         siglongjmp(child_context->recovery, 1);
     }
     /* Do not relabel bugs in the loader, host callbacks, or unrelated app threads
@@ -1720,6 +1757,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         if (state.fault_signal) {
             char fault[512]; describe_fault(fault, sizeof fault, "", state.fault_signal,
                 state.fault_pc, state.fault_address, state.fault_registers); report("error=%s", fault);
+            report_fault_memory_snapshot();
         }
         report("host_stage=stopped guest_execution_started=%s phone_ready=false nnMain_completed=false", state.guest_started ? "true" : "false");
     } else {
