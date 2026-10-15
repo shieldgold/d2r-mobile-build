@@ -17,6 +17,14 @@ typedef int (*botw_services_memory_fn)(void *opaque, uint64_t address, size_t le
  * output are unsupported until a real corresponding sink is connected. */
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque);
 void botw_services_destroy(botw_services *services);
+/* Optional checked preparation immediately before host I/O writes a validated
+ * guest output span. This is separate from the memory permission validator;
+ * it must not reenter services. Return 0 to continue, -1 to stop before I/O.
+ * The handler/state must outlive the registration; NULL disables it. */
+typedef int (*botw_services_write_prepare_fn)(void *opaque, uint64_t address,
+    size_t length, char *error, size_t capacity);
+void botw_services_set_memory_write_preparer(botw_services *services,
+    botw_services_write_prepare_fn prepare, void *opaque);
 /* mode is Horizon Normal=0 or Boost=1. active distinguishes the current host
  * mode from a stored future profile. The handler must validate configuration
  * and apply an actual host policy for active requests; 0 accepts, -1 rejects.

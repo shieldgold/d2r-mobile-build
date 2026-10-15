@@ -78,6 +78,8 @@ struct botw_services {
     void *performance_opaque;
     botw_services_focus_fn focus_handler;
     void *focus_opaque;
+    botw_services_write_prepare_fn write_prepare;
+    void *write_prepare_opaque;
     uint32_t focus_mode;
     unsigned focus_suspend_out, focus_policy_configured;
     botw_services_kernel_api kernel;
@@ -247,6 +249,28 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
     if (s) { pthread_mutex_lock(&s->lock); s->performance_handler = handler; s->performance_opaque = opaque; pthread_mutex_unlock(&s->lock); }
+}
+void botw_services_set_memory_write_preparer(botw_services *s,
+        botw_services_write_prepare_fn prepare, void *opaque) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock);
+    s->write_prepare = prepare; s->write_prepare_opaque = opaque;
+    pthread_mutex_unlock(&s->lock);
+}
+/* Called only after parsing and whole-descriptor permission validation, and
+ * before the first backend write. Preparing the entire intended span avoids
+ * changing an initial chunk before a later preparation failure. */
+static int prepare_host_output(botw_services *s, uint64_t address, size_t length,
+        const char *operation, char *error, size_t capacity) {
+    if (!length || !s->write_prepare) return 0;
+    if (!address || length > UINT64_MAX - address)
+        return problem(error, capacity, "%s invalid host output span", operation);
+    if (error && capacity) error[0] = 0;
+    if (s->write_prepare(s->write_prepare_opaque, address, length, error, capacity)) {
+        if (error && capacity && error[0]) return -1;
+        return problem(error, capacity, "%s host write preparation failed", operation);
+    }
+    return 0;
 }
 void botw_services_set_focus_handler(botw_services *s, botw_services_focus_fn handler, void *opaque) {
     if (!s) return;
@@ -1060,6 +1084,8 @@ static int save_request(botw_services *s, Session *session, Object *o, uint8_t *
             if (botw_savefs_stat(o->savefs, o->file_path, &entry, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.Write size check", &backend, 0, error, cap);
             if (offset > entry.size || length > entry.size - offset) return fs_result_response(ipc, capacity, r, 2u | (6201u << 9));
         }
+        if (!write && prepare_host_output(s, r->output_address, (size_t)length,
+                "SaveFS IFile.Read", error, cap)) return -1;
         size_t done = 0;
         while ((uint64_t)done < length) {
             size_t chunk = length - done > BUFFER_LIMIT ? BUFFER_LIMIT : (size_t)(length - done), actual = 0;
@@ -1172,6 +1198,8 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
             if (!file && (offset > size || length > size - offset)) return problem(error, cap, "RomFS IStorage.Read exceeds image bounds");
             uint64_t wanted = length;
             if (file && (offset >= size || wanted > size - offset)) wanted = offset >= size ? 0 : size - offset;
+            if (prepare_host_output(s, r->output_address, (size_t)wanted,
+                    "RomFS.Read", error, cap)) return -1;
             size_t done = 0;
             while ((uint64_t)done < wanted) {
                 size_t chunk = wanted - done > BUFFER_LIMIT ? BUFFER_LIMIT : (size_t)(wanted - done), actual = 0;
