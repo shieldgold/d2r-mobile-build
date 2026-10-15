@@ -84,6 +84,34 @@ class IOSAssemblyTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.assemble()
 
+    def test_default_host_memory_policy_overrides_a_shell_experiment(self):
+        self.info['BOTWHostMemoryPolicy'] = 'original-logical-v1'
+        self.write_shell()
+        result = self.assemble()
+        self.assertEqual(plistlib.loads((result / 'Info.plist').read_bytes())['BOTWHostMemoryPolicy'],
+                         'bounded-v1')
+
+    def test_invalid_host_memory_policy_is_rejected_before_publication(self):
+        for value in (None, True, 1, '', 'original-logical-v2', b'bounded-v1', [], {}):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'host memory policy'):
+                self.assemble(host_memory_policy=value)
+            self.assertFalse(self.app.exists())
+
+    def test_original_logical_policy_rejects_an_unadapted_guest(self):
+        relative = 'native/botw_app/memory_policy.h'
+        source = self.sources / relative
+        source.write_text('/* synthetic policy selector source */\n')
+        self.manifest['source_sha256'][relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        self.write_shell()
+        with self.assertRaisesRegex(ValueError, 'Host39.*v4'):
+            self.assemble(host_memory_policy='original-logical-v1')
+        self.assertFalse(self.app.exists())
+
+    def test_original_logical_policy_requires_selector_source_provenance(self):
+        with self.assertRaisesRegex(ValueError, 'memory policy selector source'):
+            self.assemble(host_memory_policy='original-logical-v1')
+        self.assertFalse(self.app.exists())
+
     def test_audio_module_source_provenance_is_verified(self):
         relative = 'native/botw_audio/audio.c'
         source = self.sources / relative

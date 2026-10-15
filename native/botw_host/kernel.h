@@ -44,6 +44,13 @@ typedef struct {
     int (*execute_thread)(void *opaque, uint64_t entry, uint64_t argument,
                           uint64_t stack_top, uint32_t handle,
                           char *error, size_t error_capacity);
+    /* Required by configure_logical_memory only. Fresh host dirty-memory
+     * admission before configuration (0,0) and every heap growth. Return 0 to
+     * admit or -1 with a diagnostic. Called under the kernel lock: do not
+     * reenter the kernel or access guest memory. Admission is not a promise
+     * that all writable virtual pages can simultaneously reside in RAM. */
+    int (*heap_admission)(void *opaque, size_t previous_size, size_t requested_size,
+                          char *error, size_t error_capacity);
 } botw_kernel_callbacks;
 botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *opaque);
 /* Cooperative stop wakes backend waits/sleeps. Returns 0 only after all worker
@@ -155,6 +162,14 @@ int botw_kernel_configure_core_mask(botw_kernel *kernel, uint64_t mask,
  * multiples of 2 MiB. physical_budget includes heap and image_bytes. */
 int botw_kernel_configure_memory(botw_kernel *kernel, size_t heap_capacity,
     size_t stack_capacity, size_t alias_capacity, size_t physical_budget,
+    size_t image_bytes, char *error, size_t error_capacity);
+/* Explicit sparse logical application pool, separate from physical_budget.
+ * Requires a live heap_admission callback; does not allocate/touch heap pages.
+ * GetInfo(6/21)=logical_pool, (7/22)=image+successful_heap, (5)=heap_capacity.
+ * Every growth still requires real VM success before publishing any charge.
+ * Only valid before the first memory reservation, like configure_memory. */
+int botw_kernel_configure_logical_memory(botw_kernel *kernel, size_t heap_capacity,
+    size_t stack_capacity, size_t alias_capacity, size_t logical_pool,
     size_t image_bytes, char *error, size_t error_capacity);
 #ifdef __cplusplus
 }

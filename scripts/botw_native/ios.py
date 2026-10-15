@@ -25,6 +25,8 @@ import zipfile
 
 from ci import macho_minimum_os
 from .guest_framework import build_framework, MAX_METADATA_BYTES, MAX_TOTAL_BYTES
+from .heap_policy import POLICY as BOUNDED_HEAP_PROFILE
+from .thread_stack import SZS_POLICY
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_ID = 'local.botw.native'
@@ -174,7 +176,7 @@ def _shell(archive_path, source_root, limit, expected_digest):
 
 
 def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, expected_shell_sha256,
-                 source_root=ROOT, max_shell_bytes=256 * 1024**2):
+                 source_root=ROOT, max_shell_bytes=256 * 1024**2, host_memory_policy='bounded-v1'):
     """Verify the content-free shell and local source provenance, then publish an unsigned .app.
 
     guest_dir is the output root returned by guest_framework.build_framework.
@@ -182,7 +184,11 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
     rewritten program bytes exist solely in the signed-code framework location.
     expected_shell_sha256 is required and must come from a trusted build artifact
     channel verified independently of this IPA, never from its own manifest.
+    host_memory_policy selects the separate runtime accounting mode; the
+    original-logical experiment requires the already audited Host39/v4 inputs.
     """
+    if not isinstance(host_memory_policy, str) or host_memory_policy not in ('bounded-v1', 'original-logical-v1'):
+        raise ValueError('Unknown packaged host memory policy')
     if (not isinstance(expected_shell_sha256, str) or
             not re.fullmatch('[0-9a-fA-F]{64}', expected_shell_sha256)):
         raise ValueError('A complete independently trusted shell IPA SHA256 is required')
@@ -192,6 +198,9 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
     if output_app.name != 'BOTWNative.app':
         raise ValueError('Output app must be named BOTWNative.app')
     shell = _shell(shell_ipa, source_root, max_shell_bytes, expected_shell_sha256.lower())
+    if (host_memory_policy == 'original-logical-v1' and
+            'native/botw_app/memory_policy.h' not in _json(shell['shell-manifest.json'])['source_sha256']):
+        raise ValueError('Shell omits memory policy selector source provenance')
     published = _tree(guest_dir)
     metadata_bytes = _read(guest_dir / 'guest-framework-report.json', MAX_METADATA_BYTES)
     metadata = _json(metadata_bytes)
@@ -224,6 +233,11 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
         expected = build_framework(report_path, rewrite_dir, regenerated, module_names=names, minimum_ios=minimum_ios)
         if metadata != expected:
             raise ValueError('Guest metadata or source digest mismatch; regenerate from audited inputs')
+        if (host_memory_policy == 'original-logical-v1' and
+                (expected.get('guest_address_bits') != 39 or
+                 expected.get('guest_heap_policy') != BOUNDED_HEAP_PROFILE or
+                 expected.get('guest_thread_stack_policy') != SZS_POLICY)):
+            raise ValueError('Original logical host memory policy requires audited Host39 heap thunks and v4 stack inputs')
         if not any(s['path'] == 'report.json' and s['sha256'] == _digest(report_bytes) for s in expected['sources']):
             raise ValueError('Preflight report changed while assembling')
         for relative, path in published.items():
@@ -235,6 +249,7 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
         for name, data in shell.items():
             (app / name).write_bytes(data)
         info = plistlib.loads((app / 'Info.plist').read_bytes())
+        info['BOTWHostMemoryPolicy'] = host_memory_policy
         info['BOTWGuestAddressBits'] = expected['guest_address_bits']
         if 'guest_heap_policy' in expected:
             info['BOTWGuestHeapPolicy'] = expected['guest_heap_policy']['profile']
@@ -358,6 +373,8 @@ def main(argv=None):
     for flag in ('shell', 'guest', 'report', 'rewrite', 'output-app'):
         assemble.add_argument('--' + flag, type=Path, required=True)
     assemble.add_argument('--source-root', type=Path, default=ROOT)
+    assemble.add_argument('--host-memory-policy', choices=('bounded-v1', 'original-logical-v1'),
+                          default='bounded-v1', help='Explicit host memory accounting experiment; default preserves bounded mode')
     assemble.add_argument('--expected-shell-sha256', required=True,
                           help='SHA256 from an independently verified build artifact channel, not the IPA manifest')
     sign = subcommands.add_parser('sign', help='Sign locally using an installed identity; no install or launch')
@@ -369,7 +386,8 @@ def main(argv=None):
     try:
         if args.command == 'assemble':
             path = assemble_app(args.shell, args.guest, args.report, args.rewrite, args.output_app,
-                                expected_shell_sha256=args.expected_shell_sha256, source_root=args.source_root)
+                                expected_shell_sha256=args.expected_shell_sha256, source_root=args.source_root,
+                                host_memory_policy=args.host_memory_policy)
             print(f'Assembled {path}; unsigned, guest not executed')
         else:
             result = sign_app(args.app, args.profile, args.identity, args.udid, args.output_ipa)

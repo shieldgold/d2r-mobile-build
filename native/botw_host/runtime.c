@@ -141,6 +141,8 @@ static int focus_suspended, focus_stopping;
 static void *configured_graphics_layer;
 static botw_input *configured_input;
 static unsigned configured_address_bits = 36;
+static enum botw_host_memory_policy configured_memory_policy = BOTW_HOST_MEMORY_BOUNDED;
+static _Atomic int memory_policy_stopping;
 static int host_foreground = 1, host_focused = 1;
 static int host_audio_session_active = 1;
 static uint32_t run_sequence;
@@ -205,6 +207,8 @@ static struct {
     int alternate_stack_installed;
     int guest_started;
     unsigned address_bits;
+    enum botw_host_memory_policy memory_policy;
+    int thread_stack_mode;
     botw_address_space_policy allocator_policy[2];
     const char *current_entry;
     struct sigaction previous[4];
@@ -1007,11 +1011,100 @@ static size_t host_available_memory(void) {
 #endif
     return available;
 }
+/* iOS exposes an app dirty-memory limit. macOS has no equivalent source here;
+ * hw.memsize is deliberately not substituted for a fresh app-limit reading. */
+#if TARGET_OS_IPHONE
+static size_t (*dirty_available_query)(void) = os_proc_available_memory;
+#else
+static size_t (*dirty_available_query)(void);
+#endif
+typedef struct {
+    uint64_t virtual_size, resident_size, footprint, limit_remaining, available;
+} HostDirtyMemory;
+static int original_memory_stopped(void) {
+    return state.memory_policy == BOTW_HOST_MEMORY_ORIGINAL_LOGICAL &&
+        atomic_load_explicit(&memory_policy_stopping, memory_order_acquire);
+}
+/* Kernel admission may hold its lock. Only take focus_lock here; focus wait,
+ * focus updates and cleanup release that lock before entering the kernel.
+ * Publishing before the broadcast and checking under focus_lock prevents a
+ * suspended pthread from missing the stop between its predicate and wait. */
+static int stop_memory_policy(void) {
+    int previous = atomic_exchange_explicit(&memory_policy_stopping, 1, memory_order_acq_rel);
+    pthread_mutex_lock(&focus_lock);
+    pthread_cond_broadcast(&focus_changed);
+    pthread_mutex_unlock(&focus_lock);
+    return previous;
+}
+static int read_dirty_admission(HostDirtyMemory *observed, char *error, size_t capacity) {
+    if (!dirty_available_query) {
+        snprintf(error, capacity, "original logical heap requires a fresh iOS app dirty-memory limit; unavailable on this host");
+        return -1;
+    }
+    task_vm_info_data_t info = {0}; mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    kern_return_t result = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count);
+    if (result != KERN_SUCCESS || count < TASK_VM_INFO_REV4_COUNT || count > TASK_VM_INFO_COUNT) {
+        snprintf(error, capacity, "original logical heap: task_info unavailable result=%d returned_count=%u", result, count);
+        return -1;
+    }
+    size_t available = dirty_available_query(); /* Fresh, independent observation. */
+    uint64_t headroom = info.limit_bytes_remaining < available ? info.limit_bytes_remaining : available;
+    if (headroom < HEAP_POLICY_RESERVE) {
+        snprintf(error, capacity, "original logical heap: fresh dirty headroom=%llu below guard=%zu footprint=%llu app_available=%zu limit_remaining=%llu",
+            (unsigned long long)headroom, HEAP_POLICY_RESERVE, (unsigned long long)info.phys_footprint,
+            available, (unsigned long long)info.limit_bytes_remaining);
+        return -1;
+    }
+    *observed = (HostDirtyMemory){info.virtual_size, info.resident_size, info.phys_footprint,
+        info.limit_bytes_remaining, available};
+    return 0;
+}
+static int kernel_heap_admission(void *opaque, size_t previous, size_t requested,
+                                  char *error, size_t capacity) {
+    (void)opaque; (void)previous; (void)requested;
+    HostDirtyMemory observed;
+    if (state.memory_policy != BOTW_HOST_MEMORY_ORIGINAL_LOGICAL ||
+            atomic_load_explicit(&memory_policy_stopping, memory_order_acquire)) {
+        snprintf(error, capacity, "original logical heap admission is not active or has stopped"); return -1;
+    }
+    int result = read_dirty_admission(&observed, error, capacity);
+    if (result) stop_memory_policy();
+    return result;
+}
+static void require_memory_admission(const char *stage) {
+    if (state.memory_policy != BOTW_HOST_MEMORY_ORIGINAL_LOGICAL) return;
+    char error[512]; HostDirtyMemory observed;
+    if (atomic_load_explicit(&memory_policy_stopping, memory_order_acquire) ||
+            read_dirty_admission(&observed, error, sizeof error)) {
+        if (stop_memory_policy())
+            fail("original logical heap stopped at %s", stage);
+        fail("memory admission at %s: %s", stage, error);
+    }
+    report("host_dirty_admission stage=%s virtual_size=%llu resident_size=%llu phys_footprint=%llu limit_bytes_remaining=%llu os_proc_available_memory=%llu guard=%zu advisory=true residency_guaranteed=false",
+        stage, (unsigned long long)observed.virtual_size, (unsigned long long)observed.resident_size,
+        (unsigned long long)observed.footprint, (unsigned long long)observed.limit_remaining,
+        (unsigned long long)observed.available, HEAP_POLICY_RESERVE);
+}
 static void configure_kernel_memory(void) {
     const size_t mib = 1024u * 1024u;
     size_t image = 0;
     for (unsigned i = 0; i < MODULE_COUNT; i++) image += state.modules[i].size;
     state.image_bytes = image;
+    if (state.memory_policy == BOTW_HOST_MEMORY_ORIGINAL_LOGICAL) {
+        char error[512];
+        if (!state.heap_policy_active || state.thread_stack_mode != 4 || state.address_bits != 39 ||
+                !state.host39_transport_audited)
+            fail("original logical heap requires the audited base-v0 Host39 heap thunks and v4 stack image");
+        if (image > SIZE_MAX - HEAP_POLICY_ORIGINAL) fail("original logical application pool overflow");
+        size_t pool = image + HEAP_POLICY_ORIGINAL;
+        require_memory_admission("kernel_configuration");
+        if (botw_kernel_configure_address_space(state.kernel, state.address_bits, error, sizeof error) ||
+                botw_kernel_configure_logical_memory(state.kernel, 4096u * mib, 256u * mib,
+                    512u * mib, pool, image, error, sizeof error)) fail("configure original logical memory: %s", error);
+        report("guest_address_bits=%u guest_memory_policy=original-logical-v1 logical_application_pool=%zu image_bytes=%zu heap_capacity=%zu host_dirty_guard=%zu residency_guaranteed=false",
+            state.address_bits, pool, image, 4096u * mib, HEAP_POLICY_RESERVE);
+        return;
+    }
     size_t available = host_available_memory();
     /* Include already mapped modules while respecting the host's live limit.
      * Virtual capacities do not grant committed physical memory. */
@@ -1096,6 +1189,7 @@ static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64
         pthread_setspecific(state.keys[2], context->tlr); pthread_setspecific(state.keys[3], (void *)botw_gate);
         install_heap_parameter_slots();
         if (host_pool_push) context->autorelease_pool = host_pool_push();
+        require_memory_admission("child_entry");
         report("guest_thread_entered handle=0x%x", handle);
         ((void (*)(uint64_t, uint64_t))entry)(argument, handle);
         snprintf(context->error, sizeof context->error, "guest thread returned without ExitThread handle=0x%x", handle);
@@ -1258,6 +1352,11 @@ int botw_host_set_address_space(unsigned bits) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     configured_address_bits = bits; pthread_mutex_unlock(&run_lock); return 0;
 }
+int botw_host_set_memory_policy(enum botw_host_memory_policy policy) {
+    if (policy != BOTW_HOST_MEMORY_BOUNDED && policy != BOTW_HOST_MEMORY_ORIGINAL_LOGICAL) return 1;
+    if (pthread_mutex_trylock(&run_lock)) return 2;
+    configured_memory_policy = policy; pthread_mutex_unlock(&run_lock); return 0;
+}
 void botw_host_refresh_input(void) {
     pthread_mutex_lock(&lifecycle_lock);
     if (state.services) {
@@ -1291,8 +1390,9 @@ static int services_focus(void *opaque, uint32_t mode, int foreground, int focus
 static int wait_for_focus(void) {
     pthread_mutex_lock(&focus_lock);
     int result = 0;
-    while (focus_suspended && !focus_stopping && !result) result = pthread_cond_wait(&focus_changed, &focus_lock);
-    int stopped = focus_stopping;
+    while (focus_suspended && !focus_stopping && !original_memory_stopped() && !result)
+        result = pthread_cond_wait(&focus_changed, &focus_lock);
+    int stopped = focus_stopping || original_memory_stopped();
     pthread_mutex_unlock(&focus_lock);
     return result || stopped ? -1 : 0;
 }
@@ -1327,7 +1427,10 @@ static int services_performance(void *opaque, uint32_t mode, uint32_t configurat
     return 0;
 }
 void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
-    if (wait_for_focus()) fail("guest execution stopped at focus boundary");
+    int focus_result = wait_for_focus();
+    if (original_memory_stopped())
+        fail("guest execution stopped by original logical heap memory admission");
+    if (focus_result) fail("guest execution stopped at focus boundary");
     for (unsigned i = 0; i < state.gate_count; i++) {
         Gate *g = &state.gates[i]; if (g->ret != ret) continue;
         if (callback_context && callback_context->active && !g->kind && g->arg == 0xa)
@@ -1533,6 +1636,7 @@ static int invoke_guest_callback(uint64_t target, const char *entry, const char 
     if (!sigsetjmp(context->recovery, 1)) {
         context->active = 1;
         require_executable(target, entry);
+        require_memory_admission("guest_callback");
         invoke(target, arguments);
         accepted = 1;
     } else if (context->fault_signal) {
@@ -1580,6 +1684,7 @@ static void run_module_constructors(void) {
         Module *m = &state.modules[i]; if (!m->init) continue;
         require_range(m, m->init, 4, "DT_INIT");
         uint64_t pointer = (uint64_t)m->base + m->init; require_executable(pointer, m->name);
+        require_memory_admission("module_constructor");
         report("constructor_called=%s", m->name); state.guest_started = 1; state.guest_executing = 1;
         ((void (*)(void))pointer)(); state.guest_executing = 0;
         report("constructor_returned=%s", m->name);
@@ -1590,18 +1695,31 @@ static uint64_t need_entry(const char *name) {
     require_executable(p, name); report("entry_resolved=%s", name); return p;
 }
 static void call_entry(const char *name, int two_args) {
+    require_memory_admission(name);
     if (state.heap_policy_active && !strcmp(name, "nninitStartup")) {
         if (state.heap_size) fail("bounded heap: initial parameters may only be selected once");
         uint64_t total = allocator_kernel_info(6);
         if (total < state.image_bytes || total - state.image_bytes > SIZE_MAX)
             fail("bounded heap: invalid actual kernel memory accounting");
-        size_t live = host_available_memory(); char error[512];
-        if (botw_host_heap_policy_plan((size_t)(total - state.image_bytes), live,
-                &state.heap_size, &state.root_size, error, sizeof error)) fail("%s", error);
+        size_t live = 0;
+        if (state.memory_policy == BOTW_HOST_MEMORY_ORIGINAL_LOGICAL) {
+            if (total - state.image_bytes != HEAP_POLICY_ORIGINAL)
+                fail("original logical heap: application pool does not match the original request");
+            state.heap_size = HEAP_POLICY_ORIGINAL;
+            state.root_size = HEAP_POLICY_ORIGINAL - HEAP_POLICY_STARTUP;
+        } else {
+            live = host_available_memory(); char error[512];
+            if (botw_host_heap_policy_plan((size_t)(total - state.image_bytes), live,
+                    &state.heap_size, &state.root_size, error, sizeof error)) fail("%s", error);
+        }
         install_heap_parameter_slots();
-        report("heap_policy=botw-switch-base-v0-bounded-heap-v1 experiment=true kernel_heap_available=%llu live_host_available=%zu host_reserve=%zu heap=%zu root=%zu startup_block=%zu game_playable=false",
-            (unsigned long long)(total - state.image_bytes), live, HEAP_POLICY_RESERVE,
-            state.heap_size, state.root_size, HEAP_POLICY_STARTUP);
+        if (state.memory_policy == BOTW_HOST_MEMORY_ORIGINAL_LOGICAL)
+            report("heap_policy=original-logical-v1 experiment=true logical_application_pool=%llu heap=%zu root=%zu startup_block=%zu host_dirty_guard=%zu residency_guaranteed=false game_playable=false",
+                (unsigned long long)total, state.heap_size, state.root_size, HEAP_POLICY_STARTUP, HEAP_POLICY_RESERVE);
+        else
+            report("heap_policy=botw-switch-base-v0-bounded-heap-v1 experiment=true kernel_heap_available=%llu live_host_available=%zu host_reserve=%zu heap=%zu root=%zu startup_block=%zu game_playable=false",
+                (unsigned long long)(total - state.image_bytes), live, HEAP_POLICY_RESERVE,
+                state.heap_size, state.root_size, HEAP_POLICY_STARTUP);
     }
     if (state.heap_policy_active && !strcmp(name, "nnMain")) {
         uint64_t used = allocator_kernel_info(7);
@@ -1748,6 +1866,8 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
     pthread_mutex_lock(&lifecycle_lock);
     memset(&state, 0, sizeof state); state.event = event; state.owner = pthread_self();
     state.address_bits = configured_address_bits;
+    state.memory_policy = configured_memory_policy;
+    atomic_store_explicit(&memory_policy_stopping, 0, memory_order_release);
     pthread_mutex_unlock(&lifecycle_lock);
     pthread_mutex_lock(&focus_lock); focus_suspended = 0; focus_stopping = 0;
     pthread_mutex_unlock(&focus_lock);
@@ -1801,6 +1921,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         int stack_mode = botw_address_space_audit_thread_stack_image(stack_main->base,
             stack_main->size, stack_main->text_end, stack_error, sizeof stack_error);
         if (stack_mode < 0) fail("thread stack policy: %s", stack_error);
+        state.thread_stack_mode = stack_mode;
         if (stack_mode) {
             if (state.address_bits != 39 || !state.host39_transport_audited ||
                     find_raw_symbol("nninitStartup") != (uint64_t)stack_main->base + 0x7352f8 ||
@@ -1820,7 +1941,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");
         host_pool_pop = (void (*)(void *))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPop");
         const botw_kernel_callbacks kernel_callbacks = {.log = services_log, .memory = external_memory,
-            .executable = executable_address, .execute_thread = execute_child};
+            .executable = executable_address, .execute_thread = execute_child, .heap_admission = kernel_heap_admission};
         state.kernel = botw_kernel_create(&kernel_callbacks, NULL);
         if (!state.kernel) fail("allocate Horizon kernel context");
         /* Fixed base-v0 NPDM KAC KernelFlags 0x020073b7 allows priorities

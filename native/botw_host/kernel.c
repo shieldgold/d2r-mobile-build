@@ -102,6 +102,8 @@ struct botw_kernel {
     uint8_t *reservation;
     size_t reservation_size, heap_capacity, stack_capacity, alias_capacity;
     size_t physical_budget, image_bytes, heap_size, host_page;
+    size_t logical_pool_limit; /* Explicit policy; never presented as host RAM. */
+    int logical_memory;
     uint64_t heap_base, stack_base, alias_base;
     uint64_t address_limit;
     int memory_configured;
@@ -741,13 +743,31 @@ static int reserve_memory_locked(botw_kernel *k, char *error, size_t capacity) {
         k->address_limit == (UINT64_C(1) << 36) ? 36u : 39u,
         outside_limit ? "host mappings fall outside guest address space" : strerror(map_error ? map_error : ENOMEM));
 }
+static size_t application_pool_limit_locked(const botw_kernel *k) {
+    return k->logical_memory ? k->logical_pool_limit : k->physical_budget;
+}
+static int admit_heap_locked(botw_kernel *k, size_t previous, size_t requested,
+                              char *error, size_t capacity) {
+    if (!k->callbacks.heap_admission)
+        return diagnostic(error, capacity, "logical memory requires fresh host heap admission");
+    if (error && capacity) error[0] = 0;
+    if (k->callbacks.heap_admission(k->opaque, previous, requested, error, capacity)) {
+        if (error && capacity && !error[0]) diagnostic(error, capacity, "fresh host heap admission failed");
+        return BOTW_KERNEL_ERROR;
+    }
+    return 0;
+}
 static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     uint64_t requested = regs[1];
     if (requested & (HEAP_UNIT - 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_SIZE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock);
     if (!k->memory_configured) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_UNSUPPORTED; }
-    if (requested > k->heap_capacity || requested > k->physical_budget - k->image_bytes) {
+    if (requested > k->heap_capacity || requested > application_pool_limit_locked(k) - k->image_bytes) {
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_OUT_OF_MEMORY; return BOTW_KERNEL_HANDLED;
+    }
+    if (k->logical_memory && requested > k->heap_size &&
+            admit_heap_locked(k, k->heap_size, (size_t)requested, error, capacity)) {
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR;
     }
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
     size_t size = (size_t)requested;
@@ -1116,7 +1136,7 @@ static int get_info(botw_kernel *k, uint64_t *regs, char *error, size_t capacity
     switch (id) {
     case 2: value = k->alias_base; break; case 3: value = k->alias_capacity; break;
     case 4: value = k->heap_base; break; case 5: value = k->heap_capacity; break;
-    case 6: case 21: value = k->physical_budget; break;
+    case 6: case 21: value = application_pool_limit_locked(k); break;
     case 7: case 22: value = k->image_bytes + k->heap_size; break;
     case 12: value = (uintptr_t)k->reservation; break; case 13: value = k->reservation_size; break;
     case 14: value = k->stack_base; break; case 15: value = k->stack_capacity; break;
@@ -1466,6 +1486,25 @@ int botw_kernel_configure_memory(botw_kernel *k, size_t heap, size_t stack, size
         pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "guest memory capacities exceed address space");
     }
     k->heap_capacity = heap; k->stack_capacity = stack; k->alias_capacity = alias;
-    k->physical_budget = budget; k->image_bytes = image; k->memory_configured = 1;
+    k->physical_budget = budget; k->logical_pool_limit = 0; k->logical_memory = 0;
+    k->image_bytes = image; k->memory_configured = 1;
+    pthread_mutex_unlock(&k->lock); return 0;
+}
+int botw_kernel_configure_logical_memory(botw_kernel *k, size_t heap, size_t stack,
+        size_t alias, size_t pool, size_t image, char *error, size_t capacity) {
+    if (!k || !heap || !stack || !alias || ((heap | stack | alias) & (HEAP_UNIT - 1)) ||
+            pool < image || pool - image > heap)
+        return diagnostic(error, capacity, "invalid logical memory capacities/application pool");
+    pthread_mutex_lock(&k->lock);
+    if (k->reservation || k->stopping) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "cannot reconfigure active/stopping guest memory");
+    }
+    if (!capacities_fit(k->address_limit, heap, stack, alias)) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "guest memory capacities exceed address space");
+    }
+    if (admit_heap_locked(k, 0, 0, error, capacity)) { pthread_mutex_unlock(&k->lock); return -1; }
+    k->heap_capacity = heap; k->stack_capacity = stack; k->alias_capacity = alias;
+    k->logical_pool_limit = pool; k->logical_memory = 1; k->physical_budget = 0;
+    k->image_bytes = image; k->memory_configured = 1;
     pthread_mutex_unlock(&k->lock); return 0;
 }

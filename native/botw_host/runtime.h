@@ -32,6 +32,17 @@ int botw_host_set_input(botw_input *input);
  * 39-bit mode requires separately verified SDK transport adaptations. Returns
  * 1 for unsupported widths, 2 while running, 0 after saving configuration. */
 int botw_host_set_address_space(unsigned bits);
+enum botw_host_memory_policy {
+    BOTW_HOST_MEMORY_BOUNDED = 0,
+    BOTW_HOST_MEMORY_ORIGINAL_LOGICAL = 1
+};
+/* Default remains bounded. ORIGINAL_LOGICAL explicitly selects the fixed
+ * base-v0 original heap/root via the existing audited TSD thunks and v4 stack
+ * image. Requires fresh iOS public dirty-memory observations with 256 MiB
+ * headroom; unavailable/short observations fail closed. No entitlement or
+ * physical-residency guarantee is added. macOS has no such app-limit source
+ * here and rejects this opt-in. Returns 0, 1 unknown, or 2 while running. */
+int botw_host_set_memory_policy(enum botw_host_memory_policy policy);
 /* Pure planner for the explicitly packaged base-v0 bounded-heap experiment.
  * Limits are actual kernel heap availability and a fresh host availability
  * reading. Keeps a 256 MiB host reserve and the original 32 MiB startup block;

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "runtime.h"
+#include "memory_policy.h"
 #include "graphics.h"
 #include "BOTWInputOverlay.h"
 
@@ -225,6 +226,10 @@ static void *runGuest(void *unused) {
     unsigned addressBits = configuredBits ? [configuredBits unsignedIntValue] : 36;
     if (botw_host_set_address_space(addressBits)) {
         hostEvent("error=invalid packaged guest address policy"); return;
+    }
+    if (configurePackagedHostMemoryPolicy(
+            [NSBundle.mainBundle objectForInfoDictionaryKey:@"BOTWHostMemoryPolicy"])) {
+        hostEvent("error=invalid packaged host memory policy"); return;
     }
     if (!frontendInput || !((CAMetalLayer *)self.metalView.layer).device ||
         botw_host_set_input(frontendInput) || botw_host_set_graphics_layer((__bridge void *)self.metalView.layer)) {
