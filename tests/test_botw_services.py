@@ -1,5 +1,6 @@
 """Hand-built Horizon IPC fixtures; no Nintendo binaries or headers needed."""
 import ctypes as C
+from concurrent.futures import ThreadPoolExecutor
 import shutil
 import struct
 import subprocess
@@ -10,6 +11,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LOG = C.CFUNCTYPE(None, C.c_void_p, C.c_char_p)
 MEMORY = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint64, C.c_size_t, C.c_int)
+EVENT_CREATE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.POINTER(C.c_uint32), C.POINTER(C.c_uint32), C.c_void_p, C.c_size_t)
+EVENT_DUP = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.POINTER(C.c_uint32), C.c_void_p, C.c_size_t)
+EVENT_ACTION = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_void_p, C.c_size_t)
+PROCESS_CHECK = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32)
+
+
+class KernelAPI(C.Structure):
+    _fields_ = [('opaque', C.c_void_p), ('create', EVENT_CREATE), ('duplicate', EVENT_DUP),
+                ('signal', EVENT_ACTION), ('clear', EVENT_ACTION), ('close', EVENT_ACTION),
+                ('is_process', PROCESS_CHECK)]
+
+
 PERFORMANCE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_uint32, C.c_int, C.c_void_p, C.c_size_t)
 
 
@@ -60,7 +73,7 @@ class ServicesTests(unittest.TestCase):
         return self.lib.botw_services_close(self.ctx, handle, self.error, 1024)
 
     @staticmethod
-    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None):
+    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=()):
         descriptor = b''
         if static:
             address, size = static
@@ -71,14 +84,19 @@ class ServicesTests(unittest.TestCase):
             descriptor += struct.pack('<III', size & 0xffffffff, address & 0xffffffff,
                                       ((address >> 36) & 0x3fffff) << 2 |
                                       ((size >> 32) & 15) << 24 | ((address >> 32) & 15) << 28)
-        special = struct.pack('<IQ', 1, 0) if pid else b''
+        special = b''
+        if pid or copies:
+            special = struct.pack('<I', bool(pid) | len(copies) << 1)
+            if pid:
+                special += struct.pack('<Q', 0)
+            special += struct.pack('<' + 'I' * len(copies), *copies)
         start = 8 + len(special) + len(descriptor)
         body = b'SFCI' + struct.pack('<III', 0, command, 0) + payload
         if domain:
             body = struct.pack('<BBHIII', 1, 0, len(body), domain, 0, 0) + body
         words = (16 + len(body) + 3) // 4
         header = struct.pack('<II', kind | bool(static) << 16 | bool(buffer) << 20,
-                             words | (bool(pid) << 31))
+                             words | (bool(pid or copies) << 31))
         message = header + special + descriptor + b'\0' * (-start % 16) + body
         return message.ljust(start + words * 4, b'\0')
 
@@ -181,6 +199,118 @@ class ServicesTests(unittest.TestCase):
         _, error = self.send(session, self.request(0, struct.pack('<II', 0, 0x00010000)), good=False)
         self.assertIn('host performance handler', error)
         self.send(session, self.request(1, struct.pack('<I', 0)), good=False)
+
+    def applet_kernel(self):
+        self.kernel_handles, self.kernel_events = {}, []
+        def allocate(event):
+            handle = 0x20000 + len(self.kernel_handles)
+            self.kernel_handles[handle] = event
+            return handle
+        def create(_, signaled, writer, reader, error, cap):
+            event = {'signaled': bool(signaled)}
+            self.kernel_events.append(event)
+            writer[0], reader[0] = allocate(event), allocate(event)
+            return 0
+        def duplicate(_, handle, out, error, cap):
+            if self.kernel_handles.get(handle) is None:
+                return -1
+            out[0] = allocate(self.kernel_handles[handle])
+            return 0
+        def action(name):
+            def perform(_, handle, error, cap):
+                event = self.kernel_handles.get(handle)
+                if event is None:
+                    return -1
+                if name == 'close':
+                    self.kernel_handles[handle] = None
+                else:
+                    event['signaled'] = name == 'signal'
+                return 0
+            return EVENT_ACTION(perform)
+        self.kernel_api = KernelAPI(None, EVENT_CREATE(create), EVENT_DUP(duplicate),
+                                    action('signal'), action('clear'), action('close'),
+                                    PROCESS_CHECK(lambda _, handle: int(handle == 0xffff8001)))
+        self.lib.botw_services_set_kernel_api.argtypes = [C.c_void_p, C.POINTER(KernelAPI)]
+        self.lib.botw_services_set_kernel_api(self.ctx, C.byref(self.kernel_api))
+        self.lib.botw_services_set_applet_state.argtypes = [C.c_void_p, C.c_uint64, C.c_int,
+                                                          C.c_int, C.c_uint32, C.c_char_p, C.c_size_t]
+
+    def applet_state(self, foreground=1, focused=1, mode=0, user=0x12345678):
+        rc = self.lib.botw_services_set_applet_state(self.ctx, user, foreground, focused,
+                                                   mode, self.error, 1024)
+        self.assertEqual(rc, 0, self.error.value)
+
+    def applet_proxy(self):
+        oe = self.service(self.initialized_sm(), b'appletOE')
+        raw, _ = self.send(oe, self.request(0, b'\0' * 8, pid=True, copies=(0xffff8001,)))
+        _, handles, _ = self.response(raw)
+        return handles[0]
+
+    def proxy_child(self, proxy, command):
+        raw, _ = self.send(proxy, self.request(command))
+        _, handles, _ = self.response(raw)
+        return handles[0]
+
+    def test_applet_proxy_requires_measured_state_and_current_process_handle(self):
+        self.applet_kernel()
+        oe = self.service(self.initialized_sm(), b'appletOE')
+        self.send(oe, self.request(0, b'\0' * 8, pid=True, copies=(0xffff8001,)), good=False)
+        self.applet_state()
+        self.send(oe, self.request(0, b'\0' * 8, pid=True), good=False)
+        self.send(oe, self.request(0, b'\0' * 8, pid=True, copies=(0xbad,)), good=False)
+        self.send(oe, self.request(0, b'\0' * 8, pid=True, copies=(0xffff8001,)))
+
+    def test_applet_window_and_common_queries_match_host_lifecycle(self):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        window = self.proxy_child(proxy, 2)
+        common = self.proxy_child(proxy, 0)
+        app = self.proxy_child(proxy, 20)
+        raw, _ = self.send(window, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], 0x12345678)
+        self.send(window, self.request(10))
+        raw, _ = self.send(app, self.request(40))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 1)
+        self.applet_state(foreground=0, focused=0)
+        raw, _ = self.send(common, self.request(9))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 3)
+        self.send(window, self.request(10), good=False)
+        self.applet_state()
+        for command, expected in ((5, 0), (6, 0), (9, 1)):
+            raw, _ = self.send(common, self.request(command))
+            data, _, _ = self.response(raw)
+            self.assertEqual(data[0], expected)
+        self.send(proxy, self.request(999), good=False)
+
+    def test_applet_message_event_tracks_queue_and_notification_flags(self):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        common, controller = self.proxy_child(proxy, 0), self.proxy_child(proxy, 1)
+        raw, _ = self.send(common, self.request(0))
+        _, handles, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 2)  # one HIPC copy handle
+        event = self.kernel_handles[handles[0]]
+        self.assertFalse(event['signaled'])
+        self.send(controller, self.request(11, b'\1'))
+        self.applet_state(mode=1)
+        self.assertTrue(event['signaled'])
+        raw, _ = self.send(common, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 30)
+        self.assertFalse(event['signaled'])
+        raw, _ = self.send(common, self.request(1))
+        self.assertEqual(struct.unpack_from('<I', raw, 24)[0], 0x680)
+        self.applet_state(foreground=0, focused=0, mode=1)
+        self.assertTrue(event['signaled'])
+        raw, _ = self.send(common, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 15)
+        self.assertFalse(event['signaled'])
 
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
@@ -330,6 +460,24 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(self.close(sm), 0)
         self.service(clone)
         self.assertEqual(self.close(clone), 0)
+
+    def test_parallel_handle_creation_and_close_are_serialized(self):
+        def work(_):
+            handles = []
+            for _ in range(64):
+                handle, error = C.c_uint32(), C.create_string_buffer(256)
+                rc = self.lib.botw_services_connect(self.ctx, b'sm:', 3, C.byref(handle), error, 256)
+                if rc:
+                    return error.value
+                handles.append(handle.value)
+                if self.lib.botw_services_close(self.ctx, handle.value, error, 256):
+                    return error.value
+            return handles
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(work, range(8)))
+        self.assertTrue(all(isinstance(result, list) for result in results), results)
+        handles = [handle for result in results for handle in result]
+        self.assertEqual(len(set(handles)), 512)
 
     def test_handle_table_exhaustion_is_bounded(self):
         handles = []

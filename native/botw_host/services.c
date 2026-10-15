@@ -9,6 +9,7 @@
  * https://switchbrew.org/wiki/Log_services
  */
 #include "services.h"
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +22,9 @@
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
-enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION };
+enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
+    OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
+    OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS };
 typedef struct Object {
     enum ObjectKind kind;
     unsigned refs, initialized;
@@ -37,19 +40,28 @@ typedef struct Session {
  * that client handle once. This matches the SDK's CMIF-Close/SVC-Close sequence. */
 typedef struct { uint32_t id; Session *session; } Handle;
 struct botw_services {
+    pthread_mutex_t lock;
     Handle handles[HANDLE_LIMIT];
     uint32_t next_handle, log_destination;
     uint32_t performance_mode, performance_configuration[2];
     unsigned performance_configured[2];
     botw_services_performance_fn performance_handler;
     void *performance_opaque;
+    botw_services_kernel_api kernel;
+    unsigned applet_ready, applet_foreground, applet_focus, applet_operation;
+    unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance;
+    uint64_t applet_resource_user_id;
+    uint32_t applet_event_write, applet_event_read;
+    uint32_t applet_messages[32];
+    unsigned applet_message_head, applet_message_count;
     botw_services_log_fn log;
     botw_services_memory_fn memory;
     void *opaque;
 };
 typedef struct {
     uint32_t type, command, token;
-    unsigned pid, domain, domain_close;
+    unsigned pid, domain, domain_close, copy_count;
+    uint32_t copy_handle;
     uint32_t object_id;
     const uint8_t *payload;
     size_t payload_size;
@@ -77,6 +89,12 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_LOGGER: return "lm.ILogger";
         case OBJECT_APM: return "apm.IPerformanceManager";
         case OBJECT_APM_SESSION: return "apm.ISession";
+        case OBJECT_APPLET_OE: return "appletOE";
+        case OBJECT_APPLET_PROXY: return "am.IApplicationProxy";
+        case OBJECT_COMMON_STATE: return "am.ICommonStateGetter";
+        case OBJECT_SELF_CONTROLLER: return "am.ISelfController";
+        case OBJECT_WINDOW_CONTROLLER: return "am.IWindowController";
+        case OBJECT_APPLICATION_FUNCTIONS: return "am.IApplicationFunctions";
     }
     return "<invalid>";
 }
@@ -120,18 +138,52 @@ static int object_handle(botw_services *s, Object *o, uint32_t *handle, char *er
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque) {
     if (!memory) return NULL;
     botw_services *s = calloc(1, sizeof *s);
+    if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
     if (s) { s->next_handle = 0x10000; s->log_destination = 0xffff; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
-    if (s) { s->performance_handler = handler; s->performance_opaque = opaque; }
+    if (s) { pthread_mutex_lock(&s->lock); s->performance_handler = handler; s->performance_opaque = opaque; pthread_mutex_unlock(&s->lock); }
+}
+void botw_services_set_kernel_api(botw_services *s, const botw_services_kernel_api *api) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock);
+    if (!s->applet_event_write && !s->applet_event_read) s->kernel = api ? *api : (botw_services_kernel_api){0};
+    pthread_mutex_unlock(&s->lock);
+}
+static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
+    if (!user_id || (foreground != 0 && foreground != 1) || (focused != 0 && focused != 1) || (!foreground && focused) || operation > 1)
+        return problem(error, cap, "invalid host applet state user=0x%llx foreground=%d focused=%d operation=%u", (unsigned long long)user_id, foreground, focused, operation);
+    if (s->applet_ready && s->applet_resource_user_id != user_id)
+        return problem(error, cap, "host applet resource user ID cannot change during a run");
+    unsigned focus = !foreground ? 3 : focused ? 1 : 2;
+    uint32_t messages[2]; unsigned count = 0;
+    if (s->applet_ready && s->applet_focus != focus) messages[count++] = 15;
+    if (s->applet_ready && s->applet_operation != operation && s->applet_notify_operation) messages[count++] = 30;
+    if (count > 32 - s->applet_message_count) return problem(error, cap, "applet notification queue full");
+    if (count && s->applet_event_write && s->kernel.signal_event(s->kernel.opaque, s->applet_event_write, error, cap)) return -1;
+    for (unsigned i = 0; i < count; i++) s->applet_messages[(s->applet_message_head + s->applet_message_count++) % 32] = messages[i];
+    s->applet_ready = 1; s->applet_resource_user_id = user_id;
+    s->applet_foreground = (unsigned)foreground; s->applet_focus = focus; s->applet_operation = operation;
+    if (!foreground) s->applet_foreground_rights = 0;
+    return 0;
+}
+int botw_services_set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
+    if (!s) return problem(error, cap, "host applet state requires service context");
+    pthread_mutex_lock(&s->lock);
+    int result = set_applet_state(s, user_id, foreground, focused, operation, error, cap);
+    pthread_mutex_unlock(&s->lock); return result;
 }
 void botw_services_destroy(botw_services *s) {
     if (!s) return;
+    pthread_mutex_lock(&s->lock);
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) release_session(s->handles[i].session);
-    free(s);
+    char error[128];
+    if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, error, sizeof error);
+    if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
+    pthread_mutex_unlock(&s->lock); pthread_mutex_destroy(&s->lock); free(s);
 }
-int botw_services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
+static int services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
     if (!s || !name || !handle || length != 3 || memcmp(name, "sm:", 3))
         return problem(error, cap, "unsupported named port %.*s (only sm: is registered)", (int)(length < 32 ? length : 32), name ? name : "");
     Object *o = new_object(OBJECT_SM);
@@ -139,7 +191,7 @@ int botw_services_connect(botw_services *s, const char *name, size_t length, uin
     if (object_handle(s, o, handle, error, cap)) return -1;
     emit(s, "ipc_connect port=sm: handle=0x%x", *handle); return 0;
 }
-int botw_services_close(botw_services *s, uint32_t id, char *error, size_t cap) {
+static int services_close(botw_services *s, uint32_t id, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, id) : NULL;
     if (!handle) return problem(error, cap, "CloseHandle invalid or closed IPC handle=0x%x", id);
     Session *session = handle->session; handle->id = 0; handle->session = NULL; release_session(session);
@@ -171,11 +223,16 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     if (b >> 31) {
         if (!checked_span(offset, 4, capacity)) return problem(error, cap, "truncated HIPC special header");
         uint32_t special = load32(ipc + offset); offset += 4;
-        if (special & ~1u) return problem(error, cap, "IPC input handles/reserved special header unsupported (0x%x)", special);
+        if ((special & ~0x1fu) || ((special >> 1) & 15) > 1) return problem(error, cap, "IPC move/multiple input handles or reserved special header unsupported (0x%x)", special);
+        r->copy_count = (special >> 1) & 15;
         r->pid = special & 1;
         if (r->pid) {
             if (!checked_span(offset, 8, capacity)) return problem(error, cap, "truncated HIPC PID");
             offset += 8; /* Kernel supplies host process identity, never trusts placeholder. */
+        }
+        if (r->copy_count) {
+            if (!checked_span(offset, 4, capacity)) return problem(error, cap, "truncated HIPC copy handle");
+            r->copy_handle = load32(ipc + offset); offset += 4;
         }
     }
     if (!checked_span(offset, (size_t)statics * 8 + (size_t)sends * 12, capacity))
@@ -204,7 +261,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
             return problem(error, cap, "CMIF domain input objects/reserved fields unsupported");
         offset += 16;
         if (type == 2) {
-            if (data_size || r->input_count || r->pid) return problem(error, cap, "CMIF domain Close has unexpected data");
+            if (data_size || r->input_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data");
             r->domain_close = 1; return 0;
         }
         if (type != 1 || data_size < 16 || !checked_span(offset, data_size, raw_end))
@@ -239,7 +296,7 @@ static int return_object(botw_services *s, Session *session, Object *o, uint8_t 
     response(ipc, capacity, r, NULL, 0, handle, object_id); return 0;
 }
 static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
-    if (r->input_count || r->pid) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
+    if (r->input_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
     uint32_t handle = 0, object_id;
     switch (r->command) {
         case 0:
@@ -311,7 +368,76 @@ static int logger_packet(botw_services *s, const Request *r, char *error, size_t
     }
     return 0;
 }
-int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
+static int applet_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->applet_ready) return problem(error, cap, "appletOE requires measured host lifecycle state");
+    if (r->input_count) return problem(error, cap, "unsupported applet input buffer service=%s command=%u", kind_name(o->kind), r->command);
+    if (o->kind == OBJECT_APPLET_OE && r->command == 0) {
+        if (!r->pid || r->copy_count != 1 || r->payload_size < 8 || load64(r->payload) || !s->kernel.is_process_handle || !s->kernel.is_process_handle(s->kernel.opaque, r->copy_handle))
+            return problem(error, cap, "appletOE.OpenApplicationProxy requires PID, reserved=0 and one current-process copy handle (got=0x%x)", r->copy_handle);
+        Object *proxy = new_object(OBJECT_APPLET_PROXY);
+        if (!proxy) return problem(error, cap, "allocate ApplicationProxy failed");
+        return return_object(s, session, proxy, ipc, capacity, r, 0, error, cap);
+    }
+    if (r->pid || r->copy_count) return problem(error, cap, "unexpected applet PID/handle service=%s command=%u", kind_name(o->kind), r->command);
+    if (o->kind == OBJECT_APPLET_PROXY) {
+        enum ObjectKind child;
+        switch (r->command) {
+            case 0: child = OBJECT_COMMON_STATE; break;
+            case 1: child = OBJECT_SELF_CONTROLLER; break;
+            case 2: child = OBJECT_WINDOW_CONTROLLER; break;
+            case 20: child = OBJECT_APPLICATION_FUNCTIONS; break;
+            default: return problem(error, cap, "unsupported ApplicationProxy interface command=%u", r->command);
+        }
+        Object *object = new_object(child);
+        if (!object) return problem(error, cap, "allocate %s failed", kind_name(child));
+        return return_object(s, session, object, ipc, capacity, r, 0, error, cap);
+    }
+    if (o->kind == OBJECT_COMMON_STATE) {
+        if (r->command == 0) {
+            if (!s->kernel.create_event || !s->kernel.duplicate_handle || !s->kernel.signal_event || !s->kernel.clear_event || !s->kernel.close_handle)
+                return problem(error, cap, "ICommonStateGetter.GetEventHandle requires real kernel event API");
+            if (!s->applet_event_read && s->kernel.create_event(s->kernel.opaque, s->applet_message_count != 0, &s->applet_event_write, &s->applet_event_read, error, cap)) return -1;
+            uint32_t handle = 0;
+            if (s->kernel.duplicate_handle(s->kernel.opaque, s->applet_event_read, &handle, error, cap)) return -1;
+            response(ipc, capacity, r, NULL, 0, handle, 0);
+            store32(ipc + 8, 1u << 1); /* HIPC copy, independent client read endpoint. */
+            return 0;
+        }
+        if (r->command == 1) {
+            if (!s->applet_message_count) {
+                response(ipc, capacity, r, NULL, 0, 0, 0);
+                store32(ipc + 16 + (r->domain ? 16 : 0) + 8, 0x680); /* AM: no messages */
+                return 0;
+            }
+            if (s->applet_message_count == 1 && s->applet_event_read && s->kernel.clear_event(s->kernel.opaque, s->applet_event_read, error, cap)) return -1;
+            uint32_t message = s->applet_messages[s->applet_message_head];
+            s->applet_message_head = (s->applet_message_head + 1) % 32; s->applet_message_count--;
+            response(ipc, capacity, r, &message, 4, 0, 0); return 0;
+        }
+        if (r->command == 5 || r->command == 9) {
+            uint8_t value = (uint8_t)(r->command == 5 ? s->applet_operation : s->applet_focus);
+            response(ipc, capacity, r, &value, 1, 0, 0); return 0;
+        }
+        if (r->command == 6) { response(ipc, capacity, r, &s->performance_mode, 4, 0, 0); return 0; }
+    } else if (o->kind == OBJECT_SELF_CONTROLLER && (r->command == 11 || r->command == 12)) {
+        if (r->payload_size < 1 || r->payload[0] > 1) return problem(error, cap, "SelfController notification command=%u requires bool", r->command);
+        if (r->command == 11) s->applet_notify_operation = r->payload[0]; else s->applet_notify_performance = r->payload[0];
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    } else if (o->kind == OBJECT_WINDOW_CONTROLLER) {
+        if (r->command == 1) { response(ipc, capacity, r, &s->applet_resource_user_id, 8, 0, 0); return 0; }
+        if (r->command == 10) {
+            if (!s->applet_foreground || s->applet_focus != 1) return problem(error, cap, "WindowController.AcquireForegroundRights requires active focused host app");
+            s->applet_foreground_rights = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
+    } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 40) {
+        if (!s->applet_foreground) return problem(error, cap, "ApplicationFunctions.NotifyRunning requires foreground host app");
+        s->applet_running = 1; uint8_t active = 1;
+        emit(s, "applet_running=true resource_user_id=0x%llx", (unsigned long long)s->applet_resource_user_id);
+        response(ipc, capacity, r, &active, 1, 0, 0); return 0;
+    }
+    return problem(error, cap, "unsupported IPC service=%s command=%u", kind_name(o->kind), r->command);
+}
+static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
     if (!handle->session) return problem(error, cap, "SendSyncRequest server endpoint closed for IPC handle=0x%x", handle_id);
@@ -337,6 +463,7 @@ int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
+    if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
     if (o->kind == OBJECT_SM) {
         if (r.input_count) return problem(error, cap, "sm: command=%u unexpected input buffer", r.command);
@@ -350,10 +477,13 @@ int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_
             enum ObjectKind service_kind;
             if (!memcmp(name, "lm\0\0\0\0\0\0", 8)) service_kind = OBJECT_LM;
             else if (!memcmp(name, "apm\0\0\0\0\0", 8)) service_kind = OBJECT_APM;
+            else if (!memcmp(name, "appletOE", 8)) service_kind = OBJECT_APPLET_OE;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_APPLICATION_FUNCTIONS) {
+        return applet_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_APM) {
         if (r.input_count || r.pid) return problem(error, cap, "apm manager command=%u unexpected buffers/PID", r.command);
         if (r.command == 0) {
@@ -403,4 +533,22 @@ int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_
         }
     }
     return problem(error, cap, "unsupported IPC service=%s command=%u", kind_name(o->kind), r.command);
+}
+
+/* Service -> kernel is the sole lock order. Kernel callbacks must never call
+ * services again. Context destruction requires callers to join guest threads. */
+int botw_services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
+    if (!s) return problem(error, cap, "ConnectToNamedPort requires service context");
+    pthread_mutex_lock(&s->lock); int result = services_connect(s, name, length, handle, error, cap);
+    pthread_mutex_unlock(&s->lock); return result;
+}
+int botw_services_close(botw_services *s, uint32_t handle, char *error, size_t cap) {
+    if (!s) return problem(error, cap, "CloseHandle requires service context");
+    pthread_mutex_lock(&s->lock); int result = services_close(s, handle, error, cap);
+    pthread_mutex_unlock(&s->lock); return result;
+}
+int botw_services_send(botw_services *s, uint32_t handle, void *buffer, size_t capacity, char *error, size_t cap) {
+    if (!s) return problem(error, cap, "SendSyncRequest requires service context");
+    pthread_mutex_lock(&s->lock); int result = services_send(s, handle, buffer, capacity, error, cap);
+    pthread_mutex_unlock(&s->lock); return result;
 }

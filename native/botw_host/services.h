@@ -22,6 +22,22 @@ typedef int (*botw_services_performance_fn)(void *opaque, uint32_t mode,
     uint32_t configuration, int active, char *error, size_t error_capacity);
 void botw_services_set_performance_handler(botw_services *services,
     botw_services_performance_fn handler, void *opaque);
+/* Kernel bridge: events retain independent read/write endpoints. GetEventHandle
+ * returns a duplicated read endpoint to the guest using a HIPC copy handle. */
+typedef struct {
+    void *opaque;
+    int (*create_event)(void *, int, uint32_t *, uint32_t *, char *, size_t);
+    int (*duplicate_handle)(void *, uint32_t, uint32_t *, char *, size_t);
+    int (*signal_event)(void *, uint32_t, char *, size_t);
+    int (*clear_event)(void *, uint32_t, char *, size_t);
+    int (*close_handle)(void *, uint32_t, char *, size_t);
+    int (*is_process_handle)(void *, uint32_t);
+} botw_services_kernel_api;
+void botw_services_set_kernel_api(botw_services *services, const botw_services_kernel_api *api);
+/* Supply measured host state. Focus/foreground are booleans; operation_mode is
+ * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
+int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,
+    int foreground, int focused, uint32_t operation_mode, char *error, size_t error_capacity);
 /* 0 means executed. -1 means unsupported/invalid and error contains a concrete
  * diagnostic; callers must stop guest execution instead of forging success. */
 int botw_services_connect(botw_services *services, const char *name, size_t name_length,
