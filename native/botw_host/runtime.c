@@ -19,7 +19,6 @@
 #include <fcntl.h>
 #include <math.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 #include <pthread.h>
@@ -725,9 +724,9 @@ static int audio_read_guest(void *opaque, uint64_t source, void *destination, si
     if (!bytes) return 0;
     if (!destination || !services_memory(NULL, source, bytes, 0))
         return audio_copy_error(error, capacity, "guest read range", KERN_INVALID_ADDRESS);
-    mach_vm_size_t copied = 0;
-    kern_return_t result = mach_vm_read_overwrite(mach_task_self(), source, bytes,
-        (mach_vm_address_t)(uintptr_t)destination, &copied);
+    vm_size_t copied = 0;
+    kern_return_t result = vm_read_overwrite(mach_task_self(), (vm_address_t)source, (vm_size_t)bytes,
+        (vm_address_t)(uintptr_t)destination, &copied);
     if (result != KERN_SUCCESS || copied != bytes)
         return audio_copy_error(error, capacity, "protected guest read", result == KERN_SUCCESS ? KERN_FAILURE : result);
     return 0;
@@ -738,7 +737,7 @@ static int audio_write_guest(void *opaque, uint64_t destination, const void *sou
     if (!bytes) return 0;
     if (!source || bytes > UINT32_MAX || !services_memory(NULL, destination, bytes, 1))
         return audio_copy_error(error, capacity, "guest write range", KERN_INVALID_ADDRESS);
-    kern_return_t result = mach_vm_write(mach_task_self(), destination,
+    kern_return_t result = vm_write(mach_task_self(), (vm_address_t)destination,
         (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
     return result == KERN_SUCCESS ? 0 : audio_copy_error(error, capacity, "protected guest write", result);
 }
