@@ -802,7 +802,16 @@ static void configure_resource_backends(const char *documents) {
     state.savefs = botw_savefs_open(path, "01007ef00011e000", state.local_user.uid_hex, 0, &save_error);
     if (!state.savefs) fail("open local save filesystem: %s", save_error.message);
     botw_services_set_savefs(state.services, state.savefs);
-    report("local_offline_user_ready=true save_backend_ready=true game_save_verified=false");
+    /* Publish and explicitly preselect the persistent host-local user for this
+     * process launch. The account bridge checks this exact SaveFS title/UID;
+     * no Nintendo profile or online authorization is inferred from it. */
+    if (botw_services_set_local_user(state.services, state.local_user.uid,
+            "app-documents:botw-profile/uid.bin", error, sizeof error))
+        fail("publish local offline account: %s", error);
+    if (botw_services_set_preselected_local_user(state.services, state.local_user.uid,
+            error, sizeof error)) fail("preselect local offline account: %s", error);
+    report("local_offline_user_ready=true save_backend_ready=true game_save_verified=false "
+        "local_account_published=true local_user_preselected=true");
     /* This target registers only the mounted base image. A downloaded update
      * archive is not installed content and must not stand in for patch RomFS. */
     if (botw_services_set_patch_absent(state.services, 1, error, sizeof error))
