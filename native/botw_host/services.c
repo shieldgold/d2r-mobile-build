@@ -12,6 +12,7 @@
 #include "../botw_resources/romfs.h"
 #include "../botw_resources/savefs.h"
 #include "../botw_input/input.h"
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -40,7 +41,7 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
     OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE,
-    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT };
+    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -53,6 +54,8 @@ typedef struct Object {
     uint64_t pid;
     StorageBacking *storage;
     botw_romfs *romfs;
+    botw_savefs *savefs;
+    uint32_t file_mode;
     char *file_path;
     uint8_t account_uid[16];
 } Object;
@@ -125,7 +128,7 @@ typedef struct {
     size_t payload_size;
     uint64_t input_address;
     size_t input_size;
-    unsigned input_count, output_count, output_static_count;
+    unsigned input_count, output_count, input_static_count, output_static_count;
     uint64_t output_address;
     size_t output_size;
 } Request;
@@ -172,6 +175,8 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_PCTL_SERVICE: return "pctl.IParentalControlService";
         case OBJECT_ACCOUNT: return "acc:u0";
         case OBJECT_ACCOUNT_CONTEXT: return "acc.IBaasAccountManagerForApplication(local-context)";
+        case OBJECT_SAVE_FILESYSTEM: return "fs.IFileSystem(SaveFS)";
+        case OBJECT_SAVE_FILE: return "fs.IFile(SaveFS)";
     }
     return "<invalid>";
 }
@@ -305,7 +310,7 @@ void botw_services_set_savefs(botw_services *s, botw_savefs *savefs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->savefs = savefs; pthread_mutex_unlock(&s->lock);
 }
-static int local_user_mount(botw_services *s, const uint8_t uid[16], char *error, size_t cap) {
+static int local_user_savefs(botw_savefs *savefs, const uint8_t uid[16], char *error, size_t cap) {
     static const char hex[] = "0123456789abcdef";
     char user_hex[33]; unsigned nonzero = 0;
     for (unsigned i = 0; i < 16; i++) {
@@ -313,10 +318,13 @@ static int local_user_mount(botw_services *s, const uint8_t uid[16], char *error
     }
     user_hex[32] = 0;
     if (!nonzero) return problem(error, cap, "local user UID must be nonzero");
-    if (!s->savefs) return problem(error, cap, "local user requires borrowed SaveFS mount");
-    if (strcmp(botw_savefs_title_id(s->savefs), LOCAL_USER_TITLE) || strcmp(botw_savefs_user_id(s->savefs), user_hex))
+    if (!savefs) return problem(error, cap, "local user requires borrowed SaveFS mount");
+    if (strcmp(botw_savefs_title_id(savefs), LOCAL_USER_TITLE) || strcmp(botw_savefs_user_id(savefs), user_hex))
         return problem(error, cap, "local user does not match SaveFS immutable BOTW title/user identity");
     return 0;
+}
+static int local_user_mount(botw_services *s, const uint8_t uid[16], char *error, size_t cap) {
+    return local_user_savefs(s->savefs, uid, error, cap);
 }
 int botw_services_set_local_user(botw_services *s, const uint8_t uid[16], const char *source, char *error, size_t cap) {
     if (!s || !uid || !source || !*source) return problem(error, cap, "local user requires context, nonzero UID and explicit local identity source");
@@ -522,6 +530,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
         uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
         if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
+        r->input_static_count++;
     }
     for (unsigned i = 0; i < sends + recvs; i++, offset += 12) {
         uint32_t size = load32(ipc + offset), low = load32(ipc + offset + 4), high = load32(ipc + offset + 8);
@@ -587,9 +596,10 @@ static int result_response(uint8_t *ipc, size_t capacity, const Request *r, uint
     store32(ipc + 16 + (r->domain ? 16 : 0) + 8, result); return 0;
 }
 static int exact_payload(const Request *r, size_t expected, const char *method, char *error, size_t cap) {
-    /* Only nondomain HIPC has unsized trailing alignment. Domain data_size is
-     * exact; neither path may hide unknown nonzero input in that padding. */
-    if (r->payload_size < expected || (r->domain ? r->payload_size != expected : r->payload_size - expected > 15))
+    /* cmifMakeRequest reserves 16 alignment bytes; an already aligned data
+     * start (e.g. one X descriptor) leaves all 16 at the end. Domain data_size
+     * is exact; neither path may hide unknown nonzero input in its padding. */
+    if (r->payload_size < expected || (r->domain ? r->payload_size != expected : r->payload_size - expected > 16))
         return problem(error, cap, "%s requires %zu input bytes (got=%zu domain=%u)", method, expected, r->payload_size, r->domain);
     for (size_t i = expected; i < r->payload_size; i++)
         if (r->payload[i]) return problem(error, cap, "%s has unexpected input beyond %zu bytes", method, expected);
@@ -933,6 +943,136 @@ static int fs_no_input_payload(const Request *r, const char *method, char *error
         if (r->payload[i]) return problem(error, cap, "fsp-srv.%s takes no input payload", method);
     return 0;
 }
+static int save_backend_response(botw_services *s, uint8_t *ipc, size_t capacity, const Request *r,
+                                 const char *method, const botw_savefs_error *backend, uint64_t actual, char *error, size_t cap) {
+    /* Only established FS results are translated. Unmapped host failures stop
+     * with the real errno and partial byte count instead of fabricated success.
+     * Numeric descriptions reference libvapours/results/fs_results.hpp. */
+    uint32_t description = backend->code == ENOENT ? 1 : backend->code == EEXIST ? 2 :
+        (backend->code == EDQUOT || backend->code == ENOSPC) ? 30 : 0;
+    emit(s, "savefs_error method=%s errno=%d actual_bytes=%llu detail=%s", method, backend->code, (unsigned long long)actual, backend->message);
+    if (description) return fs_result_response(ipc, capacity, r, 2u | description << 9);
+    return problem(error, cap, "SaveFS %s errno=%d actual_bytes=%llu: %s", method, backend->code, (unsigned long long)actual, backend->message);
+}
+static int save_path_input(const Request *r, char path[0x301], char *error, size_t cap) {
+    if (r->input_count != 1 || r->input_static_count != 1 || r->input_size > 0x301)
+        return problem(error, cap, "SaveFS path requires one checked X pointer of at most 0x301 bytes");
+    const char *input = (const char *)(uintptr_t)r->input_address;
+    const char *end = memchr(input, 0, r->input_size);
+    if (!end) return problem(error, cap, "SaveFS path is not NUL terminated");
+    memcpy(path, input, (size_t)(end - input) + 1); return 0;
+}
+static int save_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->local_user_ready || !o->savefs) return problem(error, cap, "SaveFS object has no persistent local user/mount binding");
+    /* An opened object pins its borrowed backend identity, independently of
+     * later set_savefs calls. The owner keeps every borrowed mount alive until
+     * service/object destruction. File objects do not depend on a live IFS. */
+    if (local_user_savefs(o->savefs, s->local_uid, error, cap)) return -1;
+    if (r->pid || r->copy_count) return problem(error, cap, "SaveFS command=%u unexpected PID/handles", r->command);
+    botw_savefs_error backend = {0};
+    if (o->kind == OBJECT_SAVE_FILESYSTEM) {
+        if (r->output_count) return problem(error, cap, "SaveFS IFileSystem command=%u does not accept output buffers", r->command);
+        if (r->command == 10) {
+            if (r->input_count) return problem(error, cap, "SaveFS IFileSystem.Commit does not accept buffers");
+            if (exact_payload(r, 0, "SaveFS IFileSystem.Commit", error, cap)) return -1;
+            if (botw_savefs_commit(o->savefs, &backend)) return save_backend_response(s, ipc, capacity, r, "IFileSystem.Commit", &backend, 0, error, cap);
+            response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
+        if (r->command != 0 && r->command != 2 && r->command != 7 && r->command != 8)
+            return problem(error, cap, "unsupported SaveFS IFileSystem command=%u: delete/rename/directory/recursive/free-space operations are not connected", r->command);
+        size_t payload_size = r->command == 0 ? 16 : r->command == 8 ? 4 : 0;
+        if (exact_payload(r, payload_size, "SaveFS IFileSystem path command", error, cap)) return -1;
+        char path[0x301]; if (save_path_input(r, path, error, cap)) return -1;
+        if (r->command == 0) {
+            uint64_t size = load64(r->payload + 8);
+            /* +4 is alignment padding, not a second option field. BigFile=1
+             * means a concatenation directory and has no backend here. */
+            if (load32(r->payload) || size > INT64_MAX) return problem(error, cap, "SaveFS CreateFile requires option=0 and nonnegative signed size");
+            if (botw_savefs_create(o->savefs, path, size, &backend)) return save_backend_response(s, ipc, capacity, r, "IFileSystem.CreateFile", &backend, 0, error, cap);
+            response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
+        if (r->command == 2) {
+            if (botw_savefs_mkdir(o->savefs, path, &backend)) return save_backend_response(s, ipc, capacity, r, "IFileSystem.CreateDirectory", &backend, 0, error, cap);
+            response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
+        uint32_t mode = r->command == 8 ? load32(r->payload) : 0;
+        if (r->command == 8 && ((mode & ~7u) || !(mode & 3u) || ((mode & 4u) && !(mode & 2u))))
+            return problem(error, cap, "SaveFS OpenFile invalid/unsupported mode=0x%x (Read=1 Write=2 AllowAppend=4)", mode);
+        botw_savefs_entry entry;
+        if (botw_savefs_stat(o->savefs, path, &entry, &backend)) return save_backend_response(s, ipc, capacity, r, "IFileSystem.GetEntryType/OpenFile", &backend, 0, error, cap);
+        if (r->command == 7) {
+            uint32_t type = entry.is_directory ? 0 : 1;
+            response(ipc, capacity, r, &type, 4, 0, 0); return 0;
+        }
+        if (entry.is_directory) return problem(error, cap, "SaveFS OpenFile path is a directory");
+        /* Probe actual OS read/write permissions without changing bytes. The
+         * path backend currently opens files for each checked operation; no
+         * rename/delete commands are exposed that could retarget a live file. */
+        size_t actual = 0;
+        int failed = mode & 2u ? botw_savefs_pwrite(o->savefs, path, 0, NULL, 0, &actual, &backend) :
+            botw_savefs_pread(o->savefs, path, 0, NULL, 0, &actual, &backend);
+        if (failed) return save_backend_response(s, ipc, capacity, r, "IFileSystem.OpenFile", &backend, 0, error, cap);
+        Object *file = new_object(OBJECT_SAVE_FILE);
+        if (!file) return problem(error, cap, "allocate SaveFS file object failed");
+        size_t length = strlen(path) + 1; file->file_path = malloc(length);
+        if (!file->file_path) { release_object(file); return problem(error, cap, "allocate SaveFS file path failed"); }
+        memcpy(file->file_path, path, length); file->savefs = o->savefs; file->file_mode = mode;
+        return return_object(s, session, file, ipc, capacity, r, 0, error, cap);
+    }
+    if (r->command == 2 || r->command == 3 || r->command == 4) {
+        if (r->input_count || r->output_count) return problem(error, cap, "SaveFS IFile command=%u does not accept buffers", r->command);
+        if (exact_payload(r, r->command == 3 ? 8 : 0, "SaveFS IFile metadata command", error, cap)) return -1;
+        if (r->command == 2) {
+            /* The backend's durable primitive syncs the entire actual save
+             * store; close itself never runs this operation. */
+            if (botw_savefs_commit(o->savefs, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.Flush", &backend, 0, error, cap);
+        } else if (r->command == 3) {
+            if (!(o->file_mode & 2u)) return fs_result_response(ipc, capacity, r, 2u | (6203u << 9));
+            uint64_t size = load64(r->payload);
+            if (size > INT64_MAX) return problem(error, cap, "SaveFS SetSize requires nonnegative signed size");
+            if (botw_savefs_truncate(o->savefs, o->file_path, size, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.SetSize", &backend, 0, error, cap);
+        } else {
+            botw_savefs_entry entry;
+            if (botw_savefs_stat(o->savefs, o->file_path, &entry, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.GetSize", &backend, 0, error, cap);
+            if (entry.is_directory) return problem(error, cap, "SaveFS GetSize file path became a directory");
+            response(ipc, capacity, r, &entry.size, 8, 0, 0); return 0;
+        }
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (r->command == 0 || r->command == 1) {
+        int write = r->command == 1;
+        if (exact_payload(r, 24, write ? "SaveFS IFile.Write" : "SaveFS IFile.Read", error, cap)) return -1;
+        uint32_t option = load32(r->payload); uint64_t offset = load64(r->payload + 8), length = load64(r->payload + 16);
+        if (option > (unsigned)write || offset > INT64_MAX || length > (uint64_t)INT64_MAX - offset || length > SIZE_MAX)
+            return problem(error, cap, "SaveFS IFile.%s unsupported option/offset/length option=%u offset=%llu length=%llu", write ? "Write" : "Read", option, (unsigned long long)offset, (unsigned long long)length);
+        if (write ? r->output_count || r->input_static_count || r->input_count != (length ? 1u : 0u) || length > r->input_size :
+            r->input_count || r->output_static_count || r->output_count != (length ? 1u : 0u) || length > r->output_size)
+            return problem(error, cap, "SaveFS IFile.%s requires a checked %s buffer covering the full requested span", write ? "Write" : "Read", write ? "A input" : "B output");
+        if (!(o->file_mode & (write ? 2u : 1u))) return fs_result_response(ipc, capacity, r, 2u | ((write ? 6203u : 6202u) << 9));
+        if (write && length && !(o->file_mode & 4u)) {
+            botw_savefs_entry entry;
+            if (botw_savefs_stat(o->savefs, o->file_path, &entry, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.Write size check", &backend, 0, error, cap);
+            if (offset > entry.size || length > entry.size - offset) return fs_result_response(ipc, capacity, r, 2u | (6201u << 9));
+        }
+        size_t done = 0;
+        while ((uint64_t)done < length) {
+            size_t chunk = length - done > BUFFER_LIMIT ? BUFFER_LIMIT : (size_t)(length - done), actual = 0;
+            int failed = write ? botw_savefs_pwrite(o->savefs, o->file_path, offset + done, (const void *)(uintptr_t)(r->input_address + done), chunk, &actual, &backend) :
+                botw_savefs_pread(o->savefs, o->file_path, offset + done, (void *)(uintptr_t)(r->output_address + done), chunk, &actual, &backend);
+            if (actual > chunk) return problem(error, cap, "SaveFS backend returned count beyond requested chunk");
+            done += actual;
+            if (failed) return save_backend_response(s, ipc, capacity, r, write ? "IFile.Write" : "IFile.Read", &backend, done, error, cap);
+            if (actual < chunk) {
+                if (write) return problem(error, cap, "SaveFS write returned short success actual_bytes=%zu", done);
+                break; /* A real file EOF is a successful short read. */
+            }
+        }
+        if (write && option && botw_savefs_commit(o->savefs, &backend)) return save_backend_response(s, ipc, capacity, r, "IFile.Write Flush", &backend, done, error, cap);
+        uint64_t actual = done;
+        response(ipc, capacity, r, write ? NULL : &actual, write ? 0 : 8, 0, 0); return 0;
+    }
+    return problem(error, cap, "unsupported SaveFS IFile command=%u", r->command);
+}
 static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (o->kind == OBJECT_FSP) {
         if (r->input_count || r->output_count || r->copy_count) return problem(error, cap, "fsp-srv command=%u unexpected buffers/handles", r->command);
@@ -941,6 +1081,19 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
             o->initialized = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
         }
         if (!o->initialized || r->pid) return problem(error, cap, "fsp-srv requires initialized client and no unexpected PID");
+        if (r->command == 51) {
+            if (exact_payload(r, 0x48, "fsp-srv.OpenSaveDataFileSystem", error, cap)) return -1;
+            if (!s->local_user_ready) return problem(error, cap, "OpenSaveDataFileSystem requires configured persistent local user");
+            if (local_user_mount(s, s->local_uid, error, cap)) return -1;
+            uint8_t expected[0x48] = {0}; expected[0] = 1; expected[40] = 1;
+            memcpy(expected + 16, s->local_uid, 16);
+            if (memcmp(r->payload, expected, sizeof expected))
+                return problem(error, cap, "OpenSaveDataFileSystem requires User space, current title=0, matching local UID, Account type=1 and zero remaining attributes");
+            Object *filesystem = new_object(OBJECT_SAVE_FILESYSTEM);
+            if (!filesystem) return problem(error, cap, "allocate SaveFS filesystem object failed");
+            filesystem->savefs = s->savefs;
+            return return_object(s, session, filesystem, ipc, capacity, r, 0, error, cap);
+        }
         if (r->command == 1005) {
             if (fs_no_input_payload(r, "GetGlobalAccessLogMode", error, cap)) return -1;
             /* No SDK Log/SD access-log sink has been installed, so this actual
@@ -1197,7 +1350,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     trace_request(s, o->kind, &r, handle_id);
     if (o->kind == OBJECT_SM) {
@@ -1222,6 +1375,8 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_SAVE_FILESYSTEM || o->kind == OBJECT_SAVE_FILE) {
+        return save_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_ACCOUNT || o->kind == OBJECT_ACCOUNT_CONTEXT) {
         return account_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_PCTL_FACTORY || o->kind == OBJECT_PCTL_SERVICE) {

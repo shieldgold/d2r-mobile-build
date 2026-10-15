@@ -1,6 +1,7 @@
 """Hand-built Horizon IPC fixtures; no Nintendo binaries or headers needed."""
 import ctypes as C
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import mmap
 import platform
 import shutil
@@ -49,12 +50,37 @@ class ServicesTests(unittest.TestCase):
         source = ROOT / 'native/botw_host/services.c'
         if not source.exists():
             raise AssertionError('Horizon services implementation is missing')
+        # The real backend still performs every host syscall by default. This
+        # narrow fsync seam counts durability attempts and can return one EIO;
+        # no SaveFS operation or IPC reply is replaced by a fake backend.
+        savefs_probe = Path(cls.build.name) / 'savefs-probe.c'
+        savefs_probe.write_text(r'''
+#define _GNU_SOURCE 1
+#define _DARWIN_C_SOURCE 1
+#include <unistd.h>
+#include <errno.h>
+#include <stdatomic.h>
+static atomic_uint sync_count;
+static atomic_int fail_sync;
+static int observed_fsync(int fd) {
+    atomic_fetch_add(&sync_count, 1);
+    if (atomic_exchange(&fail_sync, 0)) { errno = EIO; return -1; }
+    return fsync(fd);
+}
+#define fsync observed_fsync
+#include "SAVEFS_SOURCE"
+#undef fsync
+void botw_test_savefs_sync_reset(int fail_next) {
+    atomic_store(&sync_count, 0); atomic_store(&fail_sync, fail_next);
+}
+unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
+'''.replace('SAVEFS_SOURCE', str(ROOT / 'native/botw_resources/savefs.c')))
         flags = [shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
                  '-Werror', '-shared', '-fPIC', '-pthread']
         if platform.system() == 'Darwin':
             flags += ['-framework', 'Security']
         subprocess.run(flags + [str(source), str(ROOT / 'native/botw_resources/romfs.c'),
-                                str(ROOT / 'native/botw_resources/savefs.c'),
+                                str(savefs_probe),
                                 str(ROOT / 'native/botw_resources/local_user.c'),
                                 str(ROOT / 'native/botw_input/input.c'), '-o', str(cls.library)], check=True)
         cls.lib = C.CDLL(str(cls.library))
@@ -75,6 +101,8 @@ class ServicesTests(unittest.TestCase):
         cls.lib.botw_savefs_open.argtypes = [C.c_char_p, C.c_char_p, C.c_char_p, C.c_uint64, C.POINTER(RomfsError)]
         cls.lib.botw_savefs_open.restype = C.c_void_p
         cls.lib.botw_savefs_close.argtypes = [C.c_void_p]
+        cls.lib.botw_test_savefs_sync_reset.argtypes = [C.c_int]
+        cls.lib.botw_test_savefs_sync_count.restype = C.c_uint
 
     @classmethod
     def tearDownClass(cls):
@@ -87,6 +115,7 @@ class ServicesTests(unittest.TestCase):
             address >= start and address - start <= size and length <= size - (address - start)
             and (not write or writable) for start, size, writable in self.ranges)))
         self.ctx = self.lib.botw_services_create(self.log, self.memory, None)
+        self.lib.botw_test_savefs_sync_reset(0)
         self.error = C.create_string_buffer(1024)
         self.assertTrue(self.ctx)
 
@@ -211,7 +240,7 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(len(handles), 1)
         return handles[0]
 
-    def local_savefs(self, uid_hex=None, title=b'01007ef00011e000'):
+    def local_savefs(self, uid_hex=None, title=b'01007ef00011e000', quota=0):
         directory = tempfile.TemporaryDirectory(prefix='botw-account-services-')
         self.addCleanup(directory.cleanup)
         documents = Path(directory.name) / 'Documents'
@@ -222,13 +251,13 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(bytes(user), bytes(reopened))
         self.assertEqual(user.uid_hex.decode(), bytes(user.uid).hex())
         store = self.lib.botw_savefs_open(str(documents / 'botw-saves').encode(), title,
-                                         user.uid_hex if uid_hex is None else uid_hex, 0, C.byref(error))
+                                         user.uid_hex if uid_hex is None else uid_hex, quota, C.byref(error))
         self.assertTrue(store, error.message)
         self.addCleanup(self.lib.botw_savefs_close, store)
         return store, user, documents
 
-    def configure_local_user(self, preselect=True):
-        store, user, documents = self.local_savefs()
+    def configure_local_user(self, preselect=True, quota=0):
+        store, user, documents = self.local_savefs(quota=quota)
         self.lib.botw_services_set_savefs(self.ctx, store)
         self.assertEqual(self.lib.botw_services_set_local_user(self.ctx, user.uid,
                          b'app-documents:botw-profile/uid.bin', self.error, 1024), 0, self.error.value)
@@ -496,6 +525,349 @@ class ServicesTests(unittest.TestCase):
             self.assertEqual(self.lib.botw_services_send(self.ctx, handle, ipc, 256, self.error, 1024), 0, self.error.value)
             self.assertEqual(struct.unpack_from('<4sIII', bytes(ipc), 32), (b'SFCO', 0, result, 0x55667788))
         self.assertEqual(bytes(output), bytes(user.uid) + bytes(112))
+
+    @staticmethod
+    def save_mount_payload(uid):
+        payload = bytearray(0x48)
+        payload[0] = 1  # User space; current application ID=0.
+        payload[16:32] = bytes(uid)
+        payload[40] = 1  # Account save type; rank/index/system ID/reserved=0.
+        return bytes(payload)
+
+    def save_mount(self, user, domain=False, fsp=None):
+        fsp = self.service(self.initialized_sm(), b'fsp-srv') if fsp is None else fsp
+        root = 0
+        if domain:
+            raw, _ = self.send(fsp, self.request(0, kind=5))
+            data, _, _ = self.response(raw)
+            root, = struct.unpack_from('<I', data)
+        self.send(fsp, self.request(1, bytes(8), pid=True, domain=root))
+        raw, _ = self.send(fsp, self.request(51, self.save_mount_payload(user.uid), domain=root))
+        data, handles, count = self.response(raw, domain)
+        self.assertEqual((len(handles), count), (0, 1) if domain else (1, 0))
+        return (fsp, struct.unpack_from('<I', data)[0]) if domain else (handles[0], 0)
+
+    def save_path(self, handle, root, command, path, payload=b'', good=True):
+        if isinstance(path, str):
+            path = path.encode()
+        name = self.static_buffer(path)
+        self.ranges.append((C.addressof(name), len(name), False))
+        return self.send(handle, self.request(command, payload, domain=root,
+                         static=(C.addressof(name), len(name))), good=good)
+
+    def save_file(self, fs, root, path='/slot', mode=3):
+        raw, _ = self.save_path(fs, root, 8, path, struct.pack('<I', mode))
+        data, handles, count = self.response(raw, bool(root))
+        self.assertEqual((len(handles), count), (0, 1) if root else (1, 0))
+        return (fs, struct.unpack_from('<I', data)[0]) if root else (handles[0], 0)
+
+    def save_write(self, file, root, data, offset=0, option=0, good=True):
+        buffer = C.create_string_buffer(data)
+        self.ranges.append((C.addressof(buffer), len(buffer), False))
+        return self.send(file, self.request(1, struct.pack('<IIQQ', option, 0, offset, len(data)),
+                         domain=root, buffer=(C.addressof(buffer), len(data)) if data else None), good=good)
+
+    def save_read(self, file, root, size, offset=0, good=True):
+        buffer = C.create_string_buffer(b'\xa5' * max(size, 1), max(size, 1))
+        self.ranges.append((C.addressof(buffer), len(buffer), True))
+        raw, error = self.send(file, self.request(0, struct.pack('<IIQQ', 0, 0, offset, size),
+                               domain=root, receive=(C.addressof(buffer), size) if size else None), good=good)
+        if not good:
+            return raw, error
+        data, _, _ = self.response(raw, bool(root))
+        actual, = struct.unpack_from('<Q', data)
+        self.assertLessEqual(actual, size)
+        self.assertEqual(bytes(buffer)[actual:size], b'\xa5' * (size - actual))
+        return bytes(buffer)[:actual]
+
+    def assert_fs_result(self, raw, description, domain=False):
+        at = 32 if domain else 16
+        self.assertEqual(struct.unpack_from('<4sIII', raw, at), (b'SFCO', 0, 2 | description << 9, 0))
+
+    def test_save_mount_requires_exact_current_title_account_and_persistent_user_binding(self):
+        fsp = self.service(self.initialized_sm(), b'fsp-srv')
+        store, user, _ = self.local_savefs()
+        self.send(fsp, self.request(51, self.save_mount_payload(user.uid)), good=False)
+        self.send(fsp, self.request(1, bytes(8), pid=True))
+        self.send(fsp, self.request(51, self.save_mount_payload(user.uid)), good=False)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        self.assertEqual(self.lib.botw_services_set_local_user(self.ctx, user.uid, b'local-file', self.error, 1024), 0)
+        original = self.save_mount_payload(user.uid)
+        for offset in (0, 1, 8, 16, 32, 40, 41, 42, 44, 48, 56, 64, 71):
+            payload = bytearray(original)
+            payload[offset] ^= 1
+            self.send(fsp, self.request(51, payload), good=False)
+        self.send(fsp, self.request(51, original + b'\1'), good=False)
+        self.send(fsp, self.request(51, original, pid=True), good=False)
+        raw, _ = self.send(fsp, self.request(51, original))
+        _, handles, _ = self.response(raw)
+        self.assertEqual(len(handles), 1)
+
+    def test_save_files_create_write_flush_resize_commit_and_reopen_real_persisted_bytes(self):
+        store, user, documents = self.configure_local_user()
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode()
+        for domain in (False, True):
+            fs, root = self.save_mount(user, domain)
+            directory = '/domain' if domain else '/normal'
+            self.save_path(fs, root, 2, directory)
+            path = directory + '/slot'
+            self.save_path(fs, root, 0, path, struct.pack('<IIQ', 0, 0, 9))
+            for name, expected in ((directory, 0), (path, 1)):
+                raw, _ = self.save_path(fs, root, 7, name)
+                data, _, _ = self.response(raw, domain)
+                self.assertEqual(struct.unpack_from('<I', data)[0], expected)
+            file, child = self.save_file(fs, root, path)
+            self.save_write(file, child, b'save-data', option=1)
+            self.assertEqual(self.save_read(file, child, 16), b'save-data')
+            self.assertEqual(self.save_read(file, child, 8, offset=99), b'')
+            self.send(file, self.request(3, struct.pack('<Q', 4), domain=child))
+            raw, _ = self.send(file, self.request(4, domain=child))
+            data, _, _ = self.response(raw, domain)
+            self.assertEqual(struct.unpack_from('<Q', data)[0], 4)
+            self.send(file, self.request(2, domain=child))
+            self.send(fs, self.request(10, domain=root))
+            self.assertEqual((host / path[1:]).read_bytes(), b'save')
+            # An independent file object observes the actual committed bytes.
+            reopened, other = self.save_file(fs, root, path, mode=1)
+            self.assertEqual(self.save_read(reopened, other, 16), b'save')
+        self.assertTrue(store)
+
+    def test_save_file_access_modes_and_allow_append_are_enforced_before_mutation(self):
+        _, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
+        for mode in (0, 4, 5, 8, 0xffffffff):
+            self.save_path(fs, root, 8, '/slot', struct.pack('<I', mode), good=False)
+            self.save_path(fs, root, 8, '/missing', struct.pack('<I', mode), good=False)
+        read, _ = self.save_file(fs, root, mode=1)
+        raw, _ = self.save_write(read, 0, b'a')
+        self.assert_fs_result(raw, 6203)
+        raw, _ = self.send(read, self.request(3, struct.pack('<Q', 8)))
+        self.assert_fs_result(raw, 6203)
+        write, _ = self.save_file(fs, root, mode=2)
+        buffer = C.create_string_buffer(4)
+        self.ranges.append((C.addressof(buffer), 4, True))
+        raw, _ = self.send(write, self.request(0, struct.pack('<IIQQ', 0, 0, 0, 4), receive=(C.addressof(buffer), 4)))
+        self.assert_fs_result(raw, 6202)
+        raw, _ = self.save_write(write, 0, b'ab', offset=3)
+        self.assert_fs_result(raw, 6201)
+        self.assertEqual(host.read_bytes(), bytes(4))
+        self.save_write(write, 0, b'abcd')
+        append, _ = self.save_file(fs, root, mode=6)
+        self.save_write(append, 0, b'ef', offset=4)
+        # AllowAppend grants growth; it does not force offsets to end-of-file.
+        self.save_write(append, 0, b'Z', offset=1)
+        self.assertEqual(host.read_bytes(), b'aZcdef')
+
+    def test_save_objects_keep_original_mount_and_files_outlive_filesystem_sessions(self):
+        store, user, documents = self.configure_local_user()
+        first = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode()
+        fs, root = self.save_mount(user)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        file, child = self.save_file(fs, root)
+        other, other_user, other_documents = self.local_savefs()
+        self.lib.botw_services_set_savefs(self.ctx, other)
+        self.save_write(file, child, b'old!')
+        self.save_path(fs, root, 2, '/original')
+        self.assertEqual(self.close(fs), 0)
+        self.assertEqual(self.save_read(file, child, 8), b'old!')
+        self.assertEqual(self.close(file), 0)
+        self.send(file, self.request(4), good=False)
+        self.assertEqual((first / 'slot').read_bytes(), b'old!')
+        second = other_documents / 'botw-saves' / '01007ef00011e000' / other_user.uid_hex.decode()
+        self.assertEqual(list(second.iterdir()), [])
+        self.lib.botw_services_set_savefs(self.ctx, store)
+
+    def test_save_domain_file_copy_survives_domain_object_and_session_close(self):
+        store, user, _ = self.configure_local_user()
+        fs, root = self.save_mount(user, True)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        _, child = self.save_file(fs, root)
+        raw, _ = self.send(fs, self.request(1, struct.pack('<I', child), kind=5))
+        _, handles, _ = self.response(raw)
+        copy = handles[0]
+        for object_id in (child, root):
+            close = struct.pack('<II', 4, 8) + bytes(8) + struct.pack('<BBHIII', 2, 0, 0, object_id, 0, 0)
+            self.send(fs, close)
+            self.send(fs, self.request(4, domain=object_id), good=False)
+        self.assertEqual(self.close(fs), 0)
+        other, _, _ = self.local_savefs()
+        self.lib.botw_services_set_savefs(self.ctx, other)
+        self.save_write(copy, 0, b'live')
+        self.assertEqual(self.save_read(copy, 0, 8), b'live')
+        self.assertEqual(self.close(copy), 0)
+        self.assertEqual(self.close(copy), -1)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+
+    def test_save_missing_exists_paths_unknown_options_and_unsupported_operations_are_not_success(self):
+        _, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user, True)
+        raw, _ = self.save_path(fs, root, 7, '/missing')
+        self.assert_fs_result(raw, 1, True)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        raw, _ = self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        self.assert_fs_result(raw, 2, True)
+        for payload in (struct.pack('<IIQ', 1, 0, 4), struct.pack('<IIQ', 0, 0, 1 << 63), bytes(8)):
+            self.save_path(fs, root, 0, '/unsupported', payload, good=False)
+        for path in (b'/../outside', b'relative', b'/a//b', b'/bad\xff'):
+            self.save_path(fs, root, 0, path, struct.pack('<IIQ', 0, 0, 4), good=False)
+        for command in (1, 3, 4, 5, 6, 9, 11, 12, 999):
+            _, error = self.save_path(fs, root, command, '/slot', good=False)
+            self.assertIn('SaveFS', error)
+            self.assertIn(str(command), error)
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode()
+        self.assertEqual(sorted(x.name for x in host.iterdir()), ['slot'])
+
+    def test_save_file_bounds_unknown_options_and_bad_full_span_do_not_partly_write(self):
+        _, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user, True)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 8))
+        file, child = self.save_file(fs, root)
+        buffer = C.create_string_buffer(b'12345678')
+        self.ranges.append((C.addressof(buffer), len(buffer), False))
+        for option, offset, size in ((2, 0, 8), (0, 1 << 63, 8), (0, (1 << 63) - 4, 8), (0, 0, 9)):
+            self.send(file, self.request(1, struct.pack('<IIQQ', option, 0, offset, size), domain=child,
+                      buffer=(C.addressof(buffer), 8)), good=False)
+        self.send(file, self.request(1, struct.pack('<IIQQ', 0, 0, 0, 8), domain=child,
+                  buffer=(C.addressof(buffer) + 4, 8)), good=False)
+        for command, payload in ((2, b'\0'), (3, struct.pack('<Q', 1 << 63)), (4, b'\0'), (99, b'')):
+            self.send(file, self.request(command, payload, domain=child), good=False)
+        self.assertEqual(self.save_read(file, child, 0), b'')
+        self.save_write(file, child, b'')
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
+        self.assertEqual(host.read_bytes(), bytes(8))
+
+    def test_save_large_io_is_chunked_after_whole_descriptor_validation(self):
+        _, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user)
+        size = 16 * 1024 * 1024 + 37
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, size))
+        file, child = self.save_file(fs, root)
+        data = b'A' * (16 * 1024 * 1024) + b'B' * 37
+        self.save_write(file, child, data)
+        self.assertEqual(self.save_read(file, child, size + 31), data)
+        self.send(file, self.request(2))
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
+        self.assertEqual(host.read_bytes(), data)
+
+    def test_save_quota_and_commit_failures_preserve_error_and_actual_storage(self):
+        _, user, documents = self.configure_local_user(quota=4)
+        fs, root = self.save_mount(user)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        file, child = self.save_file(fs, root, mode=7)
+        raw, _ = self.save_write(file, child, b'12345')
+        self.assert_fs_result(raw, 30)
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode()
+        self.assertEqual((host / 'slot').read_bytes(), bytes(4))
+        self.save_write(file, child, b'abcd')
+        (host / 'unsafe').symlink_to(host / 'slot')
+        for handle, object_id, command in ((file, child, 2), (fs, root, 10)):
+            _, error = self.send(handle, self.request(command, domain=object_id), good=False)
+            self.assertIn('SaveFS', error)
+            self.assertIn('errno=', error)
+        _, error = self.save_write(file, child, b'efgh', option=1, good=False)
+        self.assertIn('actual_bytes=4', error)
+        self.assertEqual((host / 'slot').read_bytes(), b'efgh')
+        # Closing does not pretend to commit (nor traverse the unsafe entry).
+        self.assertEqual(self.close(file), 0)
+        self.assertEqual(self.close(fs), 0)
+
+    def test_save_flush_propagates_host_fsync_failure_and_close_never_implicitly_commits(self):
+        _, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 4))
+        file, _ = self.save_file(fs, root)
+        self.save_write(file, 0, b'init')
+        self.lib.botw_test_savefs_sync_reset(0)
+        self.assertEqual(self.close(fs), 0)
+        self.assertEqual(self.lib.botw_test_savefs_sync_count(), 0)
+        self.lib.botw_test_savefs_sync_reset(1)
+        _, error = self.send(file, self.request(2), good=False)
+        self.assertIn('IFile.Flush errno=' + str(errno.EIO), error)
+        self.assertEqual(self.lib.botw_test_savefs_sync_count(), 1)
+        self.lib.botw_test_savefs_sync_reset(1)
+        _, error = self.save_write(file, 0, b'real', option=1, good=False)
+        self.assertIn('IFile.Write Flush errno=' + str(errno.EIO), error)
+        self.assertIn('actual_bytes=4', error)
+        host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
+        self.assertEqual(host.read_bytes(), b'real')
+        fs, root = self.save_mount(user)
+        self.lib.botw_test_savefs_sync_reset(1)
+        _, error = self.send(fs, self.request(10), good=False)
+        self.assertIn('IFileSystem.Commit errno=' + str(errno.EIO), error)
+        self.lib.botw_test_savefs_sync_reset(0)
+        self.send(file, self.request(2))
+        self.assertGreaterEqual(self.lib.botw_test_savefs_sync_count(), 2)
+        self.lib.botw_test_savefs_sync_reset(1)
+        self.assertEqual(self.close(file), 0)
+        self.assertEqual(self.close(fs), 0)
+        self.assertEqual(self.lib.botw_test_savefs_sync_count(), 0)
+        self.lib.botw_test_savefs_sync_reset(0)
+
+    def test_save_committed_bytes_survive_service_and_backend_close_then_remount(self):
+        store, user, documents = self.configure_local_user()
+        fs, root = self.save_mount(user)
+        self.save_path(fs, root, 0, '/slot', struct.pack('<IIQ', 0, 0, 8))
+        file, _ = self.save_file(fs, root)
+        self.save_write(file, 0, b'persist!')
+        self.send(fs, self.request(10))
+        self.lib.botw_services_destroy(self.ctx)
+        self.ctx = None
+        # Release the actual mount's exclusive lock before opening it again.
+        for i, (callback, args, _) in enumerate(self._cleanups):
+            if callback == self.lib.botw_savefs_close and args == (store,):
+                self._cleanups.pop(i)
+                break
+        else:
+            self.fail('missing actual SaveFS cleanup')
+        self.lib.botw_savefs_close(store)
+        error = RomfsError()
+        reopened_user = LocalUser()
+        self.assertEqual(self.lib.botw_local_user_open(str(documents).encode(), C.byref(reopened_user), C.byref(error)), 0)
+        self.assertEqual(bytes(reopened_user), bytes(user))
+        reopened = self.lib.botw_savefs_open(str(documents / 'botw-saves').encode(),
+                    b'01007ef00011e000', reopened_user.uid_hex, 0, C.byref(error))
+        self.assertTrue(reopened, error.message)
+        self.addCleanup(self.lib.botw_savefs_close, reopened)
+        self.ctx = self.lib.botw_services_create(self.log, self.memory, None)
+        self.assertTrue(self.ctx)
+        self.lib.botw_services_set_savefs(self.ctx, reopened)
+        self.assertEqual(self.lib.botw_services_set_local_user(self.ctx, reopened_user.uid,
+                         b'reopened-local-file', self.error, 1024), 0, self.error.value)
+        fs, root = self.save_mount(reopened_user)
+        file, _ = self.save_file(fs, root, mode=1)
+        self.assertEqual(self.save_read(file, 0, 16), b'persist!')
+
+    def test_save_real_partial_host_write_keeps_error_and_changed_byte_count(self):
+        # RLIMIT_FSIZE is process-wide, so isolate it from the test runner and
+        # other agents. This calls the same real IPC + SaveFS chain in a child.
+        script = r'''
+import resource, signal, sys
+sys.path.insert(0, sys.argv[1])
+from test_botw_services import ServicesTests
+ServicesTests.setUpClass()
+t = ServicesTests()
+t.setUp()
+try:
+    _, user, documents = t.configure_local_user()
+    fs, root = t.save_mount(user)
+    t.save_path(fs, root, 0, '/slot', __import__('struct').pack('<IIQ', 0, 0, 0))
+    file, _ = t.save_file(fs, root, mode=6)
+    signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (4, 4))
+    _, error = t.save_write(file, 0, b'12345678', good=False)
+    assert 'actual_bytes=4' in error, error
+    assert 'errno=' + str(__import__('errno').EFBIG) in error, error
+    path = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
+    assert path.read_bytes() == b'1234'
+finally:
+    t.tearDown()
+    t.doCleanups()
+    ServicesTests.tearDownClass()
+'''
+        result = subprocess.run([sys.executable, '-c', script, str(ROOT / 'tests')], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def performance_handler(self):
         calls = []

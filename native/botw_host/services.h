@@ -62,8 +62,9 @@ void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
  * for a patch. Installed patch storage needs a separate supported backend. */
 int botw_services_set_patch_absent(botw_services *services, int known_absent,
     char *error, size_t error_capacity);
-/* Share the actual per-title/per-user host save mount. This borrowed instance
- * must outlive services; future save requests validate its immutable IDs. */
+/* Share the actual per-title/per-user host save mount. Every borrowed instance
+ * must outlive services, including after replacement: already opened IFS/file
+ * objects retain their original mount. New mounts validate immutable IDs. */
 void botw_services_set_savefs(botw_services *services, botw_savefs *savefs);
 /* Publish one persistent host-local offline user, once per services context.
  * The already borrowed SaveFS must have the audited BOTW title identity and
