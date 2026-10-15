@@ -32,7 +32,7 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
-    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE };
+    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -77,6 +77,10 @@ struct botw_services {
     size_t hid_npad_count;
     unsigned hid_npad_active;
     uint64_t hid_joy_hold;
+    unsigned aoc_ready;
+    uint64_t aoc_application_id, aoc_base_id;
+    uint32_t aoc_installed_ids[128], aoc_event_write, aoc_event_read;
+    size_t aoc_installed_count;
     size_t storage_bytes;
     float audio_main_gain, audio_library_gain, audio_transparent_rate;
     uint8_t *capture_images[3], *transition_image;
@@ -142,6 +146,7 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_ROMFS_FILE: return "fs.IFile(RomFS)";
         case OBJECT_HID: return "hid";
         case OBJECT_HID_APPLET_RESOURCE: return "hid.IAppletResource";
+        case OBJECT_AOC: return "aoc:u";
     }
     return "<invalid>";
 }
@@ -248,6 +253,25 @@ void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->romfs = romfs; pthread_mutex_unlock(&s->lock);
 }
+static int compare_u32(const void *a, const void *b) {
+    uint32_t first = *(const uint32_t *)a, second = *(const uint32_t *)b;
+    return (first > second) - (first < second);
+}
+int botw_services_set_addon_content(botw_services *s, uint64_t application_id, uint64_t base_id, const uint32_t *ids, size_t count, char *error, size_t cap) {
+    if (!s || !application_id || count > 128 || (count && !ids)) return problem(error, cap, "AOC requires application identity and at most 128 actual installed IDs");
+    uint32_t installed[128] = {0}; if (count) memcpy(installed, ids, count * 4);
+    qsort(installed, count, 4, compare_u32);
+    for (size_t i = 1; i < count; i++) if (installed[i] == installed[i - 1]) return problem(error, cap, "AOC installed content set contains duplicate ID=%u", installed[i]);
+    pthread_mutex_lock(&s->lock);
+    if (s->aoc_ready && s->aoc_application_id != application_id) {
+        pthread_mutex_unlock(&s->lock); return problem(error, cap, "AOC application identity cannot change during a run");
+    }
+    int changed = s->aoc_ready && (count != s->aoc_installed_count || memcmp(installed, s->aoc_installed_ids, count * 4));
+    if (changed && s->aoc_event_write && s->kernel.signal_event(s->kernel.opaque, s->aoc_event_write, error, cap)) { pthread_mutex_unlock(&s->lock); return -1; }
+    s->aoc_ready = 1; s->aoc_application_id = application_id; s->aoc_base_id = base_id;
+    s->aoc_installed_count = count; memcpy(s->aoc_installed_ids, installed, sizeof installed);
+    pthread_mutex_unlock(&s->lock); return 0;
+}
 void botw_services_get_audio_gain(botw_services *s, float *main_applet, float *library_applet, float *transparent_rate) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
@@ -310,6 +334,8 @@ void botw_services_destroy(botw_services *s) {
     char error[128];
     if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, error, sizeof error);
     if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
+    if (s->aoc_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_read, error, sizeof error);
+    if (s->aoc_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_write, error, sizeof error);
     for (unsigned index = 0; index < 10; index++) {
         if (s->hid_style_event_read[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_read[index], error, sizeof error);
         if (s->hid_style_event_write[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_write[index], error, sizeof error);
@@ -831,6 +857,42 @@ static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *i
     if (r->command == 121) { response(ipc, capacity, r, &s->hid_joy_hold, 8, 0, 0); return 0; }
     return problem(error, cap, "unsupported IPC service=hid command=%u", r->command);
 }
+static int aoc_request(botw_services *s, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->aoc_ready) return problem(error, cap, "aoc:u requires actual installed content state from host");
+    if (r->input_count || r->copy_count) return problem(error, cap, "aoc:u unexpected input buffer/handle command=%u", r->command);
+    if (r->command == 8 || r->command == 10) {
+        if (r->output_count || (r->command == 10 ? !r->pid || r->payload_size < 8 : r->pid)) return problem(error, cap, "invalid AOC list-changed event request");
+        if (!s->kernel.create_event || !s->kernel.duplicate_handle || !s->kernel.signal_event || !s->kernel.close_handle)
+            return problem(error, cap, "AOC list-changed event requires real kernel events");
+        if (!s->aoc_event_read && s->kernel.create_event(s->kernel.opaque, 0, &s->aoc_event_write, &s->aoc_event_read, error, cap)) return -1;
+        uint32_t handle = 0;
+        if (s->kernel.duplicate_handle(s->kernel.opaque, s->aoc_event_read, &handle, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, handle, 0); store32(ipc + 8, 1u << 1); return 0;
+    }
+    if (r->command <= 5) {
+        unsigned list = r->command == 1 || r->command == 3, by_process = r->command == 2 || r->command == 3 || r->command == 5;
+        size_t identity_offset = list ? 8 : 0;
+        if (r->payload_size < identity_offset + 8 || (by_process ? !r->pid : r->pid || load64(r->payload + identity_offset) != s->aoc_application_id))
+            return problem(error, cap, "aoc:u command=%u requires actual application identity or current-process PID descriptor", r->command);
+        if (r->command == 4 || r->command == 5) {
+            if (!s->aoc_base_id || r->output_count) return problem(error, cap, "AOC base ID unavailable: host must publish actual control metadata");
+            response(ipc, capacity, r, &s->aoc_base_id, 8, 0, 0); return 0;
+        }
+        if (!list) {
+            if (r->output_count) return problem(error, cap, "CountAddOnContent does not accept output buffers");
+            uint32_t count = (uint32_t)s->aoc_installed_count;
+            response(ipc, capacity, r, &count, 4, 0, 0); return 0;
+        }
+        uint32_t offset = load32(r->payload), requested = load32(r->payload + 4);
+        if (offset > INT32_MAX || requested > INT32_MAX || (requested && (r->output_count != 1 || requested > r->output_size / 4)))
+            return problem(error, cap, "ListAddOnContent invalid offset/count/output buffer");
+        uint32_t available = offset >= s->aoc_installed_count ? 0 : (uint32_t)s->aoc_installed_count - offset;
+        if (available > requested) available = requested;
+        if (available) memcpy((void *)(uintptr_t)r->output_address, s->aoc_installed_ids + offset, available * 4);
+        response(ipc, capacity, r, &available, 4, 0, 0); return 0;
+    }
+    return problem(error, cap, "unsupported aoc:u command=%u installed_count=%zu (no DLC entitlement inferred)", r->command, s->aoc_installed_count);
+}
 static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
@@ -857,7 +919,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
     if (o->kind == OBJECT_SM) {
@@ -875,10 +937,13 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "appletOE", 8)) service_kind = OBJECT_APPLET_OE;
             else if (!memcmp(name, "fsp-srv\0", 8)) service_kind = OBJECT_FSP;
             else if (!memcmp(name, "hid\0\0\0\0\0", 8)) service_kind = OBJECT_HID;
+            else if (!memcmp(name, "aoc:u\0\0\0", 8)) service_kind = OBJECT_AOC;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_AOC) {
+        return aoc_request(s, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_HID || o->kind == OBJECT_HID_APPLET_RESOURCE) {
         return hid_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind >= OBJECT_FSP && o->kind <= OBJECT_ROMFS_FILE) {

@@ -585,6 +585,48 @@ class ServicesTests(unittest.TestCase):
         self.send(controller, self.request(13, bytes([1, 0, 0])), good=False)
         self.assertEqual(len(calls), before)
 
+    def addon_state(self, ids=(), app=0x01007ef00011e000, base=0):
+        self.lib.botw_services_set_addon_content.argtypes = [C.c_void_p, C.c_uint64, C.c_uint64,
+            C.POINTER(C.c_uint32), C.c_size_t, C.c_char_p, C.c_size_t]
+        values = (C.c_uint32 * len(ids))(*ids)
+        return self.lib.botw_services_set_addon_content(self.ctx, app, base, values, len(ids), self.error, 1024)
+
+    def test_aoc_enumerates_only_installed_content_and_signals_actual_set_changes(self):
+        self.applet_kernel()
+        self.assertEqual(self.addon_state(), 0)
+        aoc = self.service(self.initialized_sm(), b'aoc:u')
+        raw, _ = self.send(aoc, self.request(2, b'\0' * 8, pid=True))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 0)
+        raw, _ = self.send(aoc, self.request(8))
+        _, handles, _ = self.response(raw)
+        event = self.kernel_handles[handles[0]]
+        self.assertFalse(event['signaled'])
+        output = C.create_string_buffer(b'\xaa' * 16)
+        self.ranges.append((C.addressof(output), len(output), True))
+        raw, _ = self.send(aoc, self.request(3, struct.pack('<IIQ', 0, 4, 0), pid=True,
+                                           receive=(C.addressof(output), 16)))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 0)
+        self.assertEqual(bytes(output)[:16], b'\xaa' * 16)
+        self.assertEqual(self.addon_state((2, 1)), 0)
+        self.assertTrue(event['signaled'])
+        event['signaled'] = False
+        self.assertEqual(self.addon_state((1, 2)), 0)
+        self.assertFalse(event['signaled'])
+        raw, _ = self.send(aoc, self.request(3, struct.pack('<IIQ', 1, 2, 0), pid=True,
+                                           receive=(C.addressof(output), 16)))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 1)
+        self.assertEqual(struct.unpack_from('<I', output)[0], 2)
+        self.assertEqual(self.addon_state((1, 1)), -1)
+        self.send(aoc, self.request(5, b'\0' * 8, pid=True), good=False)
+        self.assertEqual(self.addon_state((1, 2), base=0x01007ef00011f000), 0)
+        raw, _ = self.send(aoc, self.request(5, b'\0' * 8, pid=True))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], 0x01007ef00011f000)
+        self.send(aoc, self.request(0, struct.pack('<Q', 0xbad)), good=False)
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)

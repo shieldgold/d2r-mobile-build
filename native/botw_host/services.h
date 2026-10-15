@@ -51,6 +51,12 @@ void botw_services_set_input(botw_services *services, botw_input *input, uint32_
  * order is services -> input/kernel; frontend callbacks must release input first. */
 int botw_services_refresh_input(botw_services *services, char *error, size_t error_capacity);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
+/* Publish only content actually installed/mounted for this application. Empty
+ * lists are valid. base_id=0 means unknown metadata, not an inferred entitlement.
+ * Changes signal the persistent AOC event; identical sets do not. */
+int botw_services_set_addon_content(botw_services *services, uint64_t application_id,
+    uint64_t base_id, const uint32_t *installed_ids, size_t count,
+    char *error, size_t error_capacity);
 /* Host audio mixer reads the same gain policy queried/set by IAudioController.
  * Values are finite [0,1], initialized to unity. Each output is optional. */
 void botw_services_get_audio_gain(botw_services *services, float *main_applet,
