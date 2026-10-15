@@ -691,7 +691,16 @@ _Static_assert(sizeof(SamplerBuilder)<=sizeof(NVNsamplerBuilder),"sampler builde
 _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute ABI");
 _Static_assert(sizeof(VertexStream)==sizeof(NVNvertexStreamState),"stream ABI");
 _Static_assert(sizeof(DepthState)==sizeof(NVNdepthStencilState),"depth ABI");
-NVN(nvnDeviceGetTextureHandle,NVNtextureHandle,const NVNdevice *d,int texture,int sampler){get(d,[BWDevice class]);if(texture<0||texture>0xfffff||sampler<0||sampler>0xfff)fatal("texture/sampler descriptor index");return (uint64_t)texture|((uint64_t)sampler<<20);}
+NVN(nvnDeviceGetTextureHandle,NVNtextureHandle,const NVNdevice *d,int texture,int sampler){
+    get(d,[BWDevice class]);if(texture<0||texture>0xfffff||sampler<0||sampler>0xfff)fatal("texture/sampler descriptor index");
+    uint32_t low=(uint32_t)texture|((uint32_t)sampler<<20);
+    /* Original BOTW leaf: SXTW(low32) | (1ULL << 32). */
+    uint64_t upper=(low&UINT32_C(0x80000000))?UINT64_C(0xffffffff00000000):UINT64_C(0x100000000);
+    return upper|low;}
+/* Original graphics BindTexture writes only the low word. Upper bits are not
+ * an additional descriptor index or a canonical-form validation predicate. */
+static unsigned textureDescriptorIndex(uint64_t handle){return (uint32_t)handle&0xfffff;}
+static unsigned samplerDescriptorIndex(uint64_t handle){return ((uint32_t)handle>>20)&0xfff;}
 static int descriptors(void *raw,const NVNmemoryPool *memory,ptrdiff_t offset,int count,BOOL sampler){BWPool *pool=get(memory,[BWPool class]);if(sampler&&count>BWMaxSamplerDescriptors)return report("sampler descriptor count exceeds 4096");if(offset<0||count<1||count>0x100000||!range(offset,(size_t)count*BWDescriptorBytes,pool.size))return report("descriptor pool bounds");BWDescriptors *p=[BWDescriptors new];p.pool=pool;p.offset=offset;p.count=count;p.sampler=sampler;p.entries=[NSMutableDictionary new];put(raw,p);return 1;}
 NVN(nvnTexturePoolInitialize,NVNboolean,NVNtexturePool *p,const NVNmemoryPool *m,ptrdiff_t o,int n){return descriptors(p,m,o,n,NO);}
 NVN(nvnSamplerPoolInitialize,NVNboolean,NVNsamplerPool *p,const NVNmemoryPool *m,ptrdiff_t o,int n){return descriptors(p,m,o,n,YES);}
@@ -760,7 +769,7 @@ static BWPipeline *pipeline(BWReplay *state){
 }
 static void prepareResources(BWReplay *state,id<MTLCommandBuffer> cb){
     for(NSNumber *stage in state.program.stageShaders){BWShader *s=state.program.stageShaders[stage];const botw_graphics_shader_binding *b=s.bindings.bytes;size_t n=s.bindings.length/sizeof *b;
-        for(size_t i=0;i<n;i++)if(b[i].kind==BOTW_GRAPHICS_TEXTURE){NSNumber *h=state.textures[resourceKey(stage,@(b[i].nvn_slot))];BWTexture *texture=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!h||!texture)fatal("unbound texture descriptor");uploadTexture(texture,cb);}}
+        for(size_t i=0;i<n;i++)if(b[i].kind==BOTW_GRAPHICS_TEXTURE){NSNumber *h=state.textures[resourceKey(stage,@(b[i].nvn_slot))];BWTexture *texture=state.texturePool.entries[@(textureDescriptorIndex(h.unsignedLongLongValue))];if(!h||!texture)fatal("unbound texture descriptor");uploadTexture(texture,cb);}}
 }
 static void validateDrawProfiles(BWReplay *state,NSDictionary *draw){
     for(BWShader *shader in state.program.stageShaders.allValues){
@@ -805,8 +814,8 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
                 NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;
                 for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot){id<MTLBufferBinding> buffer=(id<MTLBufferBinding>)argument;if([r[@"size"] unsignedLongLongValue]<buffer.bufferDataSize || (pool.bufferOffset+offset)%MAX(1,buffer.bufferAlignment))fatal(storage?"storage range size/alignment does not satisfy the shader":"uniform range size/alignment does not satisfy the shader");}
                 if(vertex)[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];else[encoder setFragmentBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];}
-            else{NSNumber *h=state.textures[key];if(!h)fatal("unbound combined texture handle");if(b[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!t)fatal("texture descriptor missing");NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;for(id<MTLBinding> a in args)if(a.used&&a.type==MTLBindingTypeTexture&&a.index==b[i].metal_slot){id<MTLTextureBinding> reflected=(id<MTLTextureBinding>)a;if(reflected.textureType!=t.texture.textureType)fatal("shader texture type differs from actual NVN descriptor");if(!textureScalarType(t,reflected.textureDataType))fatal("shader texture scalar type differs from actual NVN format");}if(vertex)[encoder setVertexTexture:t.texture atIndex:b[i].metal_slot];else[encoder setFragmentTexture:t.texture atIndex:b[i].metal_slot];}
-                else{BWSampler *s=state.samplerPool.entries[@(h.unsignedLongLongValue>>20)];if(!s)fatal("sampler descriptor missing");if(vertex)[encoder setVertexSamplerState:s.state atIndex:b[i].metal_slot];else[encoder setFragmentSamplerState:s.state atIndex:b[i].metal_slot];}}
+            else{NSNumber *h=state.textures[key];if(!h)fatal("unbound combined texture handle");if(b[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=state.texturePool.entries[@(textureDescriptorIndex(h.unsignedLongLongValue))];if(!t)fatal("texture descriptor missing");NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;for(id<MTLBinding> a in args)if(a.used&&a.type==MTLBindingTypeTexture&&a.index==b[i].metal_slot){id<MTLTextureBinding> reflected=(id<MTLTextureBinding>)a;if(reflected.textureType!=t.texture.textureType)fatal("shader texture type differs from actual NVN descriptor");if(!textureScalarType(t,reflected.textureDataType))fatal("shader texture scalar type differs from actual NVN format");}if(vertex)[encoder setVertexTexture:t.texture atIndex:b[i].metal_slot];else[encoder setFragmentTexture:t.texture atIndex:b[i].metal_slot];}
+                else{BWSampler *s=state.samplerPool.entries[@(samplerDescriptorIndex(h.unsignedLongLongValue))];if(!s)fatal("sampler descriptor missing");if(vertex)[encoder setVertexSamplerState:s.state atIndex:b[i].metal_slot];else[encoder setFragmentSamplerState:s.state atIndex:b[i].metal_slot];}}
         }
     }
 }

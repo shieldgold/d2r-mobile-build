@@ -387,6 +387,9 @@ class MetalBridgeTests(unittest.TestCase):
     def test_object_errors_include_abi_entry_type_raw_identity_and_release_locks(self):
         self.run_graphics_probe('probe_object_diagnostic.c', 'NVN_ENTRY_OBJECT_DIAGNOSTIC_AND_ERROR_ESCAPE_OK')
 
+    def test_texture_handle_bit32_signed_low_word_and_descriptor_domain(self):
+        self.run_graphics_probe('probe_texture_handle.c', 'TEXTURE_HANDLE_SIGN_EXTENSION_BIT32_AND_DOMAIN_OK')
+
     def test_queue_budgets_use_real_validated_storage_for_gpu_copy_and_draw(self):
         self.run_graphics_probe('probe_queue_arena_gpu.c', 'GPU_COPY_CLEAR_DRAW_OK')
 
@@ -516,6 +519,43 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
             self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+
+    def test_graphics_texture_handles_decode_low_word_for_vertex_and_fragment_gpu_sampling(self):
+        smoke = RESOURCE_SMOKE.replace('page*2', '(64u*1024u*1024u)')
+        smoke = smoke.replace('    NVNtexturePool tp; NVNsamplerPool sp;',
+            '    int textureIndex=(int)strtoul(argv[1],NULL,0),samplerIndex=(int)strtoul(argv[2],NULL,0);\n'
+            '    NVNtexturePool tp; NVNsamplerPool sp;')
+        smoke = smoke.replace('nvnTexturePoolInitialize(&tp,&pool,0,16)', 'nvnTexturePoolInitialize(&tp,&pool,262144,0x100000)')
+        smoke = smoke.replace('nvnSamplerPoolInitialize(&sp,&pool,1024,16)', 'nvnSamplerPoolInitialize(&sp,&pool,131072,4096)')
+        smoke = smoke.replace('nvnTexturePoolRegisterTexture(&tp,3,&tiled,NULL);', 'nvnTexturePoolRegisterTexture(&tp,textureIndex,&tiled,NULL);')
+        smoke = smoke.replace('nvnSamplerPoolRegisterSampler(&sp,4,&sampler);', 'nvnSamplerPoolRegisterSampler(&sp,samplerIndex,&sampler);')
+        smoke = smoke.replace('nvnDeviceGetTextureHandle(&device,3,4);',
+            'nvnDeviceGetTextureHandle(&device,textureIndex,samplerIndex);\n'
+            '    if(argc>3)handleTexture=((uint64_t)(uint32_t)strtoul(argv[3],NULL,0)<<32)|(uint32_t)handleTexture;')
+        smoke = smoke.replace('constant float4& u [[buffer(0)]]) {return {float4(v.p+u.xy,u.z,1)};}',
+            'constant float4& u [[buffer(0)]],texture2d<float> t [[texture(3)]],sampler s [[sampler(0)]]) '
+            '{return {float4(v.p+u.xy,u.z*t.sample(s,float2(.75,.75),level(0)).b,1)};}')
+        smoke = smoke.replace('vb[]={{BOTW_GRAPHICS_UNIFORM,5,0}};',
+            'vb[]={{BOTW_GRAPHICS_UNIFORM,5,0},{BOTW_GRAPHICS_TEXTURE,9,3},{BOTW_GRAPHICS_SAMPLER,9,0}};')
+        smoke = smoke.replace('resourceMSL,"rv",vb,1)', 'resourceMSL,"rv",vb,3)')
+        smoke = smoke.replace('nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,9,handleTexture);',
+            'nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_VERTEX,9,handleTexture);'
+            'nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,9,handleTexture);')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'texture-handles.c'; harness.write_text(smoke); exe = path / 'texture-handles'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for texture, sampler in ((0x7ffff, 0x7ff), (0x80000, 0x800), (0xfffff, 0xfff)):
+                for upper in (None, 0, 1, 0xffffffff, 0x13579bdf, 0x80000001):
+                    args = [str(exe), hex(texture), hex(sampler)] + ([] if upper is None else [hex(upper)])
+                    result = subprocess.run(args, capture_output=True, text=True, timeout=20)
+                    if result.returncode == 77:
+                        self.skipTest('No Metal device')
+                    self.assertEqual(result.returncode, 0, f'{args}\n{result.stdout}{result.stderr}')
+                    self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
 
     def test_upper_left_window_origin_matches_ndc_viewport_and_scissor_pixels(self):
         smoke = METAL_SMOKE.replace('API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);',

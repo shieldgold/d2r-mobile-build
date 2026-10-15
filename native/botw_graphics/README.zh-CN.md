@@ -38,6 +38,8 @@
 
 描述符查询0x0f/0x10返回真实 pool 使用的32-byte跨度，0x11/0x12返回原 NVN ABI 保留数256；原客体分配器因此从索引256开始。人工 GPU 测试使用查询值创建池并从texture256、sampler4095真实采样；索引等于实际count、sampler4096及sampler count4097均拒绝。低索引旧人工夹具仍可直接调用；reserved 查询没有把它们改写为客体实际分配行为。
 
+组合纹理句柄使用 BOTW 原 SDK 的 `sxtw(texture | (sampler << 20)) | (1ULL << 32)`：sampler最高位为1时保留符号扩展，texture=0xfffff/sampler=0xfff的合法结果为UINT64_MAX。graphics绑定与原consumer一样只解码低32位的TIC20/sampler12字段，高32位任意值不改变选择；原compute路径不在该合同内。桥接层仍拒绝越出20/12位的生成参数以避免别名，实际pool范围与生命周期另外核验。SeparateTexture/Sampler不在原导出表中，继续拒绝。人工回归覆盖bit31两侧、bit32、最大字段、越域参数，以及18组真实vertex/fragment采样的canonical与不同高32位输入。
+
 纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。设备窗口原点仅接受 UpperLeft=1，与 Metal 的上左渲染目标、viewport 和 scissor 坐标对应；非对称三角形及顶部裁剪的实际像素已验证，其他原点模式明确拒绝。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
 TextureBuilderSetDefaults 与原 BOTW SDK 一样保留 +0 的 device；真实 main 先 SetDevice 再 SetDefaults，人工 GPU 夹具已按该顺序验证颜色目标、块线性采样和深度目标，避免清空 device 导致后续初始化失败。
