@@ -80,7 +80,9 @@ int botw_services_set_capture_image(botw_services *services, unsigned kind,
 int botw_services_get_transition_image(botw_services *services, void *rgba,
     size_t capacity, uint64_t *generation);
 /* Supply measured host state. Focus/foreground are booleans; operation_mode is
- * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
+ * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run.
+ * If cmd14 SetRestartMessageEnabled subscribed, an accepted suspended->running
+ * execution-policy transition queues Resume(16) on the actual message event. */
 int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,
     int foreground, int focused, uint32_t operation_mode, char *error, size_t error_capacity);
 /* 0 means executed. -1 means unsupported/invalid and error contains a concrete

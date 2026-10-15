@@ -599,6 +599,91 @@ class ServicesTests(unittest.TestCase):
         self.send(controller, self.request(13, bytes([1, 0, 0])), good=False)
         self.assertEqual(len(calls), before)
 
+    def test_restart_message_reports_real_execution_resume_and_preserves_queued_messages(self):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        common, controller = self.proxy_child(proxy, 0), self.proxy_child(proxy, 1)
+        raw, _ = self.send(common, self.request(0))
+        _, handles, _ = self.response(raw)
+        event = self.kernel_handles[handles[0]]
+
+        def message():
+            raw, _ = self.send(common, self.request(1))
+            data, _, _ = self.response(raw)
+            return struct.unpack_from('<I', data)[0]
+
+        self.assertEqual(message(), 15)
+        calls = []
+        self.focus = FOCUS(lambda _, mode, foreground, focused, suspended, error, cap:
+                           calls.append((mode, foreground, focused, suspended)) or 0)
+        self.lib.botw_services_set_focus_handler.argtypes = [C.c_void_p, FOCUS, C.c_void_p]
+        self.lib.botw_services_set_focus_handler(self.ctx, self.focus, None)
+        self.send(controller, self.request(13, bytes([0, 0, 1])))
+        before = len(calls)
+        self.send(controller, self.request(14, b'\1'))
+        self.assertEqual(len(calls), before)  # subscription does not change focus policy
+        self.assertFalse(event['signaled'])  # enabling does not fabricate a resume
+        self.send(controller, self.request(14, b'\2'), good=False)
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(calls[-1], (0, 0, 0, 1))
+        self.assertEqual(message(), 15)
+        self.assertFalse(event['signaled'])
+        self.applet_state()
+        self.assertEqual(calls[-1], (0, 1, 1, 0))
+        self.assertEqual(message(), 15)
+        self.assertTrue(event['signaled'])  # Resume is independently queued
+        self.send(controller, self.request(14, b'\0'))
+        self.assertEqual(message(), 16)  # disable only filters future notifications
+        self.assertFalse(event['signaled'])
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(message(), 15)
+        self.applet_state()
+        self.assertEqual(message(), 15)
+        self.assertFalse(event['signaled'])
+
+    def test_restart_notification_requires_suspension_and_accepted_host_resume(self):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        common, controller = self.proxy_child(proxy, 0), self.proxy_child(proxy, 1)
+        self.send(common, self.request(1))  # initial focus notification
+        self.send(controller, self.request(14, b'\1'))
+
+        def messages():
+            values = []
+            while True:
+                raw, _ = self.send(common, self.request(1))
+                if struct.unpack_from('<I', raw, 24)[0] == 0x680:
+                    return values
+                data, _, _ = self.response(raw)
+                values.append(struct.unpack_from('<I', data)[0])
+
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(messages(), [15])
+        self.applet_state()
+        self.assertEqual(messages(), [15])  # no execution policy was installed
+        reject = [False]
+        self.focus = FOCUS(lambda *_: -1 if reject[0] else 0)
+        self.lib.botw_services_set_focus_handler.argtypes = [C.c_void_p, FOCUS, C.c_void_p]
+        self.lib.botw_services_set_focus_handler(self.ctx, self.focus, None)
+        self.send(controller, self.request(13, bytes([1, 1, 0])))
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(messages(), [15])
+        self.applet_state()
+        self.assertEqual(messages(), [15])  # NoSuspend has no resume edge
+        self.send(controller, self.request(13, bytes([0, 0, 1])))
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(messages(), [15])
+        reject[0] = True
+        rc = self.lib.botw_services_set_applet_state(self.ctx, 0x12345678, 1, 1, 0,
+                                                    self.error, 1024)
+        self.assertEqual(rc, -1)
+        self.assertEqual(messages(), [])  # rejected transition publishes no lifecycle change
+        reject[0] = False
+        self.applet_state()
+        self.assertEqual(messages(), [15, 16])
+
     def addon_state(self, ids=(), app=0x01007ef00011e000, base=0):
         self.lib.botw_services_set_addon_content.argtypes = [C.c_void_p, C.c_uint64, C.c_uint64,
             C.POINTER(C.c_uint32), C.c_size_t, C.c_char_p, C.c_size_t]

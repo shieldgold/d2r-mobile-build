@@ -91,7 +91,7 @@ struct botw_services {
     uint8_t *capture_images[3], *transition_image;
     uint64_t transition_generation;
     unsigned applet_ready, applet_foreground, applet_focus, applet_operation;
-    unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance;
+    unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance, applet_notify_resume;
     uint64_t applet_resource_user_id;
     uint32_t applet_event_write, applet_event_read;
     uint32_t applet_messages[32];
@@ -232,10 +232,14 @@ void botw_services_set_focus_handler(botw_services *s, botw_services_focus_fn ha
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->focus_handler = handler; s->focus_opaque = opaque; pthread_mutex_unlock(&s->lock);
 }
+static int focus_suspended(uint32_t base_mode, unsigned suspend_out, unsigned foreground, unsigned focus) {
+    uint32_t mode = suspend_out ? 3 : base_mode;
+    return mode == 3 ? focus != 1 : mode == 1 ? 0 : !foreground;
+}
 static int apply_focus_policy(botw_services *s, uint32_t base_mode, unsigned suspend_out, unsigned foreground, unsigned focus, char *error, size_t cap) {
     if (!s->focus_handler) return problem(error, cap, "SelfController focus policy requires actual host focus handler");
     uint32_t mode = suspend_out ? 3 : base_mode;
-    int suspended = mode == 3 ? focus != 1 : mode == 1 ? 0 : !foreground;
+    int suspended = focus_suspended(base_mode, suspend_out, foreground, focus);
     if (error && cap) error[0] = 0;
     if (s->focus_handler(s->focus_opaque, mode, (int)foreground, focus == 1, suspended, error, cap)) {
         if (error && cap && error[0]) return -1;
@@ -341,11 +345,16 @@ static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, 
     if (s->applet_ready && s->applet_resource_user_id != user_id)
         return problem(error, cap, "host applet resource user ID cannot change during a run");
     unsigned focus = !foreground ? 3 : focused ? 1 : 2;
-    uint32_t messages[2]; unsigned count = 0;
+    uint32_t messages[3]; unsigned count = 0;
     /* Opening the virtual applet transitions Unknown -> measured host focus.
      * The 1.x SDK waits for this initial announcement before querying focus. */
     if (!s->applet_ready || s->applet_focus != focus) messages[count++] = 15;
     if (s->applet_ready && s->applet_operation != operation && s->applet_notify_operation) messages[count++] = 30;
+    /* ISelfController cmd14 controls Resume(16), not process relaunch. Publish
+     * only a real execution-policy suspension -> running lifecycle edge. */
+    if (s->applet_ready && s->focus_policy_configured && s->applet_notify_resume &&
+        focus_suspended(s->focus_mode, s->focus_suspend_out, s->applet_foreground, s->applet_focus) &&
+        !focus_suspended(s->focus_mode, s->focus_suspend_out, (unsigned)foreground, focus)) messages[count++] = 16;
     if (count > 32 - s->applet_message_count) return problem(error, cap, "applet notification queue full");
     if (s->focus_policy_configured && (s->applet_foreground != (unsigned)foreground || s->applet_focus != focus) && apply_focus_policy(s, s->focus_mode, s->focus_suspend_out, (unsigned)foreground, focus, error, cap)) return -1;
     if (count && s->applet_event_write && s->kernel.signal_event(s->kernel.opaque, s->applet_event_write, error, cap)) return -1;
@@ -732,9 +741,11 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
         if (apply_focus_policy(s, mode, suspend_out, s->applet_foreground, s->applet_focus, error, cap)) return -1;
         s->focus_mode = mode; s->focus_suspend_out = suspend_out; s->focus_policy_configured = 1;
         response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
-    } else if (o->kind == OBJECT_SELF_CONTROLLER && (r->command == 11 || r->command == 12)) {
+    } else if (o->kind == OBJECT_SELF_CONTROLLER && (r->command == 11 || r->command == 12 || r->command == 14)) {
         if (r->payload_size < 1 || r->payload[0] > 1) return problem(error, cap, "SelfController notification command=%u requires bool", r->command);
-        if (r->command == 11) s->applet_notify_operation = r->payload[0]; else s->applet_notify_performance = r->payload[0];
+        if (r->command == 11) s->applet_notify_operation = r->payload[0];
+        else if (r->command == 12) s->applet_notify_performance = r->payload[0];
+        else s->applet_notify_resume = r->payload[0];
         response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
     } else if (o->kind == OBJECT_WINDOW_CONTROLLER) {
         if (r->command == 1) { response(ipc, capacity, r, &s->applet_resource_user_id, 8, 0, 0); return 0; }
