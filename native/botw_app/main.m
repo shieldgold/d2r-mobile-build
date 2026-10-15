@@ -121,7 +121,7 @@ static void *runGuest(void *unused) {
     activeController = self;
 }
 - (void)observeFrame:(CADisplayLink *)sender {
-    (void)sender;
+    botw_host_display_tick(sender.targetTimestamp);
     botw_host_refresh_input();
     if (!self.firstFrameObserved && botw_graphics_presented_frame_count()) {
         self.firstFrameObserved = YES;

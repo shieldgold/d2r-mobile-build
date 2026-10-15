@@ -22,7 +22,7 @@ __attribute__((noreturn))
 static void exit_process(int status) {
     /* A failed cooperative stop may retain guest workers. Do not release their
      * view/layer or backend state while they can still access those objects. */
-    fprintf(stdout, "mac_process_exit=%d guest_resources_released=false\n", status);
+    fprintf(stdout, "mac_process_exit=%d frontend_resources_released=false\n", status);
     fflush(stdout); fflush(stderr); _Exit(status);
 }
 static void *run_guest(void *unused) {

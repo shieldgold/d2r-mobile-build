@@ -100,7 +100,7 @@ class MacFrontendTests(unittest.TestCase):
         closed = self.run_frontend(self.build.name, BOTW_MAC_TEST_CLOSE='1')
         self.assertEqual(closed.returncode, 0, closed.stdout + closed.stderr)
         self.assertIn('synthetic_host_real_display_ticks=2', closed.stdout)
-        self.assertIn('mac_process_exit=0 guest_resources_released=false', closed.stdout)
+        self.assertIn('mac_process_exit=0 frontend_resources_released=false', closed.stdout)
 
 
 if __name__ == '__main__':
