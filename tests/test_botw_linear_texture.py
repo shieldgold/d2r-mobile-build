@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from botw_metal_counter_capability import require_counter_sampling
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -67,10 +69,14 @@ class LinearTextureTests(unittest.TestCase):
         self.probe('unused-vertex', 'LINEAR_UNUSED_VERTEX_SLOT_IS_NOT_FEEDBACK_OK')
 
     def test_feedback_is_rejected_before_any_batch_publication(self):
-        for mode in ('feedback-texture', 'feedback-storage', 'feedback-two-handles',
-                     'feedback-after-counter'):
+        for mode in ('feedback-texture', 'feedback-storage', 'feedback-two-handles'):
             with self.subTest(mode=mode):
                 self.probe(mode, 'LINEAR_FEEDBACK_PREFLIGHT_PRESERVES_POOL_AND_COUNTER_OK')
+
+    def test_feedback_after_counter_is_rejected_before_any_batch_publication(self):
+        require_counter_sampling()
+        self.probe('feedback-after-counter',
+                   'LINEAR_FEEDBACK_PREFLIGHT_PRESERVES_POOL_AND_COUNTER_OK')
 
 
 class LinearPolicyArithmeticTests(unittest.TestCase):
