@@ -28,7 +28,6 @@
 #define MAX_SHARED_MAPS 64
 #define HEAP_UNIT ((size_t)0x200000)
 #define GUEST_PAGE ((size_t)0x1000)
-#define ADDRESS_LIMIT (UINT64_C(1) << 36)
 typedef struct { uint64_t destination, source; size_t size; unsigned users; } Mapping;
 typedef struct Object Object;
 typedef struct Thread Thread;
@@ -87,6 +86,7 @@ struct botw_kernel {
     size_t reservation_size, heap_capacity, stack_capacity, alias_capacity;
     size_t physical_budget, image_bytes, heap_size, host_page;
     uint64_t heap_base, stack_base, alias_base;
+    uint64_t address_limit;
     int memory_configured;
     Mapping mappings[MAX_MAPS];
     SharedMapping shared_mappings[MAX_SHARED_MAPS];
@@ -152,6 +152,7 @@ botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *op
     if (callbacks) k->callbacks = *callbacks;
     k->opaque = opaque; k->owner = pthread_self(); k->next_handle = HANDLE_BASE;
     k->next_thread_id = 2;
+    k->address_limit = UINT64_C(1) << 36;
     k->initial_thread.kernel = k; k->initial_thread.host = pthread_self();
     k->initial_thread.handle = BOTW_KERNEL_INITIAL_THREAD; k->initial_thread.id = 1;
     k->initial_thread.priority = k->initial_thread.effective_priority = 44;
@@ -546,14 +547,17 @@ static int reserve_memory_locked(botw_kernel *k, char *error, size_t capacity) {
     if (!k->memory_configured) return diagnostic(error, capacity, "guest memory capacities/budget must be configured first");
     size_t total = k->heap_capacity + k->stack_capacity + k->alias_capacity;
     size_t request = total + HEAP_UNIT;
+    int map_error = 0, outside_limit = 0;
     for (unsigned attempt = 0; attempt < 16; attempt++) {
         uintptr_t hint = attempt ? UINT64_C(0x100000000) + (uint64_t)(attempt - 1) * UINT64_C(0x100000000) : 0;
-        if (hint && request > ADDRESS_LIMIT - hint) continue;
+        if (hint && (hint >= k->address_limit || request > k->address_limit - hint)) continue;
         void *raw = mmap((void *)hint, request, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        if (raw == MAP_FAILED) continue;
+        if (raw == MAP_FAILED) { map_error = errno; continue; }
         uintptr_t address = (uintptr_t)raw;
         uintptr_t aligned = (address + HEAP_UNIT - 1) & ~(uintptr_t)(HEAP_UNIT - 1);
-        if (address >= ADDRESS_LIMIT || request > ADDRESS_LIMIT - address) { munmap(raw, request); continue; }
+        if (address >= k->address_limit || request > k->address_limit - address) {
+            munmap(raw, request); outside_limit = 1; continue;
+        }
         size_t prefix = (size_t)(aligned - address), suffix = request - prefix - total;
         if (prefix) munmap(raw, prefix);
         if (suffix) munmap((void *)(aligned + total), suffix);
@@ -561,7 +565,9 @@ static int reserve_memory_locked(botw_kernel *k, char *error, size_t capacity) {
         k->alias_base = aligned; k->stack_base = aligned + k->alias_capacity;
         k->heap_base = k->stack_base + k->stack_capacity; return 0;
     }
-    return diagnostic(error, capacity, "cannot reserve %zu bytes below 36-bit guest address limit: %s", total, strerror(errno));
+    return diagnostic(error, capacity, "cannot reserve %zu bytes below %u-bit guest address limit: %s", total,
+        k->address_limit == (UINT64_C(1) << 36) ? 36u : 39u,
+        outside_limit ? "host mappings fall outside guest address space" : strerror(map_error ? map_error : ENOMEM));
 }
 static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     uint64_t requested = regs[1];
@@ -983,13 +989,35 @@ int botw_kernel_reservation(botw_kernel *k, uint64_t *base, uint64_t *size) {
     if (exists) { *base = (uintptr_t)k->reservation; *size = k->reservation_size; }
     pthread_mutex_unlock(&k->lock); return exists;
 }
+static int capacities_fit(uint64_t limit, size_t heap, size_t stack, size_t alias) {
+    return heap <= limit - HEAP_UNIT && stack <= limit - HEAP_UNIT - heap &&
+        alias < limit - HEAP_UNIT - heap - stack;
+}
+int botw_kernel_configure_address_space(botw_kernel *k, unsigned bits, char *error, size_t capacity) {
+    if (!k || (bits != 36 && bits != 39)) return diagnostic(error, capacity, "guest address width must be 36 or 39 bits");
+    uint64_t limit = UINT64_C(1) << bits;
+    pthread_mutex_lock(&k->lock);
+    if (k->reservation || k->stopping) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "cannot reconfigure active/stopping guest address space");
+    }
+    if (k->memory_configured && !capacities_fit(limit, k->heap_capacity, k->stack_capacity, k->alias_capacity)) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "guest memory capacities exceed %u-bit address space", bits);
+    }
+    k->address_limit = limit; pthread_mutex_unlock(&k->lock); return 0;
+}
+uint64_t botw_kernel_address_space_limit(botw_kernel *k) {
+    if (!k) return 0;
+    pthread_mutex_lock(&k->lock); uint64_t limit = k->address_limit;
+    pthread_mutex_unlock(&k->lock); return limit;
+}
 int botw_kernel_configure_memory(botw_kernel *k, size_t heap, size_t stack, size_t alias, size_t budget, size_t image, char *error, size_t capacity) {
-    if (!k || !heap || !stack || !alias || ((heap | stack | alias) & (HEAP_UNIT - 1)) ||
-        budget < image || heap > ADDRESS_LIMIT - HEAP_UNIT || stack > ADDRESS_LIMIT - HEAP_UNIT - heap ||
-        alias >= ADDRESS_LIMIT - HEAP_UNIT - heap - stack)
+    if (!k || !heap || !stack || !alias || ((heap | stack | alias) & (HEAP_UNIT - 1)) || budget < image)
         return diagnostic(error, capacity, "invalid guest memory capacities/budget");
     pthread_mutex_lock(&k->lock);
     if (k->reservation || k->stopping) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "cannot reconfigure active/stopping guest memory"); }
+    if (!capacities_fit(k->address_limit, heap, stack, alias)) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "guest memory capacities exceed address space");
+    }
     k->heap_capacity = heap; k->stack_capacity = stack; k->alias_capacity = alias;
     k->physical_budget = budget; k->image_bytes = image; k->memory_configured = 1;
     pthread_mutex_unlock(&k->lock); return 0;

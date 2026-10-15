@@ -88,6 +88,13 @@ int botw_kernel_query_memory(botw_kernel *kernel, uint64_t address,
                              botw_kernel_memory_info *info);
 /* Read an existing reservation without allocating it. Returns 1 if present. */
 int botw_kernel_reservation(botw_kernel *kernel, uint64_t *base, uint64_t *size);
+/* Default is 36 bits. A target-adapted SDK may explicitly select 39 bits;
+ * this does not rewrite guest pointer encodings. Configure before reservation.
+ * Only 36/39 are supported. Existing capacities must fit the selected limit. */
+int botw_kernel_configure_address_space(botw_kernel *kernel, unsigned bits,
+    char *error, size_t error_capacity);
+/* Exclusive guest address bound. Does not allocate a reservation; null => 0. */
+uint64_t botw_kernel_address_space_limit(botw_kernel *kernel);
 /* Configure reservation before first memory SVC. All capacities must be
  * multiples of 2 MiB. physical_budget includes heap and image_bytes. */
 int botw_kernel_configure_memory(botw_kernel *kernel, size_t heap_capacity,

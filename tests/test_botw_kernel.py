@@ -142,6 +142,50 @@ static int resident(uint64_t address) {
     assert(!mincore((void *)(uintptr_t)address, (size_t)sysconf(_SC_PAGESIZE), &vector));
     return vector & 1;
 }
+static void extended_address_space(void) {
+    const size_t unit = 0x200000, heap_capacity = (size_t)UINT64_C(0x100000000);
+    const size_t requested_heap = 0xc2600000, image = unit * 27;
+    const uint64_t old_limit = UINT64_C(1) << 36, limit = UINT64_C(1) << 39;
+    uint64_t base, size;
+    assert(botw_kernel_address_space_limit(ctx) == old_limit);
+    assert(botw_kernel_configure_address_space(ctx, 38, error, sizeof error) == -1);
+    assert(botw_kernel_address_space_limit(ctx) == old_limit);
+    assert(botw_kernel_configure_memory(ctx, old_limit, unit, unit, unit, 0, error, sizeof error) == -1);
+    assert(!botw_kernel_reservation(ctx, &base, &size));
+    assert(!botw_kernel_configure_address_space(ctx, 39, error, sizeof error));
+    assert(botw_kernel_address_space_limit(ctx) == limit);
+    /* Reject a narrowing configuration which would invalidate capacities. */
+    assert(!botw_kernel_configure_memory(ctx, old_limit, unit, unit, unit, 0, error, sizeof error));
+    assert(botw_kernel_configure_address_space(ctx, 36, error, sizeof error) == -1);
+    assert(botw_kernel_address_space_limit(ctx) == limit);
+    assert(!botw_kernel_configure_memory(ctx, heap_capacity, unit * 128, unit * 256,
+        heap_capacity, image, error, sizeof error));
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    unsigned char *sentinel = mmap(NULL, page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(sentinel != MAP_FAILED); memset(sentinel, 0xa5, page);
+    /* This is the real SDK heap request with a > 5 GiB continuous reservation.
+       Lazy backing touches only the first/last pages; capacity is not quota. */
+    uint64_t r[32] = {0, requested_heap}; svc(1, r); assert(!r[0]);
+    uint64_t heap = r[1]; assert(botw_kernel_reservation(ctx, &base, &size));
+    assert(size == heap_capacity + unit * 384 && base < limit && size <= limit - base);
+    assert(info(12) == base && info(13) == size && info(4) == heap);
+    assert(info(6) == heap_capacity && info(7) == requested_heap + image);
+    *(unsigned char *)(uintptr_t)heap = 0x19;
+    *(unsigned char *)(uintptr_t)(heap + requested_heap - 1) = 0x39;
+    assert(*(unsigned char *)(uintptr_t)heap == 0x19);
+    assert(*(unsigned char *)(uintptr_t)(heap + requested_heap - 1) == 0x39);
+    assert(botw_kernel_memory(ctx, heap + requested_heap - 1, 1, 1));
+    assert(!botw_kernel_memory(ctx, heap + requested_heap, 1, 0));
+    botw_kernel_memory_info region;
+    assert(botw_kernel_query_memory(ctx, heap + requested_heap - 1, &region) == 1);
+    assert(region.base == heap && region.size == requested_heap && region.permission == 3);
+    assert(botw_kernel_configure_address_space(ctx, 36, error, sizeof error) == -1);
+    assert(botw_kernel_configure_address_space(ctx, 39, error, sizeof error) == -1);
+    assert(botw_kernel_address_space_limit(ctx) == limit);
+    r[1] = heap_capacity; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_OUT_OF_MEMORY);
+    for (size_t i = 0; i < page; i++) assert(sentinel[i] == 0xa5);
+    assert(!munmap(sentinel, page));
+}
 static void memory_mapping(void) {
     const size_t unit = 0x200000;
     uint64_t base, size;
@@ -575,6 +619,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "multi")) multi_wait();
     else if (!strcmp(argv[1], "timing")) timing();
     else if (!strcmp(argv[1], "memory")) memory_mapping();
+    else if (!strcmp(argv[1], "address39")) extended_address_space();
     else if (!strcmp(argv[1], "threads")) threads();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
@@ -628,6 +673,9 @@ class KernelTests(unittest.TestCase):
 
     def test_heap_budget_alias_permissions_and_4k_16k_boundaries(self):
         self.check_case('memory')
+
+    def test_explicit_39bit_reservation_supports_real_sdk_heap_and_independent_budget(self):
+        self.check_case('address39')
 
     def test_create_start_exit_uses_mapped_stack_and_thread_local_context(self):
         self.check_case('threads')
