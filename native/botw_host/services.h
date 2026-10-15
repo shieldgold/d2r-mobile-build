@@ -14,6 +14,14 @@ typedef void (*botw_services_log_fn)(void *opaque, const char *message);
 typedef int (*botw_services_memory_fn)(void *opaque, uint64_t address, size_t length, int writable);
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque);
 void botw_services_destroy(botw_services *services);
+/* mode is Horizon Normal=0 or Boost=1. active distinguishes the current host
+ * mode from a stored future profile. The handler must validate configuration
+ * and apply an actual host policy for active requests; 0 accepts, -1 rejects.
+ * Configuration state changes only after handler acceptance. */
+typedef int (*botw_services_performance_fn)(void *opaque, uint32_t mode,
+    uint32_t configuration, int active, char *error, size_t error_capacity);
+void botw_services_set_performance_handler(botw_services *services,
+    botw_services_performance_fn handler, void *opaque);
 /* 0 means executed. -1 means unsupported/invalid and error contains a concrete
  * diagnostic; callers must stop guest execution instead of forging success. */
 int botw_services_connect(botw_services *services, const char *name, size_t name_length,

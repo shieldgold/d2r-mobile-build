@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LOG = C.CFUNCTYPE(None, C.c_void_p, C.c_char_p)
 MEMORY = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint64, C.c_size_t, C.c_int)
+PERFORMANCE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_uint32, C.c_int, C.c_void_p, C.c_size_t)
 
 
 class ServicesTests(unittest.TestCase):
@@ -122,6 +123,64 @@ class ServicesTests(unittest.TestCase):
         _, handles, _ = self.response(raw)
         self.assertEqual(len(handles), 1)
         return handles[0]
+
+    def performance_handler(self):
+        calls = []
+        def apply(_, mode, config, active, error, capacity):
+            if config not in (0x00010000, 0x00020000, 0x92220008):
+                message = b'unsupported test host performance configuration\0'
+                C.memmove(error, message, min(len(message), capacity))
+                return -1
+            calls.append((mode, config, active))
+            return 0
+        self.performance = PERFORMANCE(apply)
+        self.lib.botw_services_set_performance_handler.argtypes = [C.c_void_p, PERFORMANCE, C.c_void_p]
+        self.lib.botw_services_set_performance_handler(self.ctx, self.performance, None)
+        return calls
+
+    def apm_session(self, apm):
+        raw, _ = self.send(apm, self.request(0))
+        _, handles, _ = self.response(raw)
+        self.assertEqual(len(handles), 1)
+        return handles[0]
+
+    def test_apm_mode_and_configuration_have_host_backed_state(self):
+        calls = self.performance_handler()
+        apm = self.service(self.initialized_sm(), b'apm')
+        raw, _ = self.send(apm, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 0)
+        session = self.apm_session(apm)
+        self.send(session, self.request(1, struct.pack('<I', 0)), good=False)
+        self.send(session, self.request(0, struct.pack('<II', 0, 0x00010000)))
+        self.send(session, self.request(0, struct.pack('<II', 1, 0x00020000)))
+        self.assertEqual(calls, [(0, 0x00010000, 1), (1, 0x00020000, 0)])
+        self.assertEqual(self.close(session), 0)
+        session = self.apm_session(apm)
+        for mode, expected in ((0, 0x00010000), (1, 0x00020000)):
+            raw, _ = self.send(session, self.request(1, struct.pack('<I', mode)))
+            data, _, _ = self.response(raw)
+            self.assertEqual(struct.unpack_from('<I', data)[0], expected)
+
+    def test_apm_rejected_host_configuration_preserves_prior_state(self):
+        calls = self.performance_handler()
+        session = self.apm_session(self.service(self.initialized_sm(), b'apm'))
+        self.send(session, self.request(0, struct.pack('<II', 0, 0x92220008)))
+        _, error = self.send(session, self.request(0, struct.pack('<II', 0, 0xbad)), good=False)
+        self.assertIn('unsupported test host', error)
+        self.send(session, self.request(0, struct.pack('<II', 2, 0x00010000)), good=False)
+        self.send(session, self.request(1, struct.pack('<I', 2)), good=False)
+        self.send(session, self.request(99), good=False)
+        raw, _ = self.send(session, self.request(1, struct.pack('<I', 0)))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 0x92220008)
+        self.assertEqual(calls, [(0, 0x92220008, 1)])
+
+    def test_apm_set_fails_without_host_policy_handler(self):
+        session = self.apm_session(self.service(self.initialized_sm(), b'apm'))
+        _, error = self.send(session, self.request(0, struct.pack('<II', 0, 0x00010000)), good=False)
+        self.assertIn('host performance handler', error)
+        self.send(session, self.request(1, struct.pack('<I', 0)), good=False)
 
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()

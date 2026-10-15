@@ -5,6 +5,7 @@
  * https://github.com/switchbrew/libnx/blob/master/nx/include/switch/sf/hipc.h
  * https://github.com/switchbrew/libnx/blob/master/nx/include/switch/sf/cmif.h
  * https://github.com/switchbrew/libnx/blob/master/nx/source/services/sm.c
+ * https://github.com/switchbrew/libnx/blob/master/nx/source/services/apm.c
  * https://switchbrew.org/wiki/Log_services
  */
 #include "services.h"
@@ -20,7 +21,7 @@
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
-enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER };
+enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION };
 typedef struct Object {
     enum ObjectKind kind;
     unsigned refs, initialized;
@@ -38,6 +39,10 @@ typedef struct { uint32_t id; Session *session; } Handle;
 struct botw_services {
     Handle handles[HANDLE_LIMIT];
     uint32_t next_handle, log_destination;
+    uint32_t performance_mode, performance_configuration[2];
+    unsigned performance_configured[2];
+    botw_services_performance_fn performance_handler;
+    void *performance_opaque;
     botw_services_log_fn log;
     botw_services_memory_fn memory;
     void *opaque;
@@ -66,7 +71,14 @@ static void emit(botw_services *s, const char *format, ...) {
     s->log(s->opaque, text);
 }
 static const char *kind_name(enum ObjectKind kind) {
-    return kind == OBJECT_SM ? "sm:" : kind == OBJECT_LM ? "lm" : "lm.ILogger";
+    switch (kind) {
+        case OBJECT_SM: return "sm:";
+        case OBJECT_LM: return "lm";
+        case OBJECT_LOGGER: return "lm.ILogger";
+        case OBJECT_APM: return "apm.IPerformanceManager";
+        case OBJECT_APM_SESSION: return "apm.ISession";
+    }
+    return "<invalid>";
 }
 static Object *new_object(enum ObjectKind kind) {
     Object *o = calloc(1, sizeof *o);
@@ -110,6 +122,9 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     botw_services *s = calloc(1, sizeof *s);
     if (s) { s->next_handle = 0x10000; s->log_destination = 0xffff; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
+}
+void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
+    if (s) { s->performance_handler = handler; s->performance_opaque = opaque; }
 }
 void botw_services_destroy(botw_services *s) {
     if (!s) return;
@@ -332,9 +347,45 @@ int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_
         if (r.command == 1) {
             if (!o->initialized || r.payload_size < 8) return problem(error, cap, "sm: GetService requires initialized client and 8-byte service name");
             char name[9]; memcpy(name, r.payload, 8); name[8] = 0;
-            if (memcmp(name, "lm\0\0\0\0\0\0", 8)) return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
-            Object *lm = new_object(OBJECT_LM); if (!lm) return problem(error, cap, "allocate lm object failed");
-            return return_object(s, session, lm, ipc, capacity, &r, 1, error, cap);
+            enum ObjectKind service_kind;
+            if (!memcmp(name, "lm\0\0\0\0\0\0", 8)) service_kind = OBJECT_LM;
+            else if (!memcmp(name, "apm\0\0\0\0\0", 8)) service_kind = OBJECT_APM;
+            else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
+            Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
+            return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
+        }
+    } else if (o->kind == OBJECT_APM) {
+        if (r.input_count || r.pid) return problem(error, cap, "apm manager command=%u unexpected buffers/PID", r.command);
+        if (r.command == 0) {
+            Object *apm_session = new_object(OBJECT_APM_SESSION);
+            if (!apm_session) return problem(error, cap, "allocate apm.ISession failed");
+            return return_object(s, session, apm_session, ipc, capacity, &r, 0, error, cap);
+        }
+        if (r.command == 1) {
+            /* iPhone host exposes the handheld Normal mode. Dock/Boost cannot
+             * be inferred from a desktop display or a charging connection. */
+            response(ipc, capacity, &r, &s->performance_mode, 4, 0, 0); return 0;
+        }
+    } else if (o->kind == OBJECT_APM_SESSION) {
+        if (r.input_count || r.pid) return problem(error, cap, "apm.ISession command=%u unexpected buffers/PID", r.command);
+        if (r.command == 0 || r.command == 1) {
+            if (r.payload_size < (r.command == 0 ? 8u : 4u)) return problem(error, cap, "apm.ISession command=%u truncated input", r.command);
+            uint32_t mode = load32(r.payload);
+            if (mode > 1) return problem(error, cap, "apm.ISession invalid performance mode=%u", mode);
+            if (r.command == 0) {
+                uint32_t configuration = load32(r.payload + 4);
+                if (!s->performance_handler) return problem(error, cap, "apm.SetPerformanceConfiguration requires host performance handler mode=%u configuration=0x%x", mode, configuration);
+                if (error && cap) error[0] = 0;
+                if (s->performance_handler(s->performance_opaque, mode, configuration, mode == s->performance_mode, error, cap)) {
+                    if (error && cap && error[0]) return -1;
+                    return problem(error, cap, "host rejected apm performance mode=%u configuration=0x%x", mode, configuration);
+                }
+                s->performance_configuration[mode] = configuration; s->performance_configured[mode] = 1;
+                emit(s, "apm_configuration mode=%u configuration=0x%x active=%s host_policy_accepted=true", mode, configuration, mode == s->performance_mode ? "true" : "false");
+                response(ipc, capacity, &r, NULL, 0, 0, 0); return 0;
+            }
+            if (!s->performance_configured[mode]) return problem(error, cap, "apm.GetPerformanceConfiguration has no configured host policy mode=%u", mode);
+            response(ipc, capacity, &r, &s->performance_configuration[mode], 4, 0, 0); return 0;
         }
     } else if (o->kind == OBJECT_LM && r.command == 0) {
         if (r.input_count || !r.pid || r.payload_size < 8) return problem(error, cap, "lm.OpenLogger requires PID descriptor and u64 placeholder");
