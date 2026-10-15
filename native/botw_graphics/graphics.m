@@ -171,6 +171,7 @@ static botw_graphics_error errorCallback;
 static botw_graphics_memory_range memoryValidator;
 static botw_graphics_memory_access memoryAccessValidator;
 static _Thread_local char lastError[1024];
+static _Thread_local const char *currentEntry;
 static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
 static _Thread_local unsigned graphicsDepth;
 static _Thread_local BOOL pendingError,pendingFatal;
@@ -243,7 +244,10 @@ int botw_graphics_copy_latest_frame(void *rgba,size_t capacity,uint32_t *width,u
 
 
 static int report(const char *format, ...) {
-    va_list args; va_start(args,format); vsnprintf(lastError,sizeof lastError,format,args); va_end(args);
+    const char *entry=currentEntry?currentEntry:"<host>";if(!strncmp(entry,"w_nvn",5))entry+=2;
+    int prefix=snprintf(lastError,sizeof lastError,"entry=%s: ",entry);
+    size_t offset=prefix>0?MIN((size_t)prefix,sizeof lastError-1):0;
+    va_list args;va_start(args,format);vsnprintf(lastError+offset,sizeof lastError-offset,format,args);va_end(args);
     fprintf(stderr,"[botw graphics] %s\n",lastError);
     pendingError=YES;return 0;
 }
@@ -280,8 +284,15 @@ static void put(void *raw,id value) {
     objectSpans[@(serial)]=[NSValue valueWithRange:NSMakeRange((NSUInteger)raw,bytes)];
 }
 static id get(const void *raw,Class expected) {
-    id value=raw?objects[@(((const BWObject*)raw)->serial)]:nil;
-    if(!value || ![value isKindOfClass:expected])fatal("object lifetime/type"); return value;
+    uint64_t key=0;char detail[384];
+    if(raw&&memoryAccessValidator&&!memoryAccessValidator(raw,sizeof key,0)){
+        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=<unreadable> actual=<none>",class_getName(expected),raw);fatal(detail);
+    }
+    if(raw)memcpy(&key,raw,sizeof key);id value=raw?objects[@(key)]:nil;
+    if(!value||![value isKindOfClass:expected]){
+        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=0x%llx actual=%s",class_getName(expected),raw,(unsigned long long)key,value?class_getName([value class]):"<none>");fatal(detail);
+    }
+    return value;
 }
 static void removeObject(void *raw) {
     NSNumber *key=@(((BWObject*)raw)->serial);[objects removeObjectForKey:key];[objectSpans removeObjectForKey:key];((BWObject*)raw)->serial=0;
@@ -865,11 +876,11 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
     @catch(BWGraphicsFailure *failure){(void)failure;} \
     @catch(NSException *exception){report("Native graphics exception: %s",exception.reason.UTF8String);pendingFatal=YES;}
 #define WRAP_VALUE(scope,name,ret,parameters,operation) \
-    scope ret name parameters {ret value={0};graphicsBegin(); \
-        @autoreleasepool{@try{value=(operation);}CATCH_GRAPHICS_FAILURE}graphicsEnd();return value;}
+    scope ret name parameters {ret value={0};graphicsBegin();const char *previous=currentEntry;currentEntry=#name; \
+        @autoreleasepool{@try{value=(operation);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();return value;}
 #define WRAP_VOID(scope,name,parameters,operation) \
-    scope void name parameters {graphicsBegin(); \
-        @autoreleasepool{@try{operation;}CATCH_GRAPHICS_FAILURE}graphicsEnd();}
+    scope void name parameters {graphicsBegin();const char *previous=currentEntry;currentEntry=#name; \
+        @autoreleasepool{@try{operation;}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();}
 #define NVN_VALUE(name,ret,parameters,arguments) WRAP_VALUE(static,w_##name,ret,parameters,h_##name arguments) \
     _Static_assert(__builtin_types_compatible_p(__typeof__(&w_##name),NVNT_##name),"NVN wrapper signature: " #name);
 #define NVN_VOID(name,parameters,arguments) WRAP_VOID(static,w_##name,parameters,h_##name arguments) \
@@ -898,7 +909,7 @@ WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control
 WRAP_VALUE(,botw_graphics_register_shader_with_profile,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count,const botw_graphics_shader_draw_profile *profile),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,profile))
 WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,0,0,pixels,bytes))
 WRAP_VALUE(,botw_graphics_read_texture_subresource,int,(const NVNtexture *texture,unsigned level,unsigned layer,void *pixels,size_t bytes),readTextureImpl(texture,level,layer,pixels,bytes))
-#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}graphicsEnd();abort();}
+#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();const char *previous=currentEntry;currentEntry=#name;@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();abort();}
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED
 static void *lookupNVNImpl(const char *name){if(!name)return NULL;
