@@ -45,6 +45,7 @@ int main(void) {
                        ROOT / 'native/botw_host/services.c', ROOT / 'native/botw_host/kernel.c',
                        ROOT / 'native/botw_host/hipc_address.c',
                        ROOT / 'native/botw_host/address_space.c',
+                       ROOT / 'native/botw_resources/savefs.c', ROOT / 'native/botw_resources/local_user.c',
                        ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c']
             compiled = subprocess.run(['xcrun', 'clang', '-O2', '-Wall', '-Wextra', '-Werror',
                                        *(str(s) for s in sources), '-o', str(executable)],
@@ -84,6 +85,7 @@ int main(void) {
                        ROOT / 'native/botw_host/services.c', ROOT / 'native/botw_host/kernel.c',
                        ROOT / 'native/botw_host/hipc_address.c',
                        ROOT / 'native/botw_host/address_space.c',
+                       ROOT / 'native/botw_resources/savefs.c', ROOT / 'native/botw_resources/local_user.c',
                        ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c']
             compiled = subprocess.run(['xcrun', 'clang', '-O2', '-Wall', '-Wextra', '-Werror',
                                        *(str(s) for s in sources), '-o', str(executable)],

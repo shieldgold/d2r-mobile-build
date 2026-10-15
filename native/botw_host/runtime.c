@@ -11,6 +11,8 @@
 #include "address_space.h"
 #include "../botw_input/input.h"
 #include "../botw_resources/romfs.h"
+#include "../botw_resources/savefs.h"
+#include "../botw_resources/local_user.h"
 #include <TargetConditionals.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -113,6 +115,8 @@ static struct {
     botw_kernel *kernel;
     botw_input *input;
     botw_romfs *romfs;
+    botw_savefs *savefs;
+    botw_local_user local_user;
     int input_owned;
     uint32_t input_shared_handle;
     uint64_t resource_user_id;
@@ -601,6 +605,16 @@ static void configure_resource_backends(const char *documents) {
     if (botw_romfs_pread(state.romfs, "/System/Version.txt", 0, version, sizeof version - 1, &actual, &fs_error))
         fail("read game resource version: %s", fs_error.message);
     report("romfs_available=true bytes=%llu version=%s", (unsigned long long)botw_romfs_image_size(state.romfs), version);
+    botw_local_user_error user_error;
+    if (botw_local_user_open(documents, &state.local_user, &user_error))
+        fail("open local offline user: %s", user_error.message);
+    length = snprintf(path, sizeof path, "%s/botw-saves", documents);
+    if (length < 0 || (size_t)length >= sizeof path) fail("save directory path exceeds limit");
+    botw_savefs_error save_error;
+    state.savefs = botw_savefs_open(path, "01007ef00011e000", state.local_user.uid_hex, 0, &save_error);
+    if (!state.savefs) fail("open local save filesystem: %s", save_error.message);
+    botw_services_set_savefs(state.services, state.savefs);
+    report("local_offline_user_ready=true save_backend_ready=true game_save_verified=false");
     /* This target registers only the mounted base image. A downloaded update
      * archive is not installed content and must not stand in for patch RomFS. */
     if (botw_services_set_patch_absent(state.services, 1, error, sizeof error))
@@ -958,6 +972,7 @@ static int cleanup(void) {
     if (state.input_owned) botw_input_destroy(state.input);
     state.input = NULL;
     botw_romfs_close(state.romfs); state.romfs = NULL;
+    botw_savefs_close(state.savefs); state.savefs = NULL;
     botw_kernel_destroy(state.kernel); state.kernel = NULL;
     for (unsigned i = 0; i < state.signal_count; i++) sigaction(caught_signals[i], &state.previous[i], NULL);
     /* Darwin validates ss_size even with SS_DISABLE (an initially disabled

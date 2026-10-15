@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 static void report(const char *s) { puts(s); fflush(stdout); }
 int main(int argc, char **argv) {
@@ -14,5 +15,8 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--sdk-probe")) return 64;
     }
     if (host39 && botw_host_set_address_space(39)) return 64;
-    return botw_host_run_mode(argv[1], argv[1], report, mode);
+    char *root = realpath(argv[1], NULL);
+    if (!root) { perror("bundle directory"); return 66; }
+    int result = botw_host_run_mode(root, root, report, mode);
+    free(root); return result;
 }

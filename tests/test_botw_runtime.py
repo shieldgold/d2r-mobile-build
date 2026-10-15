@@ -182,7 +182,8 @@ class NativeRuntimeTests(unittest.TestCase):
         cls.build = tempfile.TemporaryDirectory(prefix='botw-runtime-tests-')
         cls.exe = Path(cls.build.name) / 'botw-host'
         sources = [ROOT / 'native/botw_host' / f for f in ('runtime.c', 'entry.S', 'cli.c', 'services.c', 'kernel.c', 'hipc_address.c', 'address_space.c')]
-        sources += [ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c']
+        sources += [ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c',
+                    ROOT / 'native/botw_resources/savefs.c', ROOT / 'native/botw_resources/local_user.c']
         built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
                                 '-O1', '-g', *(str(s) for s in sources), '-o', str(cls.exe)],
                                text=True, capture_output=True)
@@ -214,6 +215,37 @@ class NativeRuntimeTests(unittest.TestCase):
         self.assertIn('host39 transport audit:', result.stdout)
         self.assertNotIn('entry_called=', result.stdout)
         self.assertNotIn('nnMain_called=true', result.stdout)
+
+    def test_resource_mount_reuses_local_save_user_and_refuses_corrupt_identity(self):
+        from test_botw_romfs import fixture
+        with tempfile.TemporaryDirectory(prefix='botw-local-save-') as folder:
+            root = Path(folder)
+            for name in MODULES:
+                image(root, name)
+            romfs, _ = fixture([('/System/Version.txt', b'1.0.0')])
+            (root / 'botw-romfs.bin').write_bytes(romfs)
+            def run(mode):
+                return subprocess.run([str(self.exe), str(root), mode], capture_output=True,
+                                      text=True, timeout=10)
+            first = run('--load-only')
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertIn('save_backend_ready=true game_save_verified=false', first.stdout)
+            identity = root / 'botw-profile/uid.bin'
+            original = identity.read_bytes()
+            saves = list((root / 'botw-saves/01007ef00011e000').iterdir())
+            self.assertEqual(len(saves), 1)
+            self.assertEqual(len(saves[0].name), 32)
+            second = run('--load-only')
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertEqual(identity.read_bytes(), original)
+            self.assertEqual(list((root / 'botw-saves/01007ef00011e000').iterdir()), saves)
+            damaged = original[:-1]
+            identity.write_bytes(damaged)
+            stopped = run('--sdk-probe')
+            self.assertEqual(stopped.returncode, 1, stopped.stdout + stopped.stderr)
+            self.assertIn('open local offline user:', stopped.stdout)
+            self.assertNotIn('entry_called=', stopped.stdout)
+            self.assertEqual(identity.read_bytes(), damaged)
 
     def test_unknown_relocation_is_rejected(self):
         p = self.run_host('--load-only', bad_type=True)
@@ -339,6 +371,7 @@ int main(void) {
                                 str(ROOT / 'native/botw_host/services.c'), str(ROOT / 'native/botw_host/kernel.c'),
                                 str(ROOT / 'native/botw_host/hipc_address.c'),
                                 str(ROOT / 'native/botw_host/address_space.c'),
+                                str(ROOT / 'native/botw_resources/savefs.c'), str(ROOT / 'native/botw_resources/local_user.c'),
                                 str(ROOT / 'native/botw_input/input.c'), str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(executable)],
                                capture_output=True, text=True)
         self.assertEqual(built.returncode, 0, built.stderr)

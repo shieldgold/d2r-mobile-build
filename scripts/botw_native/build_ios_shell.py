@@ -13,6 +13,7 @@ SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/services.c', 'native/
            'native/botw_host/hipc_address.c',
            'native/botw_host/address_space.c',
            'native/botw_host/entry.S', 'native/botw_resources/romfs.c', 'native/botw_resources/savefs.c',
+           'native/botw_resources/local_user.c',
            'native/botw_input/input.c', 'native/botw_input/BOTWInputOverlay.m',
            'native/botw_graphics/graphics.m', 'native/botw_graphics/shader_bundle.m',
            'native/botw_app/main.m')
