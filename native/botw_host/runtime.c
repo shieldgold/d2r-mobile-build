@@ -135,6 +135,8 @@ static struct {
     void *graphics_workspace;
     size_t graphics_workspace_size;
     int host39_transport_audited;
+    int heap_policy_active, heap_initial_sized;
+    size_t heap_size, root_size, image_bytes;
     /* Accessed by the real frontend display callback under lifecycle_lock. */
     void *vi_display, *vi_layer;
     uint32_t vi_vsync_write, vi_vsync_read;
@@ -373,6 +375,106 @@ static uint64_t find_raw_definition(const char *name, Module **module, const Sym
     return 0;
 }
 static uint64_t find_raw_symbol(const char *name) { return find_raw_definition(name, NULL, NULL); }
+/* Two fixed base-v0 parameters use the pinned upstream PARAMS thunk contract:
+ * save x16 below SP, read the allocated key-page/TSD slot, restore x16, resume.
+ * Reusing KRES0/KRES1 here is explicit in the packaged policy; no D2R display
+ * parameters are installed. The offline packager first verifies the complete
+ * original NSO SHA/build-ID profile, then independently unwinds these thunks
+ * and verifies the existing Host39 chain. Check actual loaded instructions
+ * again before any guest execution. Signed code is never changed at runtime. */
+#define HEAP_POLICY_UNIT ((size_t)0x200000)
+#define HEAP_POLICY_RESERVE ((size_t)0x10000000)
+#define HEAP_POLICY_STARTUP ((size_t)0x02000000)
+#define HEAP_POLICY_MIN_ROOT ((size_t)0x20000000)
+#define HEAP_POLICY_ORIGINAL ((size_t)0xc2600000)
+int botw_host_heap_policy_plan(size_t kernel_available, size_t live_available,
+        size_t *heap, size_t *root, char *error, size_t capacity) {
+    if (!heap || !root || heap == root || live_available < HEAP_POLICY_RESERVE) {
+        if (error && capacity) snprintf(error, capacity, "bounded heap: invalid output or live host memory below reserve");
+        return 1;
+    }
+    size_t value = live_available - HEAP_POLICY_RESERVE;
+    if (value > kernel_available) value = kernel_available;
+    if (value > HEAP_POLICY_ORIGINAL) value = HEAP_POLICY_ORIGINAL;
+    value &= ~(HEAP_POLICY_UNIT - 1);
+    if (value < HEAP_POLICY_STARTUP + HEAP_POLICY_MIN_ROOT) {
+        if (error && capacity) snprintf(error, capacity, "bounded heap: cannot fit 512 MiB experimental root plus 32 MiB startup block");
+        return 1;
+    }
+    *heap = value; *root = value - HEAP_POLICY_STARTUP; return 0;
+}
+static uint32_t heap_policy_word(const unsigned char *image, size_t offset) {
+    uint32_t word; memcpy(&word, image + offset, sizeof word); return word;
+}
+static int heap_policy_error(char *error, size_t capacity, const char *message) {
+    if (error && capacity) snprintf(error, capacity, "bounded heap image: %s", message);
+    return -1;
+}
+static uint32_t heap_policy_branch(size_t source, size_t target) {
+    int64_t delta = (int64_t)target - (int64_t)source;
+    return 0x14000000u | ((uint32_t)(delta / 4) & 0x3ffffffu);
+}
+static int heap_policy_image_mode(Module *m, char *error, size_t capacity) {
+    static const size_t offsets[2] = {0x735304, 0x7353b0};
+    static const unsigned registers[2] = {0, 8};
+    static const uint32_t contexts[2][5] = {
+        {0x910003fd, 0xd10043ff, 0x52b84c00, 0x943bf422, 0x910023e0},
+        {0x910043e0, 0x940b23a2, 0x52b80c08, 0x910043e0, 0xf9000be8}};
+    if (!m || !m->base || !m->name || strcmp(m->name, "main"))
+        return heap_policy_error(error, capacity, "main layout is outside the fixed profile");
+    /* A legacy/synthetic image without these sites cannot opt into this
+     * explicit transformation. Preserve the existing generic loader path. */
+    if (!in_range(offsets[1] + 8, 4, m->size)) {
+        if (m->size > offsets[0] && (!in_range(offsets[0], 4, m->size) ||
+                heap_policy_word(m->base, offsets[0]) != contexts[0][2]))
+            return heap_policy_error(error, capacity, "truncated or single patched parameter site");
+        return 0;
+    }
+    const unsigned char *image = m->base;
+    uint32_t a = heap_policy_word(image, offsets[0]), b = heap_policy_word(image, offsets[1]);
+    if (a == contexts[0][2] && b == contexts[1][2]) return 0; /* Original image: no policy. */
+    if ((a & 0xfc000000u) != 0x14000000u || (b & 0xfc000000u) != 0x14000000u ||
+            m->key_idx[4] != 4 || m->key_idx[5] != 5 || m->key_off % PAGE ||
+            m->key_size != PAGE || offsets[1] + 12 > m->text_end ||
+            !in_range(m->key_off, PAGE, m->patch_off) || m->key_off < ROUND_PAGE(m->text_end))
+        return heap_policy_error(error, capacity, "requires both audited parameters and the dedicated key slots");
+    size_t prior = 0;
+    for (unsigned i = 0; i < 2; i++) {
+        size_t offset = offsets[i];
+        for (unsigned j = 0; j < 5; j++) if (j != 2 &&
+                heap_policy_word(image, offset - 8 + j * 4) != contexts[i][j])
+            return heap_policy_error(error, capacity, "original parameter context differs");
+        uint32_t word = heap_policy_word(image, offset);
+        int64_t delta = ((int64_t)((word & 0x3ffffffu) ^ 0x2000000u) - 0x2000000) * 4;
+        int64_t target = (int64_t)offset + delta;
+        if (target < (int64_t)m->patch_off || target < 0 ||
+                !in_range((size_t)target, 32, m->size) || (i && (size_t)target != prior + 32))
+            return heap_policy_error(error, capacity, "parameter thunk leaves executable patch range");
+        size_t thunk = (size_t)target; unsigned reg = registers[i], tmp = 16;
+        int64_t back = (int64_t)(offset + 4) - (int64_t)(thunk + 28);
+        if (back < -(1 << 27) || back >= (1 << 27))
+            return heap_policy_error(error, capacity, "parameter return branch exceeds ARM64 range");
+        int64_t pages = (int64_t)(m->key_off >> 12) - (int64_t)((thunk + 8) >> 12);
+        if (pages < -(1 << 20) || pages >= (1 << 20))
+            return heap_policy_error(error, capacity, "parameter key page exceeds ADRP range");
+        uint32_t imm = (uint32_t)pages & 0x1fffffu;
+        uint32_t expected[8] = {0xf81f03f0u, 0xd53bd060u | reg,
+            0x90000000u | (imm & 3u) << 29 | (imm >> 2) << 5 | tmp,
+            0xf9400000u | m->key_idx[4 + i] << 10 | tmp << 5 | tmp,
+            0x8b000000u | tmp << 16 | reg << 5 | reg,
+            0xf9400000u | reg << 5 | reg, 0xf85f03f0u,
+            heap_policy_branch(thunk + 28, offset + 4)};
+        for (unsigned j = 0; j < 8; j++) if (heap_policy_word(image, thunk + j * 4) != expected[j])
+            return heap_policy_error(error, capacity, "parameter thunk instruction differs");
+        prior = thunk;
+    }
+    return 1;
+}
+static void install_heap_parameter_slots(void) {
+    if (pthread_setspecific(state.keys[4], (void *)(uintptr_t)state.heap_size) ||
+            pthread_setspecific(state.keys[5], (void *)(uintptr_t)state.root_size))
+        fail("install bounded heap parameters on actual guest thread");
+}
 static int services_memory(void *opaque, uint64_t address, size_t length, int writable);
 static const char *const allocator_constructor = "_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm";
 static const char *const allocator_constructor_alias = "_ZN2nn2os6detail21AddressSpaceAllocatorC2Emmm";
@@ -778,10 +880,7 @@ static int executable_address(void *opaque, uint64_t pointer) {
     }
     return 0;
 }
-static void configure_kernel_memory(void) {
-    const size_t mib = 1024u * 1024u;
-    size_t image = 0;
-    for (unsigned i = 0; i < MODULE_COUNT; i++) image += state.modules[i].size;
+static size_t host_available_memory(void) {
     size_t available = 0;
 #if TARGET_OS_IPHONE
     available = os_proc_available_memory();
@@ -790,6 +889,14 @@ static void configure_kernel_memory(void) {
     if (sysctlbyname("hw.memsize", &physical, &length, NULL, 0)) fail("query physical memory");
     available = physical > SIZE_MAX ? SIZE_MAX : (size_t)physical;
 #endif
+    return available;
+}
+static void configure_kernel_memory(void) {
+    const size_t mib = 1024u * 1024u;
+    size_t image = 0;
+    for (unsigned i = 0; i < MODULE_COUNT; i++) image += state.modules[i].size;
+    state.image_bytes = image;
+    size_t available = host_available_memory();
     /* Include already mapped modules while respecting the host's live limit.
      * Virtual capacities do not grant committed physical memory. */
     size_t budget = 4096u * mib;
@@ -844,6 +951,7 @@ static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64
         *(void **)((uint8_t *)context->tlr + 0x1f8) = (uint8_t *)context->tlr + 0x200;
         pthread_setspecific(state.keys[0], NULL); pthread_setspecific(state.keys[1], context->tls);
         pthread_setspecific(state.keys[2], context->tlr); pthread_setspecific(state.keys[3], (void *)botw_gate);
+        install_heap_parameter_slots();
         if (host_pool_push) context->autorelease_pool = host_pool_push();
         report("guest_thread_entered handle=0x%x", handle);
         ((void (*)(uint64_t, uint64_t))entry)(argument, handle);
@@ -1071,6 +1179,13 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
             if (handled == BOTW_KERNEL_HANDLED) {
                 if (g->arg == 1) report("heap_request=%llu result=0x%llx heap_base=0x%llx",
                     (unsigned long long)heap_request, (unsigned long long)regs[0], (unsigned long long)regs[1]);
+                if (g->arg == 1 && !regs[0] && state.heap_policy_active &&
+                        pthread_equal(pthread_self(), state.owner) && state.current_entry &&
+                        !strcmp(state.current_entry, "nninitStartup")) {
+                    if (!state.heap_size || heap_request != state.heap_size)
+                        fail("bounded heap: original SDK requested an unexpected heap size");
+                    state.heap_initial_sized = 1;
+                }
                 /* The audited base-v0 startup ignores allocation errors before
                  * consuming its output pointer. Stop this known initial-heap
                  * failure here; ordinary guest resizing keeps Horizon results. */
@@ -1309,6 +1424,27 @@ static uint64_t need_entry(const char *name) {
     require_executable(p, name); report("entry_resolved=%s", name); return p;
 }
 static void call_entry(const char *name, int two_args) {
+    if (state.heap_policy_active && !strcmp(name, "nninitStartup")) {
+        if (state.heap_size) fail("bounded heap: initial parameters may only be selected once");
+        uint64_t total = allocator_kernel_info(6);
+        if (total < state.image_bytes || total - state.image_bytes > SIZE_MAX)
+            fail("bounded heap: invalid actual kernel memory accounting");
+        size_t live = host_available_memory(); char error[512];
+        if (botw_host_heap_policy_plan((size_t)(total - state.image_bytes), live,
+                &state.heap_size, &state.root_size, error, sizeof error)) fail("%s", error);
+        install_heap_parameter_slots();
+        report("heap_policy=botw-switch-base-v0-bounded-heap-v1 experiment=true kernel_heap_available=%llu live_host_available=%zu host_reserve=%zu heap=%zu root=%zu startup_block=%zu game_playable=false",
+            (unsigned long long)(total - state.image_bytes), live, HEAP_POLICY_RESERVE,
+            state.heap_size, state.root_size, HEAP_POLICY_STARTUP);
+    }
+    if (state.heap_policy_active && !strcmp(name, "nnMain")) {
+        uint64_t used = allocator_kernel_info(7);
+        if (!state.heap_initial_sized || used < state.image_bytes ||
+                used - state.image_bytes != state.heap_size ||
+                state.root_size + HEAP_POLICY_STARTUP != state.heap_size)
+            fail("bounded heap: actual SDK heap and game root parameters are inconsistent");
+        report("heap_policy_actual_heap_verified=true heap=%zu root=%zu original_sdk_allocator=true", state.heap_size, state.root_size);
+    }
     uint64_t p = need_entry(name); report("entry_called=%s tls=0x%llx tlr=0x%llx", name,
         (unsigned long long)pthread_getspecific(state.keys[1]), (unsigned long long)pthread_getspecific(state.keys[2]));
     state.guest_started = 1; state.guest_executing = 1;
@@ -1472,6 +1608,17 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             }
             report("host39_loaded_transport_audited=true inline_sites=36 host_helpers=5");
             state.host39_transport_audited = 1;
+        }
+        char heap_error[512];
+        int heap_mode = heap_policy_image_mode(&state.modules[0], heap_error, sizeof heap_error);
+        if (heap_mode < 0) fail("%s", heap_error);
+        if (heap_mode) {
+            if (state.address_bits != 39 || !state.host39_transport_audited ||
+                    find_raw_symbol("nninitStartup") != (uint64_t)state.modules[0].base + 0x7352f8 ||
+                    find_raw_symbol("nnMain") != (uint64_t)state.modules[0].base + 0x735330)
+                fail("bounded heap requires the fixed base-v0 Host39 entry profile");
+            state.heap_policy_active = 1;
+            report("heap_policy_loaded_audited=true parameter_sites=2 tsd_slots=KRES0,KRES1 experimental=true");
         }
         initialize_keys();
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");

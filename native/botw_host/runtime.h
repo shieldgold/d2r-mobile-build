@@ -1,6 +1,7 @@
 /* BOTW native host experiment. No game content is distributed with this code. */
 #ifndef BOTW_HOST_RUNTIME_H
 #define BOTW_HOST_RUNTIME_H
+#include <stddef.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +32,13 @@ int botw_host_set_input(botw_input *input);
  * 39-bit mode requires separately verified SDK transport adaptations. Returns
  * 1 for unsupported widths, 2 while running, 0 after saving configuration. */
 int botw_host_set_address_space(unsigned bits);
+/* Pure planner for the explicitly packaged base-v0 bounded-heap experiment.
+ * Limits are actual kernel heap availability and a fresh host availability
+ * reading. Keeps a 256 MiB host reserve and the original 32 MiB startup block;
+ * root >= 512 MiB is an execution guard, not a proven game minimum. Outputs
+ * are unchanged on failure. This does not enable the policy or allocate. */
+int botw_host_heap_policy_plan(size_t kernel_available, size_t live_available,
+                              size_t *heap, size_t *root, char *error, size_t capacity);
 void botw_host_set_applet_state(int foreground, int focused);
 /* Actual host audio-session availability, combined with app focus by the
  * runtime. Interruptions pause real output without completing queued buffers. */

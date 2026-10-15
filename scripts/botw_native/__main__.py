@@ -28,9 +28,13 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--rewrite', action='store_true', help='Run the pinned offline source rewriter')
     parser.add_argument('--host39', action='store_true', help='Apply the fixed base-v0 host address transport adaptation')
+    parser.add_argument('--heap-policy', choices=('bounded-host-memory-v1',),
+                        help='Explicit experimental base-v0 heap/root parameters within actual host memory')
     args = parser.parse_args(argv)
     if args.host39 and not args.rewrite:
         parser.error('--host39 requires --rewrite')
+    if args.heap_policy and not args.host39:
+        parser.error('--heap-policy requires --host39 and --rewrite')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = {'schema': 1, 'status': 'started', 'phone_ready': False, 'guest_execution_tested': False,
@@ -74,6 +78,8 @@ def main(argv=None):
             extensions = ['branch_tables.py', 'rewriter_driver.py']
             if args.host39:
                 extensions.extend(('hipc_address.py', 'nso.py', 'rewrite.py'))
+            if args.heap_policy:
+                extensions.append('heap_policy.py')
             report['rewriter'] = {'upstream_commit': UPSTREAM_COMMIT, 'sha256': TOOL_SHA256,
                                   'ruleset': 'native', 'private_gates': False,
                                   'local_extension_sha256': {
@@ -81,7 +87,8 @@ def main(argv=None):
                                       for name in extensions}}
             for module in modules:
                 print('Rewriting ' + module['name'], flush=True)
-                result = rewrite_module(tool, exefs / module['name'], output / 'rewrite', host39=args.host39)
+                result = rewrite_module(tool, exefs / module['name'], output / 'rewrite', host39=args.host39,
+                                        heap_policy=bool(args.heap_policy))
                 report['rewrites'].append(result)
                 print(module['name'] + ': ' + result['status'], flush=True)
                 write_report(output, report)
@@ -89,6 +96,9 @@ def main(argv=None):
             if args.host39 and report['status'] == 'rewritten':
                 from .guest_framework import HOST39_POLICY
                 report['host_address_policy'] = HOST39_POLICY.copy()
+                if args.heap_policy:
+                    from .heap_policy import POLICY
+                    report['guest_heap_policy'] = POLICY.copy()
         write_report(output, report)
         print('Report: ' + str(output / 'report.json'), flush=True)
         return 1 if report['status'] == 'rewrite_failed' else 0

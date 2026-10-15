@@ -1,5 +1,6 @@
 """Run a pinned, verified source tool. Guest modules are never executed."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -90,8 +91,17 @@ def validate_structure(directory, name):
             'semantic_equivalence_verified': False}
 
 
-def rewrite_module(tool, module, output, timeout=300, *, host39=False):
+def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_policy=False):
+    if heap_policy and not host39:
+        raise ValueError('The explicit heap policy requires the audited Host39 pipeline')
     tool, module, output = verified_tool(tool), Path(module), Path(output)
+    if heap_policy:
+        from .nso import inspect_nso
+        profile = json.loads((Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json').read_text())
+        expected = profile['modules'].get(module.name)
+        actual = inspect_nso(module.read_bytes(), module.name)
+        if expected is None or any(actual[key] != expected[key] for key in ('sha256', 'build_id')):
+            raise ValueError('The explicit heap policy requires the fixed original module fingerprint: ' + module.name)
     output.mkdir(parents=True, exist_ok=True)
     log = output / f'{module.name}.rewrite.log'
     env = dict(os.environ, DM_RULESET='native', DM_PRIVATE_GATES='0')
@@ -113,6 +123,7 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False):
     image = output / f'{module.name}.patched.bin'
     sites = output / f'{module.name}.sites.tsv'
     adaptation = None
+    heap_adaptation = None
     generic_digest = hashlib.sha256(image.read_bytes()).hexdigest()
     if host39:
         from .hipc_address import apply, verify
@@ -122,6 +133,17 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False):
         updated, adaptation = apply(module.name, initialized_image(module.read_bytes(), module.name),
             generic_bytes, {'generic_site_offsets': [int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()]})
         verify(updated, adaptation, expected_input_sha256=generic_digest)
+        if heap_policy and module.name == 'main':
+            from .heap_policy import apply as apply_heap, verify as verify_heap
+            layout = {}
+            for row in (output / 'main.fixups.tsv').read_text().splitlines():
+                fields = row.split()
+                if len(fields) == 3 and fields[0] == '#':
+                    layout[fields[1]] = int(fields[2], 0)
+            host39_digest = hashlib.sha256(updated).hexdigest()
+            updated, heap_adaptation = apply_heap(initialized_image(module.read_bytes(), module.name),
+                updated, layout, generic_site_offsets=[int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()])
+            verify_heap(updated, heap_adaptation, expected_input_sha256=host39_digest)
         temporary = image.with_suffix('.host39.part')
         temporary.write_bytes(updated)
         temporary.replace(image)
@@ -134,4 +156,7 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False):
     if adaptation is not None:
         result['generic_image_sha256'] = generic_digest
         result['host_address_adaptation'] = adaptation
+    if heap_adaptation is not None:
+        result['host39_image_sha256'] = heap_adaptation['input_image_sha256']
+        result['heap_adaptation'] = heap_adaptation
     return result

@@ -115,6 +115,22 @@ def _address_policy(report, originals, rewrites):
     return 39
 
 
+def _heap_policy(report, originals, rewrites, address_bits):
+    policy = report.get('guest_heap_policy')
+    adapted = {name for name, item in rewrites.items() if 'heap_adaptation' in item or 'host39_image_sha256' in item}
+    if policy is None:
+        if adapted:
+            raise ValueError('Heap adaptation requires an explicit bounded heap policy')
+        return None
+    from .heap_policy import POLICY
+    if (address_bits != 39 or policy != POLICY or
+            any(type(policy.get(key)) is not type(value) for key, value in POLICY.items()) or adapted != {'main'}):
+        raise ValueError('Unsupported or incomplete explicit heap policy')
+    profile_path = Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json'
+    verify_profile(list(originals.values()), json.loads(profile_path.read_text()))
+    return POLICY.copy()
+
+
 def _text(data, label):
     try:
         return data.decode('utf-8')
@@ -302,6 +318,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
     report = json.loads(_text(report_bytes, 'report'), object_pairs_hook=_unique_object)
     originals, rewrites = _module_records(report)
     address_bits = _address_policy(report, originals, rewrites)
+    heap_policy = _heap_policy(report, originals, rewrites, address_bits)
     names = list(MODULE_NAMES if module_names is None else module_names)
     if not names or len(set(names)) != len(names) or any(name not in MODULE_NAMES for name in names):
         raise ValueError('Select unique known BOTW module names')
@@ -318,6 +335,20 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         files.update({kind: _read_file(rewrite_dir / f'{name}.{kind}.tsv', MAX_METADATA_BYTES) for kind in TABLE_KINDS})
         layout = _layout(files['fixups'], originals[name], len(image))
         _audit_tables(files, image, layout, rewrites[name])
+        address_image = image
+        if heap_policy and name == 'main':
+            from .heap_policy import verify as verify_heap
+            heap_manifest = rewrites[name]['heap_adaptation']
+            if (not isinstance(heap_manifest, dict) or
+                    heap_manifest.get('source_image_sha256') != rewrites[name]['host_address_adaptation'].get('source_image_sha256')):
+                raise ValueError('Heap original image identity differs from Host39 source')
+            digest = rewrites[name].get('host39_image_sha256')
+            if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
+                raise ValueError('Heap adaptation requires its independently anchored Host39 input digest')
+            if heap_manifest.get('layout') != {key: layout[key] for key in
+                    ('KEY_PAGE_OFF', 'PATCH_OFF', 'KEY_KRES0_IDX', 'KEY_KRES1_IDX')}:
+                raise ValueError('Heap parameter layout differs from the runtime key table')
+            address_image = verify_heap(image, heap_manifest, expected_input_sha256=digest)
         if address_bits == 39:
             from .hipc_address import verify
             adaptation = rewrites[name]['host_address_adaptation']
@@ -326,7 +357,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
             generic_digest = rewrites[name].get('generic_image_sha256')
             if not isinstance(generic_digest, str) or not re.fullmatch('[0-9a-f]{64}', generic_digest):
                 raise ValueError('Host39 requires the original generic rewrite digest: ' + name)
-            verify(image, adaptation, expected_input_sha256=generic_digest)
+            verify(address_image, adaptation, expected_input_sha256=generic_digest)
         for kind, data in files.items():
             extension = kind if kind == 'patched.bin' else kind + '.tsv'
             sources.append({'path': f'rewrite/{name}.{extension}', 'bytes': len(data), 'sha256': _digest(data)})
@@ -351,6 +382,8 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
                            'build_id': originals[m['name']]['build_id'],
                            'image_sha256': rewrites[m['name']]['image_sha256'],
                            'image_bytes': len(m['image']), 'layout': m['layout']} for m in modules]}
+    if heap_policy:
+        result['guest_heap_policy'] = heap_policy
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f'.{output_dir.name}.tmp-', dir=output_dir.parent))
     try:
