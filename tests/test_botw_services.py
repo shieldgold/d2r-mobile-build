@@ -1468,6 +1468,72 @@ finally:
         self.assertTrue(event['signaled'])
         self.send(hid, self.request(100, struct.pack('<IIQ', 0x80000000, 0, 0x12345678), pid=True), good=False)
 
+    def test_hid_debugpad_requires_exact_identity_and_abi_before_mutating_shared_memory(self):
+        self.applet_kernel(); self.applet_state()
+        self.lib.botw_input_create.restype = C.c_void_p
+        self.lib.botw_input_destroy.argtypes = [C.c_void_p]
+        self.lib.botw_input_shared_memory.argtypes = [C.c_void_p, C.POINTER(C.c_size_t)]
+        self.lib.botw_input_shared_memory.restype = C.c_void_p
+        input = self.lib.botw_input_create(); self.assertTrue(input)
+        self.addCleanup(self.lib.botw_input_destroy, input)
+        self.kernel_handles[0x30000] = {'shared_memory': True}
+        self.lib.botw_services_set_input.argtypes = [C.c_void_p, C.c_void_p, C.c_uint32]
+        self.lib.botw_services_set_input(self.ctx, input, 0x30000)
+        hid = self.service(self.initialized_sm(), b'hid')
+        payload = struct.pack('<Q', 0x12345678)
+        memory = self.lib.botw_input_shared_memory(input, None)
+        before = C.string_at(memory, 0x40000)
+        invalid = [self.request(1, payload), self.request(1, struct.pack('<Q', 0xbad), pid=True),
+                   self.request(1, b'', pid=True), self.request(1, payload + b'\x01', pid=True),
+                   self.request(1, payload + b'\0' * 20, pid=True),
+                   self.request(1, payload, pid=True, copies=(0x30000,))]
+        incoming = self.static_buffer(b'abcd'); self.ranges.append((C.addressof(incoming), len(incoming), False))
+        invalid.append(self.request(1, payload, pid=True, static=(C.addressof(incoming), 4)))
+        outgoing = C.create_string_buffer(16); self.ranges.append((C.addressof(outgoing), 16, True))
+        invalid.append(self.request(1, payload, pid=True, receive=(C.addressof(outgoing), 16)))
+        for arguments in ({'static': (0, 0)}, {'buffer': (0, 0)}, {'receive': (0, 0)}, {'receive_static': (0, 0)}):
+            invalid.append(self.request(1, payload, pid=True, **arguments))
+        moved = bytearray(self.request(1, payload, pid=True)); struct.pack_into('<I', moved, 8, 1 | 1 << 5)
+        invalid.append(bytes(moved))
+        for request in invalid:
+            with self.subTest(request=request.hex()):
+                rejected, _ = self.send(hid, request, good=False)
+                self.assertEqual(rejected[:len(request)], request)
+                self.assertEqual(C.string_at(memory, 0x40000), before)
+        for command in (11, 21, 31):
+            self.send(hid, self.request(command, payload, pid=True), good=False)
+            self.assertEqual(C.string_at(memory, 0x40000), before)
+        request = bytearray(self.request(1, payload, pid=True))
+        self.assertEqual(struct.unpack_from('<II', request), (4, 0x8000000a))
+        self.assertEqual(len(request), 60)
+        request[56:60] = bytes.fromhex('deadbeef')  # real SDK leaves these framing bytes uninitialized
+        raw, _ = self.send(hid, bytes(request))
+        data, handles, objects = self.response(raw)
+        self.assertEqual((handles, objects), ([], 0)); self.assertFalse(any(data))
+        self.assertEqual(struct.unpack_from('<II', raw), (0, 6))
+        after = C.string_at(memory, 0x40000)
+        self.assertEqual(struct.unpack_from('<QQQ', after, 8), (17, 0, 1))
+        self.assertEqual(struct.unpack_from('<QQ', after, 0x20), (1, 1))
+        self.assertEqual(after[0x30:0x48], bytes(24))
+        self.assertEqual(after[0x400:], before[0x400:])
+        request[56:60] = bytes.fromhex('abcdef12')
+        self.send(hid, bytes(request))
+        self.assertEqual(C.string_at(memory, 0x40000), after)
+        minimal = request[:56]; struct.pack_into('<I', minimal, 4, 0x80000009)
+        self.send(hid, bytes(minimal))  # complete u64, no trailing alignment reservation
+        self.assertEqual(C.string_at(memory, 0x40000), after)
+        raw, _ = self.send(hid, self.request(0, kind=5))
+        domain, = struct.unpack_from('<I', self.response(raw)[0])
+        for extra in (b'\0' * 4, b'\xa5' * 4, b'\0' * 8):
+            request = self.request(1, payload + extra, pid=True, domain=domain)
+            rejected, _ = self.send(hid, request, good=False)
+            self.assertEqual(rejected[:len(request)], request)
+            self.assertEqual(C.string_at(memory, 0x40000), after)
+        raw, _ = self.send(hid, self.request(1, payload, pid=True, domain=domain))
+        data, handles, objects = self.response(raw, domain=True)
+        self.assertEqual((handles, objects), ([], 0)); self.assertFalse(any(data))
+        self.assertEqual(C.string_at(memory, 0x40000), after)
+
     def test_self_controller_focus_policy_requires_actual_host_handler(self):
         self.applet_kernel()
         self.applet_state()

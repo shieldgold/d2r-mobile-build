@@ -30,6 +30,20 @@ _Static_assert(sizeof(npad_entry)==0x30,"old SDK atomic Npad sample");
 _Static_assert(sizeof(npad_ring)==0x350,"old SDK Npad Lifo");
 _Static_assert(offsetof(npad_memory,rings)==0x28,"old SDK FullKey ring");
 _Static_assert(sizeof(npad_memory)==BOTW_HID_NPAD_STRIDE,"old SDK Npad stride");
+typedef struct {
+    uint64_t sampling;
+    uint32_t attributes, buttons;
+    int32_t rx, ry, lx, ly;
+} debug_pad_state;
+typedef struct { _Atomic uint64_t sampling; debug_pad_state state; } debug_pad_entry;
+typedef struct {
+    _Atomic uint64_t ticks, capacity, tail, count;
+    debug_pad_entry entries[17];
+} debug_pad_ring;
+_Static_assert(sizeof(debug_pad_state)==0x20,"old SDK DebugPadState");
+_Static_assert(sizeof(debug_pad_entry)==0x28,"old SDK atomic DebugPad sample");
+_Static_assert(sizeof(debug_pad_ring)==0x2c8,"old SDK DebugPad Lifo");
+_Static_assert(sizeof(debug_pad_ring)<=BOTW_HID_DEBUG_PAD_SIZE,"DebugPad region bounds");
 typedef struct { uint64_t buttons; int32_t axes[4]; int connected; } source_state;
 struct botw_input {
     pthread_mutex_t mutex;
@@ -38,7 +52,8 @@ struct botw_input {
     uint32_t styles, ids[10], blocked;
     size_t id_count;
     int active;
-    uint64_t sampling;
+    uint64_t sampling, debug_pad_sampling;
+    int debug_pad_active;
 };
 static int id_index(uint32_t id) { return id<8?(int)id:id==0x20?8:id==0x10?9:-1; }
 static npad_memory *npad(botw_input *input,unsigned index) {
@@ -81,6 +96,9 @@ static int selected(botw_input *input,uint32_t *style) {
 }
 static void initialize_memory(botw_input *input) {
     memset(input->memory,0,BOTW_HID_SHARED_MEMORY_SIZE);
+    input->debug_pad_active=0;input->debug_pad_sampling=0;
+    debug_pad_ring *debug=(debug_pad_ring *)(void *)(input->memory+BOTW_HID_DEBUG_PAD_OFFSET);
+    atomic_init(&debug->capacity,17);atomic_init(&debug->tail,16);
     for(unsigned index=0;index<10;index++)for(unsigned ring=0;ring<7;ring++) {
         npad_ring *r=&npad(input,index)->rings[ring];
         atomic_init(&r->capacity,17); atomic_init(&r->tail,16);
@@ -166,9 +184,31 @@ static void publish(npad_ring *ring,const npad_state *state,uint64_t ticks) {
     uint64_t count=atomic_load_explicit(&ring->count,memory_order_relaxed);
     atomic_store_explicit(&ring->count,count<16?count+1:16,memory_order_release);
 }
+static void publish_debug_pad(botw_input *input,uint64_t ticks) {
+    debug_pad_ring *ring=(debug_pad_ring *)(void *)(input->memory+BOTW_HID_DEBUG_PAD_OFFSET);
+    debug_pad_state state={0};state.sampling=++input->debug_pad_sampling;
+    uint64_t tail=(atomic_load_explicit(&ring->tail,memory_order_relaxed)+1)%17;
+    debug_pad_entry *entry=&ring->entries[tail];
+    atomic_store_explicit(&entry->sampling,UINT64_MAX,memory_order_release);
+    memcpy(&entry->state,&state,sizeof state);
+    atomic_store_explicit(&entry->sampling,state.sampling,memory_order_release);
+    atomic_store_explicit(&ring->ticks,ticks,memory_order_relaxed);
+    atomic_store_explicit(&ring->tail,tail,memory_order_release);
+    uint64_t count=atomic_load_explicit(&ring->count,memory_order_relaxed);
+    atomic_store_explicit(&ring->count,count<16?count+1:16,memory_order_release);
+}
+int botw_input_activate_debug_pad(botw_input *input,uint64_t ticks) {
+    if(!input)return -1;
+    pthread_mutex_lock(&input->mutex);
+    if(!input->debug_pad_active) {
+        input->debug_pad_active=1;publish_debug_pad(input,ticks);
+    }
+    pthread_mutex_unlock(&input->mutex);return 0;
+}
 void botw_input_sample(botw_input *input,uint64_t ticks) {
     if(!input)return;
     pthread_mutex_lock(&input->mutex);uint32_t style=0;int index=selected(input,&style);
+    if(input->debug_pad_active)publish_debug_pad(input,ticks);
     npad_state current={0};current.sampling=++input->sampling;
     int32_t axes[4]={0};
     if(index>=0)for(unsigned s=0;s<BOTW_INPUT_SOURCE_COUNT;s++) {

@@ -83,6 +83,46 @@ static void ring(void) {
     }
     botw_input_destroy(input);
 }
+static size_t debug_latest(void) { return 0x20+u64(0x10)*0x28; }
+static void debug_disconnected(uint64_t sequence) {
+    size_t e=debug_latest();assert(u64(8)==17 && u64(0x10)<17 && u64(0x18)<=16);
+    assert(u64(e)==sequence && u64(e+8)==sequence);
+    for(size_t i=16;i<0x28;i++)assert(!shared[e+i]);
+}
+static void debugpad(void) {
+    setup();assert(botw_input_activate_debug_pad(NULL,1)==-1);
+    assert(u64(8)==17 && u64(16)==16 && !u64(24));
+    assert(!botw_input_set_source(input,BOTW_INPUT_TOUCH,BOTW_BUTTON_A,123,456,789,-321,1));
+    botw_input_sample(input,1); assert(!u64(24)); /* no activation via real Npad input */
+    unsigned char *rest=malloc(0x40000-0x400);assert(rest);memcpy(rest,shared+0x400,0x40000-0x400);
+    memset(shared+0x2c8,0x5a,0x138);
+    assert(!botw_input_activate_debug_pad(input,100));debug_disconnected(1);assert(u64(24)==1 && u64(0)==100);
+    assert(!memcmp(rest,shared+0x400,0x40000-0x400)); /* no Npad or neighboring stream change */
+    unsigned char first[0x400];memcpy(first,shared,sizeof first);
+    assert(!botw_input_activate_debug_pad(input,999));assert(!memcmp(first,shared,sizeof first));
+    for(uint64_t seq=2;seq<=67;seq++) {
+        botw_input_sample(input,seq*100);debug_disconnected(seq);
+        assert(u64(24)==(seq<16?seq:16));
+        size_t previous=0x20+((u64(16)+16)%17)*0x28;assert(u64(previous+8)==seq-1);
+        for(size_t i=0x2c8;i<0x400;i++)assert(shared[i]==0x5a);
+        assert(u64(latest(8,1)+16)==BOTW_BUTTON_A); /* DebugPad remains distinct */
+    }
+    free(rest);botw_input_destroy(input);
+}
+static void debugpad_rebind(void) {
+    setup();assert(!botw_input_set_source(input,BOTW_INPUT_TOUCH,BOTW_BUTTON_X,77,88,0,0,1));
+    assert(!botw_input_activate_debug_pad(input,1));debug_disconnected(1);
+    unsigned char *owned=shared,*external=calloc(1,0x40000);assert(external);
+    assert(!botw_input_bind_shared_memory(input,external,0x40000));shared=external;
+    assert(u64(8)==17 && u64(16)==16 && !u64(24));botw_input_sample(input,2);assert(!u64(24));
+    assert(u64(latest(8,1)+8)==1 && u64(latest(8,1)+16)==BOTW_BUTTON_X);
+    assert(!botw_input_activate_debug_pad(input,3));debug_disconnected(1);
+    unsigned char snapshot[0x400];memcpy(snapshot,external,sizeof snapshot);
+    botw_input_unbind_shared_memory(input);shared=owned;
+    assert(u64(8)==17 && u64(16)==16 && !u64(24));botw_input_sample(input,4);assert(!u64(24));
+    assert(!botw_input_activate_debug_pad(input,5));debug_disconnected(1);
+    assert(!memcmp(snapshot,external,sizeof snapshot));free(external);botw_input_destroy(input);
+}
 static void timing(void) {
     uint64_t first=botw_input_monotonic_ticks(); assert(first);
     for(unsigned i=0;i<1000;i++)assert(botw_input_monotonic_ticks()>=first);
@@ -139,6 +179,7 @@ static void concurrent_unbind(void) {
     unsigned char *mapped=mmap(NULL,0x40000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
     assert(mapped!=MAP_FAILED);
     assert(!botw_input_bind_shared_memory(input,mapped,0x40000));
+    assert(!botw_input_activate_debug_pad(input,1));
     pthread_t thread; assert(!pthread_create(&thread,NULL,continuous_sampler,NULL));
     while(!atomic_load(&samples_started)) { }
     botw_input_unbind_shared_memory(input);
@@ -169,7 +210,8 @@ static void concurrent(void) {
 }
 int main(int argc,char **argv) {
     assert(argc==2);
-    if(!strcmp(argv[1],"baseline"))baseline(); else if(!strcmp(argv[1],"buttons"))buttons();
+    if(!strcmp(argv[1],"debugpad"))debugpad();else if(!strcmp(argv[1],"debugpad_rebind"))debugpad_rebind();
+    else if(!strcmp(argv[1],"baseline"))baseline(); else if(!strcmp(argv[1],"buttons"))buttons();
     else if(!strcmp(argv[1],"merge"))merge(); else if(!strcmp(argv[1],"ring"))ring();
     else if(!strcmp(argv[1],"unbind"))unbind(); else if(!strcmp(argv[1],"concurrent_unbind"))concurrent_unbind();
     else if(!strcmp(argv[1],"timing"))timing(); else if(!strcmp(argv[1],"config"))config(); else if(!strcmp(argv[1],"concurrent"))concurrent(); else abort();
@@ -202,6 +244,8 @@ class InputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(), 'ok')
 
+    def test_debugpad_activates_once_and_publishes_disconnected_wrap_without_touching_npad(self): self.case('debugpad')
+    def test_debugpad_binding_resets_activation_sequence_and_preserves_sources(self): self.case('debugpad_rebind')
     def test_no_input_is_released(self): self.case('baseline')
     def test_real_buttons_axes_and_release(self): self.case('buttons')
     def test_touch_and_controller_merge_then_disconnect(self): self.case('merge')

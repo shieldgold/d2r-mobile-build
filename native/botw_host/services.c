@@ -131,6 +131,7 @@ typedef struct {
     uint64_t input_address;
     size_t input_size;
     unsigned input_count, output_count, input_static_count, output_static_count;
+    unsigned buffer_descriptor_count;
     uint64_t output_address;
     size_t output_size;
 } Request;
@@ -570,6 +571,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     size_t raw_end = offset + (size_t)(b & 0x3ff) * 4;
     if (raw_end > capacity) return problem(error, cap, "HIPC raw data exceeds IPC buffer (end=%zu capacity=%zu)", raw_end, capacity);
     unsigned recv_statics = recv_mode >= 3 ? recv_mode - 2 : 0;
+    r->buffer_descriptor_count = statics + sends + recvs + recv_statics;
     if (!checked_span(raw_end, recv_statics * 8, capacity)) return problem(error, cap, "HIPC receive static list exceeds buffer");
     for (unsigned i = 0; i < recv_statics; i++) {
         const uint8_t *entry = ipc + raw_end + i * 8;
@@ -1242,6 +1244,22 @@ static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *i
         Object *resource = new_object(OBJECT_HID_APPLET_RESOURCE);
         if (!resource) return problem(error, cap, "allocate hid.IAppletResource failed");
         return return_object(s, session, resource, ipc, capacity, r, 0, error, cap);
+    }
+    if (r->command == 1) {
+        /* Old SDK ActivateDebugPad: PID + one u64 ARUID, no buffers/handles
+         * or output objects. Empty auto-select descriptors are still foreign
+         * parameters for this method. Validate everything before publishing. */
+        if (r->buffer_descriptor_count) return problem(error, cap, "hid.ActivateDebugPad does not accept buffer descriptors");
+        /* PID-only raw prefix is 20 bytes. CMIF alignment consumes 12 of
+         * the builder's 16 reserved bytes, leaving exactly four framing bytes.
+         * The original SDK does not initialize that tail. Domain data_size
+         * already removes framing padding, so its payload must be exact. */
+        if (r->domain ? r->payload_size != 8 : (r->payload_size != 8 && r->payload_size != 12))
+            return problem(error, cap, "hid.ActivateDebugPad requires u64 ARUID and at most four non-domain framing bytes");
+        uint64_t ticks = botw_input_monotonic_ticks();
+        if (!ticks) return problem(error, cap, "hid.ActivateDebugPad requires the actual host input clock");
+        if (botw_input_activate_debug_pad(s->input, ticks)) return problem(error, cap, "host rejected DebugPad activation");
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
     }
     if (r->command == 100 || r->command == 102 || r->command == 103 || r->command == 104 || r->command == 109) {
         uint32_t styles = s->hid_supported_styles, ids[10]; size_t count = s->hid_npad_count;

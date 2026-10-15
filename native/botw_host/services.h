@@ -57,7 +57,12 @@ typedef struct botw_input botw_input;
 typedef struct botw_romfs botw_romfs;
 typedef struct botw_savefs botw_savefs;
 /* Borrowed backends must outlive services. Input is already bound to this kernel
- * shared-memory handle; root retains the original handle until services stop. */
+ * shared-memory handle; root retains the original handle until services stop.
+ * HID command 1 validates PID/current ARUID, exact u64 semantic payload and
+ * legal HIPC framing padding (its contents are unspecified), with no descriptors
+ * or handles, then activates the same backing's disconnected DebugPad stream.
+ * Other device activations stay
+ * unsupported until they have corresponding real producer implementations. */
 void botw_services_set_input(botw_services *services, botw_input *input, uint32_t shared_memory_handle);
 /* Invoke after host input sampling to signal actual Npad style changes. Lock
  * order is services -> input/kernel; frontend callbacks must release input first. */

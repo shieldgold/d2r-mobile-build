@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 #define BOTW_HID_SHARED_MEMORY_SIZE 0x40000u
+#define BOTW_HID_DEBUG_PAD_OFFSET 0u
+#define BOTW_HID_DEBUG_PAD_SIZE 0x400u
 #define BOTW_HID_NPAD_OFFSET 0x9a00u
 #define BOTW_HID_NPAD_STRIDE 0x5000u
 #define BOTW_NPAD_STYLE_FULLKEY 1u
@@ -53,6 +55,12 @@ int botw_input_configure(botw_input *input, uint32_t supported_styles,
     const uint32_t *ids, size_t count);
 uint32_t botw_input_style(botw_input *input, uint32_t npad_id);
 int botw_input_disconnect(botw_input *input, uint32_t npad_id);
+/* Activate the current binding's DebugPad stream, which has no connected
+ * debug-controller source. First activation publishes one disconnected sample
+ * at ticks, repeated activation is idempotent and does not sample/reset Npad.
+ * Returns 0 on success, -1 for NULL input. bind/unbind clears this activation
+ * and its independent sequence; the frontend source-state rules are unchanged. */
+int botw_input_activate_debug_pad(botw_input *input, uint64_t ticks);
 /* Call at the host display/input cadence with a real monotonic 19.2 MHz tick.
  * Samples advance even with all buttons released; producer serializes ring writes. */
 void botw_input_sample(botw_input *input, uint64_t timestamp_ticks);
