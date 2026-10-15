@@ -25,16 +25,21 @@
 
 ## 原生宿主与手机证据
 
-独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；框架中仍保留经过审计的七模块程序。遇到未知系统服务时记录原程序偏移并停止，不返回伪造的成功状态。
+独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-2026-10-15 最新真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `07e89a3`：
+2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `c64a0e0`：
 
 - 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
 - `devicectl` 确认安装与启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、34 个弱未定义引用归零、230 个门登记。
-- 原始 `_init_libc0`、`nnosInitialize`、`_init_libc1` 均真实执行并返回；`nndiagStartup` 中条件变量广播完成。随后明确停在 SVC `0x1f` / `ConnectToNamedPort("sm:")`，原程序偏移 `sdk+0xa7b50`。服务管理器与 IPC 尚未实现，没有进入实际游戏构造或 nnMain。
-- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-07e89a3/`。日志界面是开发中的真实启动记录，始终标明 `graphics_ready=false`、`gameplay_verified=false`。
+- `_init_libc0`、`nnosInitialize`、`_init_libc1`、`nndiagStartup` 已真实返回；SM、日志、性能与应用管理 IPC 已执行，SDK 模块初始化到 `aoc:u` 边界。该次手机测试没有进入 nnMain。
+- 完整本体 RomFS 已传入手机 Documents，14,420,017,152 字节；手机应用真实读到 `/System/Version.txt` 为 `1.0.0`。更新应用保留此容器。
+- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-c64a0e0/`。开发界面和报告保持 `gameplay_verified=false`。
 
-对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38731615516) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38731615349) 均通过。外层下载工件已核对 GitHub 官方摘要，宿主来源记录保留在本地 `outputs/botw-verified-host-07e89a3/shell-provenance.json`。
+该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38737912201) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38737911919) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
+
+后续 Mac ARM64 原生执行已完成 SDK 初始化、游戏初始堆 `0xc2600000`（3,261,071,360 字节）分配、逆序模块构造，并真实进入 `nnMain`。该进度尚不代表手机可玩；最新启动日志保留在 `outputs/botw-host39-probe/`，遇到未实现调用仍明确停止。图形、触摸/手柄、线程、只读资源和存档后端已有独立实现与测试，实际画面、操作及游戏存档验收仍未完成。
+
+Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。
 
@@ -91,6 +96,16 @@ PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native \
   --output outputs/botw-native-local --rewrite
 ```
 
+准备当前 Host39 开发目标时使用独立输出目录：
+
+```sh
+PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native \
+  --exefs outputs/botw-native-local/ExeFS \
+  --output outputs/botw-native-host39 --rewrite --host39
+```
+
+Host39 框架打包仍核验固定七模块指纹、通用改写摘要及全部地址补丁；本机组装器从验证结果写入 `BOTWGuestAddressBits`，前端读取后选择对应策略。没有这个证据链时不会自动选择 39 位。
+
 不带 `--rewrite` 只进行模块审计。带此参数会下载 SHA256 固定的开源构建工具，并以 `native` 规则域运行，关闭 D2R 私有门；**不会执行游戏程序**。
 
 输出包括 `report.json`、`ExeFS/`、`rewrite/*.rewrite.log`、改写后的映像与门表。`report.json` 是状态依据；中途失败不能用目录里残留的个别文件判定成功。当前实际实验结果位于本工作区 `outputs/botw-native-base/`。
@@ -106,17 +121,17 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 
 首阶段为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。宿主阶段另增人工程序执行、框架布局、来源校验、ZIP 边界和本地签名流程测试。GitHub Actions 仅使用人工合成输入，不上传游戏文件。
 
-宿主集成后的完整本地回归为 **131 项全部通过、无跳过**，其中 **24 项原生宿主测试**在 Apple ARM64 上编译和执行人工程序。覆盖签名代码页写保护、重定位与弱符号抢占、异常 SP 恢复、SDK 调用顺序、逆序构造、构造失败不进入 nnMain、条件唤醒标志、固定四槽熵值以及 36 位地址空间边界。云端分别运行 Linux 准备测试与 macOS 原生宿主测试，再编译 iPhoneOS 宿主。
+最近完成的一批完整本地回归为 **282 项全部通过、无跳过**。包含实际 ARM64 执行、HIPC 高地址与 x18 保留、宿主边界与线程、真实 Metal 像素、资源路径与写入持久性测试。Host39 两个分配器另有 1024 次原始 ARM64 算法和真实映射试验。云端分别运行 Linux 准备测试与 macOS 原生宿主测试，再编译 iPhoneOS 宿主；测试通过与安装成功都不能替代可玩验收。
 
 未安装可选原生实验依赖或未设置 `BOTW_REWRITER_PATH` 时，相关测试会明确标为跳过；不得把这种运行宣称为完整的原生实验测试通过。
 
 ## 当前限制与后续工作
 
 - 当前只支持已固定本体版本的 solid Zstandard NCZ，要求连续 section；不支持 NCZBLOCK 或直接解密 NSP。本地更新包 1.9.0 与两个 DLC 尚未应用。
-- 资源段尚未完整导出；当前输出不是可以导入 D2R Mobile 的 Data。
+- 完整本体 RomFS 已本地导出并挂载到手机；使用独立 BOTW 目标。
 - 上游指令改写器来自固定提交，本地识别扩展的源码摘要也记录在报告中。D2R 专用 cuts、obs、params 全部为零。
-- 模块装载、初步 SDK 启动、构建签名及开发版装机路径已建立。已审计并用人工程序验证 `sdk → subsdk3 → subsdk2 → subsdk1 → subsdk0 → main` 的 DT_INIT 顺序，实际游戏尚未到此阶段。后续仍需接通完整系统服务、适配游戏着色器容器和 NVN 图形路径，最后验证真实游戏画面、操作与存档。
-- 安装的开发版不包含已导出的完整资源，尚未进入游戏；没有修改手机系统设置。
+- Mac 实际游戏已走完 `sdk → subsdk3 → subsdk2 → subsdk1 → subsdk0 → main` 的 DT_INIT 并进入 nnMain；系统服务及图形路径仍按实际调用继续补齐。
+- 手机当前仍是尚未通过游戏画面、操作及存档验收的开发版本。完整本体资源已经存在，尚不能游玩。
 
 游戏文件、密钥、生成的程序代码与日志只保留在被忽略的本地目录。仓库不分发这些内容。
 
