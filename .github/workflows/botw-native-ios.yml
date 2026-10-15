@@ -49,14 +49,14 @@ jobs:
           persist-credentials: false
       - name: Select iPhoneOS SDK
         run: python3 scripts/source/select_xcode.py
+      - name: Compile generic shell without game content
+        run: python3 -m scripts.botw_native.build_ios_shell --output outputs/botw-ios-shell
       - name: Prepare isolated test dependencies
         run: |
           python3 -m venv .tools/botw-ci-venv
           .tools/botw-ci-venv/bin/python -m pip install -r requirements.botw.txt
       - name: Test native host using synthetic programs
         run: .tools/botw-ci-venv/bin/python -m unittest discover -s tests -p 'test_botw_*.py' -v
-      - name: Compile generic shell without game content
-        run: python3 -m scripts.botw_native.build_ios_shell --output outputs/botw-ios-shell
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: BOTWNative-generic-ios-host
