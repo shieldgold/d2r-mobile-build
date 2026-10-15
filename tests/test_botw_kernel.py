@@ -29,6 +29,14 @@ static char error[512];
 static pthread_key_t test_tls;
 static _Atomic unsigned entered;
 static _Atomic int validation_pause, validation_entered, validation_release;
+static unsigned affinity_logs;
+static void kernel_log(void *opaque, const char *message) {
+    (void)opaque;
+    if (strstr(message, "guest_virtual_affinity")) {
+        affinity_logs++;
+        assert(strstr(message, "physical_binding=false") && strstr(message, "qos_preserved=true"));
+    }
+}
 static uint64_t validation_key;
 static uint64_t callback_stack_low, callback_stack_top;
 static uint64_t now(void) {
@@ -463,6 +471,85 @@ static void core_worker(uint64_t argument, uint32_t self) {
     (void)self; assert(argument == 7 && info(0) == argument);
     atomic_fetch_add(&entered, 1); exit_worker();
 }
+static void get_thread_affinity(uint32_t handle, int expected_core, uint64_t expected_mask) {
+    uint64_t r[32] = {0, 0, handle}; svc(0xe, r);
+    assert(!r[0] && (int32_t)r[1] == expected_core && r[2] == expected_mask);
+    if (expected_core < 0) assert(r[1] == (uint32_t)expected_core);
+}
+static uint32_t set_thread_affinity(uint32_t handle, int32_t core, uint64_t mask) {
+    uint64_t r[32] = {handle, (uint32_t)core, mask}; svc(0xf, r); return (uint32_t)r[0];
+}
+static unsigned current_virtual_core(void) {
+    uint64_t r[32] = {0}; svc(0x10, r); assert(r[0] < 4); return (unsigned)r[0];
+}
+static void *unregistered_affinity_caller(void *unused) {
+    (void)unused;
+    uint64_t r[32] = {0, 0, BOTW_KERNEL_CURRENT_THREAD}; svc(0xe, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -1, 1) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(botw_kernel_dispatch(ctx, 0x10, r, error, sizeof error) == BOTW_KERNEL_ERROR);
+    return NULL;
+}
+static void virtual_core_affinity(void) {
+    assert(!botw_kernel_configure_core_mask(ctx, 7, error, sizeof error));
+    assert(!set_priority(BOTW_KERNEL_CURRENT_THREAD, 44)); assert_host_priority(44);
+    get_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, 1); assert(current_virtual_core() == 0);
+    assert(!set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, -1, 1));
+    get_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -1, 1); assert(current_virtual_core() == 0);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, 2, 4));
+    get_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 2, 4); assert(current_virtual_core() == 2);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, 1, 3)); assert(current_virtual_core() == 1);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -1, 5)); assert(current_virtual_core() == 2);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, 0, 5));
+    assert(current_virtual_core() == 2); /* ideal is a preference; current is still allowed */
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -3, 1));
+    get_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, 0, 1); assert(current_virtual_core() == 0);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, -3, 4) == BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 2, 1) == BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, 0) == BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 3, 8) == BOTW_KERNEL_RESULT_INVALID_CORE);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, -4, 1) == BOTW_KERNEL_RESULT_INVALID_CORE);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 4, 1) == BOTW_KERNEL_RESULT_INVALID_CORE);
+    assert(set_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, UINT64_C(1)<<63) == BOTW_KERNEL_RESULT_INVALID_CORE);
+    get_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, 0, 1);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -2, UINT64_MAX)); /* process default overrides mask */
+    get_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, 1);
+    assert(set_thread_affinity(0xdead, -4, 0) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    uint64_t r[32] = {0, 0, BOTW_KERNEL_CURRENT_PROCESS}; svc(0xe, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    pthread_t other; assert(!pthread_create(&other, NULL, unregistered_affinity_caller, NULL));
+    assert(!pthread_join(other, NULL)); assert(current_virtual_core() == 0);
+    assert_host_priority(44); assert(affinity_logs == 1);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -1, 7));
+    assert(botw_kernel_configure_core_mask(ctx, 5, error, sizeof error) == -1); /* cannot invalidate thread mask */
+}
+static _Atomic unsigned affinity_stage;
+static void affinity_worker(uint64_t argument, uint32_t self) {
+    (void)argument;
+    get_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -1, 2); assert(current_virtual_core() == 1);
+    atomic_store(&affinity_stage, 1);
+    while (atomic_load(&affinity_stage) != 2) sched_yield();
+    get_thread_affinity(self, 2, 4); assert(current_virtual_core() == 2);
+    assert(set_thread_affinity(self, -3, 2) == BOTW_KERNEL_RESULT_INVALID_COMBINATION);
+    assert(!set_thread_affinity(BOTW_KERNEL_CURRENT_THREAD, -2, 0));
+    get_thread_affinity(self, 0, 1); assert(current_virtual_core() == 0);
+    get_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, 1); exit_worker();
+}
+static void worker_virtual_affinity(void) {
+    assert(!botw_kernel_configure_core_mask(ctx, 7, error, sizeof error));
+    uint64_t stack = prepare_sync(1);
+    uint64_t r[32] = {0, (uintptr_t)affinity_worker, 0, stack+0x200000, 44, 2}; svc(8, r);
+    assert(!r[0]); uint32_t worker = (uint32_t)r[1]; get_thread_affinity(worker, 2, 4);
+    assert(!set_thread_affinity(worker, -1, 2)); get_thread_affinity(worker, -1, 2);
+    r[0] = worker; svc(9, r); assert(!r[0]); uint64_t deadline = now()+1000000000;
+    while (atomic_load(&affinity_stage) != 1 && now() < deadline) sched_yield();
+    assert(atomic_load(&affinity_stage) == 1 && current_virtual_core() == 0);
+    assert(!set_thread_affinity(worker, 2, 4)); get_thread_affinity(BOTW_KERNEL_INITIAL_THREAD, 0, 1);
+    atomic_store(&affinity_stage, 2); assert(wait_one(worker, 1000000000) == 0);
+    assert(!botw_kernel_close_handle(ctx, worker, error, sizeof error));
+    assert(set_thread_affinity(worker, 0, 1) == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    assert(!pthread_key_delete(test_tls));
+}
 static void thread_core_mask(void) {
     uint64_t stack = prepare_sync(1);
     assert(!botw_kernel_configure_core_mask(ctx, 5, error, sizeof error));
@@ -787,7 +874,7 @@ static void revalidate_before_wait_registration(void) {
     assert(!pthread_join(mutation, NULL) && atomic_load(&guest_condition) == 0);
 }
 int main(int argc, char **argv) {
-    assert(argc == 2); botw_kernel_callbacks callbacks = {0}; callbacks.memory = memory;
+    assert(argc == 2); botw_kernel_callbacks callbacks = {0}; callbacks.memory = memory; callbacks.log = kernel_log;
     callbacks.executable = executable; callbacks.execute_thread = execute_thread;
     ctx = botw_kernel_create(&callbacks, NULL); assert(ctx);
     if (!strcmp(argv[1], "events")) events();
@@ -797,6 +884,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "address39")) extended_address_space();
     else if (!strcmp(argv[1], "coremask")) process_core_mask();
     else if (!strcmp(argv[1], "threadcoremask")) thread_core_mask();
+    else if (!strcmp(argv[1], "virtualaffinity")) virtual_core_affinity();
+    else if (!strcmp(argv[1], "workeraffinity")) worker_virtual_affinity();
     else if (!strcmp(argv[1], "threads")) threads();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
@@ -863,6 +952,12 @@ class KernelTests(unittest.TestCase):
 
     def test_thread_core_requests_enforce_same_npdm_mask_and_freeze_after_creation(self):
         self.check_case('threadcoremask')
+
+    def test_virtual_cpu_affinity_validates_masks_special_ids_and_preserves_qos(self):
+        self.check_case('virtualaffinity')
+
+    def test_virtual_cpu_affinity_distinguishes_worker_current_and_owner_threads(self):
+        self.check_case('workeraffinity')
 
     def test_create_start_exit_uses_mapped_stack_and_thread_local_context(self):
         self.check_case('threads')

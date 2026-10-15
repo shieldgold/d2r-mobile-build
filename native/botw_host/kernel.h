@@ -21,7 +21,8 @@ enum {
     BOTW_KERNEL_RESULT_CANCELLED = 0xec01,
     BOTW_KERNEL_RESULT_INVALID_STATE = 0xfa01,
     BOTW_KERNEL_RESULT_INVALID_PRIORITY = 0xe001,
-    BOTW_KERNEL_RESULT_INVALID_CORE = 0xe201
+    BOTW_KERNEL_RESULT_INVALID_CORE = 0xe201,
+    BOTW_KERNEL_RESULT_INVALID_COMBINATION = 0xe801
 };
 #define BOTW_KERNEL_CURRENT_THREAD UINT32_C(0xffff8000)
 #define BOTW_KERNEL_CURRENT_PROCESS UINT32_C(0xffff8001)
@@ -57,6 +58,13 @@ int botw_kernel_dispatch(botw_kernel *kernel, unsigned number, uint64_t *regs,
  * effective priority including mutex donation. Apple self updates apply and
  * read back a coarse QoS class. A remote live thread requiring a different
  * class is explicitly unsupported; no registers or priority state change. */
+/* 0x0e returns ideal core in regs[1], affinity mask in regs[2], with handle in
+ * regs[2] on input. 0x0f takes (handle,ideal,mask): -1 means don't care, -2
+ * selects process default core 0 and its single-bit mask, -3 keeps the current
+ * ideal if it remains allowed. 0x10 returns this thread's current virtual core.
+ * Virtual IDs are process guest capabilities, not Apple physical CPU IDs.
+ * Host scheduling/QoS remains in force; ARM's unsupported affinity API is not
+ * called and physical core binding is never claimed. */
 /* Synchronization ABI: 0x1a(owner,mutex,self_tag), 0x1b(mutex),
  * 0x1c(mutex,condition_key,self_tag,timeout_ns), 0x1d(condition_key,count).
  * Mutex tags are real thread handles plus MUTEX_HAS_WAITERS; condition keys

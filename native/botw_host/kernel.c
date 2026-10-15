@@ -53,6 +53,8 @@ struct Thread {
     uint64_t entry, argument, stack_top, id;
     uint32_t handle;
     int priority, effective_priority, core, started, finished, joined, joining, exit_requested;
+    int current_core;
+    uint64_t affinity_mask;
     int cancel_pending;
     SyncWaiter *sync_waiter;
     Mapping *mapping;
@@ -84,6 +86,7 @@ struct botw_kernel {
     uint32_t next_handle;
     unsigned active_waits;
     int stopping;
+    int affinity_policy_logged;
     uint8_t *reservation;
     size_t reservation_size, heap_capacity, stack_capacity, alias_capacity;
     size_t physical_budget, image_bytes, heap_size, host_page;
@@ -160,6 +163,7 @@ botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *op
     k->initial_thread.kernel = k; k->initial_thread.host = pthread_self();
     k->initial_thread.handle = BOTW_KERNEL_INITIAL_THREAD; k->initial_thread.id = 1;
     k->initial_thread.priority = k->initial_thread.effective_priority = 44;
+    k->initial_thread.affinity_mask = 1;
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0 || (page & (page - 1))) { free(k); return NULL; }
     k->host_page = (size_t)page;
@@ -389,6 +393,45 @@ static int set_thread_priority(botw_kernel *k, uint64_t *regs, char *error, size
     t->priority = priority; recompute_priorities_locked(k);
     pthread_cond_broadcast(&k->changed);
     pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
+}
+static int set_thread_core_mask(botw_kernel *k, uint64_t *regs) {
+    pthread_mutex_lock(&k->lock);
+    Thread *t = thread_from_handle_locked(k, (uint32_t)regs[0], 1);
+    if (!t) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
+    int32_t ideal = (int32_t)regs[1]; uint64_t mask = regs[2]; uint32_t result = 0;
+    if (ideal == -2) { ideal = 0; mask = 1; }
+    else if (mask & ~k->core_mask) result = BOTW_KERNEL_RESULT_INVALID_CORE;
+    else if (!mask) result = BOTW_KERNEL_RESULT_INVALID_COMBINATION;
+    else if (ideal >= 0 && ideal < 4) {
+        if (!(mask & (UINT64_C(1) << ideal))) result = BOTW_KERNEL_RESULT_INVALID_COMBINATION;
+    } else if (ideal == -3) {
+        ideal = t->core;
+        if (ideal < 0 || !(mask & (UINT64_C(1) << ideal))) result = BOTW_KERNEL_RESULT_INVALID_COMBINATION;
+    } else if (ideal != -1) result = BOTW_KERNEL_RESULT_INVALID_CORE;
+    if (!result && k->stopping) result = BOTW_KERNEL_RESULT_CANCELLED;
+    if (!result) {
+        int current = t->current_core;
+        if (!(mask & (UINT64_C(1) << current))) {
+            if (ideal >= 0) current = ideal;
+            else for (current = 3; !(mask & (UINT64_C(1) << current)); current--) { }
+        }
+        t->core = ideal; t->affinity_mask = mask; t->current_core = current;
+        /* Guest virtual-core eligibility is independent of the Apple CPU on
+         * which its pthread executes. ARM Mach affinity hints are unsupported;
+         * even trying other Mach policies may clear an established QoS class.
+         * Keep host scheduling intact and report this port's policy once. */
+        if (!k->affinity_policy_logged) {
+            k->affinity_policy_logged = 1;
+            if (k->callbacks.log) k->callbacks.log(k->opaque,
+#if defined(__APPLE__) && defined(__aarch64__)
+                "guest_virtual_affinity policy=host_scheduler host_affinity=unsupported physical_binding=false qos_preserved=true");
+#else
+                "guest_virtual_affinity policy=host_scheduler host_affinity=not_requested physical_binding=false qos_preserved=true");
+#endif
+        }
+        pthread_cond_broadcast(&k->changed);
+    }
+    pthread_mutex_unlock(&k->lock); regs[0] = result; return BOTW_KERNEL_HANDLED;
 }
 static void link_sync_waiter_locked(botw_kernel *k, SyncWaiter *w) {
     w->sequence = k->next_wait_sequence++; w->next = k->sync_waiters; k->sync_waiters = w;
@@ -835,8 +878,9 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     if (!k->callbacks.execute_thread || !k->callbacks.executable) return BOTW_KERNEL_UNSUPPORTED;
     uint64_t entry = regs[1], argument = regs[2], stack_top = regs[3];
     int32_t priority = (int32_t)regs[4], core = (int32_t)regs[5];
+    if (core == -2) core = 0;
     if (priority < 0 || priority > 63) { regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED; }
-    if (core < -2 || core == -1 || core > 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_CORE; return BOTW_KERNEL_HANDLED; }
+    if (core < 0 || core > 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_CORE; return BOTW_KERNEL_HANDLED; }
     if ((entry & 3) || (stack_top & 15) || !k->callbacks.executable(k->opaque, entry)) {
         regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED;
     }
@@ -862,6 +906,7 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     t->object.type = THREAD; t->object.refs = 1; t->kernel = k;
     t->entry = entry; t->argument = argument; t->stack_top = stack_top;
     t->priority = t->effective_priority = priority; t->core = core; t->id = k->next_thread_id++;
+    t->current_core = core; t->affinity_mask = UINT64_C(1) << core;
     Handle *h = allocate_handle(k, &t->object, THREAD);
     if (!h) { pthread_mutex_unlock(&k->lock); free(t); regs[0] = 0xd201; return BOTW_KERNEL_HANDLED; }
     t->handle = h->value; t->mapping = mapping; mapping->users++;
@@ -909,6 +954,19 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
     case 8: return create_thread(k, regs, error, capacity);
     case 9: return start_thread(k, regs, error, capacity);
     case 0xd: return set_thread_priority(k, regs, error, capacity);
+    case 0xf: return set_thread_core_mask(k, regs);
+    case 0xe: {
+        pthread_mutex_lock(&k->lock); Thread *t = thread_from_handle_locked(k, (uint32_t)regs[2], 1);
+        if (t) { regs[0] = 0; regs[1] = (uint32_t)t->core; regs[2] = t->affinity_mask; }
+        else regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE;
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+    }
+    case 0x10: {
+        pthread_mutex_lock(&k->lock); Thread *t = current_guest_thread(k);
+        if (t) regs[0] = (uint64_t)t->current_core;
+        pthread_mutex_unlock(&k->lock);
+        return t ? BOTW_KERNEL_HANDLED : diagnostic(error, capacity, "current virtual core requires a registered guest thread");
+    }
     case 0xc: {
         pthread_mutex_lock(&k->lock); Thread *t = thread_from_handle_locked(k, (uint32_t)regs[1], 1);
         if (t) { regs[0] = 0; regs[1] = (uint64_t)t->effective_priority; }
@@ -1083,7 +1141,7 @@ int botw_kernel_configure_thread_priority_mask(botw_kernel *k, uint64_t mask, ch
 int botw_kernel_configure_core_mask(botw_kernel *k, uint64_t mask, char *error, size_t capacity) {
     if (!k) return diagnostic(error, capacity, "core mask requires kernel context");
     pthread_mutex_lock(&k->lock);
-    if (!(mask & 1) || (mask & ~UINT64_C(15)) || k->threads || k->stopping) {
+    if (!(mask & 1) || (mask & ~UINT64_C(15)) || (k->initial_thread.affinity_mask & ~mask) || k->threads || k->stopping) {
         pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "invalid core mask or active/stopping thread context");
     }
     k->core_mask = mask; pthread_mutex_unlock(&k->lock); return 0;
