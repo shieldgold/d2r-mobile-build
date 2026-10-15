@@ -365,6 +365,28 @@ class ServicesTests(unittest.TestCase):
         self.lib.botw_services_get_audio_gain(self.ctx, C.byref(main), C.byref(library), C.byref(transparent))
         self.assertEqual((main.value, library.value, transparent.value), (0.25, 0.5, 0.75))
 
+    def test_display_capture_reports_availability_and_copies_real_host_snapshot(self):
+        self.applet_kernel()
+        self.applet_state()
+        display = self.proxy_child(self.applet_proxy(), 4)
+        output = C.create_string_buffer(1280 * 720 * 4)
+        self.ranges.append((C.addressof(output), len(output), True))
+        raw, _ = self.send(display, self.request(5, receive=(C.addressof(output), len(output))))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 0)
+        self.lib.botw_services_set_capture_image.argtypes = [C.c_void_p, C.c_uint, C.c_void_p, C.c_size_t, C.c_char_p, C.c_size_t]
+        snapshot = C.create_string_buffer(bytes(range(256)) * (len(output) // 256))
+        self.assertEqual(self.lib.botw_services_set_capture_image(self.ctx, 0, snapshot, len(output), self.error, 1024), 0)
+        raw, _ = self.send(display, self.request(5, receive=(C.addressof(output), len(output))))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 1)
+        self.assertEqual(bytes(output), bytes(snapshot)[:len(output)])
+        self.send(display, self.request(5, receive=(C.addressof(output), 4)), good=False)
+        self.assertEqual(self.lib.botw_services_set_capture_image(self.ctx, 0, None, 0, self.error, 1024), 0)
+        raw, _ = self.send(display, self.request(5, receive=(C.addressof(output), len(output))))
+        data, _, _ = self.response(raw)
+        self.assertEqual(data[0], 0)
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)

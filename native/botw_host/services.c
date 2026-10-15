@@ -22,13 +22,14 @@
 #define LOG_LIMIT (1024u * 1024u)
 #define BUFFER_LIMIT (16u * 1024u * 1024u)
 #define STORAGE_TOTAL_LIMIT (64u * 1024u * 1024u)
+#define CAPTURE_SIZE (1280u * 720u * 4u)
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
-    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER };
+    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -64,6 +65,7 @@ struct botw_services {
     uint32_t input_shared_memory_handle;
     size_t storage_bytes;
     float audio_main_gain, audio_library_gain, audio_transparent_rate;
+    uint8_t *capture_images[3];
     unsigned applet_ready, applet_foreground, applet_focus, applet_operation;
     unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance;
     uint64_t applet_resource_user_id;
@@ -117,6 +119,7 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_APPLET_STORAGE: return "am.IStorage";
         case OBJECT_STORAGE_ACCESSOR: return "am.IStorageAccessor";
         case OBJECT_AUDIO_CONTROLLER: return "am.IAudioController";
+        case OBJECT_DISPLAY_CONTROLLER: return "am.IDisplayController";
     }
     return "<invalid>";
 }
@@ -196,6 +199,12 @@ void botw_services_get_audio_gain(botw_services *s, float *main_applet, float *l
     if (transparent_rate) *transparent_rate = s->audio_transparent_rate;
     pthread_mutex_unlock(&s->lock);
 }
+int botw_services_set_capture_image(botw_services *s, unsigned kind, const void *rgba, size_t size, char *error, size_t cap) {
+    if (!s || kind > 2 || (rgba ? size != CAPTURE_SIZE : size != 0)) return problem(error, cap, "capture requires kind=0..2 and verified 1280x720 RGBA8 bytes, or NULL/0");
+    uint8_t *copy = NULL;
+    if (rgba) { copy = malloc(CAPTURE_SIZE); if (!copy) return problem(error, cap, "allocate host capture snapshot failed"); memcpy(copy, rgba, CAPTURE_SIZE); }
+    pthread_mutex_lock(&s->lock); free(s->capture_images[kind]); s->capture_images[kind] = copy; pthread_mutex_unlock(&s->lock); return 0;
+}
 static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
     if (!user_id || (foreground != 0 && foreground != 1) || (focused != 0 && focused != 1) || (!foreground && focused) || operation > 1)
         return problem(error, cap, "invalid host applet state user=0x%llx foreground=%d focused=%d operation=%u", (unsigned long long)user_id, foreground, focused, operation);
@@ -223,6 +232,7 @@ void botw_services_destroy(botw_services *s) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) release_session(s->handles[i].session);
+    for (unsigned i = 0; i < 3; i++) free(s->capture_images[i]);
     char error[128];
     if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, error, sizeof error);
     if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
@@ -448,11 +458,21 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             case 20: child = OBJECT_APPLICATION_FUNCTIONS; break;
             case 11: child = OBJECT_LIBRARY_APPLET_CREATOR; break;
             case 3: child = OBJECT_AUDIO_CONTROLLER; break;
+            case 4: child = OBJECT_DISPLAY_CONTROLLER; break;
             default: return problem(error, cap, "unsupported ApplicationProxy interface command=%u", r->command);
         }
         Object *object = new_object(child);
         if (!object) return problem(error, cap, "allocate %s failed", kind_name(child));
         return return_object(s, session, object, ipc, capacity, r, 0, error, cap);
+    }
+    if (o->kind == OBJECT_DISPLAY_CONTROLLER && r->command >= 5 && r->command <= 7) {
+        if (r->output_count != 1) return problem(error, cap, "DisplayController capture query requires one checked output buffer");
+        const uint8_t *snapshot = s->capture_images[r->command - 5]; uint8_t available = snapshot != NULL;
+        if (snapshot) {
+            if (r->output_size < CAPTURE_SIZE) return problem(error, cap, "DisplayController output cannot fit 1280x720 RGBA8 capture");
+            memcpy((void *)(uintptr_t)r->output_address, snapshot, CAPTURE_SIZE);
+        }
+        response(ipc, capacity, r, &available, 1, 0, 0); return 0;
     }
     if (o->kind == OBJECT_AUDIO_CONTROLLER) {
         if (r->command == 1 || r->command == 2) {
@@ -581,7 +601,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
     if (o->kind == OBJECT_SM) {
@@ -601,7 +621,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
-    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_AUDIO_CONTROLLER) {
+    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_DISPLAY_CONTROLLER) {
         return applet_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_APM) {
         if (r.input_count || r.pid) return problem(error, cap, "apm manager command=%u unexpected buffers/PID", r.command);

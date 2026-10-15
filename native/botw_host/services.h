@@ -44,6 +44,11 @@ void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
  * Values are finite [0,1], initialized to unity. Each output is optional. */
 void botw_services_get_audio_gain(botw_services *services, float *main_applet,
     float *library_applet, float *transparent_rate);
+/* Publish a verified 1280x720 RGBA8 Horizon capture snapshot: kind 0 foreground,
+ * 1 application, 2 caller applet. NULL/0 clears availability. Copies host bytes;
+ * no screenshot is fabricated when no real snapshot has been published. */
+int botw_services_set_capture_image(botw_services *services, unsigned kind,
+    const void *rgba, size_t size, char *error, size_t error_capacity);
 /* Supply measured host state. Focus/foreground are booleans; operation_mode is
  * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
 int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,
