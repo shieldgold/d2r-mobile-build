@@ -1147,7 +1147,8 @@ static void configure_resource_backends(const char *documents) {
     if (length < 0 || (size_t)length >= sizeof path) fail("RomFS image path exceeds limit");
     if (access(path, F_OK)) {
         if (errno != ENOENT) fail("read RomFS image: %s", strerror(errno));
-        report("romfs_available=false; filesystem requests will report missing backend"); return;
+        report("romfs_available=false; filesystem requests will report missing backend");
+        report("application_language_configured=false reason=missing_romfs device_locale_backend=false"); return;
     }
     botw_romfs_error fs_error;
     state.romfs = botw_romfs_open(path, &fs_error);
@@ -1157,6 +1158,15 @@ static void configure_resource_backends(const char *documents) {
     if (botw_romfs_pread(state.romfs, "/System/Version.txt", 0, version, sizeof version - 1, &actual, &fs_error))
         fail("read game resource version: %s", fs_error.message);
     report("romfs_available=true bytes=%llu version=%s", (unsigned long long)botw_romfs_image_size(state.romfs), version);
+    /* The audited base-v0 RegionLangMask enables USen; its Bootup and TitleBG
+     * archives contain actual US English messages/voice resources. This is an
+     * explicit application fallback, independent of the device's locale.
+     * Unknown resource versions require their own reviewed language policy. */
+    if (actual == 5 && !memcmp(version, "1.0.0", 5)) {
+        if (botw_services_set_application_language(state.services, "en-US",
+                "fixed-base-v0:USen:explicit-fallback", error, sizeof error))
+            fail("configure explicit application language: %s", error);
+    } else report("application_language_configured=false reason=unsupported_resource_version device_locale_backend=false");
     botw_local_user_error user_error;
     if (botw_local_user_open(documents, &state.local_user, &user_error))
         fail("open local offline user: %s", user_error.message);
