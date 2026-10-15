@@ -150,6 +150,8 @@ typedef struct {
     uint64_t input_address;
     size_t input_size;
     unsigned input_count, output_count, input_static_count, output_static_count;
+    unsigned input_alias_count, output_alias_count, zero_input_static_nonnull;
+    size_t output_static_size;
     unsigned buffer_descriptor_count;
     uint64_t output_address;
     size_t output_size;
@@ -630,6 +632,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         return problem(error, cap, "unsupported HIPC type=%u", r->type);
     unsigned statics = (a >> 16) & 15, sends = (a >> 20) & 15;
     unsigned recvs = (a >> 24) & 15, exchanges = a >> 28, recv_mode = (b >> 10) & 15;
+    r->input_alias_count = sends; r->output_alias_count = recvs;
     if (exchanges || recv_mode == 1 || recv_mode == 2 || (b & 0x7fffc000u))
         return problem(error, cap, "unsupported HIPC receive/exchange descriptors or reserved header bits (word0=0x%x word1=0x%x)", a, b);
     size_t offset = 8;
@@ -653,7 +656,10 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     for (unsigned i = 0; i < statics; i++, offset += 8) {
         uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
         uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
-        if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
+        /* Original zero-length storage writes retain a non-NULL X pointer.
+         * It grants no span. Only that exact method may accept it in staging. */
+        if (!(x >> 16) && address) r->zero_input_static_nonnull = 1;
+        else if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
         if (x >> 16) r->input_is_static = 1;
         r->pointer_input_bytes += ((size_t)(x >> 16) + 15) & ~(size_t)15;
         r->input_static_count++;
@@ -678,8 +684,8 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         /* An old settings OutArray(0) still has a C descriptor with a real
          * non-NULL client pointer. No bytes are authorized or dereferenced.
          * stage_pointers subsequently permits this only for its exact schema. */
-        if (!(high >> 16)) r->output_address = address;
-        else if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+        r->output_static_size = high >> 16;
+        if ((high >> 16) && output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
         if (high >> 16) r->output_is_static = 1;
         r->pointer_output_bytes += ((size_t)(high >> 16) + 15) & ~(size_t)15;
         r->output_static_count++;
@@ -699,7 +705,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
                 checked_span(offset + 16, 16, raw_end) ? load32(ipc + offset + 24) : UINT32_MAX);
         offset += 16;
         if (type == 2) {
-            if (data_size || r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data");
+            if (data_size || r->buffer_descriptor_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data or descriptors");
             r->domain_close = 1; return 0;
         }
         if (type != 1 || data_size < 16 || !checked_span(offset, data_size, raw_end))
@@ -714,6 +720,33 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     r->command = load32(ipc + offset + 8); r->token = load32(ipc + offset + 12);
     r->payload = ipc + offset + 16; r->payload_size = raw_end - offset - 16; return 0;
 }
+static int storage_buffer_shape(const Request *r, const uint8_t *ipc, char *error, size_t cap) {
+    int write = r->command == 10;
+    if (r->pid || r->copy_count || r->payload_size < 8 || (r->domain && r->payload_size != 8))
+        return problem(error, cap, "IStorageAccessor requires one signed offset and no PID/handles");
+    if (write ? (r->output_count || r->output_alias_count || r->output_static_count ||
+                    r->input_alias_count > 1 || r->input_static_count > 1 ||
+                    !(r->input_alias_count + r->input_static_count)) :
+                (r->input_count || r->input_alias_count || r->input_static_count ||
+                    r->output_alias_count > 1 || r->output_static_count > 1 ||
+                    !(r->output_alias_count + r->output_static_count)))
+        return problem(error, cap, "IStorageAccessor requires one active buffer or a zero-length auto-select pair");
+    size_t table = r->raw_start + 16 + (r->domain ? 16 : 0) + 16 + 8;
+    size_t expected = (16 + (r->domain ? 16 : 0) + 16 + 8 +
+        (r->output_static_count ? 2 : 0) + 3) & ~(size_t)3;
+    if (r->raw_end - r->raw_start != expected)
+        return problem(error, cap, "IStorageAccessor has unexpected semantic input or framing length");
+    if (r->output_static_count) {
+        if (!checked_span(table, 2, r->raw_end))
+            return problem(error, cap, "IStorageAccessor.Read lacks variable C size table");
+        /* Exact fixed-SDK subset: active C size equals its u16 request size.
+         * With active B, the empty C's table slot is intentionally unwritten. */
+        if (!(r->output_count && !r->output_is_static) &&
+                ((unsigned)ipc[table] | (unsigned)ipc[table + 1] << 8) != r->output_static_size)
+            return problem(error, cap, "IStorageAccessor.Read C size disagrees with its variable size table");
+    }
+    return 0;
+}
 static int stage_pointers(botw_services *s, Object *object, Request *r, const uint8_t *ipc,
         PointerTransfer *transfer, size_t ipc_capacity, char *error, size_t cap) {
     /* The single server receive arena grows from both ends. The SDK reserves
@@ -721,7 +754,20 @@ static int stage_pointers(botw_services *s, Object *object, Request *r, const ui
     if (r->pointer_input_bytes > POINTER_CAPACITY ||
             r->pointer_output_bytes > POINTER_CAPACITY - r->pointer_input_bytes)
         return problem(error, cap, "IPC pointer arena aggregate budget exceeds capacity=%u", POINTER_CAPACITY);
-    if (r->output_static_count) {
+    int storage = object->kind == OBJECT_STORAGE_ACCESSOR && (r->command == 10 || r->command == 11);
+    if (r->zero_input_static_nonnull && !(storage && r->command == 10))
+        return problem(error, cap, "zero-length non-NULL X pointer requires the audited storage Write schema");
+    if (storage && storage_buffer_shape(r, ipc, error, cap)) return -1;
+    if (storage && r->command == 11 &&
+            ranges_overlap(r->output_address, r->output_size, transfer->ipc_address, ipc_capacity))
+        return problem(error, cap, "IPC storage Read output overlaps the client IPC message");
+    if (storage && r->output_is_static) {
+        if (r->output_address >= (UINT64_C(1) << 42))
+            return problem(error, cap, "IPC storage C destination cannot be represented by reply pointer");
+        transfer->output_address = r->output_address; transfer->output_size = r->output_size;
+        r->output_address = (uint64_t)(uintptr_t)(transfer->arena + POINTER_CAPACITY - r->pointer_output_bytes);
+        memset((void *)(uintptr_t)r->output_address, 0, r->output_size);
+    } else if (!storage && r->output_static_count) {
         /* Audited VARIABLE OutPointer schemas: account C128 and the old
          * settings language catalogue C(0..15)*8. The u16 size table follows
          * reserved alignment bytes, outside domain data_size. */
@@ -1000,24 +1046,45 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
         if (r->command == 0 && r->payload_size >= 8)
             return problem(error, cap, "CreateLibraryApplet requires host UI adapter applet_id=0x%x mode=%u", load32(r->payload), load32(r->payload + 4));
     } else if (o->kind == OBJECT_APPLET_STORAGE && r->command == 0) {
+        if (r->buffer_descriptor_count || (r->domain ? r->payload_size != 0 :
+                (r->payload_size != 0 && r->payload_size != 8)))
+            return problem(error, cap, "IStorage.Open does not accept input parameters or buffers");
         Object *accessor = new_object(OBJECT_STORAGE_ACCESSOR);
         if (!accessor) return problem(error, cap, "allocate IStorageAccessor failed");
         accessor->storage = o->storage; accessor->storage->refs++;
         return return_object(s, session, accessor, ipc, capacity, r, 0, error, cap);
     } else if (o->kind == OBJECT_STORAGE_ACCESSOR) {
         if (r->command == 0) {
-            if (r->input_count || r->output_count) return problem(error, cap, "IStorageAccessor.GetSize does not accept buffers");
+            if (r->buffer_descriptor_count || (r->domain ? r->payload_size != 0 :
+                    (r->payload_size != 0 && r->payload_size != 8)))
+                return problem(error, cap, "IStorageAccessor.GetSize does not accept input parameters or buffers");
             uint64_t size = o->storage->size; response(ipc, capacity, r, &size, 8, 0, 0); return 0;
         }
         if (r->command == 10 || r->command == 11) {
             int write = r->command == 10;
-            if (r->payload_size < 8 || (write ? r->input_count != 1 || r->output_count : r->output_count != 1 || r->input_count))
-                return problem(error, cap, "IStorageAccessor.%s requires offset and one %s buffer", write ? "Write" : "Read", write ? "input" : "output");
+            /* stage_pointers already checked the entire X/A or B/C schema,
+             * including declared zero-length buffers and framing padding. */
             uint64_t offset = load64(r->payload); size_t length = write ? r->input_size : r->output_size;
             if (offset > o->storage->size || length > o->storage->size - offset)
                 return problem(error, cap, "IStorageAccessor range exceeds backing offset=%llu length=%zu size=%zu", (unsigned long long)offset, length, o->storage->size);
-            if (write) memcpy(o->storage->bytes + (size_t)offset, (const void *)(uintptr_t)r->input_address, length);
-            else memcpy((void *)(uintptr_t)r->output_address, o->storage->bytes + (size_t)offset, length);
+            if (length && write) {
+                if (r->input_is_static) {
+                    /* X is already a complete checked private snapshot. */
+                    memcpy(o->storage->bytes + (size_t)offset, (const void *)(uintptr_t)r->input_address, length);
+                } else {
+                    uint8_t *snapshot = malloc(length);
+                    if (!snapshot) return problem(error, cap, "allocate checked storage Write snapshot failed");
+                    int failed = copy_from_guest(s, r->input_address, snapshot, length, error, cap);
+                    if (!failed) memcpy(o->storage->bytes + (size_t)offset, snapshot, length);
+                    free(snapshot); if (failed) return -1;
+                }
+            } else if (length && r->output_is_static) {
+                memcpy((void *)(uintptr_t)r->output_address, o->storage->bytes + (size_t)offset, length);
+                r->transfer->output_written = length;
+            } else if (length) {
+                if (prepare_host_output(s, r->output_address, length, "IStorageAccessor.Read", error, cap) ||
+                        copy_to_guest(s, r->output_address, o->storage->bytes + (size_t)offset, length, error, cap)) return -1;
+            }
             response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
         }
     }
