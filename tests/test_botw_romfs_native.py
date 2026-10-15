@@ -42,6 +42,11 @@ class NativeRomFSTests(unittest.TestCase):
         cls.lib.botw_romfs_stat.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(Entry), ctypes.POINTER(Error)]
         cls.lib.botw_romfs_pread.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(Error)]
         cls.lib.botw_romfs_iterate.argtypes = [ctypes.c_void_p, ctypes.c_char_p, CALLBACK, ctypes.c_void_p, ctypes.POINTER(Error)]
+        if hasattr(cls.lib, 'botw_romfs_image_size'):
+            cls.lib.botw_romfs_image_size.argtypes = [ctypes.c_void_p]
+            cls.lib.botw_romfs_image_size.restype = ctypes.c_uint64
+        if hasattr(cls.lib, 'botw_romfs_raw_pread'):
+            cls.lib.botw_romfs_raw_pread.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(Error)]
 
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
@@ -119,6 +124,46 @@ class NativeRomFSTests(unittest.TestCase):
                 self.assertFalse(mount, 'Corrupt image unexpectedly mounted')
                 self.assertNotEqual(error.code, 0)
 
+    def test_raw_image_size_and_reads_clamp_at_eof_without_overflow(self):
+        self.assertIsNotNone(self.lib)
+        self.assertTrue(hasattr(self.lib, 'botw_romfs_image_size'), 'Raw image size API is missing')
+        self.assertTrue(hasattr(self.lib, 'botw_romfs_raw_pread'), 'Raw image pread API is missing')
+        data, _ = fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = self.mount(tmp, data)
+            self.assertEqual(self.lib.botw_romfs_image_size(mount), len(data))
+            self.assertEqual(self.lib.botw_romfs_image_size(None), 0)
+            buffer, actual, error = ctypes.create_string_buffer(80), ctypes.c_size_t(999), Error()
+            for offset, size, expected in [(0, 80, data[:80]), (len(data)-2, 8, data[-2:]), (len(data), 8, b''), (2**64-1, 8, b'')]:
+                with self.subTest(offset=offset):
+                    self.assertEqual(self.lib.botw_romfs_raw_pread(mount, offset, buffer, size, ctypes.byref(actual), ctypes.byref(error)), 0)
+                    self.assertEqual(actual.value, len(expected))
+                    self.assertEqual(buffer.raw[:actual.value], expected)
+                    self.assertEqual(error.code, 0)
+            self.assertEqual(self.lib.botw_romfs_raw_pread(mount, 0, None, 0, ctypes.byref(actual), None), 0)
+            self.assertEqual(actual.value, 0)
+            full_buffer = ctypes.create_string_buffer(len(data))
+            self.assertEqual(self.lib.botw_romfs_raw_pread(mount, 0, full_buffer, 16*1024**2, ctypes.byref(actual), None), 0)
+            self.assertEqual((actual.value, full_buffer.raw), (len(data), data))
+
+    def test_raw_image_reads_reject_invalid_requests_and_real_host_short_reads(self):
+        self.assertIsNotNone(self.lib)
+        self.assertTrue(hasattr(self.lib, 'botw_romfs_raw_pread'), 'Raw image pread API is missing')
+        data, _ = fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = self.mount(tmp, data)
+            buffer, actual, error = ctypes.create_string_buffer(16), ctypes.c_size_t(999), Error()
+            for context, target, size in [(None, buffer, 1), (mount, None, 1), (mount, buffer, 16*1024**2+1), (mount, buffer, ctypes.c_size_t(-1).value)]:
+                with self.subTest(size=size):
+                    self.assertEqual(self.lib.botw_romfs_raw_pread(context, 0, target, size, ctypes.byref(actual), ctypes.byref(error)), 1)
+                    self.assertEqual(actual.value, 0)
+                    self.assertEqual(error.code, 1)
+            self.assertEqual(self.lib.botw_romfs_raw_pread(mount, 0, buffer, 1, None, None), 1)
+            (Path(tmp) / 'romfs.bin').write_bytes(data[:513])
+            self.assertEqual(self.lib.botw_romfs_raw_pread(mount, 512, buffer, 10, ctypes.byref(actual), ctypes.byref(error)), 2)
+            self.assertEqual(actual.value, 0)
+            self.assertEqual(error.code, 2)
+
     def test_unicode_names_and_zero_length_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             data, _ = fixture([('/资源/空', b''), ('/资源/数据', b'content')])
@@ -179,6 +224,8 @@ int main(int argc, char **argv) {
             (void)botw_romfs_stat(fs, "/System/Actor.byml", &entry, &error);
             (void)botw_romfs_pread(fs, "/System/Actor.byml", 0, bytes, sizeof(bytes), &actual, &error);
             (void)botw_romfs_iterate(fs, "/", visit, NULL, &error);
+            (void)botw_romfs_raw_pread(fs, UINT64_MAX, bytes, sizeof(bytes), &actual, &error);
+            (void)botw_romfs_raw_pread(fs, 0, bytes, sizeof(bytes), &actual, &error);
             botw_romfs_close(fs);
         }
     }
@@ -209,6 +256,7 @@ int main(int argc, char **argv) {
         error = Error(); mount = self.lib.botw_romfs_open(str(image).encode(), ctypes.byref(error))
         self.assertTrue(mount, error.message.decode()); self.addCleanup(self.lib.botw_romfs_close, mount)
         expected = {e['path']:e for e in json.loads(manifest.read_text())['files']}
+        self.assertEqual(self.lib.botw_romfs_image_size(mount), 14420017152)
         with image.open('rb') as stream:
             for path in ['/System/Version.txt', '/Pack/Bootup.pack']:
                 entry = Entry()
@@ -216,6 +264,10 @@ int main(int argc, char **argv) {
                 self.assertEqual((entry.offset, entry.size), (expected[path]['offset'], expected[path]['size']))
                 stream.seek(entry.offset); content = stream.read(min(64, entry.size))
                 self.assertEqual(self.read(mount, path.encode(), 0, 64)[:3], (0, content, len(content)))
+                buffer, actual = ctypes.create_string_buffer(64), ctypes.c_size_t()
+                self.assertEqual(self.lib.botw_romfs_raw_pread(mount, entry.offset, buffer, 64, ctypes.byref(actual), ctypes.byref(error)), 0)
+                stream.seek(entry.offset)
+                self.assertEqual(buffer.raw[:actual.value], stream.read(64))
 
 
 if __name__ == '__main__': unittest.main()

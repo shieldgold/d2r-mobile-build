@@ -44,6 +44,16 @@ typedef int (*botw_romfs_directory_callback)(void *user, const char *name,
 botw_romfs *botw_romfs_open(const char *image_path, botw_romfs_error *error);
 void botw_romfs_close(botw_romfs *romfs);
 
+/* Validated image length captured at open; a NULL mount returns zero. */
+uint64_t botw_romfs_image_size(const botw_romfs *romfs);
+
+/* Raw IStorage reads use offsets in the entire image, independent of paths.
+ * The same 16 MiB cap, EOF clamping, actual/error and short-read semantics as
+ * botw_romfs_pread apply. A NULL mount is invalid, including empty requests.
+ */
+int botw_romfs_raw_pread(const botw_romfs *romfs, uint64_t offset, void *buffer,
+                         size_t length, size_t *actual, botw_romfs_error *error);
+
 /* Paths are absolute UTF-8 POSIX paths. Traversal, empty components, control
  * characters, backslashes and colons are rejected. Success returns zero.
  * error is optional and is cleared on success.

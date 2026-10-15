@@ -335,6 +335,26 @@ void botw_romfs_close(botw_romfs *fs) {
     for (size_t i = 0; i < fs->count; ++i) free(fs->entries[i].path);
     free(fs->entries); free(fs);
 }
+uint64_t botw_romfs_image_size(const botw_romfs *fs) {
+    return fs ? fs->image_size : 0;
+}
+int botw_romfs_raw_pread(const botw_romfs *fs, uint64_t offset, void *buffer,
+                         size_t length, size_t *actual, botw_romfs_error *error) {
+    uint64_t available;
+    int result;
+    botw_romfs_error local_error;
+    if (!error) error = &local_error;
+    error_clear(error);
+    if (actual) *actual = 0;
+    if (!fs || !actual || (!buffer && length) || length > MAX_READ)
+        return error_set(error, BOTW_ROMFS_EINVAL, "Invalid or oversized bounded raw RomFS read");
+    if (offset >= fs->image_size || !length) return 0;
+    available = fs->image_size - offset;
+    if ((uint64_t)length > available) length = (size_t)available;
+    result = read_exact(fs, buffer, length, offset, error);
+    if (!result) *actual = length;
+    return result;
+}
 static const struct indexed_entry *find_path(const botw_romfs *fs, const char *path,
                                              botw_romfs_error *error) {
     size_t left = 0, right;
