@@ -1,6 +1,8 @@
 """Bounded, read-only SARC/Yaz0 shader discovery with exact source provenance.
 
-Format references: ZeldaMods/oead Yaz0 and ZeldaMods/sarc SARC definitions.
+Format references: ZeldaMods/oead Yaz0 and ZeldaMods/sarc SARC definitions;
+Switch-Toolbox SHARCFBNX.cs for the independently validated SHARCB v9 profile:
+https://github.com/KillzXGaming/Switch-Toolbox/blob/master/File_Format_Library/FileFormats/Shader/SHARC/SHARCFBNX.cs
 No upstream implementation or game bytes are included. BNSH validation delegates
 only to the existing local parser; parser acceptance is not runtime validation.
 """
@@ -23,6 +25,187 @@ MAX_NODES = 100000
 SHADER_SUFFIXES = {'.bfsha', '.sbfsha', '.bnsh', '.sharc', '.sharcb'}
 CONTAINER_SUFFIXES = SHADER_SUFFIXES | {'.bfres', '.sbfres', '.sarc', '.ssarc', '.pack', '.blarc', '.sblarc'}
 KNOWN_MAGIC = (b'SARC', b'FSHA', b'FRES', b'BNSH')
+
+
+def parse_sharcb_v9(data, *, max_records=MAX_NODES, max_symbols=1_000_000, max_string_bytes=64 * 1024**2):
+    """Inspect the bounded LE v9/flags=5 profile found in the selected archives.
+
+    Layout reference: Switch-Toolbox SHARCFBNX.cs. Signed shared-control offsets
+    and the low-word reflection offsets are additionally checked against this
+    profile's declared section spans. The other offset words remain opaque.
+    Code boundaries come from the declared pool offset and control c1 end;
+    magic and SPH stage fields only cross-check those already bounded spans.
+    Macro/default selection and sampler dimensionality are not inferred.
+    """
+    if (not 0 <= max_records <= MAX_NODES or not 0 <= max_symbols <= 1_000_000 or
+            not 0 <= max_string_bytes <= 64 * 1024**2 or
+            not 344 <= len(data) <= MAX_CONTAINER):
+        raise ValueError('Invalid SHARCB input or inspection limits')
+    def span(offset, size, lower=0, upper=None):
+        upper = len(data) if upper is None else upper
+        if offset < lower or size < 0 or offset > upper or size > upper - offset:
+            raise ValueError('SHARCB span exceeds declared section bounds')
+        return offset + size
+    def fields(fmt, offset, lower=0, upper=None):
+        span(offset, struct.calcsize(fmt), lower, upper)
+        return struct.unpack_from(fmt, data, offset)
+    def digest(offset, size):
+        span(offset, size)
+        return hashlib.sha256(memoryview(data)[offset:offset + size]).hexdigest()
+    def text(offset, size):
+        span(offset, size)
+        raw = data[offset:offset + size]
+        if not raw or raw[-1] or b'\0' in raw[:-1]:
+            raise ValueError('Invalid SHARCB terminated string')
+        try:
+            return raw[:-1].decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError('Invalid SHARCB string UTF-8') from exc
+
+    magic, version, size, flags, reserved, string_size, pool_size, pool = fields('<8I', 0)
+    if (magic != 0x53484142 or version != 9 or flags != 5 or reserved or size != len(data) or
+            not 1 <= string_size <= MAX_METADATA or not pool_size or pool + pool_size != size):
+        raise ValueError('Unsupported or invalid SHARCB v9 profile header')
+    string_base, metadata = 336, 336 + string_size
+    span(string_base, string_size, 336, min(pool, 64 * 1024**2))
+    table_relative, count = fields('<II', metadata, metadata, pool)
+    table = metadata + table_relative
+    span(table, 8, metadata + 8, min(pool, 64 * 1024**2))
+    if not 1 <= count <= max_records:
+        raise ValueError('SHARCB variation count limit exceeded')
+    symbols_left, string_bytes_left = max_symbols, max_string_bytes
+    control_ranges, code_ranges, variations = set(), set(), []
+    position = metadata + 8
+    kinds = {0: ('vertex', 1), 1: ('fragment', 5), 2: ('geometry', 4)}
+    for index in range(count):
+        section_size, kind, zero, sub_size = fields('<4I', position, metadata + 8, table)
+        section_end = span(position, section_size, position, table)
+        p = position + 16
+        # The fixed descriptor ends at p+68. Some tables start there; owned
+        # controls start at p+72. Those four bytes are not an unknown field.
+        span(p, 68, position, section_end)
+        if zero or sub_size != section_size - 16 or kind not in kinds:
+            raise ValueError('Unsupported SHARCB variation descriptor')
+        code_relative, control_size, control_relative, control_upper = fields('<QIiI', p)
+        control = p + control_relative
+        local_spans = []
+        if control_relative == 72:
+            span(control, control_size, p + 68, section_end)
+            control_ranges.add((control, control_size)); local_spans.append((control, control + control_size))
+        elif control_relative >= 0 or (control, control_size) not in control_ranges:
+            raise ValueError('SHARCB control alias does not match an earlier owned control')
+        if (control_size != 2000 or fields('<I', control)[0] != 0x98761234 or
+                fields('<I', control + 20)[0] != control_size):
+            raise ValueError('Unsupported or invalid SHARCB NVN control profile')
+        c1_begin, c1_end = fields('<II', control + 0x700)
+        if not 0 <= c1_begin <= c1_end or c1_end < 0x34:
+            raise ValueError('Invalid SHARCB control code/constant bounds')
+        code = pool + code_relative
+        code_end = span(code, c1_end, pool, size)
+        stage, sph_kind = kinds[kind]
+        if fields('<I', code)[0] != 0x12345678 or (fields('<I', code + 0x30)[0] >> 10) & 15 != sph_kind:
+            raise ValueError('SHARCB declared stage disagrees with bounded NVN header')
+        code_ranges.add((code, code_end))
+        reflection, reflection_spans, upper_words = {}, {}, {}
+        for name, count_at, offset_at, stride in [('uniform_blocks', 20, 24, 16), ('attributes', 32, 36, 12),
+                                                  ('uniforms', 44, 48, 12), ('samplers', 56, 60, 12)]:
+            entries, = fields('<I', p + count_at)
+            relative, upper = fields('<II', p + offset_at)
+            if entries > symbols_left:
+                raise ValueError('SHARCB reflection expansion limit exceeded')
+            symbols_left -= entries; upper_words[name] = upper
+            offset = p + relative
+            if entries:
+                end = span(offset, entries * stride, p + 68, section_end)
+                local_spans.append((offset, end))
+            reflection_spans[name] = {'offset': offset if entries else None, 'count': entries, 'stride': stride,
+                                      'relative_offset_low_word': relative}
+            rows = []
+            for entry in range(entries):
+                entry_offset = offset + entry * stride
+                name_relative, name_upper = fields('<II', entry_offset)
+                name_offset = string_base + name_relative
+                if name_upper or not string_base <= name_offset < metadata:
+                    raise ValueError('SHARCB symbol name pointer exceeds string region')
+                terminator = data.find(b'\0', name_offset, min(metadata, name_offset + 4096))
+                if terminator < 0 or terminator + 1 - name_offset > string_bytes_left:
+                    raise ValueError('SHARCB symbol string expansion limit exceeded')
+                name_bytes = terminator + 1 - name_offset; string_bytes_left -= name_bytes
+                row = {'name': text(name_offset, name_bytes), 'name_offset_upper_word': name_upper}
+                if name == 'uniform_blocks':
+                    row['location'], row['size'] = fields('<iI', entry_offset + 8)
+                else:
+                    row['offset' if name == 'uniforms' else 'location'] = fields('<I' if name == 'uniforms' else '<i', entry_offset + 8)[0]
+                rows.append(row)
+            reflection[name] = rows
+        local_spans.sort()
+        if any(a[1] > b[0] for a, b in zip(local_spans, local_spans[1:])):
+            raise ValueError('Overlapping SHARCB control/reflection spans')
+        reflection_sha = hashlib.sha256(json.dumps(reflection, sort_keys=True).encode()).hexdigest()
+        variations.append({'index': index, 'record_offset': position, 'record_bytes': section_size, 'stage': stage,
+                           'stage_type': kind, 'control_offset': control, 'control_bytes': control_size,
+                           'control_relative_offset': control_relative, 'control_offset_upper_word': control_upper,
+                           'control_sha256': digest(control, control_size), 'code_pool_relative_offset': code_relative,
+                           'code_offset': code, 'code_bytes': c1_end, 'code_sha256': digest(code, c1_end),
+                           'c1_begin': c1_begin, 'c1_end': c1_end, 'c1_offset': code + c1_begin,
+                           'c1_bytes': c1_end - c1_begin, 'c1_sha256': digest(code + c1_begin, c1_end - c1_begin),
+                           'reflection': reflection, 'reflection_sha256': reflection_sha,
+                           'reflection_spans': reflection_spans, 'reflection_offset_upper_words': upper_words})
+        position = section_end
+    if position != table:
+        raise ValueError('SHARCB variation chain does not end at its program table')
+    ordered_codes = sorted(code_ranges)
+    if any(a[1] > b[0] for a, b in zip(ordered_codes, ordered_codes[1:])):
+        raise ValueError('Partially overlapping SHARCB code spans')
+    table_size, program_count = fields('<II', table)
+    table_end = span(table, table_size, table, min(pool, 64 * 1024**2))
+    if table_size < 8 or not 1 <= program_count <= max_records:
+        raise ValueError('SHARCB program count limit exceeded')
+    position, programs, program_names = table + 8, [], set()
+    for index in range(program_count):
+        section_size, name_size, mask, first = fields('<4I', position, table + 8, table_end)
+        end = span(position, section_size, position, table_end)
+        if section_size < 16 or mask not in (3, 7) or not 1 <= name_size <= min(4096, string_bytes_left):
+            raise ValueError('Unsupported SHARCB program stage mask or name length')
+        string_bytes_left -= name_size
+        tail = span(position + 16, name_size, position + 16, end)
+        name = text(position + 16, name_size)
+        if not name or name in program_names or first >= count:
+            raise ValueError('Invalid SHARCB program name or base variation index')
+        program_names.add(name)
+        programs.append({'index': index, 'name': name, 'record_offset': position, 'record_bytes': section_size,
+                         'stage_mask': mask, 'base_index': first, 'tail_offset': tail,
+                         'tail_bytes': end - tail, 'tail_sha256': digest(tail, end - tail),
+                         'macro_environment': 'unparsed'})
+        position = end
+    if position != table_end or programs[0]['base_index'] != 0:
+        raise ValueError('SHARCB program chain does not exactly cover its table/variations')
+    for index, program in enumerate(programs):
+        end = programs[index + 1]['base_index'] if index + 1 < len(programs) else count
+        first, stage_order = program['base_index'], [k for k in kinds if program['stage_mask'] & (1 << k)]
+        if end <= first or (end - first) % len(stage_order):
+            raise ValueError('SHARCB program range does not contain complete declared stage groups')
+        if any(variations[v]['stage_type'] != stage_order[(v - first) % len(stage_order)] for v in range(first, end)):
+            raise ValueError('SHARCB variation order disagrees with program stage mask')
+        program['variation_indices'] = [list(range(v, v + len(stage_order))) for v in range(first, end, len(stage_order))]
+    stages = Counter(v['stage'] for v in variations)
+    return {'schema': 1, 'format': 'SHARCB', 'version': version, 'profile_flags': flags, 'bytes': size,
+            'sha256': digest(0, size), 'string_region': {'offset': string_base, 'bytes': string_size},
+            'header_opaque_region': {'offset': 32, 'bytes': 304, 'sha256': digest(32, 304)},
+            'metadata_offset': metadata, 'program_table_offset': table, 'program_table_bytes': table_size,
+            'code_pool': {'offset': pool, 'bytes': pool_size}, 'variations': variations, 'programs': programs,
+            'summary': {'stage_records': count, 'stage_counts': dict(stages), 'programs': program_count,
+                        'unique_code_sha256': len({v['code_sha256'] for v in variations}),
+                        'unique_control_sha256': len({v['control_sha256'] for v in variations}),
+                        'shared_control_records': sum(v['control_relative_offset'] < 0 for v in variations),
+                        'nonzero_control_offset_upper_words': sum(bool(v['control_offset_upper_word']) for v in variations),
+                        'nonzero_reflection_offset_upper_words': sum(bool(w) for v in variations for w in v['reflection_offset_upper_words'].values()),
+                        'reflection_items': max_symbols - symbols_left,
+                        'expanded_string_bytes': max_string_bytes - string_bytes_left,
+                        'c1_byte_counts': {str(k): v for k, v in sorted(Counter(v['c1_bytes'] for v in variations).items())}},
+            'compatibility': {'existing_bnsh_parser': False, 'runtime_stage_kinds': set(stages) <= {'vertex', 'fragment'},
+                              'texture_types': 'unverified', 'c0_environment': 'unverified', 'macro_environment': 'unparsed',
+                              'opaque_offset_words': 'preserved, semantics unverified', 'main_only_2d_assumption_applied': False}}
 
 
 def _exact(reader, offset, size, total):
@@ -314,14 +497,20 @@ def scan_romfs(image, paths, destination=None, *, max_expanded_bytes=512 * 1024*
         raise ValueError('Invalid resource scan limits')
     if destination is not None: destination.parent.mkdir(parents=True, exist_ok=True)
     workspace = tempfile.TemporaryDirectory(prefix='.botw-resource-shaders-', dir=destination.parent) if destination is not None else nullcontext(None)
-    report = {'schema': 1, 'image_bytes': image.size, 'roots': [], 'containers': [], 'bnsh': [], 'unclassified': []}
-    expanded, visited, programs = 0, 0, 0
+    report = {'schema': 1, 'image_bytes': image.size, 'roots': [], 'containers': [], 'bnsh': [], 'sharcb': [], 'unclassified': []}
+    expanded, visited, programs, sharcb_records = 0, 0, 0, 0
     reflection_budget = {'items': max_reflection_items, 'strings': 64 * 1024**2}
     with workspace as temp:
         stage = Path(temp) / 'resources' if temp is not None else None
         if stage is not None: stage.mkdir(mode=0o700)
+        def publish(filename, data):
+            if stage is None: return None
+            if not (stage / filename).exists():
+                with (stage / filename).open('xb') as out:
+                    (stage / filename).chmod(0o600); out.write(data)
+            return filename
         def visit(blob, depth):
-            nonlocal expanded, visited, programs
+            nonlocal expanded, visited, programs, sharcb_records
             visited += 1
             if depth > max_depth or visited > MAX_NODES:
                 raise ValueError('Resource nesting or node count limit exceeded')
@@ -351,13 +540,30 @@ def scan_romfs(image, paths, destination=None, *, max_expanded_bytes=512 * 1024*
                     visit(child, depth + 1)
                 return
             data = blob.all()
+            if prefix[:4] == b'BAHS' and len(data) >= 344:
+                archive = parse_sharcb_v9(data, max_records=MAX_NODES - programs - sharcb_records,
+                                           max_symbols=reflection_budget['items'], max_string_bytes=reflection_budget['strings'])
+                sharcb_records += archive['summary']['stage_records']
+                reflection_budget['items'] -= archive['summary']['reflection_items']
+                reflection_budget['strings'] -= archive['summary']['expanded_string_bytes']
+                archive['name'] = blob.name
+                archive['file'] = publish(archive['sha256'] + '.sharcb', data)
+                archive['source_chain'] = blob.chain + [{'kind': 'sharcb', 'offset': 0, 'bytes': len(data),
+                                                        'sha256': archive['sha256'], 'image_offset': blob.absolute}]
+                for variation in archive['variations']:
+                    for kind, suffix in [('control', '.control'), ('code', '.nvn'), ('c1', '.cbuf1')]:
+                        offset, size = variation[kind + '_offset'], variation[kind + '_bytes']
+                        filename = variation[kind + '_sha256'] + suffix
+                        variation[kind + '_file'] = publish(filename, memoryview(data)[offset:offset + size])
+                report['sharcb'].append(archive)
+                return
             if prefix[:4] in (b'FSHA', b'FRES'):
                 if len(data) < 32 or data[12:14] != b'\xff\xfe' or struct.unpack_from('<I', data, 28)[0] != len(data):
                     raise ValueError('Invalid FSHA/FRES common file header bounds')
                 version, = struct.unpack_from('<I', data, 8)
                 report['containers'].append({'format': prefix[:4].decode(), 'version': f'{version >> 16}.{version >> 8 & 255}.{version & 255}',
                                              'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'source_chain': blob.chain})
-            programs += _guard_bnsh_expansion(data, reflection_budget, MAX_NODES - programs)
+            programs += _guard_bnsh_expansion(data, reflection_budget, MAX_NODES - programs - sharcb_records)
             embedded = inspect_embedded_bnsh(data)
             if not embedded and prefix[:4] not in (b'FSHA', b'FRES'):
                 identity = hashlib.sha256(data).hexdigest()
@@ -409,6 +615,8 @@ def scan_romfs(image, paths, destination=None, *, max_expanded_bytes=512 * 1024*
                                       'image_offset': child.absolute, 'bytes': row.size, 'sha256': child.digest()}]
                 visit(child, 1)
         report['summary'] = {'visited_nodes': visited, 'decoded_bytes': expanded, 'bnsh_containers': len(report['bnsh']),
+                             'sharcb_containers': len(report['sharcb']), 'sharcb_stage_records': sharcb_records,
+                             'sharcb_programs': sum(c['summary']['programs'] for c in report['sharcb']),
                              'programs': programs, 'stage_records': sum(sum(row['stage_counts'].values()) for row in report['bnsh']),
                              'unique_code_sha256': len({s['code_sha256'] for c in report['bnsh'] for s in c['unique_stages']}),
                              'container_formats': dict(Counter(c['format'] for c in report['containers']))}
