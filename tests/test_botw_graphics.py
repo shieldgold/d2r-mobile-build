@@ -124,6 +124,43 @@ class BnshTests(unittest.TestCase):
             self.parser().parse_bnsh(synthetic_bnsh()[:-1])
 
 
+class ShaderBundleTests(unittest.TestCase):
+    def test_stager_cli_preserves_exact_stage_identities_and_counts(self):
+        import json
+        module = BnshTests().parser()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            inputs, converted, bundle = path / 'inputs', path / 'converted', path / 'bundle'
+            rows = module.extract_shader_inputs(synthetic_bnsh(), inputs)
+            converted.mkdir()
+            for row in rows:
+                (converted / (row['code_sha256'] + '.metal')).write_text(
+                    row['stage'] + ' float4 main0() {return 0;}')
+            self.assertEqual(module.main(['--bundle-inputs', str(inputs), '--bundle-compiled', str(converted),
+                                          '--bundle-dir', str(bundle)]), 0)
+            manifest = json.loads((bundle / 'manifest.json').read_text())
+            self.assertEqual(len(manifest['entries']), 2)
+            self.assertEqual(len(manifest['stage_records']), 2)
+            self.assertTrue(all(x['status'] == 'ready' for x in manifest['entries']))
+            for entry in manifest['entries']:
+                self.assertEqual((bundle / entry['code']['path']).read_bytes(),
+                                 (inputs / entry['code']['path']).read_bytes())
+
+    def test_binding_map_requires_reflection_and_rejects_unknown_driver_banks(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'shader_binding_map'), 'Private bundle binding mapper is missing')
+        reflection = {'uniforms': [{'name': 'ubo', 'slot': 0}],
+                      'samplers': [{'name': 'image', 'slot': 1}]}
+        msl = 'fragment float4 main0(constant Block& c3 [[buffer(2)]], texture2d<float> fs_tex0_28 [[texture(3)]], sampler fs_tex0_28Smplr [[sampler(0)]]) {return 0;}'
+        result = module.shader_binding_map(msl, 'fragment', reflection)
+        self.assertEqual([(x['kind'], x['nvn_slot'], x['metal_slot']) for x in result['bindings']],
+                         [('uniform', 0, 2), ('texture', 1, 3), ('sampler', 1, 0)])
+        with self.assertRaisesRegex(ValueError, 'c1|private|driver'):
+            module.shader_binding_map(msl.replace('c3 [[', 'c1 [['), 'fragment', reflection)
+        with self.assertRaisesRegex(ValueError, 'reflection'):
+            module.shader_binding_map(msl, 'fragment', {'uniforms': [], 'samplers': []})
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
     def test_real_gpu_copy_clear_and_pipeline_and_strict_unsupported_api(self):
@@ -179,6 +216,100 @@ class MetalBridgeTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, mode)
                 self.assertIn(expected, result.stderr)
 
+
+    def test_private_bundle_loader_checks_hashes_paths_and_unsupported_counts(self):
+        import json
+        source = ROOT / 'native/botw_graphics/shader_bundle.m'
+        self.assertTrue(source.exists(), 'Private shader loader is missing')
+        module = BnshTests().parser()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            inputs, converted, bundle = path / 'inputs', path / 'converted', path / 'bundle'
+            rows = module.extract_shader_inputs(synthetic_bnsh(), inputs)
+            converted.mkdir()
+            for row in rows:
+                if row['stage'] == 'fragment':
+                    row['reflection'] = {'uniforms': [{'name': 'fixtureUbo', 'slot': 0}],
+                                         'samplers': [{'name': 'fixtureTexture', 'slot': 1}]}
+                msl = ('#include <metal_stdlib>\nusing namespace metal; vertex float4 main0(uint i [[vertex_id]]) {return float4(0,0,0,1);}'
+                       if row['stage'] == 'vertex' else
+                       '#include <metal_stdlib>\nusing namespace metal; struct Block {float4 tint;}; fragment float4 main0(constant Block& c3 [[buffer(2)]], texture2d<float> fs_tex0_28 [[texture(3)]], sampler fs_tex0_28Smplr [[sampler(0)]]) {return c3.tint*fs_tex0_28.sample(fs_tex0_28Smplr,float2(0));}')
+                (converted / (row['code_sha256'] + '.metal')).write_text(msl)
+            description = json.loads((inputs / 'inputs.json').read_text())
+            description['records'] = rows
+            (inputs / 'inputs.json').write_text(json.dumps(description))
+            staged = module.stage_shader_bundle(inputs, converted, bundle)
+            self.assertEqual((staged['ready'], staged['unsupported']), (2, 0))
+            harness = path / 'bundle.c'
+            harness.write_text(BUNDLE_SMOKE)
+            exe = path / 'bundle-test'
+            graphics = source.parent
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(source), str(harness),
+                '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('REGISTERED=2 UNSUPPORTED=0 TOTAL=2', result.stdout)
+            manifest = json.loads((bundle / 'manifest.json').read_text())
+            entry = manifest['entries'][0]
+            for field, invalid, expected in (
+                    ('texture_types', [{'nvn_slot': 0, 'metal_slot': 0, 'type': 'cube'}], 'texture'),
+                    ('vertex_inputs', [0], 'vertex')):
+                saved = entry[field]; entry[field] = invalid
+                (bundle / 'manifest.json').write_text(json.dumps(manifest))
+                result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, field)
+                self.assertIn(expected, result.stderr)
+                entry[field] = saved
+            fragment = next(x for x in manifest['entries'] if x['stage'] == 'fragment')
+            fragment['reflection']['uniforms'].append({'name': 'misleadingSlot', 'slot': 1})
+            fragment['bindings'][0]['nvn_slot'] = 1
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('source resource binding map', result.stderr)
+            fragment['reflection']['uniforms'].pop()
+            fragment['bindings'][0]['nvn_slot'] = 0
+            record = manifest['stage_records'][0]
+            saved = record['entry']; record['entry'] = 100
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('stage record', result.stderr)
+            record['entry'] = saved
+            manifest['entries'][0]['status'] = 'unsupported'
+            manifest['entries'][0]['reason'] = 'Unknown private constant bank c1'
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('REGISTERED=1 UNSUPPORTED=1 TOTAL=2', result.stdout)
+            self.assertIn('c1', result.stderr)
+            manifest['entries'][0]['status'] = 'ready'
+            entry = manifest['entries'][0]
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            code = bundle / entry['code']['path']
+            original = code.read_bytes()
+            damaged = bytearray(original); damaged[8] ^= 1; code.write_bytes(damaged)
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('SHA256', result.stderr)
+            code.write_bytes(original)
+            saved = entry['code']['path']; entry['code']['path'] = '../escape.nvn'
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('relative', result.stderr)
+            entry['code']['path'] = saved
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            outside = path / 'outside.nvn'; outside.write_bytes(original)
+            code.unlink(); code.symlink_to(outside)
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('symlink', result.stderr)
 
 
 METAL_SMOKE = r"""
@@ -352,6 +483,22 @@ RESOURCE_FEATURE = r"""
     puts("GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK");
 """
 RESOURCE_SMOKE = METAL_SMOKE.replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
+
+
+BUNDLE_SMOKE = r"""
+#include "graphics.h"
+#include "shader_bundle.h"
+#include <stdio.h>
+int main(int argc,char **argv){
+    if(argc!=2)return 3;
+    if(!botw_graphics_init(NULL,NULL,NULL))return 77;
+    botw_graphics_shader_bundle_result result;char error[1024];
+    int ok=botw_graphics_load_shader_bundle(argv[1],&result,error,sizeof error);
+    if(!ok){fprintf(stderr,"%s\n",error);botw_graphics_shutdown();return 2;}
+    printf("REGISTERED=%zu UNSUPPORTED=%zu TOTAL=%zu\n",result.registered_entries,result.unsupported_entries,result.declared_entries);
+    botw_graphics_shutdown();return 0;
+}
+"""
 
 
 if __name__ == '__main__':

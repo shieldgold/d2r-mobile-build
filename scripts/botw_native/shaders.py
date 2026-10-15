@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import struct
 import subprocess
@@ -248,18 +249,130 @@ def compile_shader_inputs(records, inputs, destination, compiler, *, require_run
     return results
 
 
+def shader_binding_map(msl, stage, reflection):
+    """Match this compiler's named resources to explicit BNSH NVN slots.
+
+    c[3+r] -> uniform slot r is the fixed NVN ABI documented by the upstream
+    Maxwell reference reader. Every proposed slot must also occur in this
+    program's actual BNSH reflection. Private c0/c1 and SSBOs are rejected.
+    """
+    entry = re.search(r'\b(vertex|fragment)\s+\w+\s+(\w+)\s*\(', msl)
+    if not entry or entry[1] != stage:
+        raise ValueError('Missing or mismatched Metal entry stage')
+    end = msl.find('{', entry.end())
+    if end < 0:
+        raise ValueError('Metal entry body is missing')
+    signature = msl[entry.start():end]
+    uniforms = {x['slot'] for x in reflection.get('uniforms', []) if x['slot'] >= 0}
+    samplers = {x['slot'] for x in reflection.get('samplers', []) if x['slot'] >= 0}
+    result, covered, types = [], set(), []
+    for space, variable, metal in re.findall(r'\b(constant|device)\s+\w+\s*[&*]\s*(\w+)\s+\[\[buffer\((\d+)\)\]\]', signature):
+        bank = re.fullmatch(r'c(\d+)(?:_\d+)?', variable)
+        if space != 'constant' or not bank or not 3 <= int(bank[1]) <= 16:
+            raise ValueError('Unknown private/driver constant or storage resource: ' + variable)
+        slot = int(bank[1]) - 3
+        if slot not in uniforms:
+            raise ValueError('Uniform slot absent from BNSH reflection')
+        result.append({'kind': 'uniform', 'nvn_slot': slot, 'metal_slot': int(metal)})
+        covered.add(('buffer', int(metal)))
+    for kind, variable, metal in re.findall(r'\b(texture\w+|sampler)(?:<[^>]+>)?\s+(\w+)\s+\[\[(?:texture|sampler)\((\d+)\)\]\]', signature):
+        name = re.fullmatch(r'(?:fs|vs)_tex0_([0-9a-f]+)(Smplr)?', variable)
+        if not name:
+            raise ValueError('Unknown translated texture resource: ' + variable)
+        offset = int(name[1], 16)
+        if offset < 0x20 or (offset - 0x20) % 8:
+            raise ValueError('Unknown NVN texture constant offset')
+        slot = (offset - 0x20) // 8
+        if slot not in samplers:
+            raise ValueError('Texture/sampler slot absent from BNSH reflection')
+        binding_kind = 'sampler' if kind == 'sampler' else 'texture'
+        if kind not in ('sampler', 'texture2d', 'texture2d_array'):
+            raise ValueError('Texture type is not supported by this bundle schema')
+        result.append({'kind': binding_kind, 'nvn_slot': slot, 'metal_slot': int(metal)})
+        covered.add((binding_kind, int(metal)))
+        if binding_kind == 'texture':
+            types.append({'nvn_slot': slot, 'metal_slot': int(metal), 'type': kind[7:]})
+    declared = {(kind, int(index)) for kind, index in re.findall(r'\[\[(buffer|texture|sampler)\((\d+)\)\]\]', signature)}
+    if declared != covered:
+        raise ValueError('Unrecognized Metal resource declaration')
+    inputs = sorted({int(x) for x in re.findall(r'\[\[attribute\((\d+)\)\]\]', msl)})
+    reflected_inputs = {x['slot'] for x in reflection.get('inputs', [])}
+    if stage == 'vertex' and not set(inputs) <= reflected_inputs:
+        raise ValueError('Vertex input absent from BNSH reflection')
+    return {'entry': entry[2], 'bindings': result, 'texture_types': types, 'vertex_inputs': inputs}
+
+
+def stage_shader_bundle(inputs, converted, destination):
+    """Prepare a private local bundle; unknown resources remain unsupported."""
+    inputs, converted, destination = Path(inputs), Path(converted), Path(destination)
+    records = json.loads((inputs / 'inputs.json').read_text())['records']
+    groups = {}
+    for record in records:
+        identity = (record['control_sha256'], record['code_sha256'], record['stage'])
+        groups.setdefault(identity, []).append(record)
+    entries, files, indices = [], {}, {}
+    for identity, rows in sorted(groups.items()):
+        control_hash, code_hash, stage = identity
+        row = rows[0]
+        entry = {'stage': stage, 'control_sha256': control_hash, 'code_sha256': code_hash}
+        for kind, directory, filename in (('control', inputs, control_hash + '.control'),
+                                          ('code', inputs, code_hash + '.nvn'),
+                                          ('msl', converted, code_hash + '.metal')):
+            if not re.fullmatch(r'[0-9a-f]{64}\.(?:control|nvn|metal)', filename):
+                raise ValueError('Unsafe shader input identity')
+            payload = (directory / filename).read_bytes()
+            digest = hashlib.sha256(payload).hexdigest()
+            if kind != 'msl' and digest != entry[kind + '_sha256']:
+                raise ValueError('Original shader SHA256 mismatch: ' + filename)
+            files[filename] = payload
+            entry[kind] = {'path': filename, 'bytes': len(payload), 'sha256': digest}
+        try:
+            maps = [shader_binding_map(files[code_hash + '.metal'].decode('utf-8'), stage,
+                                       candidate.get('reflection', {})) for candidate in rows]
+            if any(mapping != maps[0] for mapping in maps):
+                raise ValueError('Conflicting BNSH resource reflection for one exact identity')
+            entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {})})
+        except ValueError as exc:
+            entry.update({'status': 'unsupported', 'reason': str(exc)})
+        indices[identity] = len(entries)
+        entries.append(entry)
+    manifest = {'schema': 1, 'entries': entries,
+                'stage_records': [{'entry': indices[(x['control_sha256'], x['code_sha256'], x['stage'])],
+                                   'container': x['container'], 'variation': x['variation'], 'stage': x['stage']}
+                                  for x in records]}
+    destination.mkdir(parents=True, exist_ok=False)
+    for name, data in files.items():
+        (destination / name).write_bytes(data)
+    (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    return {'unique_entries': len(entries), 'stage_records': len(records),
+            'ready': sum(x['status'] == 'ready' for x in entries),
+            'unsupported': sum(x['status'] == 'unsupported' for x in entries)}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--image', type=Path, required=True,
+    parser.add_argument('--image', type=Path,
                         help='Local, unrelocated NSO memory image or BNSH file')
-    parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--report', type=Path)
     parser.add_argument('--extract-dir', type=Path,
                         help='Fresh ignored directory for local shader inputs')
     parser.add_argument('--compiler', type=Path, help='Fixed, patched shader-compiler-cli binary')
     parser.add_argument('--compile-dir', type=Path, help='Fresh ignored directory for local converted output')
     parser.add_argument('--require-runtime-2d-textures', action='store_true',
                         help='Compile under explicit BNSH slot-based 2D requirements; runtime must check descriptors')
+    parser.add_argument('--bundle-inputs', type=Path, help='Existing local extraction directory for private bundling')
+    parser.add_argument('--bundle-compiled', type=Path, help='Existing local converted MSL directory for private bundling')
+    parser.add_argument('--bundle-dir', type=Path, help='Fresh ignored directory for the private runtime bundle')
     args = parser.parse_args(argv)
+    bundle_args = (args.bundle_inputs, args.bundle_compiled, args.bundle_dir)
+    if any(bundle_args):
+        if not all(bundle_args) or any((args.image, args.report, args.extract_dir, args.compiler,
+                                       args.compile_dir, args.require_runtime_2d_textures)):
+            parser.error('Bundling requires exactly --bundle-inputs, --bundle-compiled and --bundle-dir')
+        print(json.dumps(stage_shader_bundle(*bundle_args), sort_keys=True))
+        return 0
+    if not args.image or not args.report:
+        parser.error('--image and --report are required for inspection/extraction')
     if bool(args.compiler) != bool(args.compile_dir) or (args.compiler and not args.extract_dir):
         parser.error('--compiler and --compile-dir require --extract-dir')
     image = args.image.read_bytes()

@@ -6,8 +6,8 @@
 
 1. 在进入客体前调用 `botw_graphics_init(layer, error, validator)`。`layer` 是宿主持有的 `CAMetalLayer`，离屏测试可传空。`validator` 核验客体可读内存区间，着色器控制段及扩展到宿主页边界的内存池依赖它。
 2. 强制将游戏的 `nvnBootstrapLoader` 导入/导出解析到 `botw_nvn_bootstrap_loader`，避免执行客体 NVN 驱动。BOTW 此入口定义在 `subsdk0`，不是 `sdk`。
-3. 准确离线翻译后，使用 `botw_graphics_register_shader_with_bindings` 登记原始控制段、GPU 数据、本地 MSL 和逐阶段 NVN→Metal 显式资源槽映射。无资源的着色器可用 `botw_graphics_register_shader`。运行时完整 SHA256 匹配两段原始数据；管线还用 `MTLBinding` 核验每个实际资源均有映射，并核对纹理维数、uniform 大小/对齐、顶点读取范围。
-4. 编译 `graphics.m` 时开启 ARC、blocks，链接 Foundation、Metal、QuartzCore。`tools/validate_msl.m` 是独立命令行工具，不要编入 App。
+3. 准确离线翻译后，使用 `botw_graphics_load_shader_bundle` 加载本地私有包，或用 `botw_graphics_register_shader_with_bindings` 登记原始控制段、GPU 数据、本地 MSL 和逐阶段 NVN→Metal 显式资源槽映射。无资源的着色器可用 `botw_graphics_register_shader`。运行时完整 SHA256 匹配两段原始数据；管线还用 `MTLBinding` 核验每个实际资源均有映射，并核对纹理维数、uniform 大小/对齐、顶点读取范围。
+4. 编译 `graphics.m`、`shader_bundle.m` 时开启 ARC、blocks，链接 Foundation、Metal、QuartzCore。`tools/validate_msl.m` 是独立命令行工具，不要编入 App。
 
 接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空；布尔接口出错返回 0，不以无操作成功代替实现。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
 
@@ -61,7 +61,32 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 
 新版工具对未知常量数据或纹理类型明确失败。默认无上下文时实测只转换 13/37。可额外使用 `--require-runtime-2d-textures`，按反射 sampler 槽建立明确的二维纹理约束；编译器直接消费类型约束，不伪造常量缓冲数值或句柄。该路径实际转换 37/37 并全部通过 Metal 源码编译，常量值查询为 0，类型约束解析为 46 次。转换报告保存每个 shader 的查询次数、参数与应用约束。运行时必须通过 Metal 反射检查实际 NVN 纹理类型，若不满足则拒绝绘制；约束不等于已经观察过游戏实际描述符。
 
-资源槽、c1 私有常量、驱动常量、storage buffer 与顶点约定仍需分别验证。输出始终标记 `nvn_bindings_validated=false`，不会自动注册到运行时；语法编译成功不能当作正确游戏画面。
+转换报告保留 `nvn_bindings_validated=false`，表示仅完成翻译。后续打包器分别核验资源槽及顶点反射；c0/c1 私有常量、驱动常量和 storage buffer 仍拒绝登记。语法编译成功不能当作正确游戏画面。
+
+## 私有运行时包
+
+从已有的提取结果和 MSL 输出创建新的 ignored 目录：
+
+```sh
+python3 -m scripts.botw_native.shaders \
+  --bundle-inputs outputs/botw-shader-inputs-reflection \
+  --bundle-compiled outputs/botw-shader-strict-runtime-2d-final \
+  --bundle-dir outputs/botw-private-shader-bundle
+```
+
+包内保留每个原始 control/code/stage 的完整 SHA256 身份、68 个阶段引用、实际 BNSH 资源反射、明确的 NVN→Metal 槽映射、MSL 入口与纹理/顶点约束。NVN uniform slot r 对应 Maxwell c[3+r]，纹理 slot r 对应真实反射已确认的 c0[0x20+8r]；无法据此核实的项带 `unsupported` 及原因，保留身份供诊断。当前真实样本有 37 个独立身份，其中 29 项具备明确映射，8 项含未知私有资源。登记数只表明这些 shader 可以准确匹配及绑定；数组纹理、其他 NVN 命令和游戏实际呈现仍有各自的运行时检查。
+
+宿主在 `botw_graphics_init` 后、客体所有者线程调用：
+
+```c
+botw_graphics_shader_bundle_result result;
+char error[1024];
+int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof error);
+```
+
+`directory` 在手机为用户私有 `Documents/botw-shaders`。loader 只读有界相对文件名，拒绝 symlink 和路径穿越，核验文件长度/摘要、NVN 原始头、入口阶段及全部阶段引用。所有 ready 项先完成 Metal 编译预检，逐项从实际 MSL 声明反推资源槽，再与清单和 BNSH 反射交叉核对。成功后 `declared_entries` 是 unique 身份总数，`registered_entries` 是已登记数量，`unsupported_entries` 是仅诊断数量；每个未支持项都在 stderr 记录完整身份和原因。遇到未知 shader 的 `ProgramSetShaders` 仍明确失败。
+
+本机严格编译并实际 Metal 加载该私有包的结果为 `REGISTERED=29 UNSUPPORTED=8 TOTAL=37`。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
 
 ## 验证
 
