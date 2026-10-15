@@ -1,0 +1,33 @@
+{
+  "repository": "https://github.com/TommyLau/botw-mobile",
+  "commit": "5f673ae2ea4f90ad46403aa6fbe13537fb557271",
+  "license": "MIT",
+  "files": {
+    "nvn_vpool.c": {
+      "path": "dm/gfx/nvn/nvn_vpool.c",
+      "sha256": "102bcffbe3cce5ea94ac11cad410b95b088244d4779981086434a3ff901dbf46"
+    },
+    "nvn_vpool.h": {
+      "path": "dm/gfx/nvn/nvn_vpool.h",
+      "sha256": "13a7ac6cba262cb24a3aa5e6d3ad68385e9eab9ac2e89ab466ce48d38c8fc45c"
+    },
+    "tests/t_vpool.c": {
+      "path": "dm/gfx/tests/t_vpool.c",
+      "sha256": "9f8cc4a655f3e7a70c83f7f6aa95b62ca27ce3fcfc5e2b2a5e339e32b142000c"
+    },
+    "LICENSE": {
+      "path": "LICENSE",
+      "sha256": "5811600bb8fc4522d3310e8e0e637a1bb14b7c64412f8cfc6234872eb53129b9"
+    }
+  },
+  "changes": [
+    "Full interval split/coalesce, transactional later-request-wins, leases, writer preference, physical registration IDs, generations, finalize and permanent tombstones retained; no second interval algorithm.",
+    "Header includes host pool_policy.h: mapping-page, physical-alignment and preferred-token constants alias the one typed policy source. NVNmappingRequest uses current tracked 40-byte typed host ABI.",
+    "Accept 0x1fe in the module and preserve raw_kind 0xfe in every span. Legacy classes 0 and 0x100 remain raw_kind 0. Kind participates in coalescing and contiguous leases; spans expose their exact kind, contiguous leases expose one kind.",
+    "Additional strict register entry reuses the same register/reservation path but rejects and releases reservations outside the preferred host window before publication. The legacy entry keeps above-limit fallback. This is not a hardware VA-width claim.",
+    "Registration allocates its object before growing registry capacity, freeing it on grow failure so failed registrations retain existing capacity and allocations.",
+    "NVN_VPOOL_TESTING alone compiles allocator/reservation countdown failure controls, a real mmap high-address hint floor, and observable allocation/reservation/capacity accounting. No environment switch or test control symbols exist in production compilation.",
+    "Original complete t_vpool.c changed only its relative include path; full 3000 randomized batches and 20000 remaps against 4 readers remain the default. t_vpool_port.c is new synthetic port coverage."
+  ],
+  "production_status": "Stage A standalone C module only. Not included in graphics.m; no physical/virtual GPU support is enabled by vendoring."
+}

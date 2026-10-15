@@ -14,6 +14,7 @@
 #include "nvn_protos.h"
 #include "texture_abi.h"
 #include "linear_texture.h"
+#include "pool_policy.h"
 #include "vendor/botw-buffer/buffer.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -226,6 +227,9 @@
 @end
 typedef struct { uint64_t serial; } BWObject;
 typedef struct { NVNdevice *device; void *memory; size_t size; int flags; } PoolBuilder;
+_Static_assert(offsetof(PoolBuilder,memory)==BW_POOL_DEFAULT_WRITE_OFFSET&&
+               offsetof(PoolBuilder,size)==16&&offsetof(PoolBuilder,flags)==24&&
+               sizeof(((PoolBuilder*)0)->flags)==4,"base-v0 pool builder defaults span");
 typedef struct { NVNdevice *device; int flags; } DeviceBuilder;
 typedef struct { NVNdevice *device; int flags; size_t command, control, compute; void *memory; size_t memoryBytes; } QueueBuilder;
 typedef struct { uint32_t format:8,stream:4,offset:20; } VertexAttribute;
@@ -613,7 +617,7 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     BWDevice *device=get(d,[BWDevice class]);if(!value)fatal("nvnDeviceGetInteger null output");
     switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=52;break;
     case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=32;break;
-    case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=4096;break;
+    case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=(int)bw_pool_policy().mappingPageBytes;break;
     case NVN_DEVICE_INFO_COUNTER_ALIGNMENT:*value=16;break;
     case NVN_DEVICE_INFO_LINEAR_TEXTURE_STRIDE_ALIGNMENT:
     case NVN_DEVICE_INFO_LINEAR_RENDER_TARGET_STRIDE_ALIGNMENT:{
@@ -664,7 +668,15 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     case NVN_DEVICE_INFO_SUPPORTS_SAMPLE_LOCATIONS:*value=0;break;
     default:{char detail[128];snprintf(detail,sizeof detail,"nvnDeviceGetInteger unsupported capability query=0x%x",(unsigned)query);fatal(detail);}}}
 NVN(nvnDeviceFinalizeCommandHandle,void,NVNdevice *d,NVNcommandHandle h){get(d,[BWDevice class]);if(!handles[@(h)])fatal("invalid command handle");[handles removeObjectForKey:@(h)];}
-NVN(nvnMemoryPoolBuilderSetDefaults,void,NVNmemoryPoolBuilder *b){memset(b,0,sizeof *b);}
+NVN(nvnMemoryPoolBuilderSetDefaults,void,NVNmemoryPoolBuilder *b){
+    uintptr_t address=(uintptr_t)b;
+    if(!b||address>UINTPTR_MAX-(BW_POOL_DEFAULT_WRITE_OFFSET+BW_POOL_DEFAULT_WRITE_BYTES))fatal("memory pool builder defaults address overflow");
+    void *destination=(void*)(address+BW_POOL_DEFAULT_WRITE_OFFSET);
+    for(NSValue *value in objectSpans.allValues){NSRange span=value.rangeValue;if(memoryOverlap(destination,BW_POOL_DEFAULT_WRITE_BYTES,(void*)span.location,span.length))fatal("memory pool builder defaults overlap a live NVN object");}
+    texturePrepareWrite(destination,BW_POOL_DEFAULT_WRITE_BYTES);
+    unsigned char values[BW_POOL_DEFAULT_WRITE_BYTES]={0};int flags=BW_POOL_DEFAULT_FLAGS;
+    memcpy(values+16,&flags,sizeof flags);memcpy(destination,values,sizeof values);
+}
 NVN(nvnMemoryPoolBuilderSetDevice,void,NVNmemoryPoolBuilder *b,NVNdevice *d){((PoolBuilder*)b)->device=d;}
 NVN(nvnMemoryPoolBuilderSetStorage,void,NVNmemoryPoolBuilder *b,void *memory,size_t size){((PoolBuilder*)b)->memory=memory;((PoolBuilder*)b)->size=size;}
 NVN(nvnMemoryPoolBuilderSetFlags,void,NVNmemoryPoolBuilder *b,int flags){((PoolBuilder*)b)->flags=flags;}

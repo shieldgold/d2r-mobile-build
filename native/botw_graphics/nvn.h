@@ -179,8 +179,12 @@ typedef struct {
 } NVNmemoryPoolBuilder;
 
 typedef struct {
-    // TODO: reverse and define this as it looks like it's not an opaque type.
-    char dummy[1];
+    const NVNmemoryPool *physicalPool;
+    uint64_t physicalOffset;
+    uint64_t virtualOffset;
+    uint64_t size;
+    NVNstorageClass storageClass;
+    uint32_t reserved;
 } NVNmappingRequest;
 
 typedef struct {
