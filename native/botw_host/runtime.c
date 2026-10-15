@@ -49,14 +49,14 @@
 #include "../botw_graphics/shader_bundle.h"
 #include "../botw_graphics/graphics.h"
 extern int botw_graphics_init(void *, void (*)(const char *), int (*)(const void *, size_t));
-extern void botw_graphics_shutdown(void);
+extern int botw_graphics_shutdown_checked(char *, size_t);
 extern void *botw_nvn_bootstrap_loader(const char *);
 static int (*graphics_backend_init)(void *, void (*)(const char *), int (*)(const void *, size_t)) = botw_graphics_init;
-static void (*graphics_backend_shutdown)(void) = botw_graphics_shutdown;
+static int (*graphics_backend_shutdown)(char *, size_t) = botw_graphics_shutdown_checked;
 static void *(*graphics_backend_loader)(const char *) = botw_nvn_bootstrap_loader;
 #else
 static int (*graphics_backend_init)(void *, void (*)(const char *), int (*)(const void *, size_t));
-static void (*graphics_backend_shutdown)(void);
+static int (*graphics_backend_shutdown)(char *, size_t);
 static void *(*graphics_backend_loader)(const char *);
 #endif
 static void *(*host_pool_push)(void);
@@ -1836,7 +1836,23 @@ static int cleanup(void) {
         report("error=close VI vsync read endpoint: %s", error);
     state.vi_vsync_write = state.vi_vsync_read = 0;
     pthread_mutex_unlock(&lifecycle_lock);
-    if (state.graphics_started && graphics_backend_shutdown) graphics_backend_shutdown();
+    if (state.graphics_started) {
+        if (!graphics_backend_shutdown) {
+            report("error=checked graphics shutdown provider unavailable; retaining kernel and host resources");
+            return -1;
+        }
+        /* No lifecycle mutex is held while the backend drains its GPU users.
+         * This host-only provider returns errors instead of invoking the NVN
+         * callback, whose longjmp would reenter this same cleanup boundary. */
+        error[0] = 0;
+        int retired = graphics_backend_shutdown(error, sizeof error);
+        error[sizeof error - 1] = 0;
+        if (retired != 1) {
+            report("error=graphics retirement incomplete; retaining kernel and host resources: %s",
+                error[0] ? error : "checked graphics shutdown did not confirm quiescence");
+            return -1;
+        }
+    }
     pthread_mutex_lock(&lifecycle_lock);
     state.graphics_started = 0; state.graphics_workspace = NULL; state.graphics_workspace_size = 0;
     state.host39_transport_audited = 0;

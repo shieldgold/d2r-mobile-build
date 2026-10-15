@@ -1,0 +1,183 @@
+/* Included after graphics.m in a synthetic-only Objective-C translation unit.
+ * Real GPU commands consume owned test bytes; no guest image or diagnostics. */
+#include <setjmp.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <dlfcn.h>
+#define VP_CHECK(x) do{if(!(x)){fprintf(stderr,"VP CHECK line%d: %s (%s)\n",__LINE__,#x,botw_graphics_last_error());return 91;}}while(0)
+static sigjmp_buf vpJump;
+static _Thread_local int vpIsWorker;
+static unsigned vpNotifications;
+static void vpError(const char *reason){vpNotifications++;fprintf(stderr,"expected-or-fatal:%s\n",reason);if(vpIsWorker)abort();siglongjmp(vpJump,1);}
+#define VP_API(n) static NVNT_##n vp_##n
+VP_API(nvnDeviceBuilderSetDefaults);VP_API(nvnDeviceInitialize);
+VP_API(nvnMemoryPoolBuilderSetDefaults);VP_API(nvnMemoryPoolBuilderSetDevice);VP_API(nvnMemoryPoolBuilderSetStorage);VP_API(nvnMemoryPoolBuilderSetFlags);VP_API(nvnMemoryPoolInitialize);VP_API(nvnMemoryPoolFinalize);VP_API(nvnMemoryPoolMap);VP_API(nvnMemoryPoolGetBufferAddress);VP_API(nvnMemoryPoolMapVirtual);
+VP_API(nvnBufferBuilderSetDefaults);VP_API(nvnBufferBuilderSetDevice);VP_API(nvnBufferBuilderSetStorage);VP_API(nvnBufferInitialize);VP_API(nvnBufferGetAddress);VP_API(nvnBufferMap);
+VP_API(nvnQueueBuilderSetDefaults);VP_API(nvnQueueBuilderSetDevice);VP_API(nvnQueueInitialize);VP_API(nvnQueueSubmitCommands);VP_API(nvnQueueFinish);
+VP_API(nvnCommandBufferInitialize);VP_API(nvnCommandBufferBeginRecording);VP_API(nvnCommandBufferEndRecording);VP_API(nvnCommandBufferCopyBufferToBuffer);
+#undef VP_API
+#define VP_LOAD(n) vp_##n=(NVNT_##n)botw_nvn_bootstrap_loader(#n)
+static int vpPool(NVNmemoryPool *pool,NVNdevice *device,void *memory,size_t bytes,int flags){
+    NVNmemoryPoolBuilder b;memset(&b,0,sizeof b);vp_nvnMemoryPoolBuilderSetDefaults(&b);vp_nvnMemoryPoolBuilderSetDevice(&b,device);vp_nvnMemoryPoolBuilderSetStorage(&b,memory,bytes);vp_nvnMemoryPoolBuilderSetFlags(&b,flags);return vp_nvnMemoryPoolInitialize(pool,&b);
+}
+static int vpMap(NVNmemoryPool *virt,NVNmemoryPool *physical,uint64_t poff,uint64_t voff,uint64_t bytes,int storageClass){
+    NVNmappingRequest request={physical,poff,voff,bytes,storageClass,0};return vp_nvnMemoryPoolMapVirtual(virt,1,&request);
+}
+static NVNcommandHandle vpCopy(NVNcommandBuffer *command,uint64_t source,uint64_t destination,size_t bytes){
+    vp_nvnCommandBufferBeginRecording(command);vp_nvnCommandBufferCopyBufferToBuffer(command,source,destination,bytes,0);return vp_nvnCommandBufferEndRecording(command);
+}
+/* A real shared-event wait keeps the command in flight until this fixture
+ * explicitly releases it. Finalize runs on a cooperating bounded worker. */
+@interface VPGatedQueue : NSObject
+@property(strong) id<MTLCommandQueue> queue;
+@property(strong) id<MTLSharedEvent> event;
+@end
+@implementation VPGatedQueue
+- (id<MTLCommandBuffer>)commandBuffer{id<MTLCommandBuffer> cb=[self.queue commandBuffer];[cb encodeWaitForEvent:self.event value:1];return cb;}
+@end
+@interface VPFailingEncoder : NSObject
+@property(strong) id<MTLRenderCommandEncoder> real;
+@end
+@implementation VPFailingEncoder
+- (id)forwardingTargetForSelector:(SEL)selector{return self.real;}
+- (void)setFragmentBuffer:(id<MTLBuffer>)buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index{(void)buffer;(void)offset;(void)index;@throw [NSException exceptionWithName:@"SyntheticEncoderFailure" reason:@"synthetic encoder failure after actual resource capture" userInfo:nil];}
+@end
+@interface VPFailingBlit : NSObject
+@property(strong) id<MTLBlitCommandEncoder> real;
+@end
+@implementation VPFailingBlit
+- (id)forwardingTargetForSelector:(SEL)selector{return self.real;}
+- (void)copyFromBuffer:(id<MTLBuffer>)source sourceOffset:(NSUInteger)sourceOffset toBuffer:(id<MTLBuffer>)destination destinationOffset:(NSUInteger)destinationOffset size:(NSUInteger)bytes{
+    [self.real copyFromBuffer:source sourceOffset:sourceOffset toBuffer:destination destinationOffset:destinationOffset size:bytes];
+    @throw [NSException exceptionWithName:@"SyntheticBlitFailure" reason:@"synthetic blit failure after actual resource capture" userInfo:nil];
+}
+@end
+@interface VPFailingBuffer : NSObject
+@property(strong) id<MTLCommandBuffer> real;
+@end
+@implementation VPFailingBuffer
+- (id)forwardingTargetForSelector:(SEL)selector{return self.real;}
+- (id<MTLBlitCommandEncoder>)blitCommandEncoder{VPFailingBlit *encoder=[VPFailingBlit new];encoder.real=[self.real blitCommandEncoder];return (id<MTLBlitCommandEncoder>)encoder;}
+- (id<MTLRenderCommandEncoder>)renderCommandEncoderWithDescriptor:(MTLRenderPassDescriptor*)descriptor{VPFailingEncoder *encoder=[VPFailingEncoder new];encoder.real=[self.real renderCommandEncoderWithDescriptor:descriptor];return (id<MTLRenderCommandEncoder>)encoder;}
+@end
+@interface VPFailingQueue : NSObject
+@property(strong) id<MTLCommandQueue> real;
+@end
+@implementation VPFailingQueue
+- (id<MTLCommandBuffer>)commandBuffer{VPFailingBuffer *buffer=[VPFailingBuffer new];buffer.real=[self.real commandBuffer];return (id<MTLCommandBuffer>)buffer;}
+@end
+struct VPFinalizeJob {NVNmemoryPool *pool,*virtualPool,*other;pthread_mutex_t lock;pthread_cond_t changed;int done,remap,result;};
+static void *vpFinalizeWorker(void *raw){struct VPFinalizeJob *job=raw;vpIsWorker=1;@autoreleasepool{if(job->remap)job->result=vpMap(job->virtualPool,job->other,0,0,131072,0x100);else{vp_nvnMemoryPoolFinalize(job->pool);job->result=1;}}pthread_mutex_lock(&job->lock);job->done=1;pthread_cond_signal(&job->changed);pthread_mutex_unlock(&job->lock);return NULL;}
+static int vpWaitFinalize(struct VPFinalizeJob *job,pthread_t thread){struct timespec deadline;clock_gettime(CLOCK_REALTIME,&deadline);deadline.tv_sec+=5;pthread_mutex_lock(&job->lock);while(!job->done){int status=pthread_cond_timedwait(&job->changed,&job->lock,&deadline);if(status){pthread_mutex_unlock(&job->lock);return 0;}}pthread_mutex_unlock(&job->lock);return !pthread_join(thread,NULL);}
+int main(int argc,char **argv){
+    alarm(30);VP_CHECK(argc==2);const char *mode=argv[1];
+    if(sigsetjmp(vpJump,1)){fprintf(stderr,"unexpected:%s\n",botw_graphics_last_error());return 92;}
+    if(!botw_graphics_init(NULL,vpError,NULL))return 77;
+    VP_LOAD(nvnDeviceBuilderSetDefaults);VP_LOAD(nvnDeviceInitialize);
+    VP_LOAD(nvnMemoryPoolBuilderSetDefaults);VP_LOAD(nvnMemoryPoolBuilderSetDevice);VP_LOAD(nvnMemoryPoolBuilderSetStorage);VP_LOAD(nvnMemoryPoolBuilderSetFlags);VP_LOAD(nvnMemoryPoolInitialize);VP_LOAD(nvnMemoryPoolFinalize);VP_LOAD(nvnMemoryPoolMap);VP_LOAD(nvnMemoryPoolGetBufferAddress);VP_LOAD(nvnMemoryPoolMapVirtual);
+    VP_LOAD(nvnBufferBuilderSetDefaults);VP_LOAD(nvnBufferBuilderSetDevice);VP_LOAD(nvnBufferBuilderSetStorage);VP_LOAD(nvnBufferInitialize);VP_LOAD(nvnBufferGetAddress);VP_LOAD(nvnBufferMap);
+    VP_LOAD(nvnQueueBuilderSetDefaults);VP_LOAD(nvnQueueBuilderSetDevice);VP_LOAD(nvnQueueInitialize);VP_LOAD(nvnQueueSubmitCommands);VP_LOAD(nvnQueueFinish);
+    VP_LOAD(nvnCommandBufferInitialize);VP_LOAD(nvnCommandBufferBeginRecording);VP_LOAD(nvnCommandBufferEndRecording);VP_LOAD(nvnCommandBufferCopyBufferToBuffer);
+    size_t page=65536;unsigned char *p=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*q=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*out=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    VP_CHECK(p!=MAP_FAILED&&q!=MAP_FAILED&&out!=MAP_FAILED);for(size_t i=0;i<page*2;i++){p[i]=(unsigned char)(i*13+7);q[i]=(unsigned char)(i*17+29);}memset(out,0xa5,page*2);
+    NVNdeviceBuilder db;NVNdevice device;vp_nvnDeviceBuilderSetDefaults(&db);VP_CHECK(vp_nvnDeviceInitialize(&device,&db));
+    NVNmemoryPool physical,other,virtualPool,destination;VP_CHECK(vpPool(&physical,&device,p,page*2,0x189));VP_CHECK(vpPool(&other,&device,q,page*2,0x189));VP_CHECK(vpPool(&virtualPool,&device,NULL,page*2,0x221));VP_CHECK(vpPool(&destination,&device,out,page*2,0x22));
+    VP_CHECK(!vp_nvnMemoryPoolMap(&physical)&&!vp_nvnMemoryPoolGetBufferAddress(&physical)&&!vp_nvnMemoryPoolMap(&virtualPool));
+    uint64_t base=vp_nvnMemoryPoolGetBufferAddress(&virtualPool);VP_CHECK(base&&base!=((uintptr_t)p)&&base!=((uintptr_t)q));
+    VP_CHECK(vpMap(&virtualPool,&physical,0,0,page*2,!strcmp(mode,"fe-buffer")?0x1fe:0x100));
+    NVNbufferBuilder bb;NVNbuffer buffer;memset(&bb,0,sizeof bb);vp_nvnBufferBuilderSetDefaults(&bb);vp_nvnBufferBuilderSetDevice(&bb,&device);vp_nvnBufferBuilderSetStorage(&bb,&virtualPool,0,page*2);VP_CHECK(vp_nvnBufferInitialize(&buffer,&bb));VP_CHECK(vp_nvnBufferGetAddress(&buffer)==base&&!vp_nvnBufferMap(&buffer));
+    NVNqueueBuilder qb;NVNqueue queue;vp_nvnQueueBuilderSetDefaults(&qb);vp_nvnQueueBuilderSetDevice(&qb,&device);VP_CHECK(vp_nvnQueueInitialize(&queue,&qb));NVNcommandBuffer command;VP_CHECK(vp_nvnCommandBufferInitialize(&command,&device));
+    size_t bytes=512;NVNcommandHandle handle=vpCopy(&command,base,(uintptr_t)out,bytes);
+    if(!strcmp(mode,"copy-encode-error")){
+        BWQueue *object=get(&queue,[BWQueue class]);VPFailingQueue *failing=[VPFailingQueue new];failing.real=object.native;object.native=(id<MTLCommandQueue>)failing;
+        if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"synthetic blit failure"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
+        int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];VP_CHECK(checked(error,sizeof error)&&!error[0]);for(size_t i=0;i<page*2;i++)VP_CHECK(out[i]==0xa5);
+        VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_copy-encode-error_OK");return 0;
+    }
+    if(!strcmp(mode,"checked-shutdown")){
+        VP_CHECK(dlsym(RTLD_DEFAULT,"botw_graphics_init"));
+        int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);
+        char nested[64];graphicsBegin();pendingError=YES;pendingFatal=YES;const char *entry=currentEntry;
+        int nestedResult=checked(nested,sizeof nested);VP_CHECK(!nestedResult&&pendingError&&pendingFatal&&currentEntry==entry);pendingError=NO;pendingFatal=NO;graphicsEnd();
+        id<MTLBuffer> retained=((BWPool*)get(&physical,[BWPool class])).buffer;unsigned before=vpNotifications;
+        char bounded[12];memset(bounded,0xa5,sizeof bounded);int result=checked(bounded+2,8);
+        VP_CHECK(!result&&gpu&&objects&&pools.count&&vpNotifications==before&&((unsigned char)bounded[0])==0xa5&&((unsigned char)bounded[1])==0xa5&&((unsigned char)bounded[10])==0xa5&&((unsigned char)bounded[11])==0xa5&&!bounded[9]);
+        VP_CHECK(strstr(botw_graphics_last_error(),"borrowed")&&retained);retained=nil;char error[512];VP_CHECK(checked(error,sizeof error)&&!error[0]&&!gpu&&!objects&&!pools&&vpNotifications==before);
+        VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_checked-shutdown_OK");return 0;
+    }
+    if(!strcmp(mode,"sampler-device")){
+#define SD_API(n) NVNT_##n n=(NVNT_##n)botw_nvn_bootstrap_loader(#n)
+        SD_API(nvnSamplerBuilderSetDefaults);SD_API(nvnSamplerBuilderSetDevice);SD_API(nvnSamplerInitialize);SD_API(nvnSamplerFinalize);SD_API(nvnSamplerPoolInitialize);SD_API(nvnSamplerPoolRegisterSampler);
+        NVNdevice foreign;VP_CHECK(vp_nvnDeviceInitialize(&foreign,&db));NVNsamplerPool descriptors;VP_CHECK(nvnSamplerPoolInitialize(&descriptors,&destination,8192,16));
+        NVNsamplerBuilder builder;NVNsampler bad,good;nvnSamplerBuilderSetDefaults(&builder);nvnSamplerBuilderSetDevice(&builder,&foreign);VP_CHECK(nvnSamplerInitialize(&bad,&builder));
+        if(!sigsetjmp(vpJump,1)){nvnSamplerPoolRegisterSampler(&descriptors,3,&bad);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"device"));
+        nvnSamplerBuilderSetDevice(&builder,&device);VP_CHECK(nvnSamplerInitialize(&good,&builder));nvnSamplerPoolRegisterSampler(&descriptors,3,&good);BWDescriptors *pool=get(&descriptors,[BWDescriptors class]);id entry=descriptorEntry(pool,3);VP_CHECK(entry);nvnSamplerFinalize(&good);VP_CHECK(descriptorEntry(pool,3)==entry);
+#undef SD_API
+    }
+    void *cachedAllocation=NULL;int copiedCode=!strcmp(mode,"copied-code");
+    int encodeError=!strcmp(mode,"encode-error"),shortUniform=!strcmp(mode,"short-uniform-preflight");
+    if(!strcmp(mode,"shader-buffers")||encodeError||shortUniform||copiedCode){
+#define SB_API(n) NVNT_##n n=(NVNT_##n)botw_nvn_bootstrap_loader(#n)
+        SB_API(nvnTextureBuilderSetDefaults);SB_API(nvnTextureBuilderSetDevice);SB_API(nvnTextureBuilderSetSize2D);SB_API(nvnTextureBuilderSetFormat);SB_API(nvnTextureBuilderSetFlags);SB_API(nvnTextureBuilderSetStorage);SB_API(nvnTextureBuilderSetStride);SB_API(nvnTextureInitialize);
+        SB_API(nvnMemoryPoolFlushMappedRange);SB_API(nvnCommandBufferReportCounter);SB_API(nvnProgramInitialize);SB_API(nvnProgramSetShaders);SB_API(nvnCommandBufferSetRenderTargets);SB_API(nvnCommandBufferBindProgram);SB_API(nvnCommandBufferDrawArrays);
+        SB_API(nvnVertexAttribStateSetDefaults);SB_API(nvnVertexAttribStateSetFormat);SB_API(nvnVertexAttribStateSetStreamIndex);SB_API(nvnVertexStreamStateSetDefaults);SB_API(nvnVertexStreamStateSetStride);SB_API(nvnCommandBufferBindVertexAttribState);SB_API(nvnCommandBufferBindVertexStreamState);SB_API(nvnCommandBufferBindVertexBuffer);SB_API(nvnCommandBufferBindUniformBuffer);SB_API(nvnCommandBufferBindStorageBuffer);
+        float positions[]={-1,-1,3,-1,-1,3},red[]={1,0,0,1},green[]={0,1,0,1};memcpy(p,positions,sizeof positions);memcpy(q,positions,sizeof positions);memcpy(p+256,red,sizeof red);memcpy(q+256,green,sizeof green);
+        unsigned char controls[2][64]={{0}},codes[2][128]={{0}};for(unsigned i=0;i<2;i++){*(uint32_t*)controls[i]=0x98761234;*(uint32_t*)codes[i]=0x12345678;controls[i][8]=codes[i][8]=(unsigned char)(0x51+i);memcpy(out+page+i*128,codes[i],128);}
+        const char *msl="#include <metal_stdlib>\nusing namespace metal;struct I{float2 p [[attribute(0)]];};vertex float4 vs(I v [[stage_in]],uint id [[vertex_id]],device uint* out [[buffer(2)]]){out[id]=0x600u+id;return float4(v.p,0,1);}fragment float4 fs(constant float4& c [[buffer(1)]]){return c;}";
+        botw_graphics_shader_binding store={BOTW_GRAPHICS_STORAGE,3,2},uniform={BOTW_GRAPHICS_UNIFORM,5,1};VP_CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,msl,"vs",&store,1));VP_CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,msl,"fs",&uniform,1));
+        NVNmemoryPool cachedPool;unsigned char *cached=NULL;uint64_t codeBase=(uintptr_t)out;
+        if(copiedCode){cachedAllocation=malloc(page*2+1);VP_CHECK(cachedAllocation);cached=(unsigned char*)cachedAllocation+1;memset(cached,0x6c,page*2);VP_CHECK(vpPool(&cachedPool,&device,cached,page*2,0x24));BWPool *object=get(&cachedPool,[BWPool class]);VP_CHECK(!object.coherent);codeBase=vp_nvnMemoryPoolGetBufferAddress(&cachedPool);NVNcommandHandle producer=vpCopy(&command,(uintptr_t)out+page,codeBase+page,256);vp_nvnQueueSubmitCommands(&queue,1,&producer);}
+        NVNprogram program;VP_CHECK(nvnProgramInitialize(&program,&device));NVNshaderData shaders[]={{codeBase+page,controls[0]},{codeBase+page+128,controls[1]}};
+        int bound=0;if(!sigsetjmp(vpJump,1))bound=nvnProgramSetShaders(&program,2,shaders);if(copiedCode){BWPool *object=get(&cachedPool,[BWPool class]);uint32_t cpuWord,gpuWord;memcpy(&cpuWord,cached+page,4);memcpy(&gpuWord,(char*)object.buffer.contents+object.bufferOffset+page,4);fprintf(stderr,"COPIED_CODE bound=%d cpu=0x%x gpu=0x%x\n",bound,cpuWord,gpuWord);VP_CHECK(cpuWord==0x6c6c6c6c&&gpuWord==0x12345678);}VP_CHECK(bound);
+        NVNtextureBuilder tb;NVNtexture target;memset(&tb,0,sizeof tb);nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetFlags(&tb,NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET);nvnTextureBuilderSetStride(&tb,128);nvnTextureBuilderSetStorage(&tb,&destination,0);VP_CHECK(nvnTextureInitialize(&target,&tb));
+        NVNvertexAttribState attribute;NVNvertexStreamState stream;nvnVertexAttribStateSetDefaults(&attribute);nvnVertexAttribStateSetFormat(&attribute,NVN_FORMAT_RG32F,0);nvnVertexAttribStateSetStreamIndex(&attribute,0);nvnVertexStreamStateSetDefaults(&stream);nvnVertexStreamStateSetStride(&stream,8);
+        const NVNtexture *targets[]={&target};vp_nvnCommandBufferBeginRecording(&command);if(shortUniform)nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,(uintptr_t)out+page+4096);nvnCommandBufferSetRenderTargets(&command,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&command,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferBindVertexAttribState(&command,1,&attribute);nvnCommandBufferBindVertexStreamState(&command,1,&stream);nvnCommandBufferBindVertexBuffer(&command,0,base,sizeof positions);nvnCommandBufferBindUniformBuffer(&command,NVN_SHADER_STAGE_FRAGMENT,5,base+256,shortUniform?4:16);nvnCommandBufferBindStorageBuffer(&command,NVN_SHADER_STAGE_VERTEX,3,base+4096,12);nvnCommandBufferDrawArrays(&command,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=vp_nvnCommandBufferEndRecording(&command);
+        if(encodeError){BWQueue *object=get(&queue,[BWQueue class]);VPFailingQueue *failing=[VPFailingQueue new];failing.real=object.native;object.native=(id<MTLCommandQueue>)failing;}
+        BWQueue *probeQueue=get(&queue,[BWQueue class]);NSData *arenaBefore=shortUniform?digest(probeQueue.arena,probeQueue.arenaBytes):nil;
+        if(encodeError||shortUniform){if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),encodeError?"synthetic encoder failure":"uniform range"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);if(shortUniform){for(unsigned i=0;i<16;i++)VP_CHECK(out[page+4096+i]==0xa5);VP_CHECK([arenaBefore isEqual:digest(probeQueue.arena,probeQueue.arenaBytes)]);}}
+        NVNqueue second;VP_CHECK(vp_nvnQueueInitialize(&second,&qb));for(unsigned pass=0;!encodeError&&!shortUniform&&pass<(copiedCode?1u:2u);pass++){if(pass)VP_CHECK(vpMap(&virtualPool,&other,0,0,page*2,0x100));vp_nvnQueueSubmitCommands(pass?&second:&queue,1,&handle);vp_nvnQueueFinish(pass?&second:&queue);unsigned char pixels[64];VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels));for(unsigned i=0;i<16;i++)VP_CHECK(pixels[i*4]==(pass?0:255)&&pixels[i*4+1]==(pass?255:0)&&!pixels[i*4+2]&&pixels[i*4+3]==255);uint32_t *written=(void*)((pass?q:p)+4096);for(unsigned i=0;i<3;i++)VP_CHECK(written[i]==0x600+i);}
+        if(copiedCode){memset(cached+page,0x7e,128);vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);unsigned char pixels[64];VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels)&&pixels[0]==255&&!pixels[1]);nvnMemoryPoolFlushMappedRange(&cachedPool,page,128);if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"program code bytes changed"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels)&&pixels[0]==255&&!pixels[1]);}
+#undef SB_API
+    }
+    if(encodeError||shortUniform){int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];int result=checked(error,sizeof error);fprintf(stderr,"CHECKED_SHUTDOWN_AFTER_ERROR=%d %s\n",result,error);VP_CHECK(result);VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));printf("VIRTUAL_POOL_REAL_GPU_%s_OK\n",mode);return 0;}
+    int physicalRetired=0;
+
+    if(!strcmp(mode,"shader-buffers")||!strcmp(mode,"sampler-device")||copiedCode){/* Completed in the resource fixture above. */}
+    else if(!strcmp(mode,"inflight-finalize")||!strcmp(mode,"inflight-remap")){
+        int remap=!strcmp(mode,"inflight-remap");uint64_t oldGeneration=nvn_vpool_generation();
+        BWQueue *queueObject=get(&queue,[BWQueue class]);BWPool *physicalObject=get(&physical,[BWPool class]);__weak id<MTLBuffer> weakBacking=physicalObject.buffer;
+        VPGatedQueue *gated=[VPGatedQueue new];gated.queue=queueObject.native;gated.event=[gpu newSharedEvent];VP_CHECK(gated.event);queueObject.native=(id<MTLCommandQueue>)gated;
+        vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(queueObject.latest.status>=MTLCommandBufferStatusCommitted&&queueObject.latest.status<MTLCommandBufferStatusCompleted);
+        struct VPFinalizeJob job={.pool=&physical,.virtualPool=&virtualPool,.other=&other,.remap=remap,.lock=PTHREAD_MUTEX_INITIALIZER,.changed=PTHREAD_COND_INITIALIZER};pthread_t thread;VP_CHECK(!pthread_create(&thread,NULL,vpFinalizeWorker,&job));
+        int entered=0;for(unsigned i=0;i<2000;i++){if(remap){if(pthread_mutex_trylock(&graphicsLock)){entered=1;break;}pthread_mutex_unlock(&graphicsLock);}else if(physicalObject.retiring){entered=1;break;}usleep(1000);}
+        usleep(20000);pthread_mutex_lock(&job.lock);int early=job.done;pthread_mutex_unlock(&job.lock);BOOL inFlight=queueObject.latest.status<MTLCommandBufferStatusCompleted;int unchanged=nvn_vpool_generation()==oldGeneration;
+        /* Release even on a failed assertion, so the test never leaves a GPU
+         * wait behind while diagnosing a lifecycle bug. */
+        gated.event.signaledValue=1;int joined=vpWaitFinalize(&job,thread);VP_CHECK(entered&&!early&&inFlight&&joined&&job.result&&unchanged);
+        VP_CHECK(!memcmp(out,p,bytes));if(remap){VP_CHECK(weakBacking&&nvn_vpool_generation()>oldGeneration);vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(!memcmp(out,q,bytes));}
+        else{physicalRetired=1;VP_CHECK(!weakBacking);VP_CHECK(!munmap(p,page*2));p=MAP_FAILED;
+            if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"unmapped"));}
+        pthread_cond_destroy(&job.changed);pthread_mutex_destroy(&job.lock);
+    }else if(!strcmp(mode,"bounded-records")){
+        for(unsigned i=0;i<128;i++){vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(poolGPURecords.count<=1&&!memcmp(out,p,bytes));}
+        poolBeginBatch();poolEndBatch();VP_CHECK(!poolGPURecords.count);
+    }else if(!strcmp(mode,"copy-remap")){
+        VP_CHECK(vpMap(&virtualPool,&other,0,0,page*2,0x100));vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(!memcmp(out,q,bytes));
+        VP_CHECK(vpMap(&virtualPool,&physical,0,0,page*2,0x100));vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(!memcmp(out,p,bytes));
+    }else{
+        if(!strcmp(mode,"fragmented")){VP_CHECK(vpMap(&virtualPool,&other,0,page,page,0x100));handle=vpCopy(&command,base,(uintptr_t)out,page*2);}
+        else if(!strcmp(mode,"unmap-preflight")){
+            VP_CHECK(vpMap(&virtualPool,NULL,0,page,page,0));vp_nvnCommandBufferBeginRecording(&command);vp_nvnCommandBufferCopyBufferToBuffer(&command,base,(uintptr_t)out,512,0);vp_nvnCommandBufferCopyBufferToBuffer(&command,base+page,(uintptr_t)out+page,512,0);handle=vp_nvnCommandBufferEndRecording(&command);
+        }
+        if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}
+        const char *why=!strcmp(mode,"fragmented")?"fragmented":!strcmp(mode,"fe-buffer")?"kind":"unmapped";
+        VP_CHECK(strstr(botw_graphics_last_error(),why));
+        /* An unexpectedly committed prefix must complete before checking bytes. */
+        if(sigsetjmp(vpJump,1)){fprintf(stderr,"unexpected failure while draining rejected submission\n");return 93;}
+        vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
+        for(size_t i=0;i<page*2;i++)VP_CHECK(out[i]==0xa5);
+    }
+    vp_nvnMemoryPoolFinalize(&virtualPool);if(!physicalRetired)vp_nvnMemoryPoolFinalize(&physical);vp_nvnMemoryPoolFinalize(&other);vp_nvnMemoryPoolFinalize(&destination);botw_graphics_shutdown();VP_CHECK((p==MAP_FAILED||!munmap(p,page*2))&&!munmap(q,page*2)&&!munmap(out,page*2));
+    free(cachedAllocation);printf("VIRTUAL_POOL_REAL_GPU_%s_OK\n",mode);return 0;
+}

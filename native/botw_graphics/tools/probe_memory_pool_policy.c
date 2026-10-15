@@ -40,24 +40,24 @@ int main(int argc,char **argv){
         int value=-1;query(&device,NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE,&value);CHECK(value==65536);
         CHECK(!gpu);puts("POOL_PAGE_QUERY_CPU_ONLY_65536_OK");return 0;
     }
-    if(!strcmp(mode,"unsupported-map")){
+    if(!strcmp(mode,"invalid-map")){
         NVNT_nvnMemoryPoolMapVirtual map=(NVNT_nvnMemoryPoolMapVirtual)botw_nvn_bootstrap_loader("nvnMemoryPoolMapVirtual");CHECK(map);
         if(!sigsetjmp(poolJump,1)){map(NULL,0,NULL);CHECK(0);}
-        CHECK(strstr(botw_graphics_last_error(),"nvnMemoryPoolMapVirtual"));CHECK(!gpu);
-        puts("POOL_VIRTUAL_PRODUCTION_STILL_UNSUPPORTED_OK");return 0;
+        CHECK(strstr(botw_graphics_last_error(),"nvnMemoryPoolMapVirtual")&&strstr(botw_graphics_last_error(),"provenance"));CHECK(!gpu);
+        puts("POOL_INVALID_MAPPING_ABI_REJECTED_BEFORE_GPU_OK");return 0;
     }
-    if(!strcmp(mode,"physical-rejected")||!strcmp(mode,"virtual-rejected")){
+    if(!strcmp(mode,"physical-invalid-backing")||!strcmp(mode,"virtual-invalid-backing")){
         objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];
         NVNdevice device;memset(&device,0,sizeof device);put(&device,[BWDevice new]);
         PoolCPUOnlyDevice *synthetic=[PoolCPUOnlyDevice new];gpu=(id<MTLDevice>)synthetic;
         void *storage=mmap(NULL,65536,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(storage!=MAP_FAILED);
         NVNmemoryPoolBuilder builder;memset(&builder,0,sizeof builder);PoolBuilder *fields=(PoolBuilder*)&builder;
-        fields->device=&device;fields->memory=!strcmp(mode,"physical-rejected")?storage:NULL;fields->size=65536;fields->flags=!strcmp(mode,"physical-rejected")?0x189:0x221;
+        fields->device=&device;fields->memory=!strcmp(mode,"physical-invalid-backing")?(char*)storage+1:storage;fields->size=65536;fields->flags=!strcmp(mode,"physical-invalid-backing")?0x189:0x221;
         NVNmemoryPool pool;memset(&pool,0,sizeof pool);
         NVNT_nvnMemoryPoolInitialize initialize=(NVNT_nvnMemoryPoolInitialize)botw_nvn_bootstrap_loader("nvnMemoryPoolInitialize");CHECK(initialize);
         if(!sigsetjmp(poolJump,1)){initialize(&pool,&builder);CHECK(0);}
-        CHECK(strstr(botw_graphics_last_error(),"Unsupported/invalid memory pool flags"));CHECK(!synthetic.allocationCalls);CHECK(!((BWObject*)&pool)->serial);
-        gpu=nil;CHECK(!munmap(storage,65536));puts("POOL_VIRTUAL_PRODUCTION_STILL_UNSUPPORTED_OK");return 0;
+        CHECK(strstr(botw_graphics_last_error(),"physical/virtual memory pool flags/size/backing alignment"));CHECK(!synthetic.allocationCalls);CHECK(!((BWObject*)&pool)->serial);
+        gpu=nil;CHECK(!munmap(storage,65536));puts("POOL_INVALID_MAPPING_ABI_REJECTED_BEFORE_GPU_OK");return 0;
     }
     if(!strcmp(mode,"overflow")){
         if(!sigsetjmp(poolJump,1)){defaults((NVNmemoryPoolBuilder*)(uintptr_t)(UINTPTR_MAX-15));CHECK(0);}

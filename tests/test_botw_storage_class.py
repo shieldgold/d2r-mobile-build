@@ -15,7 +15,7 @@ class StorageClassTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         cls.executable = Path(cls.directory.name) / 'storage-class'
         graphics = ROOT / 'native/botw_graphics'
-        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
+        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
             '-Wall', '-Wextra', '-Werror', '-I', str(graphics), str(graphics / 'graphics.m'),
             str(graphics / 'tools/probe_storage_class.c'), '-framework', 'Foundation',
             '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(cls.executable)],
@@ -81,7 +81,10 @@ class StorageClassTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.probe(mode, marker)
 
-    def test_raw_and_virtual_mapping_families_still_reject(self):
-        for mode in ('unsupported-raw-builder', 'unsupported-raw-texture', 'unsupported-map'):
+    def test_mapping_requires_a_live_pool_with_typed_abi(self):
+        self.probe('invalid-map-pool', 'STORAGE_CLASS_MAP_INVALID_POOL_REJECTED_OK')
+
+    def test_unknown_raw_storage_class_families_still_reject(self):
+        for mode in ('unsupported-raw-builder', 'unsupported-raw-texture'):
             with self.subTest(mode=mode):
                 self.probe(mode, 'STORAGE_CLASS_OTHER_FAMILIES_REMAIN_UNSUPPORTED_OK')

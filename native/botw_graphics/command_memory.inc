@@ -15,6 +15,7 @@ static BWCommands *commandState(const NVNcommandBuffer *raw,BOOL refill){
 }
 static void recordingMemoryAccess(BWCommandMemory *span){
     if(!span||!span.memory||span.used>span.size)fatal("invalid CPU recording memory state");
+    if(span.pool&&(!poolHostLive(span.pool)||span.pool.retiring))fatal("stale CPU command memory pool");
     if(!span.owned&&(!memoryAccessValidator||!memoryAccessValidator(span.memory,span.size,1)))fatal("CPU recording memory requires full read/write access");
 }
 static BOOL spanReferenced(BWCommands *cmd,BWCommandMemory *span){
@@ -37,7 +38,7 @@ static void validateRecordingSpan(BWCommands *cmd,BWCommandMemory *span,BOOL con
         }
     }
     if(count>BW_MAX_RECORDING_SPANS)fatal("CPU recording span count exceeded");
-    if(control)for(BWPool *pool in pools)if(memoryOverlap(span.memory,span.size,pool.memory,pool.size))fatal("CPU control memory overlaps GPU memory pool");
+    if(control)for(BWPool *pool in pools)if(pool.kind!=BW_POOL_VIRTUAL&&pool.memory&&memoryOverlap(span.memory,span.size,pool.memory,pool.size))fatal("CPU control memory overlaps GPU memory pool");
 }
 static void adoptRecordingSpan(BWCommands *cmd,BWCommandMemory *span,BOOL control){
     validateRecordingSpan(cmd,span,control);BWCommandMemory *old=cmd.controlMemory;
@@ -83,6 +84,7 @@ NVN(nvnCommandBufferGetMemoryCallback,PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC,cons
 NVN(nvnCommandBufferGetMemoryCallbackData,void*,const NVNcommandBuffer *raw){return commandState(raw,YES).callbackData;}
 NVN(nvnCommandBufferAddCommandMemory,void,NVNcommandBuffer *raw,const NVNmemoryPool *memory,ptrdiff_t offset,size_t bytes){
     BWCommands *cmd=commandState(raw,YES);BWPool *pool=get(memory,[BWPool class]);
+    if(pool.kind!=BW_POOL_ORDINARY)fatal("CPU command memory requires ordinary pool");
     if(offset<0||!pool.buffer||!range((size_t)offset,bytes,pool.size))fatal("CPU command memory pool bounds");
     BWCommandMemory *span=[BWCommandMemory new];span.memory=(char*)pool.memory+offset;span.size=bytes;span.pool=pool;adoptRecordingSpan(cmd,span,NO);cmd.externalMemory=YES;
 }

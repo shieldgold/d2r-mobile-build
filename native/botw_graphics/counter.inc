@@ -15,6 +15,7 @@ static void counterConfigureDevice(BWDevice *device){
             device.timestampSet?"available":"unavailable",device.timestampStages?"supported":"unsupported");
 }
 static void validateCounterAddress(BWAddressRecord *r,BWDevice *device){
+    if(r.pool.kind!=BW_POOL_ORDINARY)fatal("counter destination requires ordinary CPU-accessible pool");
     validateBufferAddress(r,device);
     if(!device.timestampStages)fatal("GPU timestamp stage sampling is unavailable on this device");
     if(r.bytes!=sizeof(NVNcounterData)||((uintptr_t)r.pool.memory+r.offset)%16)fatal("counter destination size/alignment");
@@ -67,7 +68,7 @@ static id<MTLCommandBuffer> counterReplay(BWQueue *queue,id<MTLCommandBuffer> pr
         pass.sampleBufferAttachments[0].sampleBuffer=samples;
         pass.sampleBufferAttachments[0].startOfEncoderSampleIndex=0;pass.sampleBufferAttachments[0].endOfEncoderSampleIndex=1;
         id<MTLBlitCommandEncoder> encoder=[marker blitCommandEncoderWithDescriptor:pass];if(!encoder)fatal("GPU timestamp marker encoder allocation failed");
-        [encoder fillBuffer:scratch range:NSMakeRange(0,4) value:0];[encoder endEncoding];
+        @try{[encoder fillBuffer:scratch range:NSMakeRange(0,4) value:0];}@finally{[encoder endEncoding];}
         counterCommitSegment(queue,marker,commands,initialScratch,initialAddresses,state);
         if(marker.status!=MTLCommandBufferStatusCompleted)fatal("GPU timestamp marker did not complete successfully");
         [gpu sampleTimestamps:&cpu1 gpuTimestamp:&gpu1];

@@ -112,7 +112,7 @@ class CounterTests(unittest.TestCase):
         path = Path(cls.temp.name)
         (path / 'counter.c').write_text(DRIVER)
         cls.executable = path / 'counter'
-        command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks', '-O2',
+        command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-O2',
                    '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_graphics'),
                    str(ROOT / 'native/botw_graphics/graphics.m'), str(path / 'counter.c'),
                    '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore',
@@ -248,7 +248,7 @@ class CounterFailureTests(unittest.TestCase):
             'CHECK(!top.counter&&!bottom.counter);')
         (path / 'failure.m').write_text(source)
         cls.executable = path / 'failure'
-        result = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks', '-O2',
+        result = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-O2',
             '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_graphics'),
             str(path / 'failure.m'), '-framework', 'Foundation', '-framework', 'Metal',
             '-framework', 'QuartzCore', '-o', str(cls.executable)], capture_output=True, text=True, timeout=120)

@@ -14,6 +14,7 @@ NVN_VOID(nvnMemoryPoolBuilderSetFlags,(NVNmemoryPoolBuilder *b,int flags),(b,fla
 NVN_VALUE(nvnMemoryPoolInitialize,NVNboolean,(NVNmemoryPool *raw,const NVNmemoryPoolBuilder *builder),(raw,builder))
 NVN_VOID(nvnMemoryPoolFinalize,(NVNmemoryPool *raw),(raw))
 NVN_VALUE(nvnMemoryPoolMap,void*,(const NVNmemoryPool *p),(p))
+NVN_VALUE(nvnMemoryPoolMapVirtual,NVNboolean,(NVNmemoryPool *p,int count,const NVNmappingRequest *requests),(p,count,requests))
 NVN_VALUE(nvnMemoryPoolGetBufferAddress,NVNbufferAddress,(const NVNmemoryPool *p),(p))
 NVN_VALUE(nvnMemoryPoolGetSize,size_t,(const NVNmemoryPool *p),(p))
 NVN_VALUE(nvnMemoryPoolGetFlags,NVNmemoryPoolFlags,(const NVNmemoryPool *p),(p))

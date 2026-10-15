@@ -26,6 +26,7 @@ completion. Pool finalize drains all submitted queues before guest no-copy memor
 may be released; recreating a pool at the same address cannot redirect old handles.
 The copied memory-cache path verifies CPU permissions before copying any bytes.
 
-Virtual/physical pools, GPU-inaccessible nonempty address use, unsupported shader
-stages and unsupported draw/copy operations remain explicit failures. This family
+Physical/virtual pool support follows the contiguous coherent ranges in
+[MEMORY_POOLS.md](MEMORY_POOLS.md); direct physical GPU addresses, GPU-inaccessible
+nonempty address use, unsupported shader stages and unsupported draw/copy operations remain explicit failures. This family
 does not claim texture-buffer views, indexed/indirect draws or compute support.

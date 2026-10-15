@@ -13,7 +13,9 @@ DRIVER = r'''
 
 /* These only satisfy unused graphics linkage. No Metal result is claimed. */
 int botw_graphics_init(void *p, botw_graphics_error e, botw_graphics_memory_range m) { (void)p; (void)e; (void)m; return 1; }
-void botw_graphics_shutdown(void) {}
+int botw_graphics_shutdown_checked(char *error, size_t capacity) {
+    (void)error; (void)capacity; return 1;
+}
 void *botw_nvn_bootstrap_loader(const char *n) { (void)n; return NULL; }
 const char *botw_graphics_last_error(void) { return "unused simulated graphics"; }
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access a) { (void)a; }

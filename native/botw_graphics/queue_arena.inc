@@ -45,7 +45,7 @@ static int configureQueueArena(BWQueue *queue,const QueueBuilder *b,void *raw,co
         if(!memoryAccessValidator||!memoryAccessValidator(b->memory,b->memoryBytes,1))return report("CPU queue arena requires full read/write validation");
         if(memoryOverlap(b->memory,b->memoryBytes,raw,sizeof(NVNqueue))||memoryOverlap(b->memory,b->memoryBytes,builder,sizeof(NVNqueueBuilder))||overlapsQueueArena(b->memory,b->memoryBytes)||overlapsCommandMemory(b->memory,b->memoryBytes))return report("CPU queue arena overlaps live queue/object/recording storage");
         for(NSValue *value in objectSpans.allValues){NSRange span=value.rangeValue;if(memoryOverlap(b->memory,b->memoryBytes,(const void*)span.location,span.length))return report("CPU queue arena overlaps live NVN object storage");}
-        for(BWPool *pool in pools)if(memoryOverlap(b->memory,b->memoryBytes,pool.memory,pool.size))return report("CPU queue arena overlaps GPU memory pool");
+        for(BWPool *pool in pools)if(pool.kind!=BW_POOL_VIRTUAL&&pool.memory&&memoryOverlap(b->memory,b->memoryBytes,pool.memory,pool.size))return report("CPU queue arena overlaps GPU memory pool");
         queue.arena=b->memory;queue.arenaBytes=b->memoryBytes;queue.borrowedArena=YES;
     }else{
         void *allocation=NULL;if(posix_memalign(&allocation,BW_QUEUE_ARENA_PAGE,layout.totalBytes))return report("CPU queue arena allocation failed");
@@ -76,7 +76,7 @@ static NSArray<NSDictionary *> *queueSubmissionCommands(BWQueue *queue,int count
         if(commands.count>layout.controlBytes/sizeof(BWQueueReplayIndex)-records)fatal("CPU queue control replay budget exceeded");
         records+=commands.count;[captured addObject:commands];
     }
-    validateScratchSubmission(queue,captured);validateAddressSubmission(queue,captured);validateTextureSubmission(queue,captured);
+    validateScratchSubmission(queue,captured);validateAddressSubmission(queue,captured);validateTextureSubmission(queue,captured);validateRenderSubmission(queue,captured);
     if(queue.preparedSubmissions==UINT64_MAX)fatal("CPU queue preparation counter overflow");
     char *command=(char*)queue.arena+BW_QUEUE_ARENA_PAGE,*control=command+layout.commandBytes;
     if(bytes)memcpy(command,source.bytes,bytes);

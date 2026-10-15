@@ -61,6 +61,6 @@ BuilderGetStorageClass 与 TextureGetStorageClass 共用纯元数据规则：tar
 
 Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。硬件压缩请求、depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
 
-两个现代 RawStorageClass、physical/virtual pool、MapVirtual、sparse 和 ZCull 未因此开放。公开固定上游的 RawStorageClass=1 没有本目标 ABI 证明；其 ordinary-pool `0x100` adapter 也明确属于实验策略。本桥不采用这些未经证明的替代答案。原字节合成 oracle 验证 288 组 pitch Builder、256 组 Texture 已保存 raw byte，以及 4 个需要原生 ChooseKind 的分支边界；这些仅证明元数据，不证明 driver 映射或游戏运行。
+两个现代 RawStorageClass、sparse 和 ZCull 仍未开放；后续 physical/virtual pool 与 MapVirtual 的有限接入范围见 [MEMORY_POOLS.md](MEMORY_POOLS.md)。公开固定上游的 RawStorageClass=1 没有本目标 ABI 证明；其 ordinary-pool `0x100` adapter 也明确属于实验策略。本桥不采用这些未经证明的替代答案。原字节合成 oracle 验证 288 组 pitch Builder、256 组 Texture 已保存 raw byte，以及 4 个需要原生 ChooseKind 的分支边界；这些仅证明元数据，不证明 driver 映射或游戏运行。
 
 `tests/test_botw_storage_class.py` 将这两类 metadata 与 GPU 能力分别验证：113 个原有效颜色格式覆盖 samples、target 和不相关 flags，每种可写/真实只读页面各 10,170 次，保留 canary；实际 Metal 私有/linear 纹理 getter 覆盖初始化快照和生命周期。原表无效格式、depth/fast-clear、压缩请求及无效 device 都受控拒绝；metadata 成功后不支持的 GPU 创建仍拒绝。该验证不表示游戏已跨过下一停点或可玩。

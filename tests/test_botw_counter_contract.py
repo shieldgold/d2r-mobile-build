@@ -242,7 +242,7 @@ class CounterContractTests(unittest.TestCase):
                 ('no-sampling.m', NO_SAMPLING_DEVICE + FIXTURE, [], cls.no_sampling_executable)):
             source = Path(cls.build.name) / name
             source.write_text(contents)
-            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
+            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                                     '-Wall', '-Wextra', '-Werror', '-I', str(graphics),
                                     *extra_sources, str(source),
                                     '-framework', 'Foundation', '-framework', 'Metal',

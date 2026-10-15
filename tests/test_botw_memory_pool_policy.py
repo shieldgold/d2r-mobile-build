@@ -90,7 +90,7 @@ class MemoryPoolCPUEntrypointTests(unittest.TestCase):
         source.write_text(f'#include "{GRAPHICS / "graphics.m"}"\n'
                           f'#include "{GRAPHICS / "tools/probe_memory_pool_policy.c"}"\n')
         cls.executable = work / 'pool'
-        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
+        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                                 '-Wall', '-Wextra', '-Werror', '-O1', '-g',
                                 '-fsanitize=address,undefined', str(source),
                                 '-framework', 'Foundation', '-framework', 'Metal',
@@ -146,11 +146,11 @@ class MemoryPoolCPUEntrypointTests(unittest.TestCase):
     def test_defaults_do_not_read_device_field_on_inaccessible_page(self):
         self.run_mode('unreadable-device', 'POOL_DEFAULTS_CPU_BOUNDED')
 
-    def test_map_virtual_remains_named_unsupported(self):
-        self.run_mode('unsupported-map', 'POOL_VIRTUAL_PRODUCTION_STILL_UNSUPPORTED_OK')
+    def test_map_virtual_rejects_missing_pool_before_gpu(self):
+        self.run_mode('invalid-map', 'POOL_INVALID_MAPPING_ABI_REJECTED_BEFORE_GPU_OK')
 
-    def test_physical_pool_is_not_enabled_or_allocated(self):
-        self.run_mode('physical-rejected', 'POOL_VIRTUAL_PRODUCTION_STILL_UNSUPPORTED_OK')
+    def test_physical_invalid_backing_rejects_before_allocation(self):
+        self.run_mode('physical-invalid-backing', 'POOL_INVALID_MAPPING_ABI_REJECTED_BEFORE_GPU_OK')
 
-    def test_virtual_pool_is_not_enabled_or_allocated(self):
-        self.run_mode('virtual-rejected', 'POOL_VIRTUAL_PRODUCTION_STILL_UNSUPPORTED_OK')
+    def test_virtual_nonnull_backing_rejects_before_allocation(self):
+        self.run_mode('virtual-invalid-backing', 'POOL_INVALID_MAPPING_ABI_REJECTED_BEFORE_GPU_OK')

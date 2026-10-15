@@ -32,11 +32,11 @@ NVN(nvnBufferInitialize,NVNboolean,NVNbuffer *raw,const NVNbufferBuilder *builde
     for(NSValue *v in objectSpans.allValues){NSRange span=v.rangeValue;if(memoryOverlap(raw,sizeof *raw,(void*)span.location,span.length))return report("buffer object storage is already live");}
     struct bwu_builder snapshot;memcpy(&snapshot,builder,sizeof snapshot);BWDevice *device=get(snapshot.device,[BWDevice class]);BWPool *pool=get(snapshot.pool,[BWPool class]);
     if(!pool.live||pool.device!=device)return report("buffer device mismatch or expired pool");
-    if(pool.flags&(NVN_MEMORY_POOL_FLAGS_PHYSICAL|NVN_MEMORY_POOL_FLAGS_VIRTUAL))return report("buffer storage does not support physical/virtual pools");
+    if(pool.kind==BW_POOL_PHYSICAL)return report("buffer storage does not support physical-only pools");
     BWBuffer *b=[BWBuffer new];b.pool=pool;b.device=device;b.rawPool=(NVNmemoryPool*)snapshot.pool;b.poolGeneration=pool.generation;
-    b->backing=(bwu_pool){BWU_MAGIC('P','O','O','L'),(unsigned)pool.flags,pool.memory,pool.size};snapshot.pool=&b->backing;
+    b->backing=(bwu_pool){BWU_MAGIC('P','O','O','L'),(unsigned)pool.flags,pool.kind==BW_POOL_VIRTUAL?(void*)(uintptr_t)pool.gpuBase:pool.memory,pool.size};snapshot.pool=&b->backing;
     struct bwu_buffer value;if(!bwu_nvnBufferInitialize((NVNbuffer*)&value,(const NVNbufferBuilder*)&snapshot))return report("buffer storage range is outside its memory pool");
-    if(value.size&&!pool.buffer)return report("buffer storage has no Metal backing");b.value=value;put(raw,b);return 1;
+    if(value.size&&pool.kind!=BW_POOL_VIRTUAL&&!pool.buffer)return report("buffer storage has no Metal backing");b.value=value;put(raw,b);return 1;
 }
 NVN(nvnBufferFinalize,void,NVNbuffer *raw){bufferMemory(raw,sizeof *raw,YES,NO);BWBuffer *b=bufferObject(raw,NO);struct bwu_buffer value=b.value;bwu_nvnBufferFinalize((NVNbuffer*)&value);b.value=value;removeObject(raw);}
 NVN(nvnBufferSetDebugLabel,void,NVNbuffer *raw,const char *label){BWBuffer *b=bufferObject(raw,YES);if(!label){b.label=nil;return;}size_t n=0;while(n<256){if(memoryAccessValidator&&!memoryAccessValidator(label+n,1,0))fatal("buffer debug label is not readable");if(!label[n])break;n++;}if(n==256)fatal("buffer debug label exceeds 255 bytes");b.label=[[NSString alloc]initWithBytes:label length:n encoding:NSUTF8StringEncoding];if(!b.label)fatal("buffer debug label is not UTF-8");}

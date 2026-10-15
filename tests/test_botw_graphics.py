@@ -501,7 +501,7 @@ class MetalBridgeTests(unittest.TestCase):
     def run_graphics_probe(self, name, expected):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); graphics = ROOT / 'native/botw_graphics'; exe = path / 'queue'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(graphics / 'tools' / name),
                 '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
                 capture_output=True, text=True)
@@ -516,7 +516,7 @@ class MetalBridgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); graphics = ROOT / 'native/botw_graphics'; exe = path / 'state'
             harness = path / 'state.c'; harness.write_text(source)
-            build = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            build = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), *[str(graphics/name) for name in extra_sources], '-framework', 'Foundation',
                 '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stderr)
@@ -654,7 +654,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'command-memory.c'; harness.write_text(COMMAND_MEMORY_SMOKE); exe = path / 'command-memory'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -680,7 +680,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); graphics = ROOT / 'native/botw_graphics'
             harness = path / 'flags.c'; harness.write_text(smoke); exe = path / 'flags'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
                 '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -693,7 +693,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             # The public readback promises completion even without QueueFinish;
             # its transfer queue must wait for the separate NVN producer queue.
             harness.write_text(smoke.replace('nvnQueueFinish(&queue);', '').replace('API(nvnQueueFinish);', ''))
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
                 '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -710,7 +710,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); graphics = ROOT / 'native/botw_graphics'
             exe = path / 'astc'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(graphics / 'tools/probe_astc.m'),
                 '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
                 capture_output=True, text=True)
@@ -734,7 +734,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'capabilities.c'; harness.write_text(CAPABILITY_SMOKE); exe = path / 'capabilities'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -759,7 +759,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'descriptors.c'; harness.write_text(smoke); exe = path / 'descriptors'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -784,7 +784,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'texture-defaults.c'; harness.write_text(smoke); exe = path / 'texture-defaults'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -819,7 +819,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'texture-handles.c'; harness.write_text(smoke); exe = path / 'texture-handles'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -843,7 +843,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'origin.c'; harness.write_text(smoke); exe = path / 'origin'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -861,7 +861,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'platform.m'; harness.write_text(PLATFORM_SMOKE)
             exe = path / 'platform'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -890,7 +890,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
             for name, smoke in (('ordinary', ordinary), ('instanced', instanced)):
                 harness = path / (name + '.c'); harness.write_text(smoke); exe = path / name
-                result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                     '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                     '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -909,7 +909,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             smoke = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', ARRAY_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
             harness.write_text(smoke.replace('free(memory);', 'free(arrayMemory);free(memory);'))
             exe = path / 'array'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -993,7 +993,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             smoke = smoke.replace('    nvnMemoryPoolFinalize(&pool);', feature + '    nvnMemoryPoolFinalize(&pool);')
             harness = path / 'finite.c'; harness.write_text(smoke)
             exe = path / 'finite'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source), str(source / 'graphics.m'), str(source / 'shader_bundle.m'), str(harness),
                 '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
                 capture_output=True, text=True)
@@ -1052,7 +1052,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); msl = path / 'probe.metal'; msl.write_text(probe['msl'])
             exe = path / 'probe'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 str(tool), '-framework', 'Foundation', '-framework', 'Metal', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([str(exe), str(msl), '4', '2'], capture_output=True, text=True)
@@ -1077,7 +1077,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             harness.write_text(METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);',
                                                   STORAGE_FEATURE + '    nvnMemoryPoolFinalize(&pool);'))
             exe = path / 'storage'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -1101,7 +1101,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'race.c'; harness.write_text(CONCURRENT_SMOKE)
             exe = path / 'race'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-pthread', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -1136,7 +1136,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             harness = path / 'bundle.c'; harness.write_text(BUNDLE_SMOKE)
             source = ROOT / 'native/botw_graphics'
             exe = path / 'bundle-test'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source), str(source / 'graphics.m'), str(source / 'shader_bundle.m'), str(harness),
                 '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
                 capture_output=True, text=True)
@@ -1171,7 +1171,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             harness = path / 'constant.c'; harness.write_text(smoke)
             source = ROOT / 'native/botw_graphics/graphics.m'
             exe = path / 'constant'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
                 '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -1189,7 +1189,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             harness = path / 'smoke.c'
             harness.write_text(METAL_SMOKE)
             exe = path / 'smoke'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                 '-Werror', '-Wno-deprecated-declarations', '-I', str(source.parent),
                 str(source), str(harness), '-framework', 'Foundation', '-framework',
                 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
@@ -1226,7 +1226,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             self.assertIn(original, RESOURCE_SMOKE)
             harness.write_text(RESOURCE_SMOKE.replace(original, narrowed.replace('\n', '\\n')))
             exe = path / 'resources'
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                 '-Werror', '-Wno-deprecated-declarations', '-I', str(source.parent),
                 str(source), str(harness), '-framework', 'Foundation', '-framework',
                 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
@@ -1271,7 +1271,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
             harness.write_text(BUNDLE_SMOKE)
             exe = path / 'bundle-test'
             graphics = source.parent
-            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
                 '-I', str(graphics), str(graphics / 'graphics.m'), str(source), str(harness),
                 '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
                 capture_output=True, text=True)

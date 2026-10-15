@@ -22,7 +22,7 @@
 | 0x28 | MIN_MAX_FILTERING | 无 reduction filter 状态 |
 | 0x29 | STENCIL8_FORMAT | 无完整 stencil 读写、测试及清除 |
 | 0x32 | CONSERVATIVE_RASTER | 无 conservative raster 命令 |
-| 0x3b | ZERO_FROM_UNMAPPED_VIRTUAL_POOL_PAGES | 拒绝 virtual pool/map |
+| 0x3b | ZERO_FROM_UNMAPPED_VIRTUAL_POOL_PAGES | 未映射范围明确拒绝，不提供零读取；有限 pool/map 范围见 [MEMORY_POOLS.md](MEMORY_POOLS.md) |
 | 0x42 | PASSTHROUGH_GEOMETRY_SHADERS | 仅支持 vertex/fragment |
 | 0x43 | VIEWPORT_SWIZZLE | 无 viewport swizzle 命令 |
 | 0x44 | SPARSE_TILED_PACKAGED_TEXTURES | 拒绝 sparse/virtual 纹理 |

@@ -1,4 +1,4 @@
-/* Synthetic base-v0 storage metadata. No game code, virtual mappings, or
+/* Synthetic base-v0 storage metadata. No game code, virtual mapping bytes, or
  * device/driver queries are performed by these getters. */
 #include "graphics.h"
 #include "nvn_protos.h"
@@ -27,10 +27,11 @@ int main(int argc,char **argv){
  if(!botw_graphics_init(NULL,rejected,NULL))return 77;
  API(nvnTextureBuilderGetStorageClass);API(nvnTextureGetStorageClass);API(nvnTextureBuilderSetDefaults);API(nvnTextureBuilderSetDevice);API(nvnTextureBuilderSetTarget);API(nvnTextureBuilderSetFlags);API(nvnTextureBuilderSetFormat);API(nvnTextureBuilderSetSamples);API(nvnTextureBuilderSetStorage);API(nvnTextureBuilderSetSize2D);API(nvnTextureBuilderSetStride);
  if(!strncmp(mode,"unsupported-",12)){
-  const char *name=!strcmp(mode,"unsupported-raw-builder")?"nvnTextureBuilderGetRawStorageClass":!strcmp(mode,"unsupported-raw-texture")?"nvnTextureGetRawStorageClass":"nvnMemoryPoolMapVirtual";
+  const char *name=!strcmp(mode,"unsupported-raw-builder")?"nvnTextureBuilderGetRawStorageClass":"nvnTextureGetRawStorageClass";
   void (*unimplemented)(void)=(void(*)(void))botw_nvn_bootstrap_loader(name);CHECK(unimplemented);
   if(!sigsetjmp(recovery,1)){unimplemented();CHECK(0);}CHECK(strstr(botw_graphics_last_error(),name));puts("STORAGE_CLASS_OTHER_FAMILIES_REMAIN_UNSUPPORTED_OK");botw_graphics_shutdown();return 0;
  }
+ if(!strcmp(mode,"invalid-map-pool")){API(nvnMemoryPoolMapVirtual);if(!sigsetjmp(recovery,1)){nvnMemoryPoolMapVirtual(NULL,0,NULL);CHECK(0);}CHECK(strstr(botw_graphics_last_error(),"provenance"));puts("STORAGE_CLASS_MAP_INVALID_POOL_REJECTED_OK");botw_graphics_shutdown();return 0;}
  size_t page=(size_t)getpagesize();NVNtextureBuilder *builder=mmap(NULL,page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(builder!=MAP_FAILED);memset(builder,0xa5,page);
  nvnTextureBuilderSetDevice(builder,(NVNdevice*)(uintptr_t)0xdeadbeef000);nvnTextureBuilderSetDefaults(builder);
  if(!strcmp(mode,"builder")||!strcmp(mode,"builder-readonly")){

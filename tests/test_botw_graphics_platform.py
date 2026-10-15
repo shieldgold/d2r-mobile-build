@@ -41,7 +41,8 @@ int botw_graphics_init(void *layer, void (*error)(const char *), int (*memory)(c
     (void)layer; (void)error; (void)memory; return 1; /* Deliberately simulated. */
 }
 void *botw_nvn_bootstrap_loader(const char *name) { (void)name; return NULL; }
-void botw_graphics_shutdown(void) {
+int botw_graphics_shutdown_checked(char *error, size_t capacity) {
+    (void)error; (void)capacity;
     /* Model shutdown's GPU wait boundary while all borrowed memory is live. */
     assert(state.graphics_workspace == (void *)(uintptr_t)heap);
     assert(state.graphics_workspace_size == PAGE && state.graphics_started);
@@ -52,6 +53,7 @@ void botw_graphics_shutdown(void) {
 #if defined(BOTW_WITH_GRAPHICS)
     fake_display_live = fake_vi_ready = 0;
 #endif
+    return 1;
 }
 #if defined(BOTW_WITH_GRAPHICS)
 const char *botw_graphics_last_error(void) { return fake_backend_error; }
@@ -180,7 +182,7 @@ int main(int argc, char **argv) {
     assert(argc == 2); setup();
 #if !defined(BOTW_WITH_GRAPHICS)
     assert(!strcmp(argv[1], "headless"));
-    graphics_backend_init = botw_graphics_init; graphics_backend_shutdown = botw_graphics_shutdown;
+    graphics_backend_init = botw_graphics_init; graphics_backend_shutdown = botw_graphics_shutdown_checked;
     graphics_backend_loader = botw_nvn_bootstrap_loader; state.graphics_started = 1;
     assert(find_symbol(init_name) == (uint64_t)state.modules[1].base + 0xc794);
     state.graphics_started = 0;
@@ -213,7 +215,7 @@ int main(int argc, char **argv) {
         reject_call((void *)(uintptr_t)heap, PAGE, "Metal");
         state.graphics_started = 1;
         graphics_backend_shutdown = NULL; reject_call((void *)(uintptr_t)heap, PAGE, "Metal");
-        graphics_backend_shutdown = botw_graphics_shutdown;
+        graphics_backend_shutdown = botw_graphics_shutdown_checked;
         graphics_backend_init = NULL; reject_call((void *)(uintptr_t)heap, PAGE, "Metal");
         graphics_backend_init = botw_graphics_init;
         graphics_backend_loader = NULL; reject_call((void *)(uintptr_t)heap, PAGE, "Metal");

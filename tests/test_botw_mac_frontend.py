@@ -87,7 +87,7 @@ class MacFrontendTests(unittest.TestCase):
         folder = Path(cls.build.name)
         stub = folder / 'host.m'; stub.write_text(HOST)
         cls.binary = folder / 'botw-mac'
-        command = ['xcrun', 'clang', '-std=c11', '-mmacosx-version-min=14.0', '-fobjc-arc', '-fblocks',
+        command = ['xcrun', 'clang', '-std=c11', '-mmacosx-version-min=14.0', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                    '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_host'),
                    str(ROOT / 'native/botw_app/mac_main.m'), str(stub), '-framework', 'AppKit',
                    '-framework', 'QuartzCore', '-framework', 'Metal', '-o', str(cls.binary)]

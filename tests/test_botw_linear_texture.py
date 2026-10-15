@@ -16,7 +16,7 @@ class LinearTextureTests(unittest.TestCase):
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
         cls.executable = Path(cls.directory.name) / 'linear-texture'
-        command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks', '-Wall',
+        command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks', '-Wall',
                    '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_graphics'),
                    str(ROOT / 'native/botw_graphics/graphics.m'),
                    str(ROOT / 'native/botw_graphics/tools/probe_linear_texture.c'),

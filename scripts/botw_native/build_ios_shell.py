@@ -77,7 +77,7 @@ def build_shell(repo_root, output_dir):
                 *[argument for directory in SOURCE_DIRECTORIES for argument in ('-I', str(root / 'native' / directory))]]
         for index, source in enumerate(SOURCES):
             obj = work / f'{index}.o'
-            language = ['-fobjc-arc'] if source.endswith('.m') else (['-std=c11'] if source.endswith('.c') else [])
+            language = ['-fobjc-arc', '-fobjc-arc-exceptions'] if source.endswith('.m') else (['-std=c11'] if source.endswith('.c') else [])
             subprocess.run([*base, *language, '-c', str(root / source), '-o', str(obj)], check=True)
             objects.append(str(obj))
         subprocess.run([*base, *objects, '-framework', 'UIKit', '-framework', 'Foundation',

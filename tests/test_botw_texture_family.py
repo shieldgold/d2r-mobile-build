@@ -13,7 +13,7 @@ class TextureFamilyTests(unittest.TestCase):
     def test_native_builder_view_and_pool_lifetime(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / 'texture-family'
-            command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks',
+            command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                        '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_graphics'),
                        str(ROOT / 'native/botw_graphics/graphics.m'),
                        str(ROOT / 'native/botw_graphics/tools/probe_texture_family.c'),

@@ -27,6 +27,13 @@ typedef int (*botw_graphics_command_memory_invoker)(
 int botw_graphics_init(void *layer, botw_graphics_error error,
                        botw_graphics_memory_range validator);
 void botw_graphics_shutdown(void);
+/* Host-only retirement boundary: 1 means all GPU users and borrowed NoCopy
+ * resources are quiescent; 0 returns a bounded diagnostic and retains resources
+ * whose retirement is incomplete. It never invokes the NVN error callback or
+ * aborts. The host must keep guest backing alive on failure; it may retry after
+ * external resource holders release their references. Legacy void shutdown
+ * remains available, but is not a safe ownership-release test for the runtime. */
+int botw_graphics_shutdown_checked(char *error, size_t capacity);
 /* Configure after init and before guest entry. A readable-range validator
  * never authorizes writes. Init/shutdown clear this callback. */
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access validator);
