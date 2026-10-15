@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include "runtime.h"
 #include "memory_policy.h"
+#import "BOTWEventLog.h"
 #include "graphics.h"
 #include "BOTWInputOverlay.h"
 
@@ -36,6 +37,7 @@
 @property(nonatomic, strong) CADisplayLink *frameObserver;
 @property(nonatomic, assign) BOOL firstFrameObserved;
 - (void)appendEvent:(NSString *)message;
+- (void)replaceLogText:(NSString *)text reveal:(BOOL)reveal;
 - (void)startGuestIfReady;
 @end
 
@@ -44,13 +46,17 @@ static NSString *bundleRoot;
 static NSString *documentsRoot;
 static botw_input *frontendInput; /* Process lifetime: guest threads borrow it. */
 static BOOL audioSessionPrepared, audioInterrupted, audioServicesLost;
+static BOTWEventLog *frontendEventLog;
 
 static void hostEvent(const char *message) {
     fprintf(stdout, "%s\n", message);
     fflush(stdout);
-    NSString *text = [NSString stringWithUTF8String:message];
-    if (!text) text = @"日志含无法解码的字节";
-    dispatch_async(dispatch_get_main_queue(), ^{ [activeController appendEvent:text]; });
+    @autoreleasepool {
+        NSString *text = [NSString stringWithUTF8String:message];
+        if (!text) text = @"日志含无法解码的字节";
+        [frontendEventLog appendMessage:text reveal:[text hasPrefix:@"error="] ||
+            [text containsString:@"当前版本尚不能游玩"]];
+    }
 }
 
 static BOOL activateHostAudioSession(void) {
@@ -145,6 +151,11 @@ static void *runGuest(void *unused) {
     self.logView.textColor = UIColor.whiteColor;
     self.logView.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     self.logView.text = @"BOTW 原生兼容层开发版\n正在尝试执行本机嵌入的原程序。\n游戏画面、操作与存档尚未验证。\n\n";
+    __weak BOTWController *weakController = self;
+    frontendEventLog = [[BOTWEventLog alloc] initWithCharacterLimit:65536 handler:^(NSString *text, BOOL reveal) {
+        [weakController replaceLogText:text reveal:reveal];
+    }];
+    [frontendEventLog appendMessage:self.logView.text reveal:NO];
     [self.view addSubview:self.logView];
     frontendInput = botw_input_create();
     if (frontendInput) self.inputOverlay = [BOTWInputOverlay attachToView:self.view input:frontendInput];
@@ -196,10 +207,12 @@ static void *runGuest(void *unused) {
     hostEvent("error=audio media services reset; restart the app to reopen audio");
 }
 - (void)appendEvent:(NSString *)message {
-    self.logView.text = [self.logView.text stringByAppendingFormat:@"%@\n", message];
-    if (self.logView.text.length > 65536) self.logView.text = [self.logView.text substringFromIndex:self.logView.text.length - 65536];
-    if ([message hasPrefix:@"error="] || [message containsString:@"当前版本尚不能游玩"])
-        self.logView.hidden = NO;
+    [frontendEventLog appendMessage:message reveal:[message hasPrefix:@"error="] ||
+        [message containsString:@"当前版本尚不能游玩"]];
+}
+- (void)replaceLogText:(NSString *)text reveal:(BOOL)reveal {
+    self.logView.text = text;
+    if (reveal) self.logView.hidden = NO;
     if (self.logView.text.length) {
         [self.logView scrollRangeToVisible:NSMakeRange(self.logView.text.length - 1, 1)];
     }

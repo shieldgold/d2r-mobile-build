@@ -18,7 +18,7 @@ SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/services.c', 'native/
            'native/botw_audio/audio.c',
            'native/botw_input/input.c', 'native/botw_input/BOTWInputOverlay.m',
            'native/botw_graphics/graphics.m', 'native/botw_graphics/shader_bundle.m',
-           'native/botw_app/main.m')
+           'native/botw_app/BOTWEventLog.m', 'native/botw_app/main.m')
 SOURCE_DIRECTORIES = ('botw_host', 'botw_app', 'botw_resources', 'botw_input', 'botw_graphics', 'botw_audio')
 
 
