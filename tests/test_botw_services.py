@@ -1,6 +1,8 @@
 """Hand-built Horizon IPC fixtures; no Nintendo binaries or headers needed."""
 import ctypes as C
 from concurrent.futures import ThreadPoolExecutor
+import mmap
+import platform
 import shutil
 import struct
 import sys
@@ -80,6 +82,35 @@ class ServicesTests(unittest.TestCase):
 
     def close(self, handle):
         return self.lib.botw_services_close(self.ctx, handle, self.error, 1024)
+
+    def static_buffer(self, data):
+        # HIPC X pointers have exactly 42 address bits, unlike 64-bit A/B buffers.
+        # Linux x86-64 ctypes allocations normally sit above that range. Request
+        # a separate anonymous low mapping without MAP_FIXED or replacing pages.
+        if platform.system() != 'Linux':
+            buffer = C.create_string_buffer(data)
+        else:
+            libc = C.CDLL(None, use_errno=True)
+            libc.mmap.argtypes = [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_longlong]
+            libc.mmap.restype = C.c_void_p
+            libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
+            size = len(data) + 1
+            span = (size + mmap.PAGESIZE - 1) & -mmap.PAGESIZE
+            flags = mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS
+            hint = None
+            if platform.machine().lower() in ('x86_64', 'amd64'):
+                flags |= getattr(mmap, 'MAP_32BIT', 0x40)
+            else:
+                hint = 0x10000000  # non-fixed hint; actual result is checked below
+            address = libc.mmap(hint, span, mmap.PROT_READ | mmap.PROT_WRITE, flags, -1, 0)
+            if address == C.c_void_p(-1).value:
+                raise OSError(C.get_errno(), 'allocate addressable HIPC static fixture')
+            self.addCleanup(libc.munmap, address, span)
+            buffer = (C.c_char * size).from_address(address)
+            C.memmove(buffer, data + b'\0', size)
+        self.assertLessEqual(C.addressof(buffer) + len(buffer), 1 << 42,
+                             'HIPC static fixture does not fit the real descriptor')
+        return buffer
 
     @staticmethod
     def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=(), receive=None):
@@ -448,7 +479,7 @@ class ServicesTests(unittest.TestCase):
         raw, _ = self.send(self.filesystem(), self.request(2))
         _, handles, _ = self.response(raw)
         fs = handles[0]
-        path = C.create_string_buffer(b'/System/Actor.byml')
+        path = self.static_buffer(b'/System/Actor.byml')
         self.ranges.append((C.addressof(path), len(path), False))
         raw, _ = self.send(fs, self.request(7, static=(C.addressof(path), len(path))))
         data, _, _ = self.response(raw)
@@ -509,7 +540,7 @@ class ServicesTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 2)
         self.assertIs(self.kernel_handles[handles[0]], self.kernel_handles[0x30000])
         self.send(hid, self.request(100, struct.pack('<IIQ', 3, 0, 0x12345678), pid=True))
-        ids = C.create_string_buffer(struct.pack('<II', 0, 0x20))
+        ids = self.static_buffer(struct.pack('<II', 0, 0x20))
         self.ranges.append((C.addressof(ids), len(ids), False))
         self.send(hid, self.request(102, struct.pack('<Q', 0x12345678), static=(C.addressof(ids), 8), pid=True))
         self.assertEqual(self.lib.botw_input_set_source(input, 0, 1, 123, -234, 0, 0, 1), 0)
@@ -623,7 +654,7 @@ class ServicesTests(unittest.TestCase):
         _, handles, _ = self.response(raw)
         text = b'BOTW SDK logger reached'
         chunks = bytes([2, len(text)]) + text
-        packet = C.create_string_buffer(struct.pack('<QQBBBBI', 1, 2, 7, 0, 1, 0, len(chunks)) + chunks)
+        packet = self.static_buffer(struct.pack('<QQBBBBI', 1, 2, 7, 0, 1, 0, len(chunks)) + chunks)
         self.ranges.append((C.addressof(packet), len(packet), False))
         self.send(handles[0], self.request(0, static=(C.addressof(packet), len(packet) - 1)))
         self.assertTrue(any(text.decode() in line for line in self.logs), self.logs)
