@@ -298,6 +298,24 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         if domain:
             self.assertEqual(struct.unpack_from('<I', raw, 16)[0], 0)
 
+    def test_guest_termination_reports_original_result_without_success_reply(self):
+        for domain in (False, True):
+            app, root = self.application_functions(domain)
+            for result in (0, 0x2a2, 0x7d402, 0xffffffff):
+                request = self.request(22, struct.pack('<I', result), domain=root)
+                raw, error = self.send(app, request, good=False)
+                self.assertIn('ApplicationFunctions.SetTerminateResult', error)
+                self.assertIn(f'result=0x{result:08x}', error)
+                self.assertEqual(raw[:len(request)], request)
+
+    def test_guest_termination_rejects_malformed_payload_before_reading_result(self):
+        app, root = self.application_functions(True)
+        for payload in (b'', bytes(8)):
+            _, error = self.send(app, self.request(22, payload, domain=root), good=False)
+            self.assertIn('ApplicationFunctions.SetTerminateResult', error)
+            self.assertIn('requires 4 input bytes', error)
+            self.assertNotIn('result=0x', error)
+
     def test_local_user_configuration_requires_persistent_matching_savefs_and_is_once_only(self):
         store, user, _ = self.local_savefs()
         configure = self.lib.botw_services_set_local_user

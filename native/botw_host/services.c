@@ -945,6 +945,13 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             emit(s, "local_user launch_parameter_kind=2 delivered=true bytes=%u scope=host_local_offline", PRESELECTED_STORAGE_SIZE);
         }
         return result;
+    } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 22) {
+        /* Switchbrew AM_services: SetTerminateResult takes one u32 Result.
+         * Preserve the guest's original failure rather than hiding it behind
+         * an unknown command or accepting an unimplemented termination path. */
+        if (exact_payload(r, 4, "ApplicationFunctions.SetTerminateResult", error, cap)) return -1;
+        return problem(error, cap, "guest requested ApplicationFunctions.SetTerminateResult result=0x%08x; termination delivery is not implemented",
+            load32(r->payload));
     } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 40) {
         if (!s->applet_foreground) return problem(error, cap, "ApplicationFunctions.NotifyRunning requires foreground host app");
         s->applet_running = 1; uint8_t active = 1;
