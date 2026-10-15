@@ -31,7 +31,7 @@
 | AudioOut PCM 队列、下混、AudioUnit 与完成通知 | 首批已整模块复用并薄适配 | `d49e28e` 模块与 `90aa17b` 宿主接线保留上游 SPSC/pull/notify 结构，适配 base-v0 buffer 布局、默认设备、客体复制、内核事件和生命周期。19 项测试与真实 Mac 零 PCM 回调通过；音频设备失败继续明确报错。iPhoneOS 复制使用公开 `vm_*` API。 |
 | 账户、只读资源、保存文件与 HID | 通用算法可复用，服务协议需薄适配 | 保留已验证的持久离线 UID、真实 FS/文件 IPC、HID shared memory 和事件；1.9 的 C++ 对象布局及直接函数接管不能覆盖 1.0 原 SDK。 |
 | 同步、事件、GPU residency/cache 与队列生命周期 | 可复用算法，需薄适配 | 使用真实提交与完成信号管理借用资源，单独核对跨队列、缓存失效、关闭与后台恢复；上游单全局队列和固定帧数回收不作为本项目的完成证明。 |
-| Shader scratch 与零容量 pool | 后端差异合同已接入，绘制证据仍受限 | `6272c09` 保留 4096/131072 对齐与粒度，Metal 外部 scratch 要求为零；建立真实零容量对象、16 字节 typed 命令、代际与队列完成持有，55 项图形测试通过。Mac 和新手机实际原程序均越过零尺寸分配/记录链；实际绘制还要求精确 shader 证明，不能用上游 `g_nops` 代替。 |
+| Shader scratch 与零容量 pool | 后端差异合同已接入，绘制证据仍受限 | `6272c09` 保留 4096/131072 对齐与粒度，Metal 外部 scratch 要求为零；建立真实零容量对象、16 字节 typed 命令、代际与队列完成持有，55 项图形测试通过。Mac 和新手机实际原程序均越过零尺寸分配与 PoolInitialize，随后停在 BufferBuilder；后续 SetShaderScratchMemory 尚未抵达。实际绘制还要求精确 shader 证明，不能用上游 `g_nops` 代替。 |
 
 ## 完整 NVN 清点
 
