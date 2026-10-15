@@ -64,6 +64,10 @@ struct botw_services {
     unsigned performance_configured[2];
     botw_services_performance_fn performance_handler;
     void *performance_opaque;
+    botw_services_focus_fn focus_handler;
+    void *focus_opaque;
+    uint32_t focus_mode;
+    unsigned focus_suspend_out, focus_policy_configured;
     botw_services_kernel_api kernel;
     botw_input *input;
     botw_romfs *romfs;
@@ -195,6 +199,22 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
     if (s) { pthread_mutex_lock(&s->lock); s->performance_handler = handler; s->performance_opaque = opaque; pthread_mutex_unlock(&s->lock); }
 }
+void botw_services_set_focus_handler(botw_services *s, botw_services_focus_fn handler, void *opaque) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock); s->focus_handler = handler; s->focus_opaque = opaque; pthread_mutex_unlock(&s->lock);
+}
+static int apply_focus_policy(botw_services *s, uint32_t base_mode, unsigned suspend_out, unsigned foreground, unsigned focus, char *error, size_t cap) {
+    if (!s->focus_handler) return problem(error, cap, "SelfController focus policy requires actual host focus handler");
+    uint32_t mode = suspend_out ? 3 : base_mode;
+    int suspended = mode == 3 ? focus != 1 : mode == 1 ? 0 : !foreground;
+    if (error && cap) error[0] = 0;
+    if (s->focus_handler(s->focus_opaque, mode, (int)foreground, focus == 1, suspended, error, cap)) {
+        if (error && cap && error[0]) return -1;
+        return problem(error, cap, "host rejected applet focus mode=%u suspended=%d", mode, suspended);
+    }
+    emit(s, "applet_focus_policy mode=%u foreground=%u focus=%u suspended=%s host_policy_accepted=true", mode, foreground, focus, suspended ? "true" : "false");
+    return 0;
+}
 void botw_services_set_kernel_api(botw_services *s, const botw_services_kernel_api *api) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
@@ -262,6 +282,7 @@ static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, 
     if (!s->applet_ready || s->applet_focus != focus) messages[count++] = 15;
     if (s->applet_ready && s->applet_operation != operation && s->applet_notify_operation) messages[count++] = 30;
     if (count > 32 - s->applet_message_count) return problem(error, cap, "applet notification queue full");
+    if (s->focus_policy_configured && (s->applet_foreground != (unsigned)foreground || s->applet_focus != focus) && apply_focus_policy(s, s->focus_mode, s->focus_suspend_out, (unsigned)foreground, focus, error, cap)) return -1;
     if (count && s->applet_event_write && s->kernel.signal_event(s->kernel.opaque, s->applet_event_write, error, cap)) return -1;
     for (unsigned i = 0; i < count; i++) s->applet_messages[(s->applet_message_head + s->applet_message_count++) % 32] = messages[i];
     s->applet_ready = 1; s->applet_resource_user_id = user_id;
@@ -626,6 +647,21 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             response(ipc, capacity, r, &value, 1, 0, 0); return 0;
         }
         if (r->command == 6) { response(ipc, capacity, r, &s->performance_mode, 4, 0, 0); return 0; }
+    } else if (o->kind == OBJECT_SELF_CONTROLLER && (r->command == 13 || r->command == 16)) {
+        uint32_t mode = s->focus_mode; unsigned suspend_out = s->focus_suspend_out;
+        if (r->command == 13) {
+            if (r->payload_size < 3) return problem(error, cap, "SetFocusHandlingMode requires three bools");
+            if (r->payload[0] == 0 && r->payload[1] == 0 && r->payload[2] == 1) mode = 0;
+            else if (r->payload[0] == 1 && r->payload[1] == 1 && r->payload[2] == 0) mode = 1;
+            else if (r->payload[0] == 1 && r->payload[1] == 0 && r->payload[2] == 1) mode = 2;
+            else return problem(error, cap, "unsupported SetFocusHandlingMode bool tuple=%u,%u,%u", r->payload[0], r->payload[1], r->payload[2]);
+        } else {
+            if (r->payload_size < 1 || r->payload[0] > 1) return problem(error, cap, "SetOutOfFocusSuspendingEnabled requires bool");
+            suspend_out = r->payload[0];
+        }
+        if (apply_focus_policy(s, mode, suspend_out, s->applet_foreground, s->applet_focus, error, cap)) return -1;
+        s->focus_mode = mode; s->focus_suspend_out = suspend_out; s->focus_policy_configured = 1;
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
     } else if (o->kind == OBJECT_SELF_CONTROLLER && (r->command == 11 || r->command == 12)) {
         if (r->payload_size < 1 || r->payload[0] > 1) return problem(error, cap, "SelfController notification command=%u requires bool", r->command);
         if (r->command == 11) s->applet_notify_operation = r->payload[0]; else s->applet_notify_performance = r->payload[0];

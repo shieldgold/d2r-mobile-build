@@ -22,6 +22,14 @@ typedef int (*botw_services_performance_fn)(void *opaque, uint32_t mode,
     uint32_t configuration, int active, char *error, size_t error_capacity);
 void botw_services_set_performance_handler(botw_services *services,
     botw_services_performance_fn handler, void *opaque);
+/* Canonical Horizon focus modes: 0 SuspendHomeSleep, 1 NoSuspend,
+ * 2 SuspendHomeSleepNotify, 3 AlwaysSuspend. Host confirms actual execution
+ * policy before committing a request. Lifecycle updates use the same handler.
+ * Handler must not reenter services; gate waits must not hold this mutex. */
+typedef int (*botw_services_focus_fn)(void *opaque, uint32_t mode,
+    int foreground, int focused, int suspended, char *error, size_t error_capacity);
+void botw_services_set_focus_handler(botw_services *services,
+    botw_services_focus_fn handler, void *opaque);
 /* Kernel bridge: events retain independent read/write endpoints. GetEventHandle
  * returns a duplicated read endpoint to the guest using a HIPC copy handle. */
 typedef struct {

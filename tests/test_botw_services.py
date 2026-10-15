@@ -31,6 +31,7 @@ class KernelAPI(C.Structure):
                 ('is_process', PROCESS_CHECK)]
 
 
+FOCUS = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_int, C.c_int, C.c_int, C.c_void_p, C.c_size_t)
 PERFORMANCE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_uint32, C.c_int, C.c_void_p, C.c_size_t)
 
 
@@ -527,6 +528,31 @@ class ServicesTests(unittest.TestCase):
         self.send(hid, self.request(107, struct.pack('<IIQ', 0x20, 0, 0x12345678), pid=True))
         self.assertTrue(event['signaled'])
         self.send(hid, self.request(100, struct.pack('<IIQ', 0x80000000, 0, 0x12345678), pid=True), good=False)
+
+    def test_self_controller_focus_policy_requires_actual_host_handler(self):
+        self.applet_kernel()
+        self.applet_state()
+        controller = self.proxy_child(self.applet_proxy(), 1)
+        _, error = self.send(controller, self.request(13, bytes([0, 0, 1])), good=False)
+        self.assertIn('host focus handler', error)
+        calls = []
+        self.focus = FOCUS(lambda _, mode, foreground, focused, suspended, error, cap:
+                           calls.append((mode, foreground, focused, suspended)) or 0)
+        self.lib.botw_services_set_focus_handler.argtypes = [C.c_void_p, FOCUS, C.c_void_p]
+        self.lib.botw_services_set_focus_handler(self.ctx, self.focus, None)
+        self.send(controller, self.request(13, bytes([0, 0, 1])))
+        self.assertEqual(calls[-1], (0, 1, 1, 0))
+        self.applet_state(foreground=0, focused=0)
+        self.assertEqual(calls[-1], (0, 0, 0, 1))
+        self.send(controller, self.request(13, bytes([1, 1, 0])))
+        self.assertEqual(calls[-1], (1, 0, 0, 0))
+        self.send(controller, self.request(16, b'\1'))
+        self.assertEqual(calls[-1], (3, 0, 0, 1))
+        self.applet_state()
+        self.assertEqual(calls[-1], (3, 1, 1, 0))
+        before = len(calls)
+        self.send(controller, self.request(13, bytes([1, 0, 0])), good=False)
+        self.assertEqual(len(calls), before)
 
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
