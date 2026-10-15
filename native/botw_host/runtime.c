@@ -866,39 +866,98 @@ static int services_memory(void *opaque, uint64_t address, size_t length, int wr
     if (state.kernel && botw_kernel_memory(state.kernel, address, length, writable)) return 1;
     return external_memory(opaque, address, length, writable);
 }
+static kern_return_t writable_vm_span(uint64_t address, size_t bytes) {
+    if (!bytes) return KERN_SUCCESS;
+    if (!address || address > UINTPTR_MAX || bytes > UINTPTR_MAX - (uintptr_t)address)
+        return KERN_INVALID_ADDRESS;
+    vm_address_t cursor = (vm_address_t)address;
+    while (bytes) {
+        natural_t depth = 0;
+        for (unsigned submaps = 0;; submaps++) {
+            vm_address_t region = cursor; vm_size_t size = 0;
+            vm_region_submap_info_data_64_t info;
+            mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+            kern_return_t result = vm_region_recurse_64(mach_task_self(), &region, &size,
+                &depth, (vm_region_recurse_info_t)&info, &count);
+            if (result != KERN_SUCCESS) return result;
+            if (count < VM_REGION_SUBMAP_INFO_COUNT_64) return KERN_FAILURE;
+            if (region > cursor || !size || cursor - region >= size) return KERN_INVALID_ADDRESS;
+            if (info.is_submap) {
+                if (submaps >= 64 || depth == UINT32_MAX) return KERN_FAILURE;
+                depth++; continue; /* Retain the queried address inside the submap. */
+            }
+            if (!(info.protection & VM_PROT_WRITE)) return KERN_PROTECTION_FAILURE;
+            vm_size_t available = size - (cursor - region);
+            size_t step = available < bytes ? (size_t)available : bytes;
+            cursor += step; bytes -= step; break;
+        }
+    }
+    return KERN_SUCCESS;
+}
 static int services_prepare_write(void *opaque, uint64_t address, size_t length,
         char *error, size_t capacity) {
     (void)opaque;
-    return botw_host_prepare_guest_write((void *)(uintptr_t)address, length, error, capacity);
-}
-#if defined(BOTW_WITH_AUDIO)
-static int audio_copy_error(char *error, size_t capacity, const char *operation, kern_return_t result) {
-    if (error && capacity) snprintf(error, capacity, "AudioOut %s failed: Mach result=%d", operation, result);
+    if (botw_host_prepare_guest_write((void *)(uintptr_t)address, length, error, capacity)) return -1;
+    kern_return_t result = writable_vm_span(address, length);
+    if (result == KERN_SUCCESS) return 0;
+    if (error && capacity) snprintf(error, capacity, "IPC output write preparation failed: Mach result=%d", result);
     return -1;
 }
-static int audio_read_guest(void *opaque, uint64_t source, void *destination, size_t bytes,
-        char *error, size_t capacity) {
-    (void)opaque;
+static int guest_copy_error(const char *scope, char *error, size_t capacity,
+        const char *operation, kern_return_t result) {
+    if (error && capacity) snprintf(error, capacity, "%s %s failed: Mach result=%d", scope, operation, result);
+    return -1;
+}
+static int protected_read_guest(const char *scope, uint64_t source, void *destination,
+        size_t bytes, char *error, size_t capacity) {
     if (!bytes) return 0;
     if (!destination || !services_memory(NULL, source, bytes, 0))
-        return audio_copy_error(error, capacity, "guest read range", KERN_INVALID_ADDRESS);
+        return guest_copy_error(scope, error, capacity, "guest read range", KERN_INVALID_ADDRESS);
     vm_size_t copied = 0;
     kern_return_t result = vm_read_overwrite(mach_task_self(), (vm_address_t)source, (vm_size_t)bytes,
         (vm_address_t)(uintptr_t)destination, &copied);
     if (result != KERN_SUCCESS || copied != bytes)
-        return audio_copy_error(error, capacity, "protected guest read", result == KERN_SUCCESS ? KERN_FAILURE : result);
+        return guest_copy_error(scope, error, capacity, "protected guest read", result == KERN_SUCCESS ? KERN_FAILURE : result);
     return 0;
+}
+static int protected_write_guest(const char *scope, uint64_t destination, const void *source,
+        size_t bytes, int prepare, char *error, size_t capacity) {
+    if (!bytes) return 0;
+    if (!source || bytes > UINT32_MAX || !services_memory(NULL, destination, bytes, 1))
+        return guest_copy_error(scope, error, capacity, "guest write range", KERN_INVALID_ADDRESS);
+    if (prepare && botw_host_prepare_guest_write((void *)(uintptr_t)destination, bytes, error, capacity)) return -1;
+    /* vm_write may publish a prefix before rejecting a later inaccessible
+     * region. Reject static bad spans first; concurrent remapping still needs
+     * the caller's ownership/lifetime discipline, not a transaction claim. */
+    kern_return_t result = writable_vm_span(destination, bytes);
+    if (result != KERN_SUCCESS)
+        return guest_copy_error(scope, error, capacity, "protected guest write permissions", result);
+    result = vm_write(mach_task_self(), (vm_address_t)destination,
+        (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
+    return result == KERN_SUCCESS ? 0 : guest_copy_error(scope, error, capacity, "protected guest write", result);
+}
+static int services_read_guest(void *opaque, uint64_t source, void *destination, size_t bytes,
+        char *error, size_t capacity) {
+    (void)opaque;
+    return protected_read_guest("IPC", source, destination, bytes, error, capacity);
+}
+static int services_write_guest(void *opaque, uint64_t destination, const void *source, size_t bytes,
+        char *error, size_t capacity) {
+    (void)opaque;
+    /* The service prepares the actual original C output span before copying.
+     * Do not prepare again or treat the host-owned arena as guest memory. */
+    return protected_write_guest("IPC", destination, source, bytes, 0, error, capacity);
+}
+#if defined(BOTW_WITH_AUDIO)
+static int audio_read_guest(void *opaque, uint64_t source, void *destination, size_t bytes,
+        char *error, size_t capacity) {
+    (void)opaque;
+    return protected_read_guest("AudioOut", source, destination, bytes, error, capacity);
 }
 static int audio_write_guest(void *opaque, uint64_t destination, const void *source, size_t bytes,
         char *error, size_t capacity) {
     (void)opaque;
-    if (!bytes) return 0;
-    if (!source || bytes > UINT32_MAX || !services_memory(NULL, destination, bytes, 1))
-        return audio_copy_error(error, capacity, "guest write range", KERN_INVALID_ADDRESS);
-    if (botw_host_prepare_guest_write((void *)(uintptr_t)destination, bytes, error, capacity)) return -1;
-    kern_return_t result = vm_write(mach_task_self(), (vm_address_t)destination,
-        (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
-    return result == KERN_SUCCESS ? 0 : audio_copy_error(error, capacity, "protected guest write", result);
+    return protected_write_guest("AudioOut", destination, source, bytes, 1, error, capacity);
 }
 typedef struct { uint64_t event; uint32_t reader; } AudioAttachArguments;
 static void call_audio_attach(uint64_t function, void *opaque) {
@@ -1071,6 +1130,7 @@ void botw_host_set_applet_state(int foreground, int focused) {
 }
 static void configure_resource_backends(const char *documents) {
     char error[512]; void *shared = NULL;
+    botw_services_set_memory_copiers(state.services, services_read_guest, services_write_guest, NULL);
     state.input = configured_input;
     if (!state.input) { state.input = botw_input_create(); state.input_owned = 1; }
     if (!state.input) fail("allocate host input state");
@@ -1372,9 +1432,10 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
             size_t capacity = g->arg == 0x21 ? 0x100 : (size_t)regs[1];
             if (!capacity || capacity > 0x1000 || !services_memory(NULL, (uint64_t)ipc, capacity, 1))
                 fail("IPC buffer outside guest writable memory");
-            uint32_t *header = ipc;
+            uint32_t header[2]; char error[512];
+            if (services_read_guest(NULL, (uint64_t)(uintptr_t)ipc, header, sizeof header, error, sizeof error))
+                fail("IPC header: %s", error);
             report("ipc_send handle=0x%x type=%u header1=0x%x bytes=%zu", handle, header[0] & 0xffff, header[1], capacity);
-            char error[512];
             if (botw_services_send(state.services, handle, ipc, capacity, error, sizeof error)) fail("SendSyncRequest: %s", error);
             regs[0] = 0; return;
         }
