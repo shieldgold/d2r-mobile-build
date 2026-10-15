@@ -1931,7 +1931,7 @@ DEPTH_RASTER_FEATURE = r"""
 
 SCRATCH_GPU_FEATURE = r"""
 
-    API(nvnMemoryPoolBuilderSetFlags);API(nvnCommandBufferSetShaderScratchMemory);
+    API(nvnCommandBufferSetShaderScratchMemory);
     controls[0][8]=0x61;controls[1][8]=0x62;codes[0][8]=0x61;codes[1][8]=0x62;
     *(uint32_t*)(codes[0]+0x30)=1u<<10;*(uint32_t*)(codes[1]+0x30)=5u<<10;
     memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
