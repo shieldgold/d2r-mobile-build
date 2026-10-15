@@ -78,7 +78,7 @@ struct botw_kernel {
     SyncWaiter *sync_waiters;
     uint64_t next_wait_sequence;
     uint64_t next_thread_id;
-    uint64_t priority_mask;
+    uint64_t priority_mask, core_mask;
     char thread_failure[512];
     uint32_t next_handle;
     unsigned active_waits;
@@ -154,6 +154,7 @@ botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *op
     k->opaque = opaque; k->owner = pthread_self(); k->next_handle = HANDLE_BASE;
     k->next_thread_id = 2;
     k->priority_mask = UINT64_MAX;
+    k->core_mask = 15;
     k->address_limit = UINT64_C(1) << 36;
     k->initial_thread.kernel = k; k->initial_thread.host = pthread_self();
     k->initial_thread.handle = BOTW_KERNEL_INITIAL_THREAD; k->initial_thread.id = 1;
@@ -780,15 +781,16 @@ static int map_shared_memory(botw_kernel *k, int unmap, uint64_t *regs, char *er
 }
 static int get_info(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     unsigned id = (uint32_t)regs[1];
-    switch (id) { case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+    switch (id) { case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
         case 12: case 13: case 14: case 15: case 21: case 22: break;
         default: return BOTW_KERNEL_UNSUPPORTED;
     }
     if (!botw_kernel_is_process_handle(k, (uint32_t)regs[2])) { regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
     if (regs[3]) { regs[0] = BOTW_KERNEL_RESULT_OUT_OF_RANGE; return BOTW_KERNEL_HANDLED; }
     pthread_mutex_lock(&k->lock);
-    if (id == 1) {
-        regs[0] = 0; regs[1] = k->priority_mask; pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+    if (id == 0 || id == 1) {
+        regs[0] = 0; regs[1] = id ? k->priority_mask : k->core_mask;
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
     }
     if (!k->memory_configured) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_UNSUPPORTED; }
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
@@ -833,7 +835,7 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     uint64_t entry = regs[1], argument = regs[2], stack_top = regs[3];
     int32_t priority = (int32_t)regs[4], core = (int32_t)regs[5];
     if (priority < 0 || priority > 63) { regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED; }
-    if (core < -2 || core == -1 || core > 3) { regs[0] = 0xe201; return BOTW_KERNEL_HANDLED; }
+    if (core < -2 || core == -1 || core > 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_CORE; return BOTW_KERNEL_HANDLED; }
     if ((entry & 3) || (stack_top & 15) || !k->callbacks.executable(k->opaque, entry)) {
         regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED;
     }
@@ -842,6 +844,9 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     pthread_mutex_lock(&k->lock); Mapping *mapping = NULL;
     if (!(k->priority_mask & (UINT64_C(1) << priority))) {
         pthread_mutex_unlock(&k->lock); free(t); regs[0] = BOTW_KERNEL_RESULT_INVALID_PRIORITY; return BOTW_KERNEL_HANDLED;
+    }
+    if (core >= 0 && !(k->core_mask & (UINT64_C(1) << core))) {
+        pthread_mutex_unlock(&k->lock); free(t); regs[0] = BOTW_KERNEL_RESULT_INVALID_CORE; return BOTW_KERNEL_HANDLED;
     }
     for (unsigned i = 0; i < MAX_MAPS; i++) {
         Mapping *m = &k->mappings[i];
@@ -1073,6 +1078,14 @@ int botw_kernel_configure_thread_priority_mask(botw_kernel *k, uint64_t mask, ch
         pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "invalid priority mask or active/stopping thread context");
     }
     k->priority_mask = mask; pthread_mutex_unlock(&k->lock); return 0;
+}
+int botw_kernel_configure_core_mask(botw_kernel *k, uint64_t mask, char *error, size_t capacity) {
+    if (!k) return diagnostic(error, capacity, "core mask requires kernel context");
+    pthread_mutex_lock(&k->lock);
+    if (!(mask & 1) || (mask & ~UINT64_C(15)) || k->threads || k->stopping) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "invalid core mask or active/stopping thread context");
+    }
+    k->core_mask = mask; pthread_mutex_unlock(&k->lock); return 0;
 }
 int botw_kernel_configure_memory(botw_kernel *k, size_t heap, size_t stack, size_t alias, size_t budget, size_t image, char *error, size_t capacity) {
     if (!k || !heap || !stack || !alias || ((heap | stack | alias) & (HEAP_UNIT - 1)) || budget < image)

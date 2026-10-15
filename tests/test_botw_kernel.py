@@ -123,6 +123,27 @@ static uint64_t info(unsigned id) {
     uint64_t r[32] = {0, id, BOTW_KERNEL_CURRENT_PROCESS, 0}; svc(0x29, r);
     assert(r[0] == 0); return r[1];
 }
+static void process_core_mask(void) {
+    uint64_t base = 0, size = 0;
+    assert(info(0) == 15 && !botw_kernel_reservation(ctx, &base, &size));
+    assert(botw_kernel_configure_core_mask(NULL, 7, error, sizeof error) == -1);
+    for (uint64_t mask = 0; mask < 32; mask++) {
+        int expected = (mask & 1) && !(mask & ~UINT64_C(15)) ? 0 : -1;
+        uint64_t previous = info(0);
+        assert(botw_kernel_configure_core_mask(ctx, mask, error, sizeof error) == expected);
+        assert(info(0) == (expected ? previous : mask));
+    }
+    assert(botw_kernel_configure_core_mask(ctx, UINT64_MAX, error, sizeof error) == -1);
+    assert(!botw_kernel_configure_core_mask(ctx, 7, error, sizeof error));
+    assert(info(0) == 7 && !botw_kernel_reservation(ctx, &base, &size));
+    uint64_t r[32] = {0, 0, 0x1234, 0}; svc(0x29, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    r[1] = 0; r[2] = BOTW_KERNEL_CURRENT_PROCESS; r[3] = 1; svc(0x29, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_OUT_OF_RANGE);
+    assert(info(0) == 7 && !botw_kernel_reservation(ctx, &base, &size));
+    assert(!botw_kernel_shutdown(ctx, error, sizeof error));
+    assert(botw_kernel_configure_core_mask(ctx, 15, error, sizeof error) == -1);
+}
 static void protection_fault(int number) { (void)number; _exit(44); }
 static int readable(uint64_t address) {
     pid_t child = fork(); assert(child >= 0);
@@ -437,6 +458,35 @@ static uint32_t sync_worker(uint64_t stack, unsigned index, uint64_t entry, uint
     r[0] = handle; svc(9, r); assert(!r[0]); return handle;
 }
 static void exit_worker(void) { uint64_t r[32] = {0}; svc(0xa, r); abort(); }
+static void core_worker(uint64_t argument, uint32_t self) {
+    (void)self; assert(argument == 7 && info(0) == argument);
+    atomic_fetch_add(&entered, 1); exit_worker();
+}
+static void thread_core_mask(void) {
+    uint64_t stack = prepare_sync(1);
+    assert(!botw_kernel_configure_core_mask(ctx, 5, error, sizeof error));
+    const int invalid[] = {-3, -1, 1, 3, 4};
+    for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+        uint64_t r[32] = {0, (uintptr_t)core_worker, 7, stack + 0x200000, 44, (uint64_t)(int64_t)invalid[i]};
+        svc(8, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_CORE);
+    }
+    /* Rejected CreateThread calls do not freeze configuration. */
+    assert(!botw_kernel_configure_core_mask(ctx, 7, error, sizeof error));
+    const int valid[] = {0, 1, 2, -2};
+    for (unsigned i = 0; i < sizeof valid / sizeof valid[0]; i++) {
+        uint64_t r[32] = {0, (uintptr_t)core_worker, 7, stack + 0x200000, 44, (uint64_t)(int64_t)valid[i]};
+        svc(8, r); assert(!r[0]); uint32_t worker = (uint32_t)r[1];
+        assert(botw_kernel_configure_core_mask(ctx, 15, error, sizeof error) == -1);
+        assert(botw_kernel_configure_core_mask(ctx, 7, error, sizeof error) == -1);
+        assert(info(0) == 7);
+        r[0] = worker; svc(9, r); assert(!r[0]);
+        assert(wait_one(worker, 1000000000) == 0);
+        assert(!botw_kernel_close_handle(ctx, worker, error, sizeof error));
+        assert(botw_kernel_configure_core_mask(ctx, 5, error, sizeof error) == -1);
+    }
+    assert(atomic_load(&entered) == 4 && info(0) == 7);
+    assert(!pthread_key_delete(test_tls));
+}
 static void mutex_contender(uint64_t argument, uint32_t self) {
     atomic_fetch_add(&sync_prepared, 1); mutex_lock(self);
     unsigned index = atomic_fetch_add(&sync_order_count, 1);
@@ -744,6 +794,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "timing")) timing();
     else if (!strcmp(argv[1], "memory")) memory_mapping();
     else if (!strcmp(argv[1], "address39")) extended_address_space();
+    else if (!strcmp(argv[1], "coremask")) process_core_mask();
+    else if (!strcmp(argv[1], "threadcoremask")) thread_core_mask();
     else if (!strcmp(argv[1], "threads")) threads();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
@@ -804,6 +856,12 @@ class KernelTests(unittest.TestCase):
 
     def test_explicit_39bit_reservation_supports_real_sdk_heap_and_independent_budget(self):
         self.check_case('address39')
+
+    def test_process_core_capability_is_configured_without_a_memory_reservation(self):
+        self.check_case('coremask')
+
+    def test_thread_core_requests_enforce_same_npdm_mask_and_freeze_after_creation(self):
+        self.check_case('threadcoremask')
 
     def test_create_start_exit_uses_mapped_stack_and_thread_local_context(self):
         self.check_case('threads')

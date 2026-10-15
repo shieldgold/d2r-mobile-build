@@ -20,7 +20,8 @@ enum {
     BOTW_KERNEL_RESULT_TIMED_OUT = 0xea01,
     BOTW_KERNEL_RESULT_CANCELLED = 0xec01,
     BOTW_KERNEL_RESULT_INVALID_STATE = 0xfa01,
-    BOTW_KERNEL_RESULT_INVALID_PRIORITY = 0xe001
+    BOTW_KERNEL_RESULT_INVALID_PRIORITY = 0xe001,
+    BOTW_KERNEL_RESULT_INVALID_CORE = 0xe201
 };
 #define BOTW_KERNEL_CURRENT_THREAD UINT32_C(0xffff8000)
 #define BOTW_KERNEL_CURRENT_PROCESS UINT32_C(0xffff8001)
@@ -104,6 +105,13 @@ uint64_t botw_kernel_address_space_limit(botw_kernel *kernel);
  * before creating workers; it must include the initial thread's priority.
  * GetInfo(1) returns this mask; CreateThread/SetThreadPriority enforce it. */
 int botw_kernel_configure_thread_priority_mask(botw_kernel *kernel, uint64_t mask,
+    char *error, size_t error_capacity);
+/* Default allows four guest virtual cores (mask=15). Configure the verified
+ * process/NPDM capability before creating any worker. Only bits 0..3 are valid
+ * and core 0 (the initial/default guest core) must remain allowed. GetInfo(0)
+ * reports this same mask without allocating memory; CreateThread enforces it.
+ * This is guest capability policy, not affinity to host physical CPU cores. */
+int botw_kernel_configure_core_mask(botw_kernel *kernel, uint64_t mask,
     char *error, size_t error_capacity);
 /* Configure reservation before first memory SVC. All capacities must be
  * multiples of 2 MiB. physical_budget includes heap and image_bytes. */
