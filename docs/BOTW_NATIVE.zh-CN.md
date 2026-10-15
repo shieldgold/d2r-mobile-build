@@ -27,14 +27,24 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；框架中仍保留经过审计的七模块程序。遇到未知系统服务时记录原程序偏移并停止，不返回伪造的成功状态。
 
-2026-10-15 首轮真机测试，iPhone 15 Pro / iOS 27.2：
+2026-10-15 最新真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `07e89a3`：
 
 - 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
 - `devicectl` 确认安装与启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、34 个弱未定义引用归零、230 个门登记。
-- 原始 `_init_libc0` 已真实执行并返回；首轮宿主在 `nnosInitialize` 的线程优先级服务 SVC `0x0c` 停止。这是实际执行边界，不是游戏画面或可玩性验证。
-- 手机日志与签名包只保留本地 `outputs/botw-ios-fadf216/`。日志界面是开发中的真实启动记录，始终标明 `graphics_ready=false`、`gameplay_verified=false`。
+- 原始 `_init_libc0`、`nnosInitialize`、`_init_libc1` 均真实执行并返回；`nndiagStartup` 中条件变量广播完成。随后明确停在 SVC `0x1f` / `ConnectToNamedPort("sm:")`，原程序偏移 `sdk+0xa7b50`。服务管理器与 IPC 尚未实现，没有进入实际游戏构造或 nnMain。
+- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-07e89a3/`。日志界面是开发中的真实启动记录，始终标明 `graphics_ready=false`、`gameplay_verified=false`。
+
+对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38731615516) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38731615349) 均通过。外层下载工件已核对 GitHub 官方摘要，宿主来源记录保留在本地 `outputs/botw-verified-host-07e89a3/shell-provenance.json`。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。
+
+可信下载工具 `botw_native.artifact` 使用 GitHub CLI 的现有认证读取指定成功 run，核对仓库、提交、分支与工件身份，验证 GitHub 官方外层 ZIP 摘要和字节数，再解出唯一宿主 IPA。`shell-provenance.json` 中的 `shell_sha256` 用于下面的 `SHELL_SHA256`；不能从 IPA 自带 manifest 建立二进制信任。
+
+```sh
+PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native.artifact \
+  --repository shieldgold/d2r-mobile-build --run-id "$HOST_RUN_ID" \
+  --commit "$HOST_COMMIT" --output outputs/botw-ios-shell
+```
 
 复现组装：
 
@@ -48,10 +58,11 @@ PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native.ios assemble \
   --guest outputs/botw-guest-framework \
   --report outputs/botw-native-base/report.json \
   --rewrite outputs/botw-native-base/rewrite \
+  --expected-shell-sha256 "$SHELL_SHA256" \
   --output-app outputs/botw-ios-local/BOTWNative.app
 ```
 
-下载的宿主必须与本地源码摘要匹配；使用历史构建时通过 `--source-root` 指向该提交的源码快照。`ios sign --help` 列出本地签名参数。签名校验会确认设备、证书、Team、Bundle ID、描述文件有效期，仅使用其允许的普通开发权限。
+`SHELL_SHA256` 必须来自独立可信构建工件通道，不可仅采信 IPA 内自行声明的摘要。下载的宿主还必须与本地源码摘要匹配；使用历史构建时通过 `--source-root` 指向该提交的源码快照。`ios sign --help` 列出本地签名参数。签名校验会确认设备、证书、Team、Bundle ID、描述文件有效期，仅使用其允许的普通开发权限。
 
 ## 本地运行
 
@@ -95,6 +106,8 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 
 首阶段为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。宿主阶段另增人工程序执行、框架布局、来源校验、ZIP 边界和本地签名流程测试。GitHub Actions 仅使用人工合成输入，不上传游戏文件。
 
+宿主集成后的完整本地回归为 **131 项全部通过、无跳过**，其中 **24 项原生宿主测试**在 Apple ARM64 上编译和执行人工程序。覆盖签名代码页写保护、重定位与弱符号抢占、异常 SP 恢复、SDK 调用顺序、逆序构造、构造失败不进入 nnMain、条件唤醒标志、固定四槽熵值以及 36 位地址空间边界。云端分别运行 Linux 准备测试与 macOS 原生宿主测试，再编译 iPhoneOS 宿主。
+
 未安装可选原生实验依赖或未设置 `BOTW_REWRITER_PATH` 时，相关测试会明确标为跳过；不得把这种运行宣称为完整的原生实验测试通过。
 
 ## 当前限制与后续工作
@@ -102,7 +115,7 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 - 当前只支持已固定本体版本的 solid Zstandard NCZ，要求连续 section；不支持 NCZBLOCK 或直接解密 NSP。本地更新包 1.9.0 与两个 DLC 尚未应用。
 - 资源段尚未完整导出；当前输出不是可以导入 D2R Mobile 的 Data。
 - 上游指令改写器来自固定提交，本地识别扩展的源码摘要也记录在报告中。D2R 专用 cuts、obs、params 全部为零。
-- 模块装载、初步 SDK 启动、构建签名及开发版装机路径已建立；后续仍需接通完整系统服务、审计并执行模块构造顺序、适配游戏着色器容器和 NVN 图形路径，最后验证真实游戏画面、操作与存档。
+- 模块装载、初步 SDK 启动、构建签名及开发版装机路径已建立。已审计并用人工程序验证 `sdk → subsdk3 → subsdk2 → subsdk1 → subsdk0 → main` 的 DT_INIT 顺序，实际游戏尚未到此阶段。后续仍需接通完整系统服务、适配游戏着色器容器和 NVN 图形路径，最后验证真实游戏画面、操作与存档。
 - 安装的开发版不包含已导出的完整资源，尚未进入游戏；没有修改手机系统设置。
 
 游戏文件、密钥、生成的程序代码与日志只保留在被忽略的本地目录。仓库不分发这些内容。

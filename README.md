@@ -6,7 +6,7 @@
 
 Build unsigned IPAs and the required game data with GitHub Actions, using the **NO_XCODE** approach from [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Download a build from Releases or run your own build below.
 
-The separate Breath of the Wild native-port experiment is documented in [BOTW preparation and rewrite verification](docs/BOTW_NATIVE.zh-CN.md). It currently provides preparation tools, not a playable IPA.
+The separate Breath of the Wild native-port experiment is documented in [BOTW preparation and device host verification](docs/BOTW_NATIVE.zh-CN.md). Its development host executes original SDK initialization code on an iPhone; gameplay is not available yet.
 
 ## Download and install
 
