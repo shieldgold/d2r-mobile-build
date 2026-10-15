@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/TommyLau/botw-mobile",
+  "commit": "5f673ae2ea4f90ad46403aa6fbe13537fb557271",
+  "license": "MIT",
+  "path": "dm/gfx/nvn/botw_buffer.c",
+  "sha256": "87f1faabc5437f549256bed265e10e03743db103c3ecf90d511dfd6595b77c6f",
+  "changes": [
+    "Entry macro renamed and global registration removed; host checked wrappers own dispatch.",
+    "Base-52 original BufferBuilder fields start with device at +0; v1.9 reserved qword removed.",
+    "Upstream pure slice/default/getter/range/object model retained, memory-pool snapshot adapted to live host BWPool.",
+    "BuilderGetDevice not exported by the fixed base-52 SDK; not registered.",
+    "No-op DebugLabel body excluded; host stores a bounded real label.",
+    "Metal cache copies, object generation, access validation, asynchronous resource retention are host adapters.",
+    "Base-52 GetDebugID returns zero when device debug-level flag mask 0x75 is disabled; enabled IDs use upstream stable host serials."
+  ]
+}

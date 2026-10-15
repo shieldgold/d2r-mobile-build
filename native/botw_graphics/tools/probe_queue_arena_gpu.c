@@ -9,8 +9,8 @@
 #define API(name) NVNT_##name name = (NVNT_##name)botw_nvn_bootstrap_loader(#name)
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"CHECK failed: %s (%s)\n", #x, botw_graphics_last_error()); return 1; } } while(0)
 static const void *ctl_ptrs[2];
-static void *queueArena,*poolObject;static size_t queueArenaBytes;
-static int queue_access(const void *p,size_t n,int writable){if(!writable)return 1;if(p==poolObject&&n<=sizeof(NVNmemoryPool))return 1;return (uintptr_t)p>=(uintptr_t)queueArena&&(uintptr_t)p-(uintptr_t)queueArena<=queueArenaBytes&&n<=queueArenaBytes-((uintptr_t)p-(uintptr_t)queueArena); }
+static void *queueArena,*poolObject,*poolBacking;static size_t queueArenaBytes,poolBackingBytes;
+static int queue_access(const void *p,size_t n,int writable){if(!writable)return 1;if(p==poolObject&&n<=sizeof(NVNmemoryPool))return 1;if((uintptr_t)p>=(uintptr_t)poolBacking&&(uintptr_t)p-(uintptr_t)poolBacking<=poolBackingBytes&&n<=poolBackingBytes-((uintptr_t)p-(uintptr_t)poolBacking))return 1;return (uintptr_t)p>=(uintptr_t)queueArena&&(uintptr_t)p-(uintptr_t)queueArena<=queueArenaBytes&&n<=queueArenaBytes-((uintptr_t)p-(uintptr_t)queueArena); }
 static int valid(const void *p, size_t n) { return n <= 64 && (p == ctl_ptrs[0] || p == ctl_ptrs[1]); }
 int main(int argc, char **argv) {
     if (!botw_graphics_init(NULL, NULL, valid)) return 77;
@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
     size_t page=(size_t)getpagesize(); unsigned char *memory=NULL;
     CHECK(posix_memalign((void**)&memory,page,page*2)==0); memset(memory,0,page*2);
     memcpy(memory,"real gpu copy",14);
-    NVNmemoryPoolBuilder mb; NVNmemoryPool pool;poolObject=&pool;
+    NVNmemoryPoolBuilder mb; NVNmemoryPool pool;poolObject=&pool;poolBacking=memory;poolBackingBytes=page*2;
     nvnMemoryPoolBuilderSetDefaults(&mb); nvnMemoryPoolBuilderSetDevice(&mb,&device);
     nvnMemoryPoolBuilderSetStorage(&mb,memory,page*2); CHECK(nvnMemoryPoolInitialize(&pool,&mb));
     NVNqueueBuilder qb; NVNqueue queue; nvnQueueBuilderSetDefaults(&qb);

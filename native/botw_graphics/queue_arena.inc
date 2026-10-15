@@ -76,7 +76,7 @@ static NSArray<NSDictionary *> *queueSubmissionCommands(BWQueue *queue,int count
         if(commands.count>layout.controlBytes/sizeof(BWQueueReplayIndex)-records)fatal("CPU queue control replay budget exceeded");
         records+=commands.count;[captured addObject:commands];
     }
-    validateScratchSubmission(queue,captured);
+    validateScratchSubmission(queue,captured);validateAddressSubmission(queue,captured);
     if(queue.preparedSubmissions==UINT64_MAX)fatal("CPU queue preparation counter overflow");
     char *command=(char*)queue.arena+BW_QUEUE_ARENA_PAGE,*control=command+layout.commandBytes;
     if(bytes)memcpy(command,source.bytes,bytes);

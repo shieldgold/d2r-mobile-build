@@ -455,6 +455,47 @@ class ShaderScratchProofTests(unittest.TestCase):
             self.assertIn('BOUNDED_C_SCRATCH_PROOF_OK', run.stdout)
 
 
+class BufferAbiTests(unittest.TestCase):
+    def test_upstream_buffer_module_base52_layout_pointer_abi_and_exact_slices(self):
+        source = r"""
+#include "nvn_protos.h"
+#include "vendor/botw-buffer/buffer.h"
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+_Static_assert(__builtin_types_compatible_p(NVNT_nvnBufferBuilderGetMemoryPool,NVNmemoryPool*(*)(const NVNbufferBuilder*)),"pool pointer ABI");
+_Static_assert(__builtin_types_compatible_p(PFNNVNBUFFERBUILDERGETMEMORYPOOLPROC,NVNmemoryPool*(*)(const NVNbufferBuilder*)),"public pool pointer ABI");
+_Static_assert(offsetof(struct bwu_builder,device)==0&&offsetof(struct bwu_builder,pool)==8&&offsetof(struct bwu_builder,offset)==16&&offsetof(struct bwu_builder,size)==24,"base52 fields");
+static uint64_t bwu_new_serial(void){static uint64_t serial;return ++serial;}
+#define BWU_MAGIC(a,b,c,d) ((uint32_t)(a)|((uint32_t)(b)<<8)|((uint32_t)(c)<<16)|((uint32_t)(d)<<24))
+#define BWU_LOG(...) ((void)0)
+#define BWU_DIE(message) abort()
+#define BUFFER_UPSTREAM(name,ret,...) static __attribute__((unused)) ret bwu_##name(__VA_ARGS__)
+#include "vendor/botw-buffer/buffer.inc"
+#define CHECK(x) do{if(!(x))return __LINE__;}while(0)
+int main(void){NVNbufferBuilder builder;memset(&builder,0xa5,sizeof builder);NVNdevice *device=(void*)(uintptr_t)0x1234;
+ bwu_nvnBufferBuilderSetDevice(&builder,device);bwu_nvnBufferBuilderSetDefaults(&builder);
+ CHECK(((struct bwu_builder*)&builder)->device==device);for(size_t i=32;i<sizeof builder;i++)CHECK((unsigned char)builder.reserved[i]==0xa5);
+ unsigned char memory[16]={0};bwu_pool pool={BWU_MAGIC('P','O','O','L'),NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED,memory,sizeof memory};
+ bwu_nvnBufferBuilderSetStorage(&builder,(NVNmemoryPool*)&pool,3,7);NVNbuffer object;CHECK(bwu_nvnBufferInitialize(&object,&builder));
+ CHECK(bwu_nvnBufferMap(&object)==memory+3&&bwu_nvnBufferGetAddress(&object)==(uintptr_t)(memory+3));
+ CHECK(bwu_nvnBufferBuilderGetMemoryPool(&builder)==(NVNmemoryPool*)&pool&&bwu_nvnBufferGetMemoryPool(&object)==(NVNmemoryPool*)&pool);
+ CHECK(bwu_nvnBufferBuilderGetMemoryOffset(&builder)==3&&bwu_nvnBufferGetMemoryOffset(&object)==3);
+ CHECK(bwu_nvnBufferBuilderGetSize(&builder)==7&&bwu_nvnBufferGetSize(&object)==7&&bwu_nvnBufferGetDebugID(&object));
+ bwu_nvnBufferFlushMappedRange(&object,7,0);bwu_nvnBufferInvalidateMappedRange(&object,1,6);bwu_nvnBufferFinalize(&object);CHECK(!bwu_nvnBufferMap(&object));
+ puts("UPSTREAM_BUFFER_BASE52_PORTABLE_ABI_AND_SLICE_OK");return 0;}
+"""
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder);(path/'buffer.c').write_text(source)
+            build=subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'native/botw_graphics'),str(path/'buffer.c'),'-o',str(path/'buffer')],capture_output=True,text=True)
+            self.assertEqual(build.returncode,0,build.stderr)
+            run=subprocess.run([str(path/'buffer')],capture_output=True,text=True)
+            self.assertEqual(run.returncode,0,run.stdout+run.stderr)
+            self.assertIn('UPSTREAM_BUFFER_BASE52_PORTABLE_ABI_AND_SLICE_OK',run.stdout)
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
     def run_graphics_probe(self, name, expected):
@@ -490,6 +531,60 @@ class MetalBridgeTests(unittest.TestCase):
                     else:
                         self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
                         self.assertIn(expected, run.stderr)
+
+    def test_fixed_upstream_buffer_family_base52_bounds_identity_and_gpu_copy(self):
+        self.run_graphics_probe('probe_buffer_family.c', 'UPSTREAM_BUFFER_FAMILY_BASE52_BOUNDS_IDENTITY_AND_REAL_METAL_COPY_OK')
+
+    def test_buffer_slice_addresses_reach_vertex_uniform_storage_and_two_metal_queues(self):
+        helper = r"""
+static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t offset,size_t bytes){
+ API(nvnBufferBuilderSetDevice);API(nvnBufferBuilderSetDefaults);API(nvnBufferBuilderSetStorage);
+ API(nvnBufferInitialize);API(nvnBufferGetAddress);API(nvnBufferFinalize);
+ NVNbufferBuilder b;NVNbuffer object;nvnBufferBuilderSetDevice(&b,device);nvnBufferBuilderSetDefaults(&b);
+ nvnBufferBuilderSetStorage(&b,pool,offset,bytes);CHECK(nvnBufferInitialize(&object,&b));
+ uint64_t address=nvnBufferGetAddress(&object);nvnBufferFinalize(&object);return address;
+}
+"""
+        resources = RESOURCE_FEATURE.replace('gpu+512', 'sliceAddress(&device,&pool,512,sizeof positions)')
+        resources = resources.replace('gpu+768', 'sliceAddress(&device,&pool,768,16)').replace('gpu+784', 'sliceAddress(&device,&pool,784,16)')
+        resources = resources.replace('    for(int pass=0;pass<2;pass++){', '    NVNqueue secondQueue;CHECK(nvnQueueInitialize(&secondQueue,&qb));for(int pass=0;pass<2;pass++){')
+        resources = resources.replace('nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);', 'nvnQueueSubmitCommands(pass?&secondQueue:&queue,1,&handle);nvnQueueFinish(pass?&secondQueue:&queue);')
+        source = METAL_SMOKE.replace('int main(int argc, char **argv)', helper+'int main(int argc, char **argv)')
+        source = source.replace('    nvnMemoryPoolFinalize(&pool);', resources+'    nvnMemoryPoolFinalize(&pool);')
+        # A depth attachment at 8192 requires the resource fixture's 16-KiB pool.
+        source = source.replace('page*2', 'page*4')
+        self.compile_render_probe(source, [('', 'GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', True)])
+        storage = STORAGE_FEATURE.replace('3,gpu+1024,', '3,sliceAddress(&device,&pool,1024,sizeof instances),')
+        storage = storage.replace('NVNbufferRange writable={gpu+1280,48}', 'NVNbufferRange writable={sliceAddress(&device,&pool,1280,48),48}')
+        source = METAL_SMOKE.replace('int main(int argc, char **argv)', helper+'int main(int argc, char **argv)')
+        source = source.replace('    nvnMemoryPoolFinalize(&pool);', storage+'    nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [('', 'GPU_STORAGE_INSTANCING_BASE_IDS_OK', True)])
+
+    def test_actually_consumed_uniform_pool_generation_is_checked_before_gpu_draw(self):
+        setup = ('unsigned char *uniformMemory=NULL;CHECK(!posix_memalign((void**)&uniformMemory,page,page));'
+                 'memset(uniformMemory,0,page);NVNmemoryPool uniformPool;'
+                 'nvnMemoryPoolBuilderSetStorage(&mb,uniformMemory,page);'
+                 'CHECK(nvnMemoryPoolInitialize(&uniformPool,&mb));')
+        feature = RESOURCE_FEATURE.replace('    for(int pass=0;pass<2;pass++){', '    '+setup+'for(int pass=0;pass<2;pass++){')
+        feature = feature.replace('NVN_SHADER_STAGE_VERTEX,5,gpu+768,', 'NVN_SHADER_STAGE_VERTEX,5,(uintptr_t)uniformMemory,')
+        feature = feature.replace('nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=',
+                                  'nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);nvnMemoryPoolFinalize(&uniformPool);handle=')
+        source = METAL_SMOKE.replace('page*2','page*4').replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [('', 'stale buffer address pool generation', False)])
+
+    def test_unused_uniform_and_storage_pool_lifetimes_do_not_reject_unrelated_draw(self):
+        setup = ('API(nvnCommandBufferBindUniformBuffer);API(nvnCommandBufferBindStorageBuffer);'
+                 'unsigned char *unusedMemory=NULL;CHECK(!posix_memalign((void**)&unusedMemory,page,page));'
+                 'NVNmemoryPool unusedPool;nvnMemoryPoolBuilderSetStorage(&mb,unusedMemory,page);'
+                 'CHECK(nvnMemoryPoolInitialize(&unusedPool,&mb));')
+        source = METAL_SMOKE.replace('    nvnCommandBufferBeginRecording(&cb); nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);\n    nvnCommandBufferBindProgram',
+                                    '    '+setup+'nvnCommandBufferBeginRecording(&cb); nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);\n    nvnCommandBufferBindProgram')
+        source = source.replace('    nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);',
+            '    nvnCommandBufferBindUniformBuffer(&cb,NVN_SHADER_STAGE_VERTEX,127,(uintptr_t)unusedMemory,64);'
+            'nvnCommandBufferBindStorageBuffer(&cb,NVN_SHADER_STAGE_FRAGMENT,15,(uintptr_t)unusedMemory,64);'
+            'nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);nvnMemoryPoolFinalize(&unusedPool);')
+        source = source.replace('    nvnMemoryPoolFinalize(&pool);', '    free(unusedMemory);nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [('', 'GPU_COPY_CLEAR_DRAW_OK', True)])
 
     def test_fixed_upstream_six_state_families_typed_bounds_rw_and_error_recovery(self):
         self.run_graphics_probe('probe_render_states.c', 'FIXED_UPSTREAM_SIX_STATE_FAMILIES_TYPED_BOUNDS_RW_AND_UNLOCK_OK')

@@ -110,7 +110,7 @@ typedef int (*NVNT_nvnSamplerPoolGetSize)(const NVNsamplerPool*);
 typedef void (*NVNT_nvnBufferBuilderSetDevice)(NVNbufferBuilder*, NVNdevice*);
 typedef void (*NVNT_nvnBufferBuilderSetDefaults)(NVNbufferBuilder*);
 typedef void (*NVNT_nvnBufferBuilderSetStorage)(NVNbufferBuilder*, NVNmemoryPool*, ptrdiff_t, size_t);
-typedef NVNmemoryPool (*NVNT_nvnBufferBuilderGetMemoryPool)(const NVNbufferBuilder*);
+typedef NVNmemoryPool* (*NVNT_nvnBufferBuilderGetMemoryPool)(const NVNbufferBuilder*);
 typedef ptrdiff_t (*NVNT_nvnBufferBuilderGetMemoryOffset)(const NVNbufferBuilder*);
 typedef size_t (*NVNT_nvnBufferBuilderGetSize)(const NVNbufferBuilder*);
 typedef NVNboolean (*NVNT_nvnBufferInitialize)(NVNbuffer*, const NVNbufferBuilder*);

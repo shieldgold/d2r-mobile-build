@@ -12,6 +12,7 @@
 #include "shader_scratch_proof.h"
 #include "vendor/d2r-state/states.h"
 #include "nvn_protos.h"
+#include "vendor/botw-buffer/buffer.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,24 @@
 @property(strong) id<MTLBuffer> buffer;
 @end
 @implementation BWPool
+@end
+@interface BWBuffer : NSObject { @public bwu_pool backing; }
+@property struct bwu_buffer value;
+@property(strong) BWPool *pool;
+@property(strong) BWDevice *device;
+@property NVNmemoryPool *rawPool;
+@property uint64_t poolGeneration;
+@property(strong) NSString *label;
+@end
+@implementation BWBuffer
+@end
+@interface BWAddressRecord : NSObject
+@property(strong) BWPool *pool;
+@property(strong) BWDevice *device;
+@property size_t offset,bytes;
+@property uint64_t generation;
+@end
+@implementation BWAddressRecord
 @end
 @interface BWTexture : NSObject
 @property(strong) id<MTLTexture> texture;
@@ -195,7 +214,7 @@ typedef struct { uint64_t serial; } BWObject;
 typedef struct { NVNdevice *device; void *memory; size_t size; int flags; } PoolBuilder;
 typedef struct { NVNdevice *device; int flags; } DeviceBuilder;
 typedef struct { NVNdevice *device; int flags; size_t command, control, compute; void *memory; size_t memoryBytes; } QueueBuilder;
-typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset; size_t size; } BufferBuilder;
+
 typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset, stride; int width,height,depth,levels,samples,format,target,flags; int pkgBlockHeight; } TextureBuilder;
 typedef struct { NVNdevice *device; void *native; NVNtexture *textures[4]; int count, interval; } WindowBuilder;
 enum { BWDescriptorBytes=32, BWReservedDescriptors=256, BWMaxSamplerDescriptors=4096 };
@@ -322,6 +341,7 @@ static size_t objectStorageSize(id value){
     if([value isKindOfClass:[BWPool class]])return sizeof(NVNmemoryPool);
     if([value isKindOfClass:[BWQueue class]])return sizeof(NVNqueue);
     if([value isKindOfClass:[BWTexture class]])return sizeof(NVNtexture);
+    if([value isKindOfClass:[BWBuffer class]])return sizeof(NVNbuffer);
     if([value isKindOfClass:[BWProgram class]])return sizeof(NVNprogram);
     if([value isKindOfClass:[BWCommands class]])return sizeof(NVNcommandBuffer);
     if([value isKindOfClass:[BWSync class]])return sizeof(NVNsync);
@@ -630,8 +650,8 @@ NVN(nvnMemoryPoolMap,void*,const NVNmemoryPool *p){return ((BWPool*)get(p,[BWPoo
 NVN(nvnMemoryPoolGetBufferAddress,NVNbufferAddress,const NVNmemoryPool *p){return (uintptr_t)((BWPool*)get(p,[BWPool class])).memory;}
 NVN(nvnMemoryPoolGetSize,size_t,const NVNmemoryPool *p){return ((BWPool*)get(p,[BWPool class])).size;}
 NVN(nvnMemoryPoolGetFlags,NVNmemoryPoolFlags,const NVNmemoryPool *p){return (NVNmemoryPoolFlags)((BWPool*)get(p,[BWPool class])).flags;}
-NVN(nvnMemoryPoolFlushMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolFlushMappedRange bounds");if(!bytes)return;if(!p.coherent)memcpy((char*)p.buffer.contents+p.bufferOffset+offset,(char*)p.memory+offset,bytes);}
-NVN(nvnMemoryPoolInvalidateMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolInvalidateMappedRange bounds");if(!bytes)return;for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);if(!p.coherent)memcpy((char*)p.memory+offset,(char*)p.buffer.contents+p.bufferOffset+offset,bytes);}
+NVN(nvnMemoryPoolFlushMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolFlushMappedRange bounds");if(!bytes)return;if(memoryAccessValidator&&!memoryAccessValidator((char*)p.memory+offset,bytes,0))fatal("CPU cache source is not readable");if(!p.coherent)memcpy((char*)p.buffer.contents+p.bufferOffset+offset,(char*)p.memory+offset,bytes);}
+NVN(nvnMemoryPoolInvalidateMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolInvalidateMappedRange bounds");if(!bytes)return;if(memoryAccessValidator&&!memoryAccessValidator((char*)p.memory+offset,bytes,1))fatal("CPU cache destination is not writable");for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);if(!p.coherent)memcpy((char*)p.memory+offset,(char*)p.buffer.contents+p.bufferOffset+offset,bytes);}
 NVN(nvnQueueBuilderSetDefaults,void,NVNqueueBuilder *raw){NVNdevice *device=((QueueBuilder*)raw)->device;memset(raw,0,sizeof *raw);QueueBuilder *b=(QueueBuilder*)raw;b->device=device;b->command=BW_QUEUE_DEFAULT_COMMAND_BYTES;b->control=BW_QUEUE_DEFAULT_CONTROL_BYTES;}
 NVN(nvnQueueBuilderSetDevice,void,NVNqueueBuilder *b,NVNdevice *d){((QueueBuilder*)b)->device=d;}
 static BOOL queueFlagsSupported(int flags){return flags==NVN_QUEUE_BUILDER_FLAGS_NONE||flags==NVN_QUEUE_BUILDER_FLAGS_NO_FRAGMENT_INTERLOCK;}
@@ -640,6 +660,9 @@ NVN(nvnQueueBuilderSetFlags,void,NVNqueueBuilder *raw,int flags){
     ((QueueBuilder*)raw)->flags=flags;
 }
 static void validateScratchSubmission(BWQueue *queue,NSArray<NSArray *> *groups);
+#include "buffer_family.inc"
+static void validateAddressSubmission(BWQueue *queue,NSArray<NSArray *> *groups);
+static NSString *resourceKey(NSNumber *stage,NSNumber *slot);
 #include "queue_arena.inc"
 NVN(nvnQueueInitialize,NVNboolean,NVNqueue *raw,const NVNqueueBuilder *builder){
     if(!builder||(memoryAccessValidator&&!memoryAccessValidator(builder,sizeof(QueueBuilder),0)))return report("CPU queue builder is not fully readable");
@@ -756,7 +779,8 @@ NVN(nvnProgramSetShaders,NVNboolean,NVNprogram *raw,int count,const NVNshaderDat
     program.functions=functions;program.stageShaders=stageShaders;return 1;}
 #include "command_memory.inc"
 #include "shader_scratch.inc"
-NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress src,NVNbufferAddress dst,size_t bytes,int flags){if(flags || !bytes)fatal("nvnCommandBufferCopyBufferToBuffer flags/size");record(c,@{@"op":@"copy",@"src":@(src),@"dst":@(dst),@"size":@(bytes)});}
+#include "buffer_addresses.inc"
+NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress src,NVNbufferAddress dst,size_t bytes,int flags){if(flags || !bytes)fatal("nvnCommandBufferCopyBufferToBuffer flags/size");BWAddressRecord *source=captureBufferAddress(c,src,bytes,"GPU copy bounds/overlap"),*destination=captureBufferAddress(c,dst,bytes,"GPU copy bounds/overlap");if(source.pool==destination.pool&&source.offset<destination.offset+bytes&&destination.offset<source.offset+bytes)fatal("GPU copy bounds/overlap");record(c,@{@"op":@"copy",@"src":@(src),@"dst":@(dst),@"size":@(bytes),@"source":source,@"destination":destination});}
 NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){if(n!=1||!colors||dv||(views&&views[0]))fatal("nvnCommandBufferSetRenderTargets supports one color/default view");BWTexture *color=get(colors[0],[BWTexture class]);BWTexture *z=depth?get(depth,[BWTexture class]):nil;if(color.texture.textureType!=MTLTextureType2D||(z&&z.texture.textureType!=MTLTextureType2D))fatal("array render targets require unimplemented explicit layer/view semantics");record(c,@{@"op":@"target",@"id":@(((const BWObject*)colors[0])->serial),@"depth":depth?@(((const BWObject*)depth)->serial):@0});}
 NVN(nvnCommandBufferClearColor,void,NVNcommandBuffer *c,int index,const float *color,int mask){if(index||!color||mask!=15)fatal("nvnCommandBufferClearColor color index/mask");record(c,@{@"op":@"clear",@"color":[NSData dataWithBytes:color length:16]});}
 NVN(nvnCommandBufferBindProgram,void,NVNcommandBuffer *c,const NVNprogram *p,int stages){if(stages!=NVN_SHADER_STAGE_ALL_GRAPHICS_BITS && stages!=(NVN_SHADER_STAGE_VERTEX_BIT|NVN_SHADER_STAGE_FRAGMENT_BIT))fatal("nvnCommandBufferBindProgram stages");get(p,[BWProgram class]);record(c,@{@"op":@"program",@"id":@(((const BWObject*)p)->serial)});}
@@ -809,9 +833,9 @@ NVN(nvnVertexStreamStateSetDivisor,void,NVNvertexStreamState *s,int divisor){if(
 NVN(nvnCommandBufferBindVertexAttribState,void,NVNcommandBuffer *c,int n,const NVNvertexAttribState *s){if(n<0||n>16||(!s&&n))fatal("vertex attribute count");record(c,@{@"op":@"attributes",@"data":[NSData dataWithBytes:s length:n*sizeof *s]});}
 NVN(nvnCommandBufferBindVertexStreamState,void,NVNcommandBuffer *c,int n,const NVNvertexStreamState *s){if(n<0||n>15||(!s&&n))fatal("vertex stream count");record(c,@{@"op":@"streams",@"data":[NSData dataWithBytes:s length:n*sizeof *s]});}
 NVN(nvnCommandBufferBindDepthStencilState,void,NVNcommandBuffer *c,const NVNdepthStencilState *s){stateMemory(s,sizeof *s,NO);record(c,@{@"op":@"depthState",@"data":[NSData dataWithBytes:s length:sizeof *s]});}
-NVN(nvnCommandBufferBindVertexBuffer,void,NVNcommandBuffer *c,int slot,NVNbufferAddress address,size_t size){if(slot<0||slot>=15)fatal("vertex buffer slot");record(c,@{@"op":@"vertex",@"slot":@(slot),@"address":@(address),@"size":@(size)});}
-NVN(nvnCommandBufferBindUniformBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if(stage<0||stage>5||slot<0||slot>=128||size>65536)fatal("uniform buffer stage/slot/size");record(c,@{@"op":@"uniform",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
-NVN(nvnCommandBufferBindStorageBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if((stage!=NVN_SHADER_STAGE_VERTEX&&stage!=NVN_SHADER_STAGE_FRAGMENT)||slot<0||slot>=16)fatal("storage buffer stage/slot");record(c,@{@"op":@"storage",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
+NVN(nvnCommandBufferBindVertexBuffer,void,NVNcommandBuffer *c,int slot,NVNbufferAddress address,size_t size){if(slot<0||slot>=15)fatal("vertex buffer slot");BWAddressRecord *r=size?captureBufferAddress(c,address,size,"vertex buffer address bounds"):nil;NSMutableDictionary *op=[@{@"op":@"vertex",@"slot":@(slot),@"address":@(address),@"size":@(size)} mutableCopy];if(r)op[@"resource"]=r;record(c,op);}
+NVN(nvnCommandBufferBindUniformBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if(stage<0||stage>5||slot<0||slot>=128||size>65536)fatal("uniform buffer stage/slot/size");BWAddressRecord *r=size?captureBufferAddress(c,address,size,"unbound uniform buffer or address bounds"):nil;NSMutableDictionary *op=[@{@"op":@"uniform",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)} mutableCopy];if(r)op[@"resource"]=r;record(c,op);}
+NVN(nvnCommandBufferBindStorageBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if((stage!=NVN_SHADER_STAGE_VERTEX&&stage!=NVN_SHADER_STAGE_FRAGMENT)||slot<0||slot>=16)fatal("storage buffer stage/slot");BWAddressRecord *r=size?captureBufferAddress(c,address,size,"unbound storage buffer or address bounds"):nil;NSMutableDictionary *op=[@{@"op":@"storage",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)} mutableCopy];if(r)op[@"resource"]=r;record(c,op);}
 NVN(nvnCommandBufferBindStorageBuffers,void,NVNcommandBuffer *c,NVNshaderStage stage,int first,int count,const NVNbufferRange *ranges){if(first<0||count<0||count>16||first>16-count||(!ranges&&count))fatal("storage buffer array range");for(int i=0;i<count;i++)h_nvnCommandBufferBindStorageBuffer(c,stage,first+i,ranges[i].address,ranges[i].size);}
 NVN(nvnCommandBufferBindTexture,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNtextureHandle handle){if(stage<0||stage>5||slot<0||slot>=128)fatal("texture stage/slot");record(c,@{@"op":@"texture",@"stage":@(stage),@"slot":@(slot),@"handle":@(handle)});}
 NVN(nvnCommandBufferSetTexturePool,void,NVNcommandBuffer *c,const NVNtexturePool *p){BWDescriptors *pool=get(p,[BWDescriptors class]);if(pool.sampler)fatal("wrong texture descriptor pool type");record(c,@{@"op":@"texturePool",@"pool":pool});}
@@ -900,7 +924,7 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
 
 NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *input){
     BWQueue *queue=get(raw,[BWQueue class]);NSArray *commands=queueSubmissionCommands(queue,count,input);
-    id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;BWScratchRecord *initialScratch=state.scratch;
+    id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;BWScratchRecord *initialScratch=state.scratch;NSArray *initialAddresses=addressReplayResources(state);
     for(NSDictionary *c in commands){NSString *op=c[@"op"];
             if([op isEqual:@"target"]){state.target=objects[c[@"id"]];state.depth=objects[c[@"depth"]];if(![state.target isKindOfClass:[BWTexture class]] || state.target.depth || (state.depth&&!state.depth.depth))fatal("stale/incompatible render targets");continue;}
             if([op isEqual:@"scratch"]){state.scratch=c[@"record"];continue;}
@@ -938,7 +962,7 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
             }else if(clear)target.drawEpoch=0;
             [encoder endEncoding];target.gpuWritten=YES;if(state.depth)state.depth.gpuWritten=YES;
     }
-    retainScratchUntilCompleted(cb,commands,initialScratch,state);queue.latest=cb;commitBuffer(cb);
+    retainScratchUntilCompleted(cb,commands,initialScratch,state);retainAddressesUntilCompleted(cb,commands,initialAddresses,state);queue.latest=cb;commitBuffer(cb);
 }
 
 NVN(nvnWindowBuilderSetDefaults,void,NVNwindowBuilder *raw){memset(raw,0,sizeof *raw);((WindowBuilder*)raw)->interval=1;}
