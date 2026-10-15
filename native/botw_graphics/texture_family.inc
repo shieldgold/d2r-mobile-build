@@ -142,7 +142,7 @@ static void textureCheckStorageAlias(BWTexture *t,BWPoolRange *mapping){
         if(!other.pool.live||other.pool.generation!=other.poolGeneration)continue;
         /* An unrelated base may currently have a hole. Never compare a stale
          * cached physical range, nor make that hole fail this resource. */
-        const char *failure=NULL;BWPoolRange *current=poolTryResolve(other.pool,other.offset,other.layout.size,-1,&failure);
+        const char *failure=NULL;BWPoolIdentity *current=poolTryIdentity(other.pool,other.offset,other.layout.size,-1,&failure);
         if(current&&memoryOverlap(mapping.canonical,t.layout.size,current.canonical,other.layout.size))fatal("linear texture storage overlaps another live texture base");
     }
 }
@@ -177,7 +177,7 @@ static void textureCheckBufferAuthority(const void *canonical,size_t bytes){
 static void textureInvalidateBufferCaches(const void *canonical,size_t bytes){
     for(id object in objects.allValues)if([object isKindOfClass:[BWTexture class]]){
         BWTexture *t=object;if(t.base||!t.pool.live||t.pool.generation!=t.poolGeneration)continue;
-        const char *failure=NULL;BWPoolRange *current=poolTryResolve(t.pool,t.offset,t.layout.size,-1,&failure);
+        const char *failure=NULL;BWPoolIdentity *current=poolTryIdentity(t.pool,t.offset,t.layout.size,-1,&failure);
         if(current&&memoryOverlap(canonical,bytes,current.canonical,t.layout.size)){t.uploadHash=nil;nvn_texflush_forget(t.identity);}
     }
 }

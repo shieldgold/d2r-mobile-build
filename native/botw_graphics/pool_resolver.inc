@@ -1,26 +1,40 @@
 /* Current-mapping resolver and GPU lifetime bookkeeping. No guest callbacks run
  * under a registry lease; completion handlers never enter graphics/registry locks. */
-@interface BWPoolRange ()
+@implementation BWPoolSegment
+@end
+@interface BWPoolIdentity ()
 - (void)retireBinding;
 - (instancetype)initWithPool:(BWPool*)pool physical:(BWPool*)physical offset:(size_t)offset
                      length:(size_t)length physicalOffset:(size_t)physicalOffset
                logicalAddress:(uint64_t)logicalAddress generation:(uint64_t)generation
                    physicalID:(uint64_t)physicalID kind:(unsigned)kind;
 @end
-@implementation BWPoolRange
-- (void)retireBinding{_buffer=nil;_canonical=NULL;}
+@implementation BWPoolIdentity
+- (void)retireBinding{_canonical=NULL;}
 - (instancetype)initWithPool:(BWPool*)pool physical:(BWPool*)physical offset:(size_t)offset
                      length:(size_t)length physicalOffset:(size_t)physicalOffset
                logicalAddress:(uint64_t)logicalAddress generation:(uint64_t)generation
                    physicalID:(uint64_t)physicalID kind:(unsigned)kind {
     if((self=[super init])){_pool=pool;_physical=physical;_offset=offset;_length=length;
-        _physicalOffset=physicalOffset;_metalOffset=physical.bufferOffset+physicalOffset;
+        _physicalOffset=physicalOffset;
         _logicalAddress=logicalAddress;_mappingGeneration=generation;_physicalID=physicalID;
-        _rawKind=kind;_buffer=physical.buffer;_canonical=(char*)physical.memory+physicalOffset;}
+        _rawKind=kind;_canonical=(char*)physical.memory+physicalOffset;}
     return self;
 }
 @end
-static NSHashTable<BWPoolRange*> *poolAllRanges;
+@interface BWPoolRange ()
+- (instancetype)initWithIdentity:(BWPoolIdentity*)identity buffer:(id<MTLBuffer>)buffer metalOffset:(size_t)metalOffset;
+@end
+@implementation BWPoolRange
+- (void)retireBinding{[super retireBinding];_buffer=nil;}
+- (instancetype)initWithIdentity:(BWPoolIdentity*)i buffer:(id<MTLBuffer>)buffer metalOffset:(size_t)metalOffset{
+    if((self=[super initWithPool:i.pool physical:i.physical offset:i.offset length:i.length physicalOffset:i.physicalOffset
+        logicalAddress:i.logicalAddress generation:i.mappingGeneration physicalID:i.physicalID kind:i.rawKind])){
+        _buffer=buffer;_metalOffset=metalOffset;}
+    return self;
+}
+@end
+static NSHashTable<BWPoolIdentity*> *poolAllRanges;
 static NSMutableDictionary<NSArray*,BWPoolRange*> *poolBatchRanges;
 static BOOL poolBatchSealed;
 static NSMutableArray<id<MTLCommandBuffer>> *poolGPURecords;
@@ -40,14 +54,13 @@ static BWPool *poolAddress(uint64_t addr,size_t bytes,size_t *offset){
     }
     return nil;
 }
-static BWPoolRange *poolTryResolve(BWPool *p,size_t off,size_t bytes,int expected,const char **failure){
+static BWPoolIdentity *poolTryIdentity(BWPool *p,size_t off,size_t bytes,int expected,const char **failure){
 #define POOL_RESOLVE_FAIL(message) do{if(failure)*failure=(message);return nil;}while(0)
     if(failure)*failure=NULL;
     if(!poolHostLive(p)||p.retiring)POOL_RESOLVE_FAIL("pool lifetime/retiring");
     if(!bytes||off>p.size||bytes>p.size-off)POOL_RESOLVE_FAIL("pool range bounds");
     if(expected!=-1&&expected!=0&&expected!=0xfe)POOL_RESOLVE_FAIL("unknown required raw kind");
-    if(p.flags&NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS)POOL_RESOLVE_FAIL("pool has GPU_NO_ACCESS");
-    if(p.kind==BW_POOL_PHYSICAL)POOL_RESOLVE_FAIL("physical pool cannot be consumed directly by GPU");
+    if(p.kind==BW_POOL_PHYSICAL)POOL_RESOLVE_FAIL("physical pool has no logical consumer identity");
     BWPool *physical=p;size_t physicalOffset=off;uint64_t gen=p.generation,id=p.generation;
     unsigned kind=0;uint64_t logical=p.kind==BW_POOL_VIRTUAL?p.gpuBase:(uint64_t)(uintptr_t)p.memory;
     if(off>UINT64_MAX-logical)POOL_RESOLVE_FAIL("logical address overflow");logical+=off;
@@ -70,15 +83,39 @@ static BWPoolRange *poolTryResolve(BWPool *p,size_t off,size_t bytes,int expecte
         }@finally{nvn_vpool_lease_release(&lease);}
     }else if(p.kind!=BW_POOL_ORDINARY)POOL_RESOLVE_FAIL("invalid pool kind");
     if(expected!=-1&&kind!=(unsigned)expected)POOL_RESOLVE_FAIL("mapped raw kind mismatch");
-    if(!physical.buffer||!physical.memory)POOL_RESOLVE_FAIL("pool has no Metal backing");
-    if(physicalOffset>SIZE_MAX-physical.bufferOffset)POOL_RESOLVE_FAIL("Metal buffer offset overflow");
-    size_t metalOffset=physical.bufferOffset+physicalOffset;
-    if(metalOffset>physical.buffer.length||bytes>physical.buffer.length-metalOffset)POOL_RESOLVE_FAIL("Metal buffer range bounds");
+    if(!physical.memory)POOL_RESOLVE_FAIL("pool has no CPU backing");
     if(physicalOffset>UINTPTR_MAX-(uintptr_t)physical.memory)POOL_RESOLVE_FAIL("canonical address overflow");
-    BWPoolRange *result=[[BWPoolRange alloc]initWithPool:p physical:physical offset:off length:bytes physicalOffset:physicalOffset
+    BWPoolIdentity *result=[[BWPoolIdentity alloc]initWithPool:p physical:physical offset:off length:bytes physicalOffset:physicalOffset
         logicalAddress:logical generation:gen physicalID:id kind:kind];
     if(!poolAllRanges)poolAllRanges=[NSHashTable weakObjectsHashTable];[poolAllRanges addObject:result];return result;
 #undef POOL_RESOLVE_FAIL
+}
+/* The whole CPU interval has one canonical identity, but a GPU binding may
+ * only name one actual Metal resource. No scatter/staging is implied by Map. */
+static BWPoolRange *poolTryResolve(BWPool *p,size_t off,size_t bytes,int expected,const char **failure){
+#define POOL_BIND_FAIL(message) do{if(failure)*failure=(message);return nil;}while(0)
+    BWPoolIdentity *identity=poolTryIdentity(p,off,bytes,expected,failure);if(!identity)return nil;
+    if(p.flags&NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS)POOL_BIND_FAIL("pool has GPU_NO_ACCESS");
+    BWPool *physical=identity.physical;
+    if(physical.noCopyDeferred&&!poolEnsureOrdinaryBacking(physical,failure))return nil;
+    id<MTLBuffer> buffer=physical.buffer;size_t metalOffset=0;
+    if(physical.kind==BW_POOL_PHYSICAL){
+        uintptr_t at=(uintptr_t)identity.canonical;buffer=nil;
+        for(BWPoolSegment *segment in physical.segments){uintptr_t begin=(uintptr_t)segment.base;
+            if(at<begin||at-begin>=segment.length)continue;
+            if(bytes>segment.length-(at-begin))POOL_BIND_FAIL("GPU range crosses Metal backing segments");
+            buffer=segment.buffer;metalOffset=(size_t)(at-begin);break;
+        }
+        if(!buffer)POOL_BIND_FAIL("pool has no Metal segment backing");
+    }else{
+        if(identity.physicalOffset>SIZE_MAX-physical.bufferOffset)POOL_BIND_FAIL("Metal buffer offset overflow");
+        metalOffset=physical.bufferOffset+identity.physicalOffset;
+    }
+    if(!buffer)POOL_BIND_FAIL("pool has no Metal backing");
+    if(metalOffset>buffer.length||bytes>buffer.length-metalOffset)POOL_BIND_FAIL("Metal buffer range bounds");
+    BWPoolRange *result=[[BWPoolRange alloc]initWithIdentity:identity buffer:buffer metalOffset:metalOffset];
+    [poolAllRanges addObject:result];return result;
+#undef POOL_BIND_FAIL
 }
 static NSArray *poolRangeKey(BWPool *p,size_t off,size_t bytes,int expected){
     return @[[NSValue valueWithPointer:(__bridge const void*)p],@(p.generation),@(off),@(bytes),@(expected)];
@@ -110,7 +147,7 @@ static void poolPruneCompletedGPU(void){
     if(failure){char detail[512];snprintf(detail,sizeof detail,"committed GPU error: %s",failure.UTF8String);fatal(detail);}
 }
 static void poolRetireRanges(BWPool *p){
-    for(BWPoolRange *r in poolAllRanges)if(r.pool==p||r.physical==p)[r retireBinding];
+    for(BWPoolIdentity *r in poolAllRanges)if(r.pool==p||r.physical==p)[r retireBinding];
 }
 static void poolBeginBatch(void){if(poolBatchRanges||poolBatchSealed)fatal("nested pool submission batch");poolBatchRanges=[NSMutableDictionary new];}
 static void poolSealBatch(void){if(!poolBatchRanges||poolBatchSealed)fatal("invalid pool submission seal");poolBatchSealed=YES;}

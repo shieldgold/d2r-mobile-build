@@ -16,6 +16,7 @@
 @property void *memory;@property size_t size,bufferOffset;@property int flags;
 @property(strong) BWDevice *device;@property uint64_t generation,gpuBase;
 @property BWPoolKind kind;@property BOOL live,coherent,tracked,retiring,registered;
+@property BOOL noCopyDeferred;@property(strong) NSArray *segments;
 @property(strong) id<MTLBuffer> buffer;
 @end
 static __weak BWPool *lastCreatedPool;
@@ -62,10 +63,10 @@ static int fixtureDirtyRemove(const void *p,char *error,size_t cap){(void)p;if(d
 - (void)dealloc{if(_released)_released(_contents,_length);free(_owned);}
 @end
 @interface PoolFixtureDevice:NSObject
-@property NSUInteger maxBufferLength,allocationCalls;@property BOOL failAllocation;
+@property NSUInteger maxBufferLength,allocationCalls,failAllocationAt,holdAllocationAt,throwAllocationAt;@property BOOL failAllocation;
 @end
 @implementation PoolFixtureDevice
-- (id<MTLBuffer>)newBufferWithBytesNoCopy:(void*)p length:(NSUInteger)n options:(MTLResourceOptions)o deallocator:(void(^)(void*,NSUInteger))d{(void)o;self.allocationCalls++;if(self.failAllocation)return nil;PoolFixtureBuffer *b=[PoolFixtureBuffer new];b.contents=p;b.length=n;noCopyCreated++;b.released=^(void *address,NSUInteger bytes){noCopyReleased++;if(d)d(address,bytes);};if(holdNewNoCopy)heldNoCopy=b;return (id<MTLBuffer>)b;}
+- (id<MTLBuffer>)newBufferWithBytesNoCopy:(void*)p length:(NSUInteger)n options:(MTLResourceOptions)o deallocator:(void(^)(void*,NSUInteger))d{(void)o;self.allocationCalls++;if(self.failAllocation||self.failAllocationAt==self.allocationCalls)return nil;PoolFixtureBuffer *b=[PoolFixtureBuffer new];b.contents=p;b.length=n;noCopyCreated++;b.released=^(void *address,NSUInteger bytes){noCopyReleased++;if(d)d(address,bytes);};if(holdNewNoCopy||self.holdAllocationAt==self.allocationCalls)heldNoCopy=b;if(self.throwAllocationAt==self.allocationCalls)@throw [NSException exceptionWithName:@"PoolFixtureAllocation" reason:@"synthetic allocation throw after resource retention" userInfo:nil];return (id<MTLBuffer>)b;}
 - (id<MTLBuffer>)newBufferWithBytes:(const void*)p length:(NSUInteger)n options:(MTLResourceOptions)o{(void)o;self.allocationCalls++;if(self.failAllocation)return nil;PoolFixtureBuffer *b=[PoolFixtureBuffer new];b.owned=malloc(n);memcpy(b.owned,p,n);b.contents=b.owned;b.length=n;return (id<MTLBuffer>)b;}
 @end
 @interface PoolFixtureCB:NSObject
@@ -101,6 +102,20 @@ static kern_return_t admissionVMQuery(vm_map_t task,vm_address_t *address,vm_siz
     else if(admissionVMMode==4){*address-=(vm_address_t)getpagesize();*size=(vm_size_t)getpagesize();}
     else if(admissionVMMode==5)output.protection=VM_PROT_READ;
     else if(admissionVMMode==6){if(admissionVMQueries==1)output.is_submap=1;else output.protection=VM_PROT_READ;}
+    else if(admissionVMMode>=7){
+        *size=(vm_size_t)getpagesize();
+        if(admissionVMMode==7)*count=VM_REGION_SUBMAP_INFO_COUNT_64-1;
+        if(admissionVMQueries>1){
+            if(admissionVMMode==8)*address+=(vm_address_t)getpagesize();
+            if(admissionVMMode==9)output.protection=VM_PROT_READ;
+            if(admissionVMMode==10)return KERN_INVALID_ADDRESS;
+            if(admissionVMMode==11)*size=0;
+            if(admissionVMMode==13)*size=UINTPTR_MAX-*address+1;
+            if(admissionVMMode==14)output.protection=VM_PROT_NONE;
+        }
+        if(admissionVMMode==15)output.is_submap=1;
+        if(admissionVMMode==16){*depth=0;output.is_submap=1;}
+    }
     memcpy(info,&output,sizeof output);return KERN_SUCCESS;
 }
 #define vm_region_recurse_64 admissionVMQuery
@@ -121,7 +136,7 @@ static BWPool *host(unsigned i){return poolGuestObject(&rawPools[i],[BWPool clas
 static NVNmappingRequest request(unsigned p,uint64_t poff,uint64_t voff,uint64_t bytes,int cls){return(NVNmappingRequest){&rawPools[p],poff,voff,bytes,cls,0};}
 static int mappedSetup(void){if(!create(0,0x189,allocation,2*PG)||!create(1,0x221,NULL,4*PG))return 0;NVNmappingRequest r=request(0,0,0,2*PG,0x100);return h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&r);}
 static int testResolve(void){CHECK(mappedSetup());uint64_t base=h_nvnMemoryPoolGetBufferAddress(&rawPools[1]);size_t off=99;CHECK(poolAddress(base+PG+5,16,&off)==host(1)&&off==PG+5);CHECK(poolAddress((uintptr_t)allocation,1,&off)==nil);BWPoolRange *r=poolResolveAddress(base+PG+5,16,0,"resolve");CHECK(r.physical==host(0)&&r.canonical==allocation+PG+5&&r.metalOffset==host(0).bufferOffset+PG+5&&r.rawKind==0);uint64_t gen=r.mappingGeneration;NVNmappingRequest extra=request(0,0,3*PG,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&extra));CHECK(poolResolveAddress(base+PG+5,16,0,"stable").mappingGeneration==gen);CHECK(create(2,0x221,NULL,PG));extra=request(0,PG,0,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[2],1,&extra));BWPoolRange *alias=poolResolve(host(2),5,16,0,"alias");CHECK(alias.canonical==r.canonical&&alias.physicalID==r.physicalID);return 0;}
-static int testResolveNegative(void){CHECK(mappedSetup());const char *why=NULL;CHECK(!poolTryResolve(host(1),0,8,0xfe,&why)&&strstr(why,"kind"));CHECK(!poolTryResolve(host(1),2*PG,8,-1,&why)&&strstr(why,"unmapped"));CHECK(!poolTryResolve(host(0),0,8,-1,&why));CHECK(create(2,0x189,allocation+4*PG,PG));NVNmappingRequest r=request(2,0,PG,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&r));CHECK(!poolTryResolve(host(1),0,2*PG,-1,&why)&&strstr(why,"fragmented"));uint64_t base=host(1).gpuBase;h_nvnMemoryPoolFinalize(&rawPools[1]);REJECT(poolResolveAddress(base,8,-1,"stale"),"stale");return 0;}
+static int testResolveNegative(void){CHECK(mappedSetup());const char *why=NULL;CHECK(!poolTryIdentity(host(0),0,8,-1,&why)&&strstr(why,"physical pool has no logical consumer identity"));CHECK(!poolTryResolve(host(1),0,8,0xfe,&why)&&strstr(why,"kind"));CHECK(!poolTryResolve(host(1),2*PG,8,-1,&why)&&strstr(why,"unmapped"));CHECK(!poolTryResolve(host(0),0,8,-1,&why));CHECK(create(2,0x189,allocation+4*PG,PG));NVNmappingRequest r=request(2,0,PG,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&r));CHECK(!poolTryResolve(host(1),0,2*PG,-1,&why)&&strstr(why,"fragmented"));uint64_t base=host(1).gpuBase;h_nvnMemoryPoolFinalize(&rawPools[1]);REJECT(poolResolveAddress(base,8,-1,"stale"),"stale");return 0;}
 static int testBatch(void){CHECK(mappedSetup());poolBeginBatch();BWPoolRange *r=poolResolve(host(1),0,8,0,"preflight");poolSealBatch();CHECK(poolResolve(host(1),0,8,0,"encode")==r);const char *why=NULL;CHECK(poolTryResolve(host(1),1,8,0,&why));REJECT(poolResolve(host(1),1,8,0,"miss"),"sealed");NVNmappingRequest q=request(0,PG,0,PG,0x100);CHECK(!h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&q));poolEndBatch();CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&q));CHECK(poolResolve(host(1),0,8,0,"new").canonical==allocation+PG);return 0;}
 static int testFamily(void){CHECK(create(0,0x189,allocation+4096,PG));CHECK(host(0).coherent&&host(0).bufferOffset==4096%getpagesize());CHECK(h_nvnMemoryPoolMap(&rawPools[0])==NULL&&h_nvnMemoryPoolGetBufferAddress(&rawPools[0])==0);((PoolFixtureDevice*)gpu).maxBufferLength=PG;CHECK(create(1,0x221,NULL,8*PG));CHECK(h_nvnMemoryPoolMap(&rawPools[1])==NULL&&h_nvnMemoryPoolGetBufferAddress(&rawPools[1])!=0&&host(1).buffer==nil);CHECK(h_nvnMemoryPoolGetSize(&rawPools[1])==8*PG&&h_nvnMemoryPoolGetFlags(&rawPools[0])==0x189);CHECK(((PoolFixtureDevice*)gpu).allocationCalls==1);((PoolFixtureDevice*)gpu).maxBufferLength=8*PG;CHECK(create(2,0x18a,allocation+4*PG,PG));CHECK(h_nvnMemoryPoolMap(&rawPools[2])==allocation+4*PG&&h_nvnMemoryPoolGetBufferAddress(&rawPools[2])==0);return 0;}
 static int testMapping(void){CHECK(mappedSetup());NVNmappingRequest batch[]={request(0,PG,0,PG,0x100),request(0,0,PG,PG,0x101)};uint64_t gen=nvn_vpool_generation();CHECK(!h_nvnMemoryPoolMapVirtual(&rawPools[1],2,batch));CHECK(nvn_vpool_generation()==gen&&poolResolve(host(1),0,8,0,"old").canonical==allocation);for(long after=0;after<2;after++){nvn_vpool_test_fail_allocation_after(after);batch[1].storageClass=0x1fe;CHECK(!h_nvnMemoryPoolMapVirtual(&rawPools[1],2,batch));nvn_vpool_test_fail_allocation_after(-1);CHECK(nvn_vpool_generation()==gen&&poolResolve(host(1),0,8,0,"old").canonical==allocation);}CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],2,batch));CHECK(poolResolve(host(1),PG,8,0xfe,"FE").rawKind==0xfe);return 0;}
@@ -189,9 +204,70 @@ static int testAdmissionWrite(void){admissionReset();memoryAccessValidator=admis
 static int testAdmissionVMQuery(void){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=1;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_query"));CHECK(!strcmp(admissionOrder,"WV")&&admissionWriteCalls==1&&admissionVMQueries==1&&strstr(lastError,"vm_fields=0x1")&&strstr(lastError,"vm_result=1")&&strstr(lastError,"vm_count=3"));return 0;}
 static int testAdmissionVMRegion(void){const char *stages[]={"stage=vm_gap","stage=vm_empty","stage=vm_start"};for(int mode=2;mode<=4;mode++){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=mode;CHECK(!admissionReject(0x189,allocation,PG,stages[mode-2]));CHECK(!strcmp(admissionOrder,"WV")&&admissionVMQueries==1);}return 0;}
 static int testAdmissionVMProtection(void){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=5;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_protection"));CHECK(!strcmp(admissionOrder,"WV")&&strstr(lastError,"vm_prot=0x1"));admissionReset();admissionVMMode=6;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_protection"));CHECK(!strcmp(admissionOrder,"WVV")&&admissionVMQueries==2&&strstr(lastError,"vm_depth=1"));return 0;}
-static int testAdmissionVMSpan(void){admissionReset();memoryAccessValidator=admissionAccess;size_t page=(size_t)getpagesize();CHECK(!mprotect(allocation+page,page,PROT_READ));int result=admissionReject(0x189,allocation,PG,"stage=vm_span");CHECK(!mprotect(allocation+page,page,PROT_READ|PROT_WRITE));CHECK(!result&&admissionWriteCalls==1&&admissionVMQueries>0&&admissionOrder[0]=='W'&&strstr(lastError,"vm_fields=0x1f"));char remaining[64];snprintf(remaining,sizeof remaining,"vm_remaining=%zu",page);CHECK(strstr(lastError,remaining));return 0;}
+static int testAdmissionVMSpan(void){admissionReset();memoryAccessValidator=admissionAccess;size_t page=(size_t)getpagesize();CHECK(!mprotect(allocation+page,page,PROT_READ));int result=admissionReject(0x189,allocation,PG,"stage=vm_protection");CHECK(!mprotect(allocation+page,page,PROT_READ|PROT_WRITE));CHECK(!result&&admissionWriteCalls==1&&admissionVMQueries==2&&admissionOrder[0]=='W'&&strstr(lastError,"vm_fields=0xf"));return 0;}
 static int testAdmissionRounding(void){admissionReset();CHECK(!admissionReject(0x21,(void*)(UINTPTR_MAX-8),4,"stage=rounding_overflow"));CHECK(!admissionVMQueries&&!admissionLogicalCalls&&!admissionWriteCalls);return 0;}
+/* A different inheritance value creates real adjacent RW leaf entries without
+ * changing access or substituting backing. The fixture owns every byte. */
+static int splitOwnedRW(void){
+ size_t page=(size_t)getpagesize();CHECK(vm_inherit(mach_task_self(),(vm_address_t)(allocation+page),page,VM_INHERIT_NONE)==KERN_SUCCESS);
+ vm_address_t at=(vm_address_t)allocation;vm_size_t length=0;natural_t depth=0;vm_region_submap_info_data_64_t info={0};mach_msg_type_number_t count=VM_REGION_SUBMAP_INFO_COUNT_64;
+ CHECK(vm_region_recurse_64(mach_task_self(),&at,&length,&depth,(vm_region_recurse_info_t)&info,&count)==KERN_SUCCESS);
+ CHECK(count>=VM_REGION_SUBMAP_INFO_COUNT_64&&at==(vm_address_t)allocation&&length==page&&(info.protection&3)==3);return 0;
+}
+static int testSegmentReal(void){
+ CHECK(!splitOwnedRW());CHECK(create(0,0x189,allocation,PG));CHECK(noCopyCreated==3&&((PoolFixtureDevice*)gpu).allocationCalls==3);
+ CHECK(create(1,0x221,NULL,PG));NVNmappingRequest request0=request(0,0,0,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[1],1,&request0));
+ size_t page=(size_t)getpagesize();BWPoolRange *a=poolResolve(host(1),page-8,8,0,"first segment"),*b=poolResolve(host(1),page,8,0,"second segment");
+ CHECK(a.buffer!=b.buffer&&a.physicalID==b.physicalID&&a.canonical==allocation+page-8&&b.canonical==allocation+page);
+ const char *why=NULL;CHECK(!poolTryResolve(host(1),page-8,16,0,&why)&&strstr(why,"crosses Metal backing segments"));
+ BWPoolIdentity *identity=poolTryIdentity(host(1),0,PG,0,&why);CHECK(identity&&identity.canonical==allocation&&identity.length==PG&&identity.physicalID==a.physicalID);
+ host(1).flags|=NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS;CHECK(poolTryIdentity(host(1),0,PG,0,&why));CHECK(!poolTryResolve(host(1),0,8,0,&why)&&strstr(why,"GPU_NO_ACCESS"));host(1).flags&=~NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS;
+ a=nil;b=nil;h_nvnMemoryPoolFinalize(&rawPools[0]);CHECK(noCopyReleased==3);
+ /* Actual boot rounds a 4 KiB-aligned pointer into a larger host page. Bias
+  * belongs only to the first segment, never to later segment-local offsets. */
+ size_t bias=page/2;CHECK(create(2,0x189,allocation+bias,PG));CHECK(create(3,0x221,NULL,PG));request0=request(2,0,0,PG,0x100);CHECK(h_nvnMemoryPoolMapVirtual(&rawPools[3],1,&request0));
+ BWPoolRange *first=poolResolve(host(3),0,8,0,"biased first"),*second=poolResolve(host(3),page-bias,8,0,"biased second");CHECK(first.metalOffset==bias&&second.metalOffset==0&&first.buffer!=second.buffer&&second.canonical==allocation+page);
+ CHECK(poolTryIdentity(host(3),0,PG,0,&why).canonical==allocation+bias);CHECK(!poolTryResolve(host(3),page-bias-8,16,0,&why)&&strstr(why,"crosses Metal backing segments"));
+ first=nil;second=nil;h_nvnMemoryPoolFinalize(&rawPools[2]);CHECK(noCopyReleased==6);return 0;
+}
+static int testSegmentMetadata(void){
+ const char *stages[]={"vm_info_short","vm_gap","vm_protection","vm_query","vm_empty","vm_region_overflow","vm_protection","vm_submap_limit"};int modes[]={7,8,9,10,11,13,14,15};
+ for(unsigned i=0;i<sizeof modes/sizeof modes[0];i++){admissionReset();admissionVMMode=modes[i];CHECK(!admissionReject(0x189,allocation,PG,stages[i]));CHECK(admissionVMQueries==(modes[i]==7?1:modes[i]==15?65:2));}
+ admissionReset();admissionVMMode=12;void *old=allocation;size_t oldBytes=allocationBytes;allocationBytes=257*(size_t)getpagesize();allocation=mmap(NULL,allocationBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(allocation!=MAP_FAILED);((PoolFixtureDevice*)gpu).maxBufferLength=allocationBytes;
+ /* Round up to the NVN 64 KiB granularity while still exceeding 256 leaves. */
+ size_t bytes=(allocationBytes+PG-1)&~(PG-1);CHECK(!munmap(allocation,allocationBytes));allocationBytes=bytes;allocation=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(allocation!=MAP_FAILED);((PoolFixtureDevice*)gpu).maxBufferLength=bytes;
+ CHECK(!admissionReject(0x189,allocation,bytes,"vm_segment_limit"));CHECK(admissionVMQueries==256);CHECK(!munmap(allocation,bytes));allocation=old;allocationBytes=oldBytes;admissionReset();return 0;
+}
+static int testSegmentPinned(BOOL partialFailure,BOOL dirtyFailure){
+ CHECK(!splitOwnedRW());PoolFixtureDevice *device=(PoolFixtureDevice*)gpu;
+ device.holdAllocationAt=partialFailure?1:2;if(partialFailure)device.failAllocationAt=2;dirtyAddFail=dirtyFailure;textureTrackingAvailable=dirtyFailure;
+ if(partialFailure||dirtyFailure){@autoreleasepool{REJECT((void)create(0,0x189,allocation,PG),"borrowed Metal backing");}CHECK(poolUnpublishedPools.count==1&&!pools.count&&!((BWObject*)&rawPools[0])->serial);}
+ else{CHECK(create(0,0x189,allocation,PG));REJECT(h_nvnMemoryPoolFinalize(&rawPools[0]),"borrowed Metal backing");CHECK(host(0).retiring&&host(0).registered&&host(0).live);}
+ CHECK(noCopyCreated==(partialFailure?1:3)&&noCopyReleased==(partialFailure?0:2)&&heldNoCopy);
+ REJECT(poolShutdownPools(),"borrowed Metal backing");CHECK(noCopyReleased==(partialFailure?0:2));
+ @autoreleasepool{heldNoCopy=nil;poolShutdownPools();}CHECK(noCopyReleased==noCopyCreated&&!poolUnpublishedPools.count&&!pools.count);nvn_vpool_stats_t state;nvn_vpool_stats(&state);CHECK(!state.phys_live);return 0;
+}
+static int testOrdinaryDeferred(void){
+ size_t page=(size_t)getpagesize();CHECK(!mprotect(allocation,PG,PROT_READ));CHECK(create(0,0x22,allocation,PG));BWPool *p=host(0);CHECK(p.noCopyDeferred&&p.coherent&&!p.buffer&&!noCopyCreated);
+ const char *why=NULL;CHECK(poolTryIdentity(p,0,8,0,&why)&&!noCopyCreated);CHECK(!poolTryResolve(p,0,8,0,&why)&&strstr(why,"deferred ordinary"));CHECK(!noCopyCreated&&!p.retiring);
+ CHECK(!mprotect(allocation,PG,PROT_READ|PROT_WRITE));CHECK(poolTryResolve(p,0,8,0,&why)&&!p.noCopyDeferred&&noCopyCreated==1);h_nvnMemoryPoolFinalize(&rawPools[0]);
+ CHECK(vm_inherit(mach_task_self(),(vm_address_t)(allocation+page),page,VM_INHERIT_NONE)==KERN_SUCCESS);unsigned before=noCopyCreated;CHECK(!admissionReject(0x22,allocation,PG,"vm_span"));CHECK(noCopyCreated==before);
+ CHECK(create(1,0x24,allocation,PG));CHECK(!host(1).coherent&&noCopyCreated==before);h_nvnMemoryPoolFinalize(&rawPools[1]);
+ CHECK(!mprotect(allocation+4*PG,PG,PROT_READ));CHECK(create(2,0x24,allocation+4*PG,PG));CHECK(!host(2).coherent&&!host(2).noCopyDeferred&&host(2).buffer&&noCopyCreated==before);CHECK(!mprotect(allocation+4*PG,PG,PROT_READ|PROT_WRITE));h_nvnMemoryPoolFinalize(&rawPools[2]);
+ CHECK(!mprotect(allocation+6*PG,PG,PROT_NONE));CHECK(create(3,0x24,allocation+6*PG,PG));CHECK(host(3).noCopyDeferred&&host(3).coherent&&!host(3).buffer&&noCopyCreated==before);CHECK(!poolTryResolve(host(3),0,8,0,&why)&&strstr(why,"deferred ordinary")&&noCopyCreated==before);
+ CHECK(!mprotect(allocation+6*PG,PG,PROT_READ|PROT_WRITE));CHECK(poolTryResolve(host(3),0,8,0,&why)&&!host(3).noCopyDeferred&&noCopyCreated==before+1);h_nvnMemoryPoolFinalize(&rawPools[3]);return 0;
+}
+static int testDeferredQuarantineReentry(void){
+ CHECK(!mprotect(allocation,PG,PROT_READ));CHECK(create(0,0x22,allocation,PG));BWPool *p=host(0);CHECK(p.noCopyDeferred&&!noCopyCreated);CHECK(!mprotect(allocation,PG,PROT_READ|PROT_WRITE));
+ PoolFixtureDevice *device=(PoolFixtureDevice*)gpu;device.holdAllocationAt=1;device.throwAllocationAt=1;const char *failure=NULL;
+ REJECT((void)poolEnsureOrdinaryBacking(p,&failure),"borrowed Metal backing");CHECK(p.retiring&&p.noCopyDeferred&&heldNoCopy&&noCopyCreated==1&&!noCopyReleased);
+ id group=objc_getAssociatedObject(p,&poolBorrowedLifetimeKey);device.throwAllocationAt=device.holdAllocationAt=0;unsigned calls=(unsigned)device.allocationCalls;
+ CHECK(!poolEnsureOrdinaryBacking(p,&failure)&&failure&&strstr(failure,"retiring"));CHECK(device.allocationCalls==calls&&objc_getAssociatedObject(p,&poolBorrowedLifetimeKey)==group);
+ heldNoCopy=nil;poolShutdownPools();CHECK(noCopyReleased==1&&!p.live&&!pools.count);return 0;
+}
+static int testSubmapNoProgress(void){alarm(3);admissionReset();admissionVMMode=16;CHECK(!admissionReject(0x189,allocation,PG,"vm_submap_limit"));CHECK(admissionVMQueries==65);return 0;}
 int main(int argc,char **argv){@autoreleasepool{alarm(25);if(argc!=2)return 2;setup();int result=0;@try{
+ if(!strcmp(argv[1],"segments-real"))result=testSegmentReal();else if(!strcmp(argv[1],"segments-metadata"))result=testSegmentMetadata();else if(!strcmp(argv[1],"segments-pinned"))result=testSegmentPinned(NO,NO);else if(!strcmp(argv[1],"segments-partial"))result=testSegmentPinned(YES,NO);else if(!strcmp(argv[1],"segments-dirty"))result=testSegmentPinned(NO,YES);else if(!strcmp(argv[1],"ordinary-deferred"))result=testOrdinaryDeferred();else if(!strcmp(argv[1],"deferred-quarantine-reentry"))result=testDeferredQuarantineReentry();else if(!strcmp(argv[1],"submap-no-progress"))result=testSubmapNoProgress();else
  if(!strcmp(argv[1],"resolve"))result=testResolve();else if(!strcmp(argv[1],"resolve-negative"))result=testResolveNegative();else if(!strcmp(argv[1],"batch"))result=testBatch();else if(!strcmp(argv[1],"family"))result=testFamily();else if(!strcmp(argv[1],"mapping"))result=testMapping();else if(!strcmp(argv[1],"mapping-negative"))result=testMappingNegative();else if(!strcmp(argv[1],"initialize-negative"))result=testInitializeNegative();else if(!strcmp(argv[1],"finalize"))result=testFinalize();else if(!strcmp(argv[1],"provenance"))result=testProvenance();else if(!strcmp(argv[1],"cpu-access"))result=testCPUAccess();else if(!strcmp(argv[1],"gpu-records"))result=testGPURecords();else if(!strcmp(argv[1],"bounded-records"))result=testBoundedRecords();else if(!strcmp(argv[1],"retire-references"))result=testRetireReferences();else if(!strcmp(argv[1],"ordinary-protection"))result=testOrdinaryProtection();else if(!strcmp(argv[1],"borrowed-pinned"))result=testBorrowedPinned();else if(!strcmp(argv[1],"mapping-allocation-bounds"))result=testMappingAllocationBounds();else if(!strcmp(argv[1],"unpublished-cleanup"))result=testUnpublishedCleanup();else if(!strcmp(argv[1],"unpublished-pinned"))result=testUnpublishedPinned();else if(!strcmp(argv[1],"unpublished-retry"))result=testUnpublishedRetry(NO);else if(!strcmp(argv[1],"unpublished-register-failure"))result=testUnpublishedRetry(YES);else if(!strcmp(argv[1],"admission-logical"))result=testAdmissionLogical();else if(!strcmp(argv[1],"admission-write"))result=testAdmissionWrite();else if(!strcmp(argv[1],"admission-vm-query"))result=testAdmissionVMQuery();else if(!strcmp(argv[1],"admission-vm-region"))result=testAdmissionVMRegion();else if(!strcmp(argv[1],"admission-vm-protection"))result=testAdmissionVMProtection();else if(!strcmp(argv[1],"admission-vm-span"))result=testAdmissionVMSpan();else if(!strcmp(argv[1],"admission-rounding"))result=testAdmissionRounding();else return 2;
  if(!result){poolShutdownPools();CHECK(!munmap(allocation,allocationBytes));puts("POOL_ADAPTER_CPU_OK");}}
  @catch(NSException *e){fprintf(stderr,"unexpected %s [%s]\n",e.reason.UTF8String,lastError);return 92;}return result;}}

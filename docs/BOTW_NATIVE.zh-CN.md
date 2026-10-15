@@ -27,7 +27,7 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据安装、普通启动诊断版 `09cd584`。原 SDK 取得原始逻辑堆和根堆，进入十三个工作线程，随后受控停在 `nvnMemoryPoolInitialize` 的 physical NoCopy backing 准入：120 MiB 请求向外取整为 125,845,504 字节，首个 RW VM leaf 只剩 60,850,176 字节，具体分支为 `vm_span`。完整日志有 `host_return=1`，同一 PID 在启动约 44.7 秒后的系统进程查询中仍存活；这只是本次观察区间，尚未测得整次运行峰值，也尚未确认 VM 分裂来源。完整资源与原身份保留；尚无游戏画面、操作、音频、游戏存档或重开验收。下列记录保留历次真机证据，不能用旧机或 Mac 结果替代当前手机验证。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据安装、普通启动复制修复版 `c2b4db8`。原 SDK 取得原始逻辑堆和根堆，进入十三个工作线程，随后受控停在 `nvnMemoryPoolInitialize` 的 physical NoCopy backing 准入：120 MiB 请求向外取整为 125,845,504 字节，首个 RW VM leaf 只剩 60,850,176 字节，具体分支为 `vm_span`。完整日志有 `host_return=1`，同一 PID 在启动约 125.1 秒后的系统进程查询中仍存活；这只是本次观察区间，尚未测得整次运行峰值，也尚未确认 VM 分裂来源。完整资源与原身份保留；尚无游戏画面、操作、音频、游戏存档或重开验收。下列记录保留历次真机证据，不能用旧机或 Mac 结果替代当前手机验证。
 
 较早完成的真机测试为 iPhone 15 Pro / iOS 27.2，宿主源码提交 `3d1622c`：
 
@@ -104,6 +104,10 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 仅增加有限标量诊断的 `6b085f0` 已在普通 Mac 运行：实际 `flags=0x189`、120 MiB physical pool 的 rounded NoCopy 跨度为 **125,845,504** 字节，logical/read-write 校验允许，但首个 RW VM leaf 只剩 **60,850,176** 字节，明确在 `vm_span` 拒绝。它不是手机诊断结果，也未证明后续 leaf 的覆盖或权限。Apple 的 [NoCopy 合同](https://developer.apple.com/documentation/metal/mtldevice/makebuffer%28bytesnocopy%3Alength%3Aoptions%3Adeallocator%3A%29?language=objc) 要求已有分配位于单个 VM region，因此没有启用“只检查多段 RW 就直接包装为单一 Metal buffer”的方案。底层分配与符合该合同的分段 backing 仍在评估，未宣称已修复此停止点。
 
 相同诊断源码加上历史证据文档的 `09cd584` 完成固定源码 **789 项回归，788 通过、1 项硬件条件跳过**，并通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38823218909) 和 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38823218742)。该版在当前手机保留数据安装并普通启动，PID **1020**；完整 boot.log 相对紧邻安装前基线恰好新增一次 bootstrap。手机独立确认 `flags=0x189 kind=1 stage=vm_span`，请求长度、取整跨度、首叶剩余长度、页内偏移 **8192** 与 Mac 相同；logical/write 校验均允许，VM query 成功且叶权限为 RW。这只能确认同一拒绝条件，仍未证明分裂来源。SDK 堆、根堆、十三个线程和最大 RomFS 读取与 `e47312f` 一致，受控 `host_return=1`，没有原游戏绘制呈现日志。动态完整报告位于 `outputs/botw-ios-09cd584-iphone12/device-run-report.json`；RomFS 大小及修改时间、原 UID 与 shader manifest 保留，全部可玩验收仍为 false。
+
+`c2b4db8` 将 runtime 和 graphics 的受保护 Mach 复制合并到同一原语：保留原 logical/dirty preparation，先校验完整 source READ 与 destination WRITE VM 范围，再按 4095 字节及两侧宿主页边界分块；支持同一数值 VA 映射的前后向重叠，Mach 错误及短读取仍拒绝。当前调用点一端为独立宿主缓冲；不保证不同 VA 物理别名重叠，也不提供并发 remap 事务或跨 OS 版本的不分裂保证。固定源码 **806 项回归，805 通过、1 项硬件条件跳过**，独立 CPU 复验 24 项通过。实际普通 Mac 启动仍进入十三个线程、最大 RomFS 读取 143,743,378 字节后，在同一 `vm_span` 条件返回 1，跨度与首叶长度均未改变；因此该复制修复没有解决当前原游戏启动阻塞，不能用自有 CPU/GPU 映射测试代替此结果。动态证据位于 `outputs/botw-host39-mac-c2b4db8/ordinary-admission-evidence.json`。NoCopy 单 VM region 合同保持，后续合法分段实现仍须独立验证。
+
+该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38824544740) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38824544713)，在当前手机保留数据安装并普通启动为 PID **1024**；启动的可执行路径与本次安装收据一致，完整 boot.log 恰好新增一次 bootstrap。手机再次在同一 `vm_span` 分支受控 `host_return=1`，SDK 堆、根堆、线程及最大读取与前版一致，28.2 秒及 125.1 秒的系统查询均仍见同 PID；没有原游戏绘制呈现日志。RomFS 大小及修改时间、原 UID 字节与权限、shader manifest 均保留。完整动态报告位于 `outputs/botw-ios-c2b4db8-iphone12/device-run-report.json`；全部可玩验收仍为 false。
 
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 

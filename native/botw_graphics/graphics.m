@@ -55,6 +55,8 @@
 @property BOOL retiring,registered;
 @property size_t bufferOffset;
 @property BOOL coherent,tracked;
+@property BOOL noCopyDeferred;
+@property(strong) NSArray *segments;
 @property(strong) id<MTLBuffer> buffer;
 @property(strong) NSMutableDictionary *descriptorSlots;
 @end
@@ -761,17 +763,18 @@ NVN(nvnProgramSetShaders,NVNboolean,NVNprogram *raw,int count,const NVNshaderDat
     poolDrainGPU();
     NSMutableDictionary *functions=[NSMutableDictionary new],*stageShaders=[NSMutableDictionary new];NSMutableArray *sources=[NSMutableArray new];
     for(int i=0;i<count;i++){
-        BWShader *found=nil;BWPoolRange *mapping=nil;
+        BWShader *found=nil;BWPoolRange *mapping=nil;const char *mappingFailure=NULL;
         for(BWShader *shader in shaders){size_t offset=0;BWPool *pool=address(input[i].data,shader.codeSize,&offset);
             if(!pool||pool.device!=program.device||!input[i].control||(memoryValidator&&!memoryValidator(input[i].control,shader.controlSize)))continue;
-            const char *failure=NULL;BWPoolRange *candidate=poolTryResolve(pool,offset,shader.codeSize,0,&failure);if(!candidate)continue;
+            const char *failure=NULL;BWPoolRange *candidate=poolTryResolve(pool,offset,shader.codeSize,0,&failure);
+            if(!candidate){if(failure&&strstr(failure,"crosses Metal backing segments"))mappingFailure=failure;continue;}
             NSMutableData *control=[NSMutableData dataWithLength:shader.controlSize];
             textureReadBytes(input[i].control,control.mutableBytes,control.length,"shader control is not fully readable");
             if([digest(control.bytes,control.length) isEqual:shader.controlHash]){
                 if([digest(programCodeBytes(candidate),candidate.length) isEqual:shader.codeHash]){found=shader;mapping=candidate;break;}
             }
         }
-        if(!found)return report("No exact, validated local Metal translation for NVN shader");
+        if(!found){if(mappingFailure)return report("No exact, validated local Metal translation for NVN shader; candidate code range rejected: %s",mappingFailure);return report("No exact, validated local Metal translation for NVN shader");}
         if(functions[@(found.stage)])return report("Program has duplicate shader stages");functions[@(found.stage)]=found.function;stageShaders[@(found.stage)]=found;
         [sources addObject:@{@"range":mapping,@"hash":found.codeHash}];
     }
@@ -856,7 +859,7 @@ static void poolGuardMappingChange(BWPool *v,const NVNmappingRequest *requests,i
         for(id object in objects.allValues)if([object isKindOfClass:[BWProgram class]])for(NSDictionary *source in ((BWProgram*)object).codeSources){BWPoolRange *code=source[@"range"];
             if(code.pool==v&&code.offset<request->virtualOffset+request->size&&request->virtualOffset<code.offset+code.length)fatal("MapVirtual overlaps active program code; rebind/retire program first");}
         for(uint64_t offset=request->virtualOffset;offset<request->virtualOffset+request->size;offset+=BW_POOL_MAPPING_PAGE_BYTES){
-            const char *failure=NULL;BWPoolRange *old=poolTryResolve(v,(size_t)offset,BW_POOL_MAPPING_PAGE_BYTES,-1,&failure);
+            const char *failure=NULL;BWPoolIdentity *old=poolTryIdentity(v,(size_t)offset,BW_POOL_MAPPING_PAGE_BYTES,-1,&failure);
             if(old)textureCheckBufferAuthority(old.canonical,old.length);
         }
         if(request->physicalPool){BWPool *physical=get(request->physicalPool,[BWPool class]);textureCheckBufferAuthority((char*)physical.memory+request->physicalOffset,(size_t)request->size);}

@@ -46,6 +46,34 @@ class VirtualPoolGPUTests(unittest.TestCase):
         if name == 'nocopy-entry-metadata':
             print(result.stderr, end='')
 
+    def test_real_vm_segments_copy_all_three_nonzero_patterns_and_ack_before_unmap(self):
+        self.mode('segments-copy')
+
+    def test_cross_segment_copy_rejects_whole_submission_before_earlier_write(self):
+        self.mode('segments-preflight')
+
+    def test_cross_segment_after_counter_rejects_before_counter_commit(self):
+        require_counter_sampling()
+        self.mode('segments-counter-preflight')
+
+    def test_all_segments_wait_for_real_second_resource_release_at_checked_shutdown(self):
+        self.mode('segments-checked-shutdown')
+
+    def test_second_metal_allocation_nil_keeps_first_resource_quarantined_until_ack(self):
+        self.mode('segments-partial-nil')
+
+    def test_segmented_pool_finalize_waits_for_shared_event_controlled_real_gpu(self):
+        self.mode('segments-inflight-finalize')
+
+    def test_segmented_vertex_uniform_storage_and_second_segment_linear_target(self):
+        self.mode('segments-shader')
+        self.mode('segments-linear')
+
+    def test_each_cross_segment_draw_binding_rejects_before_arena_or_output_changes(self):
+        for kind in ('vertex', 'uniform', 'storage', 'linear'):
+            with self.subTest(kind=kind):
+                self.mode(f'segments-{kind}-cross')
+
     def test_finalize_waits_for_shared_event_controlled_inflight_gpu_and_releases_backing(self):
         self.mode('inflight-finalize')
 

@@ -36,6 +36,23 @@ static unsigned vpOwnedVMLeaves(void *memory,size_t bytes){
         at+=MIN((size_t)(end-at),(size_t)(span-(at-region)));leaves++;
     }return leaves;
 }
+/* Delegates to the real device. Every admission is checked against actual VM
+ * metadata before asking Metal; failure/retention are explicit test controls. */
+@interface VPSegmentDevice:NSObject
+@property(strong) id<MTLDevice> real;
+@property NSUInteger calls,created,released,failAt,holdAt;
+@property(strong) id<MTLBuffer> held;
+@end
+@implementation VPSegmentDevice
+- (id)forwardingTargetForSelector:(SEL)selector{return self.real;}
+- (id<MTLBuffer>)newBufferWithBytesNoCopy:(void*)bytes length:(NSUInteger)length options:(MTLResourceOptions)options deallocator:(void(^)(void*,NSUInteger))deallocator{
+    self.calls++;if(self.calls==self.failAt)return nil;
+    if(vpOwnedVMLeaves(bytes,length)!=1)@throw [NSException exceptionWithName:@"InvalidFixtureAdmission" reason:@"NoCopy request was not one actual VM leaf" userInfo:nil];
+    __weak VPSegmentDevice *weak=self;
+    id<MTLBuffer> buffer=[self.real newBufferWithBytesNoCopy:bytes length:length options:options deallocator:^(void *memory,NSUInteger size){weak.released++;if(deallocator)deallocator(memory,size);}];
+    if(buffer)self.created++;if(self.calls==self.holdAt)self.held=buffer;return buffer;
+}
+@end
 /* A real shared-event wait keeps the command in flight until this fixture
  * explicitly releases it. Finalize runs on a cooperating bounded worker. */
 @interface VPGatedQueue : NSObject
@@ -100,8 +117,21 @@ int main(int argc,char **argv){
         size_t offset=(size_t)getpagesize()/2;textureReadBytes(q+offset,p+offset,page,"graphics bulk read before NoCopy");textureWriteBytes(p+offset,q+offset,page,"graphics bulk write before NoCopy");VP_CHECK(!textureWriteRun(p,offset,q+offset,page));
         unsigned pLeaves=vpOwnedVMLeaves(p,page*2),qLeaves=vpOwnedVMLeaves(q,page*2);fprintf(stderr,"GRAPHICS_COPY_BEFORE_NOCOPY p_leaves=%u q_leaves=%u\n",pLeaves,qLeaves);VP_CHECK(pLeaves==1&&qLeaves==1);
     }
+    BOOL segmented=!strncmp(mode,"segments-",9);size_t hostPage=(size_t)getpagesize();
+    if(segmented){VP_CHECK(vm_inherit(mach_task_self(),(vm_address_t)(p+hostPage),hostPage,VM_INHERIT_NONE)==KERN_SUCCESS);VP_CHECK(vpOwnedVMLeaves(p,page*2)==3);}
     NVNdeviceBuilder db;NVNdevice device;vp_nvnDeviceBuilderSetDefaults(&db);VP_CHECK(vp_nvnDeviceInitialize(&device,&db));
-    NVNmemoryPool physical,other,virtualPool,destination;VP_CHECK(vpPool(&physical,&device,p,page*2,0x189));VP_CHECK(vpPool(&other,&device,q,page*2,0x189));VP_CHECK(vpPool(&virtualPool,&device,NULL,page*2,0x221));VP_CHECK(vpPool(&destination,&device,out,page*2,0x22));
+    NVNmemoryPool physical,other,virtualPool,destination;VPSegmentDevice *segmentDevice=nil;
+    if(segmented){segmentDevice=[VPSegmentDevice new];segmentDevice.real=gpu;gpu=(id<MTLDevice>)segmentDevice;}
+    if(!strcmp(mode,"segments-partial-nil")){
+        segmentDevice.holdAt=1;segmentDevice.failAt=2;
+        if(!sigsetjmp(vpJump,1)){vpPool(&physical,&device,p,page*2,0x189);VP_CHECK(0);}
+        gpu=segmentDevice.real;VP_CHECK(strstr(botw_graphics_last_error(),"borrowed")&&segmentDevice.created==1&&!segmentDevice.released&&poolUnpublishedPools.count==1);
+        int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];unsigned notifications=vpNotifications;VP_CHECK(!checked(error,sizeof error)&&strstr(error,"borrowed")&&vpNotifications==notifications);
+        segmentDevice.held=nil;VP_CHECK(checked(error,sizeof error)&&segmentDevice.released==1&&!poolUnpublishedPools.count);
+        VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_segments-partial-nil_OK");return 0;
+    }
+    VP_CHECK(vpPool(&physical,&device,p,page*2,0x189));if(segmented){gpu=segmentDevice.real;VP_CHECK(segmentDevice.created==3&&((BWPool*)get(&physical,[BWPool class])).segments.count==3);}
+    VP_CHECK(vpPool(&other,&device,q,page*2,0x189));VP_CHECK(vpPool(&virtualPool,&device,NULL,page*2,0x221));VP_CHECK(vpPool(&destination,&device,out,page*2,0x22));
     VP_CHECK(!vp_nvnMemoryPoolMap(&physical)&&!vp_nvnMemoryPoolGetBufferAddress(&physical)&&!vp_nvnMemoryPoolMap(&virtualPool));
     uint64_t base=vp_nvnMemoryPoolGetBufferAddress(&virtualPool);VP_CHECK(base&&base!=((uintptr_t)p)&&base!=((uintptr_t)q));
     VP_CHECK(vpMap(&virtualPool,&physical,0,0,page*2,!strcmp(mode,"fe-buffer")?0x1fe:0x100));
@@ -136,7 +166,9 @@ int main(int argc,char **argv){
     }
     void *cachedAllocation=NULL;int copiedCode=!strcmp(mode,"copied-code");
     int encodeError=!strcmp(mode,"encode-error"),shortUniform=!strcmp(mode,"short-uniform-preflight");
-    if(!strcmp(mode,"shader-buffers")||encodeError||shortUniform||copiedCode){
+    BOOL segmentedShader=!strcmp(mode,"segments-shader")||!strcmp(mode,"segments-linear")||!strcmp(mode,"segments-vertex-cross")||!strcmp(mode,"segments-uniform-cross")||!strcmp(mode,"segments-storage-cross")||!strcmp(mode,"segments-linear-cross");
+    BOOL segmentShaderFailure=segmentedShader&&strstr(mode,"-cross");
+    if(!strcmp(mode,"shader-buffers")||encodeError||shortUniform||copiedCode||segmentedShader){
 #define SB_API(n) NVNT_##n n=(NVNT_##n)botw_nvn_bootstrap_loader(#n)
         SB_API(nvnTextureBuilderSetDefaults);SB_API(nvnTextureBuilderSetDevice);SB_API(nvnTextureBuilderSetSize2D);SB_API(nvnTextureBuilderSetFormat);SB_API(nvnTextureBuilderSetFlags);SB_API(nvnTextureBuilderSetStorage);SB_API(nvnTextureBuilderSetStride);SB_API(nvnTextureInitialize);
         SB_API(nvnMemoryPoolFlushMappedRange);SB_API(nvnCommandBufferReportCounter);SB_API(nvnProgramInitialize);SB_API(nvnProgramSetShaders);SB_API(nvnCommandBufferSetRenderTargets);SB_API(nvnCommandBufferBindProgram);SB_API(nvnCommandBufferDrawArrays);
@@ -149,28 +181,43 @@ int main(int argc,char **argv){
         if(copiedCode){cachedAllocation=malloc(page*2+1);VP_CHECK(cachedAllocation);cached=(unsigned char*)cachedAllocation+1;memset(cached,0x6c,page*2);VP_CHECK(vpPool(&cachedPool,&device,cached,page*2,0x24));BWPool *object=get(&cachedPool,[BWPool class]);VP_CHECK(!object.coherent);codeBase=vp_nvnMemoryPoolGetBufferAddress(&cachedPool);NVNcommandHandle producer=vpCopy(&command,(uintptr_t)out+page,codeBase+page,256);vp_nvnQueueSubmitCommands(&queue,1,&producer);}
         NVNprogram program;VP_CHECK(nvnProgramInitialize(&program,&device));NVNshaderData shaders[]={{codeBase+page,controls[0]},{codeBase+page+128,controls[1]}};
         int bound=0;if(!sigsetjmp(vpJump,1))bound=nvnProgramSetShaders(&program,2,shaders);if(copiedCode){BWPool *object=get(&cachedPool,[BWPool class]);uint32_t cpuWord,gpuWord;memcpy(&cpuWord,cached+page,4);memcpy(&gpuWord,(char*)object.buffer.contents+object.bufferOffset+page,4);fprintf(stderr,"COPIED_CODE bound=%d cpu=0x%x gpu=0x%x\n",bound,cpuWord,gpuWord);VP_CHECK(cpuWord==0x6c6c6c6c&&gpuWord==0x12345678);}VP_CHECK(bound);
-        NVNtextureBuilder tb;NVNtexture target;memset(&tb,0,sizeof tb);nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetFlags(&tb,NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET);nvnTextureBuilderSetStride(&tb,128);nvnTextureBuilderSetStorage(&tb,&destination,0);VP_CHECK(nvnTextureInitialize(&target,&tb));
+        NVNtextureBuilder tb;NVNtexture target;memset(&tb,0,sizeof tb);nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetFlags(&tb,NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET);nvnTextureBuilderSetStride(&tb,128);nvnTextureBuilderSetStorage(&tb,(!strcmp(mode,"segments-linear")||!strcmp(mode,"segments-linear-cross"))?&virtualPool:&destination,!strcmp(mode,"segments-linear-cross")?(ptrdiff_t)(hostPage-256):!strcmp(mode,"segments-linear")?(ptrdiff_t)hostPage:0);VP_CHECK(nvnTextureInitialize(&target,&tb));
         NVNvertexAttribState attribute;NVNvertexStreamState stream;nvnVertexAttribStateSetDefaults(&attribute);nvnVertexAttribStateSetFormat(&attribute,NVN_FORMAT_RG32F,0);nvnVertexAttribStateSetStreamIndex(&attribute,0);nvnVertexStreamStateSetDefaults(&stream);nvnVertexStreamStateSetStride(&stream,8);
-        const NVNtexture *targets[]={&target};vp_nvnCommandBufferBeginRecording(&command);if(shortUniform)nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,(uintptr_t)out+page+4096);nvnCommandBufferSetRenderTargets(&command,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&command,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferBindVertexAttribState(&command,1,&attribute);nvnCommandBufferBindVertexStreamState(&command,1,&stream);nvnCommandBufferBindVertexBuffer(&command,0,base,sizeof positions);nvnCommandBufferBindUniformBuffer(&command,NVN_SHADER_STAGE_FRAGMENT,5,base+256,shortUniform?4:16);nvnCommandBufferBindStorageBuffer(&command,NVN_SHADER_STAGE_VERTEX,3,base+4096,12);nvnCommandBufferDrawArrays(&command,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=vp_nvnCommandBufferEndRecording(&command);
+        const NVNtexture *targets[]={&target};vp_nvnCommandBufferBeginRecording(&command);if(shortUniform)nvnCommandBufferReportCounter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,(uintptr_t)out+page+4096);nvnCommandBufferSetRenderTargets(&command,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&command,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferBindVertexAttribState(&command,1,&attribute);nvnCommandBufferBindVertexStreamState(&command,1,&stream);nvnCommandBufferBindVertexBuffer(&command,0,base+(!strcmp(mode,"segments-vertex-cross")?hostPage-8:0),sizeof positions);nvnCommandBufferBindUniformBuffer(&command,NVN_SHADER_STAGE_FRAGMENT,5,base+(!strcmp(mode,"segments-uniform-cross")?hostPage-8:256),shortUniform?4:16);nvnCommandBufferBindStorageBuffer(&command,NVN_SHADER_STAGE_VERTEX,3,base+(!strcmp(mode,"segments-storage-cross")?hostPage-8:4096),12);nvnCommandBufferDrawArrays(&command,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=vp_nvnCommandBufferEndRecording(&command);
         if(encodeError){BWQueue *object=get(&queue,[BWQueue class]);VPFailingQueue *failing=[VPFailingQueue new];failing.real=object.native;object.native=(id<MTLCommandQueue>)failing;}
-        BWQueue *probeQueue=get(&queue,[BWQueue class]);NSData *arenaBefore=shortUniform?digest(probeQueue.arena,probeQueue.arenaBytes):nil;
-        if(encodeError||shortUniform){if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),encodeError?"synthetic encoder failure":"uniform range"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);if(shortUniform){for(unsigned i=0;i<16;i++)VP_CHECK(out[page+4096+i]==0xa5);VP_CHECK([arenaBefore isEqual:digest(probeQueue.arena,probeQueue.arenaBytes)]);}}
-        NVNqueue second;VP_CHECK(vp_nvnQueueInitialize(&second,&qb));for(unsigned pass=0;!encodeError&&!shortUniform&&pass<(copiedCode?1u:2u);pass++){if(pass)VP_CHECK(vpMap(&virtualPool,&other,0,0,page*2,0x100));vp_nvnQueueSubmitCommands(pass?&second:&queue,1,&handle);vp_nvnQueueFinish(pass?&second:&queue);unsigned char pixels[64];VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels));for(unsigned i=0;i<16;i++)VP_CHECK(pixels[i*4]==(pass?0:255)&&pixels[i*4+1]==(pass?255:0)&&!pixels[i*4+2]&&pixels[i*4+3]==255);uint32_t *written=(void*)((pass?q:p)+4096);for(unsigned i=0;i<3;i++)VP_CHECK(written[i]==0x600+i);}
+        BWQueue *probeQueue=get(&queue,[BWQueue class]);NSData *arenaBefore=(shortUniform||segmentShaderFailure)?digest(probeQueue.arena,probeQueue.arenaBytes):nil;NSData *outputBefore=segmentShaderFailure?digest(out,page*2):nil;
+        if(encodeError||shortUniform||segmentShaderFailure){if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),encodeError?"synthetic encoder failure":segmentShaderFailure?"crosses Metal backing segments":"uniform range"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);if(segmentShaderFailure){VP_CHECK([outputBefore isEqual:digest(out,page*2)]&&[arenaBefore isEqual:digest(probeQueue.arena,probeQueue.arenaBytes)]);}if(shortUniform){for(unsigned i=0;i<16;i++)VP_CHECK(out[page+4096+i]==0xa5);VP_CHECK([arenaBefore isEqual:digest(probeQueue.arena,probeQueue.arenaBytes)]);}}
+        NVNqueue second;VP_CHECK(vp_nvnQueueInitialize(&second,&qb));for(unsigned pass=0;!encodeError&&!shortUniform&&!segmentShaderFailure&&pass<(copiedCode?1u:2u);pass++){if(pass)VP_CHECK(vpMap(&virtualPool,&other,0,0,page*2,0x100));vp_nvnQueueSubmitCommands(pass?&second:&queue,1,&handle);vp_nvnQueueFinish(pass?&second:&queue);unsigned char pixels[64];VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels));for(unsigned i=0;i<16;i++)VP_CHECK(pixels[i*4]==(pass?0:255)&&pixels[i*4+1]==(pass?255:0)&&!pixels[i*4+2]&&pixels[i*4+3]==255);uint32_t *written=(void*)((pass?q:p)+4096);for(unsigned i=0;i<3;i++)VP_CHECK(written[i]==0x600+i);}
         if(copiedCode){memset(cached+page,0x7e,128);vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);unsigned char pixels[64];VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels)&&pixels[0]==255&&!pixels[1]);nvnMemoryPoolFlushMappedRange(&cachedPool,page,128);if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"program code bytes changed"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);VP_CHECK(botw_graphics_read_texture(&target,pixels,sizeof pixels)&&pixels[0]==255&&!pixels[1]);}
 #undef SB_API
     }
-    if(encodeError||shortUniform){int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];int result=checked(error,sizeof error);fprintf(stderr,"CHECKED_SHUTDOWN_AFTER_ERROR=%d %s\n",result,error);VP_CHECK(result);VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));printf("VIRTUAL_POOL_REAL_GPU_%s_OK\n",mode);return 0;}
+    if(encodeError||shortUniform||segmentShaderFailure){int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];int result=checked(error,sizeof error);fprintf(stderr,"CHECKED_SHUTDOWN_AFTER_ERROR=%d %s\n",result,error);VP_CHECK(result);VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));printf("VIRTUAL_POOL_REAL_GPU_%s_OK\n",mode);return 0;}
     int physicalRetired=0;
 
-    if(!strcmp(mode,"graphics-copy-coherence")){
+    if(!strcmp(mode,"segments-copy")||!strcmp(mode,"segments-preflight")||!strcmp(mode,"segments-counter-preflight")){
+        if(!strcmp(mode,"segments-copy")){
+            size_t offsets[]={0,hostPage,2*hostPage};for(unsigned i=0;i<3;i++){handle=vpCopy(&command,base+offsets[i],(uintptr_t)out+offsets[i],512);vp_nvnQueueSubmitCommands(&queue,1,&handle);}vp_nvnQueueFinish(&queue);for(unsigned i=0;i<3;i++)VP_CHECK(!memcmp(out+offsets[i],p+offsets[i],512));
+            BWPool *object=get(&physical,[BWPool class]);__weak id first=((BWPoolSegment*)object.segments[0]).buffer,second=((BWPoolSegment*)object.segments[1]).buffer,third=((BWPoolSegment*)object.segments[2]).buffer;
+            vp_nvnMemoryPoolFinalize(&physical);physicalRetired=1;VP_CHECK(!first&&!second&&!third&&segmentDevice.released==3);VP_CHECK(!munmap(p,page*2));p=MAP_FAILED;
+        }else{
+            vp_nvnCommandBufferBeginRecording(&command);vp_nvnCommandBufferCopyBufferToBuffer(&command,base,(uintptr_t)out,512,0);
+            if(!strcmp(mode,"segments-counter-preflight")){NVNT_nvnCommandBufferReportCounter counter=(NVNT_nvnCommandBufferReportCounter)botw_nvn_bootstrap_loader("nvnCommandBufferReportCounter");counter(&command,NVN_COUNTER_TYPE_TIMESTAMP_TOP,(uintptr_t)out+page);}
+            vp_nvnCommandBufferCopyBufferToBuffer(&command,base+hostPage-8,(uintptr_t)out+1024,16,0);handle=vp_nvnCommandBufferEndRecording(&command);
+            BWQueue *object=get(&queue,[BWQueue class]);NSData *arena=digest(object.arena,object.arenaBytes);if(!sigsetjmp(vpJump,1)){vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(0);}VP_CHECK(strstr(botw_graphics_last_error(),"crosses Metal backing segments"));vp_nvnQueueFinish(&queue);dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);VP_CHECK([arena isEqual:digest(object.arena,object.arenaBytes)]);for(size_t i=0;i<page*2;i++)VP_CHECK(out[i]==0xa5);
+        }
+    }else if(!strcmp(mode,"segments-checked-shutdown")){
+        BWPool *object=get(&physical,[BWPool class]);__attribute__((objc_precise_lifetime)) id retained=((BWPoolSegment*)object.segments[1]).buffer;
+        int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");char error[512];VP_CHECK(checked&&!checked(error,sizeof error)&&strstr(error,"borrowed")&&segmentDevice.released==2&&object.registered&&object.live&&object.retiring);
+        retained=nil;VP_CHECK(checked(error,sizeof error)&&segmentDevice.released==3&&!gpu);VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_segments-checked-shutdown_OK");return 0;
+    }else if(!strcmp(mode,"graphics-copy-coherence")){
         __weak id<MTLBuffer> borrowed;@autoreleasepool{borrowed=((BWPool*)get(&physical,[BWPool class])).buffer;}VP_CHECK(borrowed);size_t offset=(size_t)getpagesize()/2;
         memset(q+offset,0x4b,page);textureReadBytes(q+offset,p+offset,page,"graphics live NoCopy read");textureWriteBytes(p+offset,q+offset,page,"graphics live NoCopy write");VP_CHECK(!textureWriteRun(p,offset,q+offset,page));
         VP_CHECK(vpOwnedVMLeaves(p,page*2)==1&&vpOwnedVMLeaves(q,page*2)==1);handle=vpCopy(&command,base,(uintptr_t)out,page*2);vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(!memcmp(out,p,page*2));
         vp_nvnMemoryPoolFinalize(&physical);physicalRetired=1;VP_CHECK(!borrowed);VP_CHECK(!munmap(p,page*2));p=MAP_FAILED;
-    }else if(!strcmp(mode,"shader-buffers")||!strcmp(mode,"sampler-device")||copiedCode){/* Completed in the resource fixture above. */}
-    else if(!strcmp(mode,"inflight-finalize")||!strcmp(mode,"inflight-remap")){
+    }else if(!strcmp(mode,"shader-buffers")||!strcmp(mode,"sampler-device")||copiedCode||segmentedShader){/* Completed in the resource fixture above. */}
+    else if(!strcmp(mode,"inflight-finalize")||!strcmp(mode,"inflight-remap")||!strcmp(mode,"segments-inflight-finalize")){
         int remap=!strcmp(mode,"inflight-remap");uint64_t oldGeneration=nvn_vpool_generation();
-        BWQueue *queueObject=get(&queue,[BWQueue class]);BWPool *physicalObject=get(&physical,[BWPool class]);__weak id<MTLBuffer> weakBacking=physicalObject.buffer;
+        BWQueue *queueObject=get(&queue,[BWQueue class]);BWPool *physicalObject=get(&physical,[BWPool class]);__weak id<MTLBuffer> weakBacking=physicalObject.buffer?:((BWPoolSegment*)physicalObject.segments[0]).buffer;
         VPGatedQueue *gated=[VPGatedQueue new];gated.queue=queueObject.native;gated.event=[gpu newSharedEvent];VP_CHECK(gated.event);queueObject.native=(id<MTLCommandQueue>)gated;
         vp_nvnQueueSubmitCommands(&queue,1,&handle);VP_CHECK(queueObject.latest.status>=MTLCommandBufferStatusCommitted&&queueObject.latest.status<MTLCommandBufferStatusCompleted);
         struct VPFinalizeJob job={.pool=&physical,.virtualPool=&virtualPool,.other=&other,.remap=remap,.lock=PTHREAD_MUTEX_INITIALIZER,.changed=PTHREAD_COND_INITIALIZER};pthread_t thread;VP_CHECK(!pthread_create(&thread,NULL,vpFinalizeWorker,&job));

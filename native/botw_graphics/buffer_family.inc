@@ -36,7 +36,10 @@ NVN(nvnBufferInitialize,NVNboolean,NVNbuffer *raw,const NVNbufferBuilder *builde
     BWBuffer *b=[BWBuffer new];b.pool=pool;b.device=device;b.rawPool=(NVNmemoryPool*)snapshot.pool;b.poolGeneration=pool.generation;
     b->backing=(bwu_pool){BWU_MAGIC('P','O','O','L'),(unsigned)pool.flags,pool.kind==BW_POOL_VIRTUAL?(void*)(uintptr_t)pool.gpuBase:pool.memory,pool.size};snapshot.pool=&b->backing;
     struct bwu_buffer value;if(!bwu_nvnBufferInitialize((NVNbuffer*)&value,(const NVNbufferBuilder*)&snapshot))return report("buffer storage range is outside its memory pool");
-    if(value.size&&pool.kind!=BW_POOL_VIRTUAL&&!pool.buffer)return report("buffer storage has no Metal backing");b.value=value;put(raw,b);return 1;
+    if(value.size&&pool.kind!=BW_POOL_VIRTUAL){const char *failure=NULL;
+        if(!poolEnsureOrdinaryBacking(pool,&failure))return report("%s",failure);
+        if(!pool.buffer)return report("buffer storage has no Metal backing");}
+    b.value=value;put(raw,b);return 1;
 }
 NVN(nvnBufferFinalize,void,NVNbuffer *raw){bufferMemory(raw,sizeof *raw,YES,NO);BWBuffer *b=bufferObject(raw,NO);struct bwu_buffer value=b.value;bwu_nvnBufferFinalize((NVNbuffer*)&value);b.value=value;removeObject(raw);}
 NVN(nvnBufferSetDebugLabel,void,NVNbuffer *raw,const char *label){BWBuffer *b=bufferObject(raw,YES);if(!label){b.label=nil;return;}size_t n=0;while(n<256){if(memoryAccessValidator&&!memoryAccessValidator(label+n,1,0))fatal("buffer debug label is not readable");if(!label[n])break;n++;}if(n==256)fatal("buffer debug label exceeds 255 bytes");b.label=[[NSString alloc]initWithBytes:label length:n encoding:NSUTF8StringEncoding];if(!b.label)fatal("buffer debug label is not UTF-8");}

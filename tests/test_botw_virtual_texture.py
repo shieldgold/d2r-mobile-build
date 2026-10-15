@@ -44,6 +44,26 @@ class VirtualTextureTests(unittest.TestCase):
                         'failed assertion'):
             self.assertNotIn(failure, result.stderr)
 
+    def test_segmented_private_sampling_and_cross_segment_descriptor_pool_slots(self):
+        self.mode('segments-private')
+        self.mode('segments-descriptor')
+
+    def test_whole_64k_remap_guard_preserves_private_authority_across_metal_segments(self):
+        self.mode('segments-authority')
+
+    def test_cross_segment_private_texture_rejects_before_earlier_clear(self):
+        self.mode('segments-private-cross')
+
+    def test_cross_segment_code_and_descriptor_registration_are_named_rejected(self):
+        self.mode('segments-code-cross')
+        self.mode('segments-descriptor-cross')
+
+    def test_canonical_alias_and_cache_checks_do_not_skip_cross_segment_metadata(self):
+        self.mode('segments-alias')
+
+    def test_finalize_clears_recorded_views_and_all_segment_resources(self):
+        self.mode('segments-finalize-view')
+
     def test_linear_render_uses_current_mapping_and_preserves_padding(self):
         self.mode('linear-remap')
 

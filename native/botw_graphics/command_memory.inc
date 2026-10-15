@@ -85,7 +85,9 @@ NVN(nvnCommandBufferGetMemoryCallbackData,void*,const NVNcommandBuffer *raw){ret
 NVN(nvnCommandBufferAddCommandMemory,void,NVNcommandBuffer *raw,const NVNmemoryPool *memory,ptrdiff_t offset,size_t bytes){
     BWCommands *cmd=commandState(raw,YES);BWPool *pool=get(memory,[BWPool class]);
     if(pool.kind!=BW_POOL_ORDINARY)fatal("CPU command memory requires ordinary pool");
-    if(offset<0||!pool.buffer||!range((size_t)offset,bytes,pool.size))fatal("CPU command memory pool bounds");
+    if(offset<0||!range((size_t)offset,bytes,pool.size))fatal("CPU command memory pool bounds");
+    const char *failure=NULL;if(!poolEnsureOrdinaryBacking(pool,&failure))fatal(failure);
+    if(!pool.buffer)fatal("CPU command memory pool has no materialized Metal backing");
     BWCommandMemory *span=[BWCommandMemory new];span.memory=(char*)pool.memory+offset;span.size=bytes;span.pool=pool;adoptRecordingSpan(cmd,span,NO);cmd.externalMemory=YES;
 }
 NVN(nvnCommandBufferAddControlMemory,void,NVNcommandBuffer *raw,void *memory,size_t bytes){
