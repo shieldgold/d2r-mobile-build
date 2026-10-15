@@ -34,7 +34,7 @@ class NativeRomFSTests(unittest.TestCase):
         cls.lib = None
         if not (ROOT / 'native/botw_resources/romfs.c').exists(): return
         binary = Path(cls.temp.name) / 'romfs.dylib'
-        subprocess.run(['clang', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-Wall', '-Wextra', '-Werror', '-Wconversion', '-Wshadow', '-pedantic', '-shared', '-fPIC', '-O2', str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(binary)], check=True, capture_output=True, text=True)
+        subprocess.run(['clang', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wconversion', '-Wshadow', '-pedantic', '-shared', '-fPIC', '-O2', str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(binary)], check=True, capture_output=True, text=True)
         cls.lib = ctypes.CDLL(str(binary))
         cls.lib.botw_romfs_open.argtypes = [ctypes.c_char_p, ctypes.POINTER(Error)]
         cls.lib.botw_romfs_open.restype = ctypes.c_void_p

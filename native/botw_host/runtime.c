@@ -123,8 +123,8 @@ static struct {
 } state;
 typedef struct {
     sigjmp_buf recovery;
-    int active, fault_signal;
-    uintptr_t fault_pc;
+    volatile sig_atomic_t active, fault_signal;
+    volatile uintptr_t fault_pc;
     void *tls, *tlr, *signal_stack, *autorelease_pool;
     stack_t previous_stack;
     int alternate_stack_installed;
@@ -149,6 +149,7 @@ static void fail(const char *format, ...) {
         snprintf(child_context->error, sizeof child_context->error, "%s", message);
         siglongjmp(child_context->recovery, 1);
     }
+    if (!pthread_equal(pthread_self(), state.owner)) abort();
     state.guest_executing = 0;
     siglongjmp(state.recovery, 1);
 }
@@ -747,11 +748,12 @@ static void signal_handler(int number, siginfo_t *info, void *context) {
     ucontext_t *uc = context;
     uintptr_t pc = (uintptr_t)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
     int guest_pc = pc == 0; /* A guest indirect branch to NULL also needs recovery. */
-    for (unsigned i = 0; i < MODULE_COUNT; i++) {
+    int current_is_owner = pthread_equal(pthread_self(), state.owner);
+    for (unsigned i = 0; (current_is_owner || child_context) && i < MODULE_COUNT; i++) {
         uintptr_t base = (uintptr_t)state.modules[i].base;
         if (base && pc >= base && pc - base < state.modules[i].size) guest_pc = 1;
     }
-    if (state.active && state.guest_executing && guest_pc && pthread_equal(pthread_self(), state.owner)) {
+    if (current_is_owner && state.active && state.guest_executing && guest_pc) {
         state.fault_signal = number; state.fault_pc = pc;
         state.guest_executing = 0; siglongjmp(state.recovery, 1);
     }

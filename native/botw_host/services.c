@@ -230,7 +230,9 @@ static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, 
         return problem(error, cap, "host applet resource user ID cannot change during a run");
     unsigned focus = !foreground ? 3 : focused ? 1 : 2;
     uint32_t messages[2]; unsigned count = 0;
-    if (s->applet_ready && s->applet_focus != focus) messages[count++] = 15;
+    /* Opening the virtual applet transitions Unknown -> measured host focus.
+     * The 1.x SDK waits for this initial announcement before querying focus. */
+    if (!s->applet_ready || s->applet_focus != focus) messages[count++] = 15;
     if (s->applet_ready && s->applet_operation != operation && s->applet_notify_operation) messages[count++] = 30;
     if (count > 32 - s->applet_message_count) return problem(error, cap, "applet notification queue full");
     if (count && s->applet_event_write && s->kernel.signal_event(s->kernel.opaque, s->applet_event_write, error, cap)) return -1;

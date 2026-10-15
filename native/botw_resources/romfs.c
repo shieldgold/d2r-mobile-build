@@ -1,6 +1,9 @@
 /* Read-only Switch RomFS. Layout: SciresM/hactool ivfc.h (RomFS structs).
  * Deliberately independent of Foundation, JSON, NCA crypto and guest code.
  */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "romfs.h"
 #include <errno.h>
 #include <fcntl.h>

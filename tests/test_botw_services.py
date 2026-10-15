@@ -43,7 +43,7 @@ class ServicesTests(unittest.TestCase):
         if not source.exists():
             raise AssertionError('Horizon services implementation is missing')
         subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
-                        '-Werror', '-shared', '-fPIC', str(source), str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(cls.library)], check=True)
+                        '-Werror', '-shared', '-fPIC', str(source), str(ROOT / 'native/botw_resources/romfs.c'), str(ROOT / 'native/botw_input/input.c'), '-o', str(cls.library)], check=True)
         cls.lib = C.CDLL(str(cls.library))
         cls.lib.botw_services_create.argtypes = [LOG, MEMORY, C.c_void_p]
         cls.lib.botw_services_create.restype = C.c_void_p
@@ -308,6 +308,12 @@ class ServicesTests(unittest.TestCase):
         _, handles, _ = self.response(raw)
         self.assertEqual(struct.unpack_from('<I', raw, 8)[0], 2)  # one HIPC copy handle
         event = self.kernel_handles[handles[0]]
+        self.assertTrue(event['signaled'])  # measured initial focus is announced
+        raw, _ = self.send(common, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 15)
+        self.assertFalse(event['signaled'])
+        self.applet_state()  # no duplicate notification for unchanged host state
         self.assertFalse(event['signaled'])
         self.send(controller, self.request(11, b'\1'))
         self.applet_state(mode=1)
