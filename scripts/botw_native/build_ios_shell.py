@@ -75,7 +75,8 @@ def build_shell(repo_root, output_dir):
             subprocess.run([*base, *language, '-c', str(root / source), '-o', str(obj)], check=True)
             objects.append(str(obj))
         subprocess.run([*base, *objects, '-framework', 'UIKit', '-framework', 'Foundation',
-                        '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'GameController', '-lobjc',
+                        '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'GameController',
+                        '-framework', 'CoreGraphics', '-lobjc',
                         '-Wl,-rpath,@executable_path/Frameworks', '-o', str(app / 'BOTWNative')], check=True)
         info = {'CFBundleIdentifier': 'local.botw.native', 'CFBundleExecutable': 'BOTWNative',
                 'CFBundleName': 'BOTWNative', 'CFBundleDisplayName': 'BOTW Native',
