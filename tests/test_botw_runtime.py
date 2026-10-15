@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('main', 'subsdk0', 'subsdk1', 'subsdk2', 'subsdk3', 'sdk')
 
 
-def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False, entropy_service=False, query_stack=False, priority_service=False, query_zero=False, corrupt_stack=False, symbol_interposition=False, protected_override=False):
+def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False, entropy_service=False, query_stack=False, priority_service=False, query_zero=False, corrupt_stack=False, symbol_interposition=False, protected_override=False, signal_condition=False, invalid_condition=False, constructors=False, failing_constructor=False):
     out = root / 'botw'
     out.mkdir(exist_ok=True)
     raw = bytearray(0x14000)
@@ -44,10 +44,10 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
         gate = (0xa9bf7bfd, 0xd53bd07e, adrp, 0xf9400fbd, 0x8b1d03de,
                 0xf94003de, 0xf94003fd, 0xd63f03c0, 0xa8c17bfd, 0x17ffc039)
         struct.pack_into('<' + 'I' * len(gate), raw, 0x10000, *gate)
-    if name == 'sdk' and (query_stack or query_zero):
+    if name == 'sdk' and (query_stack or query_zero or signal_condition):
         literal = 0x58000000 | (((0x8208 - 0x104) // 4) << 5)
         branch = 0x14000000 | ((0x10000 - 0x108) // 4)
-        struct.pack_into('<IIII', raw, 0x100, 0xaa1f03e2 if query_zero else 0x910003e2, literal, branch, 0xd65f03c0)
+        struct.pack_into('<IIII', raw, 0x100, 0x92800001 if signal_condition else 0xaa1f03e2 if query_zero else 0x910003e2, literal, branch, 0xd65f03c0)
         imm = (-4) & ((1 << 21) - 1)
         adrp = 0x9000001d | ((imm & 3) << 29) | ((imm >> 2) << 5)
         back = 0x14000000 | (((0x10c - 0x10024) // 4) & 0x3ffffff)
@@ -75,14 +75,17 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
               (0x8218, ((len(symbols) - 1) << 32) | 1025, 0)]
     if symbol_interposition and name == 'sdk':
         relocs.append((0x8200, (override_index << 32) | 1025, 0))
-    if query_stack or query_zero:
-        relocs.append((0x8208, 1027, 0x8220))
+    if query_stack or query_zero or signal_condition:
+        relocs.append((0x8208, 1027, 0x100 if invalid_condition else 0x8220))
     if invoke_missing:
         relocs.append((0x8200, ((len(symbols) - 2) << 32) | 1026, 0))
     rel = b''.join(struct.pack('<QQq', *r) for r in relocs)
     raw[0x8b00:0x8b00 + len(rel)] = rel
     tags = [(5, 0x8800), (6, 0x8400), (10, len(strings)), (11, 24), (4, 0x8a00),
             (7, 0x8b00), (8, len(rel)), (0, 0)]
+    if constructors:
+        tags.insert(-1, (12, 0x300))
+        struct.pack_into('<I', raw, 0x300, 0xd4200000 if name == 'sdk' and failing_constructor else 0xd65f03c0)
     for i, pair in enumerate(tags):
         struct.pack_into('<QQ', raw, 0x8000 + i * 16, *pair)
     (out / f'{name}.patched.bin').write_bytes(raw)
@@ -91,7 +94,7 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
     hdr.update({f'KEY_{n}_IDX': str(i) for i, n in enumerate(
         ('K18', 'KTLS', 'KTLR', 'KGATE', 'KRES0', 'KRES1', 'KASPECT', 'KASPECTUI'))})
     (out / f'{name}.fixups.tsv').write_text(''.join(f'# {k}\t{v}\n' for k, v in hdr.items()))
-    (out / f'{name}.gates.tsv').write_text('0x10020\tsvc\t12\t0x104\n' if name == 'sdk' and priority_service else '0x10020\tsvc\t41\t0x104\n' if name == 'sdk' and entropy_service else '0x10020\tsvc\t6\t0x108\n' if name == 'sdk' and (query_stack or query_zero) else '')
+    (out / f'{name}.gates.tsv').write_text('0x10020\tsvc\t12\t0x104\n' if name == 'sdk' and priority_service else '0x10020\tsvc\t41\t0x104\n' if name == 'sdk' and entropy_service else '0x10020\tsvc\t29\t0x108\n' if name == 'sdk' and signal_condition else '0x10020\tsvc\t6\t0x108\n' if name == 'sdk' and (query_stack or query_zero) else '')
 
 
 class RuntimeSourceTests(unittest.TestCase):
@@ -121,7 +124,7 @@ class NativeRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='botw-synthetic-') as d:
             root = Path(d)
             for name in MODULES:
-                image(root, name, **(options if name == 'sdk' or options.get('symbol_interposition') else {}))
+                image(root, name, **(options if name == 'sdk' or options.get('symbol_interposition') or options.get('constructors') else {}))
             return subprocess.run([str(self.exe), str(root), *flags], capture_output=True,
                                   text=True, timeout=10)
 
@@ -187,6 +190,33 @@ class NativeRuntimeTests(unittest.TestCase):
         p = self.run_host('--sdk-probe', symbol_interposition=True, protected_override=True)
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertIn('error=guest CPU fault signal=', p.stdout)
+
+    def test_condition_broadcast_with_no_registered_waiters_wakes_zero(self):
+        p = self.run_host('--sdk-probe', signal_condition=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('condition_signal requested=-1 waiters=0 woken=0', p.stdout)
+        self.assertIn('sdk_probe_completed=true', p.stdout)
+
+    def test_condition_key_cannot_point_to_signed_code(self):
+        p = self.run_host('--sdk-probe', signal_condition=True, invalid_condition=True)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('condition key is not aligned guest writable memory', p.stdout)
+
+    def test_boot_game_runs_reverse_module_constructors_before_nnmain(self):
+        p = self.run_host('--boot-game', constructors=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        markers = [f'constructor_returned={name}' for name in reversed(MODULES)]
+        positions = [p.stdout.index(marker) for marker in markers]
+        self.assertEqual(positions, sorted(positions))
+        self.assertLess(positions[-1], p.stdout.index('entry_called=nnMain'))
+        self.assertIn('nnMain_returned=true', p.stdout)
+        self.assertIn('phone_ready=false', p.stdout)
+
+    def test_failed_constructor_prevents_nnmain(self):
+        p = self.run_host('--boot-game', constructors=True, failing_constructor=True)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('constructor_called=sdk', p.stdout)
+        self.assertNotIn('entry_called=nnMain', p.stdout)
 
     def test_unimplemented_strong_call_stops_instead_of_returning_success(self):
         p = self.run_host('--sdk-probe', invoke_missing=True)

@@ -47,6 +47,17 @@ typedef struct { uint64_t ret, original; int kind, arg; } Gate;
 static const char *const module_names[MODULE_COUNT] = {"main", "subsdk0", "subsdk1", "subsdk2", "subsdk3", "sdk"};
 static const char *const key_names[8] = {"K18", "KTLS", "KTLR", "KGATE", "KRES0", "KRES1", "KASPECT", "KASPECTUI"};
 static pthread_mutex_t run_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Kernel condition waiters must register here before waiting. The current host
+ * rejects CreateThread and WaitProcessWideKeyAtomic, so this list is provably
+ * empty during the single guest-thread SDK probe. Future wait support must use
+ * this same mutex/list and remove nodes only after observing `signalled`. */
+typedef struct ConditionWaiter {
+    struct ConditionWaiter *next;
+    uint64_t key;
+    pthread_cond_t condition;
+    int signalled;
+} ConditionWaiter;
+static pthread_mutex_t condition_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     Module modules[MODULE_COUNT];
     Gate gates[MAX_GATES];
@@ -55,6 +66,7 @@ static struct {
     char *stubs[MAX_STUB];
     pthread_key_t keys[8];
     void *framework, *tls, *tlr;
+    ConditionWaiter *condition_waiters;
     botw_host_event event;
     sigjmp_buf recovery;
     pthread_t owner;
@@ -311,6 +323,21 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
     for (unsigned i = 0; i < state.gate_count; i++) {
         Gate *g = &state.gates[i]; if (g->ret != ret) continue;
         if (g->kind) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); regs[g->arg] = (uint64_t)ts.tv_sec * 19200000ull + (uint64_t)ts.tv_nsec * 12 / 625; return; }
+        if (g->arg == 0x1d) { /* SignalProcessWideKey(key, count). */
+            uint64_t key = regs[0]; int32_t requested = (int32_t)regs[1];
+            if ((key & 3) || !writable_guest_range(key, 4)) fail("condition key is not aligned guest writable memory");
+            unsigned waiters = 0, woken = 0;
+            pthread_mutex_lock(&condition_lock);
+            for (ConditionWaiter *waiter = state.condition_waiters; waiter; waiter = waiter->next) {
+                if (waiter->key != key || waiter->signalled) continue;
+                waiters++;
+                if (requested > 0 && woken >= (unsigned)requested) continue;
+                waiter->signalled = 1; woken++; pthread_cond_signal(&waiter->condition);
+            }
+            pthread_mutex_unlock(&condition_lock);
+            regs[0] = 0;
+            report("condition_signal requested=%d waiters=%u woken=%u", requested, waiters, woken); return;
+        }
         if (g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 || (uint32_t)regs[1] == 0xffff8000)) {
             /* main.npdm for fixed BOTW base v0: main_thread_priority = 0x2c. */
             regs[0] = 0; regs[1] = 44; report("main_thread_priority=44"); return;
@@ -362,6 +389,20 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
             uint64_t random_value; arc4random_buf(&random_value, sizeof random_value);
             regs[0] = 0; regs[1] = random_value; return;
         }
+        if (g->arg == 0x1f) {
+            const char *port = "<outside guest module>"; size_t length = strlen(port);
+            for (unsigned module_index = 0; module_index < MODULE_COUNT; module_index++) {
+                Module *m = &state.modules[module_index]; uint64_t base = (uint64_t)m->base;
+                if (regs[1] < base || regs[1] - base >= m->size) continue;
+                size_t available = m->size - (size_t)(regs[1] - base);
+                size_t limit = available < 32 ? available : 32;
+                const char *candidate = (const char *)regs[1]; const char *end = memchr(candidate, 0, limit);
+                if (end) { port = candidate; length = (size_t)(end - candidate); }
+                break;
+            }
+            fail("unsupported SVC 0x1f ConnectToNamedPort port=%.*s at original offset 0x%llx",
+                 (int)length, port, (unsigned long long)g->original);
+        }
         fail("unsupported SVC 0x%x at original offset 0x%llx (x0=0x%llx x1=0x%llx x2=0x%llx)",
              g->arg, (unsigned long long)g->original, (unsigned long long)regs[0], (unsigned long long)regs[1], (unsigned long long)regs[2]);
     }
@@ -386,9 +427,36 @@ static void initialize_keys(void) {
     pthread_setspecific(state.keys[1], state.tls); pthread_setspecific(state.keys[2], state.tlr);
     pthread_setspecific(state.keys[3], (void *)botw_gate);
 }
+static void require_executable(uint64_t pointer, const char *entry) {
+    if (pointer & 3) fail("unaligned guest executable entry %s", entry);
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
+        Module *m = &state.modules[i]; uint64_t base = (uint64_t)m->base;
+        if (pointer < base) continue;
+        uint64_t offset = pointer - base;
+        if (offset < m->text_end || (offset >= m->patch_off && offset < m->size)) return;
+    }
+    fail("guest entry %s does not point to signed code", entry);
+}
+static void run_module_constructors(void) {
+    /* The fixed BOTW rtld builds its module list by inserting the ascending
+       Horizon NSO sequence at the head (+0x51c..0x53c). InitModules (+0x748)
+       traverses that reversed list and +0xb0c invokes each module's DT_INIT.
+       NSO order is documented by Atmosphere's loader implementation:
+       https://github.com/Atmosphere-NX/Atmosphere/blob/master/docs/components/modules/loader.md
+       DT_INIT itself registers the DSO and invokes its init_array; invoking the
+       array separately here would run constructors twice. */
+    for (int i = MODULE_COUNT - 1; i >= 0; i--) {
+        Module *m = &state.modules[i]; if (!m->init) continue;
+        require_range(m, m->init, 4, "DT_INIT");
+        uint64_t pointer = (uint64_t)m->base + m->init; require_executable(pointer, m->name);
+        report("constructor_called=%s", m->name); state.guest_started = 1; state.guest_executing = 1;
+        ((void (*)(void))pointer)(); state.guest_executing = 0;
+        report("constructor_returned=%s", m->name);
+    }
+}
 static uint64_t need_entry(const char *name) {
     uint64_t p = find_symbol(name); if (!p) fail("missing SDK entry %s", name);
-    report("entry_resolved=%s", name); return p;
+    require_executable(p, name); report("entry_resolved=%s", name); return p;
 }
 static void call_entry(const char *name, int two_args) {
     uint64_t p = need_entry(name); report("entry_called=%s", name); state.guest_started = 1; state.guest_executing = 1;
@@ -479,9 +547,9 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             call_entry("nndiagStartup", 0); call_entry("nninitInitializeSdkModule", 0); call_entry("nninitStartup", 0); call_entry("_init_libc2", 0);
             if (mode == BOTW_HOST_SDK_PROBE) report("sdk_probe_completed=true nnMain_called=false phone_ready=false");
             else {
-                /* Constructor ABI and service takeover remain independently gated.
-                   This deliberate boundary is not an emulated successful boot. */
-                fail("BOOT_GAME requires audited BOTW module constructor order and service implementations; nnMain not called");
+                run_module_constructors();
+                report("nnMain_called=true phone_ready=false"); call_entry("nnMain", 0);
+                report("nnMain_returned=true game_playable=false phone_ready=false");
             }
         }
     }
