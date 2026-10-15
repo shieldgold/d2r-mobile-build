@@ -175,7 +175,7 @@ static Handle *find_handle(botw_services *s, uint32_t handle) {
     return NULL;
 }
 static int assign_handle(botw_services *s, Session *session, uint32_t *out, char *error, size_t cap) {
-    if (!s->next_handle || s->next_handle == UINT32_MAX) return problem(error, cap, "IPC handle identity space exhausted");
+    if (s->next_handle < 0x10000 || s->next_handle >= 0x20000) return problem(error, cap, "IPC handle identity space exhausted before kernel namespace");
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (!s->handles[i].id) {
         s->handles[i].id = s->next_handle++; s->handles[i].session = session; *out = s->handles[i].id;
         return 0;

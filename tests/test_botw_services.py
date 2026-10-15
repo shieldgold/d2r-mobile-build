@@ -721,6 +721,21 @@ class ServicesTests(unittest.TestCase):
         handles = [handle for result in results for handle in result]
         self.assertEqual(len(set(handles)), 512)
 
+    def test_ipc_identity_exhaustion_never_collides_with_kernel_namespace(self):
+        self.lib.botw_services_destroy(self.ctx)
+        self.ctx = self.lib.botw_services_create(LOG(), self.memory, None)
+        allocated = 0
+        while allocated <= 0x10000:
+            handle = C.c_uint32()
+            rc = self.lib.botw_services_connect(self.ctx, b'sm:', 3, C.byref(handle), self.error, 1024)
+            if rc:
+                break
+            self.assertLess(handle.value, 0x20000)
+            allocated += 1
+            self.assertEqual(self.close(handle.value), 0)
+        self.assertEqual(allocated, 0x10000)
+        self.assertIn(b'identity space exhausted', self.error.value)
+
     def test_handle_table_exhaustion_is_bounded(self):
         handles = []
         while len(handles) < 1024:
