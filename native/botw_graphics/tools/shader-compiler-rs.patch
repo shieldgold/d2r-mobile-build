@@ -16,7 +16,7 @@ index 5d5e83e..8c65140 100644
 -        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
 +        ; // this is needed to make MinGW build succeed
 diff --git a/bridge/src/bridge.cc b/bridge/src/bridge.cc
-index 21350b2..bd4c491 100644
+index 21350b2..88c70b8 100644
 --- a/bridge/src/bridge.cc
 +++ b/bridge/src/bridge.cc
 @@ -1,0 +2,3 @@
@@ -82,11 +82,22 @@ index 21350b2..bd4c491 100644
 +            queries["GetReplaceConstBuffer"]++;
 @@ -118,0 +159 @@ namespace Bridge {
 +      try {
-@@ -242,0 +284,4 @@ namespace Bridge {
+@@ -171,0 +213,6 @@ namespace Bridge {
++        u32 storage_index=0;
++        for(const auto& descriptor:program.info.storage_buffers_descriptors){
++            std::fprintf(stderr,"BOTW_STORAGE_DESCRIPTOR {\"descriptor_index\":%u,\"cbuf_index\":%u,\"cbuf_offset\":%u,\"count\":%u,\"is_written\":%s}\n",
++                storage_index,descriptor.cbuf_index,descriptor.cbuf_offset,descriptor.count,descriptor.is_written?"true":"false");
++            storage_index+=descriptor.count;
++        }
+@@ -242,0 +290,4 @@ namespace Bridge {
 +      } catch(const std::exception& error) {
 +        std::fprintf(stderr,"BOTW_TRANSLATION_ERROR %s\n",error.what());
 +        return {};
 +      }
+@@ -244 +295 @@ namespace Bridge {
+-}
+\ No newline at end of file
++}
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index 398b489..20f801f 100644
 --- a/cli/Cargo.toml

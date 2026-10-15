@@ -82,6 +82,8 @@ python3 -m scripts.botw_native.shaders \
 
 转换器原本将 uniform 数组统一声明为 64 KiB。打包器对完全固定的索引逐资源复制类型并缩小数组，67 个绑定别名的准确范围为 4–560 bytes；实际 GPU 测试已验证缩小后的 16-byte 绑定。5 个含动态 uint2 索引的顶点绑定继续要求声明的完整 64 KiB，清单标记 `declared_dynamic`，不猜测游戏属性或 uniform 值。loader 重新核验数组元素步长、读索引和范围证明，实际绘制还按 Metal 反射验证 NVN 绑定长度。
 
+编译器额外记录 IR storage descriptor 的序号、cbuf bank/offset、数量及写访问标志。真实 37 项中仅两个字体 VS 使用该资源，均为 bank0、0x110、count1、只读；与 BNSH `PerCharacterParamBlock` storage slot0 以及 MSL buffer4/5/6 的 uint/uint2/uint4 别名一致。两个程序的 c0 唯一读取是 data[68]，即 slot0 地址低32位。清单可保留这项 `storage_audit` 证据，同时明确 `access_bounds_validated=false`；动态 c1/SSBO 访问尚未获准登记。
+
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
 ```c

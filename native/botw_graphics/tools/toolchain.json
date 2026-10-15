@@ -17,5 +17,6 @@
     "shaders_without_cbuf_queries": 13,
     "cbuf_queries": 92,
     "texture_type_queries": 46
-  }
+  },
+  "storage_diagnostics": "per-shader BOTW_STORAGE_DESCRIPTOR descriptor index, exact cbuf bank/offset, count and write flag from translated IR"
 }

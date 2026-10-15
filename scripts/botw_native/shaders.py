@@ -238,6 +238,7 @@ def compile_shader_inputs(records, inputs, destination, compiler, *, require_run
         for prefix, key in (('BOTW_ENV ', 'environment_queries'),
                             ('BOTW_UNRESOLVED_CBUF ', 'unresolved_cbuf'),
                             ('BOTW_UNRESOLVED_TEXTURE ', 'unresolved_texture'),
+                            ('BOTW_STORAGE_DESCRIPTOR ', 'storage_descriptors'),
                             ('BOTW_TEXTURE_CONSTRAINT ', 'used_texture_constraints')):
             traces[key] = [json.loads(line[len(prefix):]) for line in result.stderr.splitlines()
                            if line.startswith(prefix)]
@@ -247,6 +248,67 @@ def compile_shader_inputs(records, inputs, destination, compiler, *, require_run
         # A partial run remains inspectable even if a later compiler process fails.
         (destination / 'translation.json').write_text(json.dumps({'schema': 1, 'results': results}, indent=2) + '\n')
     return results
+
+
+def audit_storage_resources(msl, stage, reflection, descriptors):
+    """Prove descriptor-name aliases against compiler IR and actual BNSH slots.
+
+    This records bindings only. Dynamic memory accesses still require separate
+    bounds validation before a shader may be registered.
+    """
+    base = {'vertex': 0x110, 'fragment': 0x510}.get(stage)
+    if base is None:
+        raise ValueError('Unsupported storage driver stage')
+    reflected = {x['slot'] for x in reflection.get('storage', []) if x['slot'] >= 0}
+    indices = {}
+    for descriptor in descriptors:
+        fields = ('descriptor_index', 'cbuf_index', 'cbuf_offset', 'count')
+        if any(type(descriptor.get(x)) is not int for x in fields) or type(descriptor.get('is_written')) is not bool:
+            raise ValueError('Invalid compiler storage descriptor')
+        index, bank, offset, count = (descriptor[x] for x in fields)
+        slot = (offset - base) // 16
+        if bank != 0 or offset < base or (offset - base) % 16 or not 1 <= count <= 16 or not 0 <= index <= 16-count or not 0 <= slot <= 16-count:
+            raise ValueError('Unsupported compiler storage descriptor address')
+        for delta in range(count):
+            if slot + delta not in reflected:
+                raise ValueError('Storage descriptor slot absent from BNSH reflection')
+            if index + delta in indices:
+                raise ValueError('Duplicate compiler storage descriptor index')
+            indices[index + delta] = (slot + delta, descriptor['is_written'])
+    bindings = []
+    for block, variable, index, metal in re.findall(r'device\s+(?:const\s+)?(\w+)\s*&\s*(ssbo(\d+)(?:_\d+)?)\s+\[\[buffer\((\d+)\)\]\]', msl):
+        if int(index) not in indices:
+            raise ValueError('Missing compiler storage descriptor for ' + variable)
+        layout = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*(uint[24]?)\s+_m0\[1\];\s*\};', msl)
+        if not layout:
+            raise ValueError('Unknown storage buffer alias layout')
+        stride = int(layout[1][-1]) * 4 if layout[1][-1].isdigit() else 4
+        slot, written = indices[int(index)]
+        accesses = re.findall(r'\b' + re.escape(variable) + r'\._m0\[([^\]]+)\]', msl)
+        if len(re.findall(r'\b' + re.escape(variable) + r'\b', msl)) != len(accesses) + 1:
+            raise ValueError('Unknown storage buffer alias use')
+        bindings.append({'nvn_slot': slot, 'metal_slot': int(metal), 'stride': stride,
+                         'is_written': written, 'dynamic_accesses': sum(not bool(re.fullmatch(r'\d+u?', x)) for x in accesses)})
+    if len(re.findall(r'\bdevice\s+(?:const\s+)?\w+\s*[&*]\s*\w+\s+\[\[buffer\(\d+\)\]\]', msl)) != len(bindings):
+        raise ValueError('Unknown Metal storage resource parameter')
+    if msl.count('[[buffer(') and not bindings and indices:
+        raise ValueError('Compiler storage descriptors have no recognized MSL aliases')
+    driver_reads = set()
+    for index in re.findall(r'\bc0(?:_\d+)?\.data\[([^\]]+)\]', msl):
+        if not re.fullmatch(r'\d+u?', index):
+            raise ValueError('Unresolved dynamic driver constant access')
+        offset = int(index.rstrip('u')) * 4
+        slot, field = divmod(offset-base, 16)
+        if offset < base or slot not in reflected or slot not in {value[0] for value in indices.values()} or field not in (0, 4, 8):
+            raise ValueError('Unknown storage driver constant field')
+        driver_reads.add((offset, slot, {0: 'address_low', 4: 'address_high', 8: 'size'}[field]))
+    for variable in re.findall(r'constant\s+\w+\s*&\s*(c0(?:_\d+)?)\s+\[\[buffer\(\d+\)\]\]', msl):
+        count = len(re.findall(r'\b' + re.escape(variable) + r'\.data\[[^\]]+\]', msl))
+        if len(re.findall(r'\b' + re.escape(variable) + r'\b', msl)) != count + 1:
+            raise ValueError('Unknown storage driver variable use')
+    return {'bindings': bindings, 'driver_reads': [{'bank': 0, 'offset': offset, 'nvn_slot': slot, 'field': field}
+                                                  for offset, slot, field in sorted(driver_reads)],
+            'access_bounds_validated': False}
 
 
 def specialize_static_c1(msl, control, code):
@@ -402,6 +464,9 @@ def stage_shader_bundle(inputs, converted, destination):
     """Prepare a private local bundle; unknown resources remain unsupported."""
     inputs, converted, destination = Path(inputs), Path(converted), Path(destination)
     records = json.loads((inputs / 'inputs.json').read_text())['records']
+    translation = converted / 'translation.json'
+    descriptor_audits = {row['code_sha256']: row.get('storage_descriptors', [])
+                         for row in json.loads(translation.read_text())['results']} if translation.exists() else {}
     groups = {}
     for record in records:
         identity = (record['control_sha256'], record['code_sha256'], record['stage'])
@@ -410,7 +475,8 @@ def stage_shader_bundle(inputs, converted, destination):
     for identity, rows in sorted(groups.items()):
         control_hash, code_hash, stage = identity
         row = rows[0]
-        entry = {'stage': stage, 'control_sha256': control_hash, 'code_sha256': code_hash}
+        entry = {'stage': stage, 'control_sha256': control_hash, 'code_sha256': code_hash,
+                 'reflection': row.get('reflection', {})}
         for kind, directory, filename in (('control', inputs, control_hash + '.control'),
                                           ('code', inputs, code_hash + '.nvn'),
                                           ('msl', converted, code_hash + '.metal')):
@@ -422,6 +488,12 @@ def stage_shader_bundle(inputs, converted, destination):
                 raise ValueError('Original shader SHA256 mismatch: ' + filename)
             files[filename] = payload
             entry[kind] = {'path': filename, 'bytes': len(payload), 'sha256': digest}
+        if re.search(r'\bssbo\d+(?:_\d+)?\b', files[code_hash + '.metal'].decode('utf-8')):
+            try:
+                entry['storage_audit'] = audit_storage_resources(files[code_hash + '.metal'].decode('utf-8'), stage,
+                                                                  row.get('reflection', {}), descriptor_audits.get(code_hash, []))
+            except ValueError as exc:
+                entry['storage_audit'] = {'access_bounds_validated': False, 'reason': str(exc)}
         try:
             msl, constants = specialize_static_c1(files[code_hash + '.metal'].decode('utf-8'),
                                                   files[control_hash + '.control'], files[code_hash + '.nvn'])

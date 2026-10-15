@@ -125,6 +125,26 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_storage_audit_requires_compiler_descriptor_and_bnsh_slot(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'audit_storage_resources'), 'Storage descriptor audit is missing')
+        source = ('struct C{uint data[16384];}; struct S{uint _m0[1];}; struct V{uint4 _m0[1];}; '
+                  'vertex float4 main0(constant C& c0 [[buffer(0)]],device S& ssbo0 [[buffer(4)]],'
+                  'device V& ssbo0_1 [[buffer(6)]]){return float4(c0.data[68u]+ssbo0._m0[i]+ssbo0_1._m0[i].x);}')
+        reflection = {'storage': [{'name': 'characters', 'slot': 0}]}
+        descriptors = [{'descriptor_index': 0, 'cbuf_index': 0, 'cbuf_offset': 0x110,
+                        'count': 1, 'is_written': False}]
+        audit = module.audit_storage_resources(source, 'vertex', reflection, descriptors)
+        self.assertEqual([(x['nvn_slot'], x['metal_slot'], x['stride']) for x in audit['bindings']],
+                         [(0, 4, 4), (0, 6, 16)])
+        self.assertEqual(audit['driver_reads'], [{'bank': 0, 'offset': 0x110, 'nvn_slot': 0, 'field': 'address_low'}])
+        with self.assertRaisesRegex(ValueError, 'descriptor'):
+            module.audit_storage_resources(source, 'vertex', reflection, [])
+        with self.assertRaisesRegex(ValueError, 'reflection'):
+            module.audit_storage_resources(source, 'vertex', {'storage': []}, descriptors)
+        with self.assertRaisesRegex(ValueError, 'driver'):
+            module.audit_storage_resources(source.replace('68u', '71u'), 'vertex', reflection, descriptors)
+
     def test_uniform_array_bounds_are_narrowed_only_for_fixed_reads(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'bound_static_uniforms'), 'Uniform footprint analysis is missing')
