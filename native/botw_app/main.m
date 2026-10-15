@@ -184,10 +184,18 @@ static void *runGuest(void *unused) {
 @property(nonatomic, strong) UIWindow *window;
 @end
 @implementation BOTWSceneDelegate
-- (void)sceneDidBecomeActive:(UIScene *)scene { (void)scene; botw_host_set_applet_state(1, 1); }
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    (void)scene;
+    UIApplication.sharedApplication.idleTimerDisabled = YES;
+    botw_host_set_applet_state(1, 1);
+}
 - (void)sceneWillResignActive:(UIScene *)scene { (void)scene; botw_host_set_applet_state(1, 0); }
 - (void)sceneWillEnterForeground:(UIScene *)scene { (void)scene; botw_host_set_applet_state(1, 0); }
-- (void)sceneDidEnterBackground:(UIScene *)scene { (void)scene; botw_host_set_applet_state(0, 0); }
+- (void)sceneDidEnterBackground:(UIScene *)scene {
+    (void)scene;
+    UIApplication.sharedApplication.idleTimerDisabled = NO;
+    botw_host_set_applet_state(0, 0);
+}
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     (void)session; (void)options;
     if (![scene isKindOfClass:UIWindowScene.class]) return;

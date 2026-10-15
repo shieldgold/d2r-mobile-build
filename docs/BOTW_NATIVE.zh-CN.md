@@ -27,17 +27,18 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `c64a0e0`：
+2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `ce11e1d`：
 
 - 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
-- `devicectl` 确认安装与启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、34 个弱未定义引用归零、230 个门登记。
-- `_init_libc0`、`nnosInitialize`、`_init_libc1`、`nndiagStartup` 已真实返回；SM、日志、性能与应用管理 IPC 已执行，SDK 模块初始化到 `aoc:u` 边界。该次手机测试没有进入 nnMain。
-- 完整本体 RomFS 已传入手机 Documents，14,420,017,152 字节；手机应用真实读到 `/System/Version.txt` 为 `1.0.0`。更新应用保留此容器。
-- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-c64a0e0/`。开发界面和报告保持 `gameplay_verified=false`。
+- `devicectl` 确认安装与解锁后启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、230 个门登记，以及实际映像的 Host39 HIPC 传输检查通过。
+- 真机已分配游戏初始堆 `0xc2600000`（3,261,071,360 字节），完成 SDK 初始化及模块构造，并真实进入游戏 `nnMain`。这仍不是已进入可操作游戏画面的证据。
+- 完整本体 RomFS 已重新传入手机 Documents，14,420,017,152 字节；手机应用真实读到 `/System/Version.txt` 为 `1.0.0`，随后通过 FSP 读取原始镜像头部。升级前后需核验资源与用户数据，不能仅凭安装成功推断容器内容仍完整。
+- 该次真机停止在 `fsp-srv` 命令 203（查询当前程序补丁存储）。本体没有补丁时返回明确缺失结果的后续修复已在 Mac 原程序执行中验证，需随新版继续真机验证。
+- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-ce11e1d/`。开发界面和报告保持 `gameplay_verified=false`。
 
-该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38737912201) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38737911919) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
+该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38746880429) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38746880146) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
 
-后续 Mac ARM64 原生执行已完成 SDK 初始化、游戏初始堆 `0xc2600000`（3,261,071,360 字节）分配、逆序模块构造，并真实进入 `nnMain`。该进度尚不代表手机可玩；最新启动日志保留在 `outputs/botw-host39-probe/`，遇到未实现调用仍明确停止。图形、触摸/手柄、线程、只读资源和存档后端已有独立实现与测试，实际画面、操作及游戏存档验收仍未完成。
+后续 Mac ARM64 原生执行已读取 RomFS 目录与文件元数据，继续在新触发的兼容层边界逐项验证。最新启动日志保留在 `outputs/botw-host39-probe/`。图形、触摸/手柄、线程、只读资源和存档后端已有独立实现与测试，实际画面、操作及游戏存档验收仍未完成。
 
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
