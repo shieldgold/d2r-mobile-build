@@ -738,6 +738,46 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         host = documents / 'botw-saves' / '01007ef00011e000' / user.uid_hex.decode() / 'slot'
         self.assertEqual(host.read_bytes(), bytes(8))
 
+    def test_save_read_rejects_entire_output_descriptor_overlapping_ipc_before_io(self):
+        _, user, _ = self.configure_local_user()
+        for domain in (False, True):
+            fs, root = self.save_mount(user, domain)
+            path = '/domain' if domain else '/normal'
+            self.save_path(fs, root, 0, path, struct.pack('<IIQ', 0, 0, 4))
+            file, child = self.save_file(fs, root, path)
+            self.save_write(file, child, b'DATA')
+            for relative, size in ((128, 4), (0, 4), (-1, 4), (255, 4), (-8, 272)):
+                arena = C.create_string_buffer(b'\xa5' * 1024, 1024)
+                base = C.addressof(arena)
+                ipc = base + 256
+                self.ranges.append((base, 1024, True))
+                request = self.request(0, struct.pack('<IIQQ', 0, 0, 0, 4), domain=child,
+                                       receive=(ipc + relative, size))
+                C.memmove(ipc, request, len(request))
+                before = bytes(arena)
+                self.error.value = b''
+                rc = self.lib.botw_services_send(self.ctx, file, ipc, 256, self.error, 1024)
+                self.assertEqual(rc, -1, (relative, size, bytes(arena)[256 + relative:260 + relative]))
+                self.assertIn(b'SaveFS IFile.Read output descriptor overlaps IPC message buffer', self.error.value)
+                self.assertEqual(bytes(arena), before, 'read or response changed the aliased span before rejection')
+            # The end of each range is exclusive: adjacent spans stay valid.
+            for relative in (-4, 256):
+                arena = C.create_string_buffer(1024)
+                base = C.addressof(arena)
+                ipc = base + 256
+                self.ranges.append((base, 1024, True))
+                request = self.request(0, struct.pack('<IIQQ', 0, 0, 0, 4), domain=child,
+                                       receive=(ipc + relative, 4))
+                C.memmove(ipc, request, len(request))
+                self.assertEqual(self.lib.botw_services_send(self.ctx, file, ipc, 256, self.error, 1024), 0, self.error.value)
+                data, _, _ = self.response(C.string_at(ipc, 256), domain)
+                self.assertEqual(struct.unpack_from('<Q', data)[0], 4)
+                self.assertEqual(C.string_at(ipc + relative, 4), b'DATA')
+            # A descriptor near HIPC's maximum address still fails checked
+            # memory validation before any backend access.
+            self.send(file, self.request(0, struct.pack('<IIQQ', 0, 0, 0, 4), domain=child,
+                      receive=((1 << 58) - 2, 4)), good=False)
+
     def test_save_large_io_is_chunked_after_whole_descriptor_validation(self):
         _, user, documents = self.configure_local_user()
         fs, root = self.save_mount(user)

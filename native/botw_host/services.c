@@ -480,6 +480,10 @@ static int services_close(botw_services *s, uint32_t id, char *error, size_t cap
     emit(s, "ipc_close handle=0x%x", id); return 0;
 }
 static int checked_span(size_t offset, size_t length, size_t end) { return offset <= end && length <= end - offset; }
+static int ranges_overlap(uint64_t first, size_t first_size, uint64_t second, size_t second_size) {
+    /* Compare distances, not address+size endpoints that could overflow. */
+    return first_size && second_size && (first <= second ? second - first < first_size : first - second < second_size);
+}
 static int input_descriptor(botw_services *s, Request *r, uint64_t address, uint64_t length, char *error, size_t cap) {
     if (!length && !address) return 0; /* inactive half of an auto-select buffer */
     if (!length || length > SIZE_MAX || address > UINT64_MAX - length ||
@@ -1048,6 +1052,8 @@ static int save_request(botw_services *s, Session *session, Object *o, uint8_t *
         if (write ? r->output_count || r->input_static_count || r->input_count != (length ? 1u : 0u) || length > r->input_size :
             r->input_count || r->output_static_count || r->output_count != (length ? 1u : 0u) || length > r->output_size)
             return problem(error, cap, "SaveFS IFile.%s requires a checked %s buffer covering the full requested span", write ? "Write" : "Read", write ? "A input" : "B output");
+        if (!write && ranges_overlap(r->output_address, r->output_size, (uint64_t)(uintptr_t)ipc, capacity))
+            return problem(error, cap, "SaveFS IFile.Read output descriptor overlaps IPC message buffer");
         if (!(o->file_mode & (write ? 2u : 1u))) return fs_result_response(ipc, capacity, r, 2u | ((write ? 6203u : 6202u) << 9));
         if (write && length && !(o->file_mode & 4u)) {
             botw_savefs_entry entry;
