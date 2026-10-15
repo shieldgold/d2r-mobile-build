@@ -30,6 +30,9 @@ static uint64_t serial;static id<MTLDevice> gpu;static BOOL textureTrackingAvail
 static int (*memoryValidator)(const void*,size_t);static int (*memoryAccessValidator)(const void*,size_t,int);
 static char lastError[512];static int dirtyFail,writePreparations,guardCalls,retireReferences;static id consumerBuffer;
 static unsigned snapshotAllocations,noCopyCreated,noCopyReleased;static BOOL rejectOversizedSnapshot,dirtyAddFail;
+static int admissionVMMode;static unsigned admissionVMQueries,admissionLogicalCalls,admissionWriteCalls;
+static char admissionOrder[32];static unsigned admissionOrderLength;
+static void admissionEvent(char event){if(admissionOrderLength+1<sizeof admissionOrder){admissionOrder[admissionOrderLength++]=event;admissionOrder[admissionOrderLength]=0;}}
 static BOOL holdNewNoCopy;static id heldNoCopy;
 static unsigned char *allocation;static size_t allocationBytes;static NVNdevice rawDevice;static NVNmemoryPool rawPools[12];
 static int report(const char *fmt,...){va_list a;va_start(a,fmt);vsnprintf(lastError,sizeof lastError,fmt,a);va_end(a);return 0;}
@@ -85,9 +88,26 @@ static void poolRetireReferences(BWPool *p){(void)p;retireReferences++;consumerB
 #define NVN(name,ret,...) static ret h_##name(__VA_ARGS__)
 #define nvn_dirty_add_range_checked fixtureDirtyAdd
 #define nvn_dirty_remove_range_checked fixtureDirtyRemove
+/* Only the existing NoCopy admission VM query is intercepted. Other owned VM
+ * access checks keep their real public calls; this never creates a GPU device. */
+static kern_return_t admissionVMQuery(vm_map_t task,vm_address_t *address,vm_size_t *size,natural_t *depth,vm_region_recurse_info_t info,mach_msg_type_number_t *count){
+    admissionVMQueries++;admissionEvent('V');
+    if(!admissionVMMode)return vm_region_recurse_64(task,address,size,depth,info,count);
+    if(admissionVMMode==1){*count=3;return KERN_INVALID_ADDRESS;}
+    vm_region_submap_info_data_64_t output={0};output.protection=VM_PROT_READ|VM_PROT_WRITE;
+    *size=BW_POOL_MAPPING_PAGE_BYTES;*count=VM_REGION_SUBMAP_INFO_COUNT_64;
+    if(admissionVMMode==2)*address+=(vm_address_t)getpagesize();
+    else if(admissionVMMode==3)*size=0;
+    else if(admissionVMMode==4){*address-=(vm_address_t)getpagesize();*size=(vm_size_t)getpagesize();}
+    else if(admissionVMMode==5)output.protection=VM_PROT_READ;
+    else if(admissionVMMode==6){if(admissionVMQueries==1)output.is_submap=1;else output.protection=VM_PROT_READ;}
+    memcpy(info,&output,sizeof output);return KERN_SUCCESS;
+}
+#define vm_region_recurse_64 admissionVMQuery
 #define NSMutableData PoolFixtureData
 #include "../memory_pool_family.inc"
 #undef NSMutableData
+#undef vm_region_recurse_64
 #undef nvn_dirty_remove_range_checked
 #undef nvn_dirty_add_range_checked
 #undef NVN
@@ -146,7 +166,32 @@ static int testUnpublishedRetry(BOOL registryFailure){
  h_nvnMemoryPoolFinalize(&rawPools[0]);CHECK(noCopyReleased==2);return 0;
 }
 static int testOrdinaryProtection(void){CHECK(!mprotect(allocation,PG,PROT_READ));CHECK(create(0,0x22,allocation,PG));CHECK(host(0).coherent);h_nvnMemoryPoolFlushMappedRange(&rawPools[0],0,8);REJECT(h_nvnMemoryPoolInvalidateMappedRange(&rawPools[0],0,8),"VM");CHECK(!mprotect(allocation,PG,PROT_READ|PROT_WRITE));h_nvnMemoryPoolFinalize(&rawPools[0]);CHECK(!mprotect(allocation+2*PG,PG,PROT_NONE));CHECK(create(1,0x22,allocation+2*PG,PG));REJECT(h_nvnMemoryPoolFlushMappedRange(&rawPools[1],0,8),"VM");CHECK(!mprotect(allocation+2*PG,PG,PROT_READ|PROT_WRITE));return 0;}
+static int admissionDenyLogical(const void *p,size_t n){(void)p;(void)n;admissionLogicalCalls++;admissionEvent('L');return 0;}
+static int admissionWriteDenied;
+static int admissionAccess(const void *p,size_t n,int write){if(p==allocation&&n==PG&&write){admissionWriteCalls++;admissionEvent('W');return !admissionWriteDenied;}return 1;}
+static void admissionReset(void){admissionVMMode=0;admissionVMQueries=admissionLogicalCalls=admissionWriteCalls=admissionOrderLength=0;admissionOrder[0]=lastError[0]=0;admissionWriteDenied=0;}
+static int admissionReject(unsigned flags,void *memory,size_t bytes,const char *stage){
+    unsigned noCopyBefore=noCopyCreated,releasedBefore=noCopyReleased,allocations=(unsigned)((PoolFixtureDevice*)gpu).allocationCalls,snapshots=snapshotAllocations;
+    NSUInteger objectCount=objects.count,spanCount=objectSpans.count;uint64_t generation=nvn_vpool_generation();NVNmemoryPool output=rawPools[0];nvn_vpool_stats_t before,after;nvn_vpool_stats(&before);
+    CHECK(!create(0,flags,memory,bytes));CHECK(strstr(lastError,"Physical/uncached pool requires coherent host-page-aligned single-VM-region backing"));CHECK(strstr(lastError,stage));
+    CHECK(strstr(lastError,"flags=0x")&&strstr(lastError,"bytes=")&&strstr(lastError,"page=")&&strstr(lastError,"mod=")&&strstr(lastError,"logical=")&&strstr(lastError,"access=")&&strstr(lastError,"vm_fields=")&&strstr(lastError,"vm_remaining="));
+    CHECK(strlen(lastError)<sizeof lastError-1&&!strstr(lastError,"address=")&&!strstr(lastError,"pointer="));nvn_vpool_stats(&after);
+    CHECK(noCopyCreated==noCopyBefore&&noCopyReleased==releasedBefore&&((PoolFixtureDevice*)gpu).allocationCalls==allocations&&snapshotAllocations==snapshots);
+    CHECK(!memcmp(&output,&rawPools[0],sizeof output)&&objects.count==objectCount&&objectSpans.count==spanCount&&!pools.count&&!poolUnpublishedPools.count&&nvn_vpool_generation()==generation&&before.phys_live==after.phys_live&&before.virt_live==after.virt_live);return 0;
+}
+static int testAdmissionLogical(void){
+    admissionReset();memoryValidator=NULL;memoryAccessValidator=admissionAccess;
+    CHECK(!admissionReject(0x21,allocation+1,PG-2,"stage=range_validator_missing"));CHECK(!admissionOrderLength&&!admissionVMQueries&&!admissionWriteCalls);CHECK(strstr(lastError,"logical=missing"));
+    admissionReset();memoryValidator=admissionDenyLogical;CHECK(!admissionReject(0x21,allocation+1,PG-2,"stage=range_denied"));CHECK(!strcmp(admissionOrder,"L")&&admissionLogicalCalls==1&&!admissionWriteCalls&&!admissionVMQueries);CHECK(strstr(lastError,"logical=deny"));
+    admissionReset();memoryValidator=NULL;memoryAccessValidator=NULL;CHECK(create(0,0x24,allocation+1,PG-2));CHECK(!lastError[0]&&!host(0).coherent&&noCopyCreated==0);h_nvnMemoryPoolFinalize(&rawPools[0]);return 0;
+}
+static int testAdmissionWrite(void){admissionReset();memoryAccessValidator=admissionAccess;admissionWriteDenied=1;CHECK(!admissionReject(0x189,allocation,PG,"stage=write_denied"));CHECK(!strcmp(admissionOrder,"W")&&admissionWriteCalls==1&&!admissionVMQueries&&!admissionLogicalCalls&&strstr(lastError,"access=deny"));return 0;}
+static int testAdmissionVMQuery(void){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=1;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_query"));CHECK(!strcmp(admissionOrder,"WV")&&admissionWriteCalls==1&&admissionVMQueries==1&&strstr(lastError,"vm_fields=0x1")&&strstr(lastError,"vm_result=1")&&strstr(lastError,"vm_count=3"));return 0;}
+static int testAdmissionVMRegion(void){const char *stages[]={"stage=vm_gap","stage=vm_empty","stage=vm_start"};for(int mode=2;mode<=4;mode++){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=mode;CHECK(!admissionReject(0x189,allocation,PG,stages[mode-2]));CHECK(!strcmp(admissionOrder,"WV")&&admissionVMQueries==1);}return 0;}
+static int testAdmissionVMProtection(void){admissionReset();memoryAccessValidator=admissionAccess;admissionVMMode=5;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_protection"));CHECK(!strcmp(admissionOrder,"WV")&&strstr(lastError,"vm_prot=0x1"));admissionReset();admissionVMMode=6;CHECK(!admissionReject(0x189,allocation,PG,"stage=vm_protection"));CHECK(!strcmp(admissionOrder,"WVV")&&admissionVMQueries==2&&strstr(lastError,"vm_depth=1"));return 0;}
+static int testAdmissionVMSpan(void){admissionReset();memoryAccessValidator=admissionAccess;size_t page=(size_t)getpagesize();CHECK(!mprotect(allocation+page,page,PROT_READ));int result=admissionReject(0x189,allocation,PG,"stage=vm_span");CHECK(!mprotect(allocation+page,page,PROT_READ|PROT_WRITE));CHECK(!result&&admissionWriteCalls==1&&admissionVMQueries>0&&admissionOrder[0]=='W'&&strstr(lastError,"vm_fields=0x1f"));char remaining[64];snprintf(remaining,sizeof remaining,"vm_remaining=%zu",page);CHECK(strstr(lastError,remaining));return 0;}
+static int testAdmissionRounding(void){admissionReset();CHECK(!admissionReject(0x21,(void*)(UINTPTR_MAX-8),4,"stage=rounding_overflow"));CHECK(!admissionVMQueries&&!admissionLogicalCalls&&!admissionWriteCalls);return 0;}
 int main(int argc,char **argv){@autoreleasepool{alarm(25);if(argc!=2)return 2;setup();int result=0;@try{
- if(!strcmp(argv[1],"resolve"))result=testResolve();else if(!strcmp(argv[1],"resolve-negative"))result=testResolveNegative();else if(!strcmp(argv[1],"batch"))result=testBatch();else if(!strcmp(argv[1],"family"))result=testFamily();else if(!strcmp(argv[1],"mapping"))result=testMapping();else if(!strcmp(argv[1],"mapping-negative"))result=testMappingNegative();else if(!strcmp(argv[1],"initialize-negative"))result=testInitializeNegative();else if(!strcmp(argv[1],"finalize"))result=testFinalize();else if(!strcmp(argv[1],"provenance"))result=testProvenance();else if(!strcmp(argv[1],"cpu-access"))result=testCPUAccess();else if(!strcmp(argv[1],"gpu-records"))result=testGPURecords();else if(!strcmp(argv[1],"bounded-records"))result=testBoundedRecords();else if(!strcmp(argv[1],"retire-references"))result=testRetireReferences();else if(!strcmp(argv[1],"ordinary-protection"))result=testOrdinaryProtection();else if(!strcmp(argv[1],"borrowed-pinned"))result=testBorrowedPinned();else if(!strcmp(argv[1],"mapping-allocation-bounds"))result=testMappingAllocationBounds();else if(!strcmp(argv[1],"unpublished-cleanup"))result=testUnpublishedCleanup();else if(!strcmp(argv[1],"unpublished-pinned"))result=testUnpublishedPinned();else if(!strcmp(argv[1],"unpublished-retry"))result=testUnpublishedRetry(NO);else if(!strcmp(argv[1],"unpublished-register-failure"))result=testUnpublishedRetry(YES);else return 2;
+ if(!strcmp(argv[1],"resolve"))result=testResolve();else if(!strcmp(argv[1],"resolve-negative"))result=testResolveNegative();else if(!strcmp(argv[1],"batch"))result=testBatch();else if(!strcmp(argv[1],"family"))result=testFamily();else if(!strcmp(argv[1],"mapping"))result=testMapping();else if(!strcmp(argv[1],"mapping-negative"))result=testMappingNegative();else if(!strcmp(argv[1],"initialize-negative"))result=testInitializeNegative();else if(!strcmp(argv[1],"finalize"))result=testFinalize();else if(!strcmp(argv[1],"provenance"))result=testProvenance();else if(!strcmp(argv[1],"cpu-access"))result=testCPUAccess();else if(!strcmp(argv[1],"gpu-records"))result=testGPURecords();else if(!strcmp(argv[1],"bounded-records"))result=testBoundedRecords();else if(!strcmp(argv[1],"retire-references"))result=testRetireReferences();else if(!strcmp(argv[1],"ordinary-protection"))result=testOrdinaryProtection();else if(!strcmp(argv[1],"borrowed-pinned"))result=testBorrowedPinned();else if(!strcmp(argv[1],"mapping-allocation-bounds"))result=testMappingAllocationBounds();else if(!strcmp(argv[1],"unpublished-cleanup"))result=testUnpublishedCleanup();else if(!strcmp(argv[1],"unpublished-pinned"))result=testUnpublishedPinned();else if(!strcmp(argv[1],"unpublished-retry"))result=testUnpublishedRetry(NO);else if(!strcmp(argv[1],"unpublished-register-failure"))result=testUnpublishedRetry(YES);else if(!strcmp(argv[1],"admission-logical"))result=testAdmissionLogical();else if(!strcmp(argv[1],"admission-write"))result=testAdmissionWrite();else if(!strcmp(argv[1],"admission-vm-query"))result=testAdmissionVMQuery();else if(!strcmp(argv[1],"admission-vm-region"))result=testAdmissionVMRegion();else if(!strcmp(argv[1],"admission-vm-protection"))result=testAdmissionVMProtection();else if(!strcmp(argv[1],"admission-vm-span"))result=testAdmissionVMSpan();else if(!strcmp(argv[1],"admission-rounding"))result=testAdmissionRounding();else return 2;
  if(!result){poolShutdownPools();CHECK(!munmap(allocation,allocationBytes));puts("POOL_ADAPTER_CPU_OK");}}
  @catch(NSException *e){fprintf(stderr,"unexpected %s [%s]\n",e.reason.UTF8String,lastError);return 92;}return result;}}

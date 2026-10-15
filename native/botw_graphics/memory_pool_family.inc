@@ -32,29 +32,65 @@ static id poolGuestObject(const void *raw,Class expected){
     }
     fatal("pool object lifetime/type provenance");
 }
-static BOOL poolSingleVMRegion(void *memory,size_t bytes){
-    uintptr_t at=(uintptr_t)memory;if(!memory||!bytes||bytes>UINTPTR_MAX-at)return NO;
-    vm_address_t region=at;vm_size_t length=0;natural_t depth=0;vm_region_submap_info_data_64_t info;
-    for(;;){mach_msg_type_number_t count=VM_REGION_SUBMAP_INFO_COUNT_64;
-        if(vm_region_recurse_64(mach_task_self(),&region,&length,&depth,(vm_region_recurse_info_t)&info,&count)!=KERN_SUCCESS||
-           region>at||!length||at-region>=length)return NO;
+typedef struct {
+    const char *stage,*logical,*access;
+    size_t page,mod,bias,span;BOOL strict,geometryValid,exact;
+    unsigned vmQueries,vmFields;natural_t vmDepth;kern_return_t vmResult;
+    mach_msg_type_number_t vmCount;vm_prot_t vmProtection;vm_size_t vmRemaining;
+} BWPoolNoCopyAdmission;
+/* vmFields describes only the last existing query: result=1, containing region=2,
+ * full info=4, leaf protection=8, remaining span=16. No address/content is logged.
+ * Fields after a short-circuit stay invalid; diagnostics do not issue more calls. */
+static BOOL poolSingleVMRegion(void *memory,size_t bytes,BWPoolNoCopyAdmission *admission){
+    uintptr_t at=(uintptr_t)memory;if(!memory||!bytes||bytes>UINTPTR_MAX-at){admission->stage="vm_input";return NO;}
+    vm_address_t region=at;vm_size_t length=0;natural_t depth=0;
+    for(;;){mach_msg_type_number_t count=VM_REGION_SUBMAP_INFO_COUNT_64;vm_region_submap_info_data_64_t info={0};
+        admission->vmQueries++;admission->vmFields=1;admission->vmProtection=0;admission->vmRemaining=0;
+        kern_return_t result=vm_region_recurse_64(mach_task_self(),&region,&length,&depth,(vm_region_recurse_info_t)&info,&count);
+        admission->vmResult=result;admission->vmCount=count;admission->vmDepth=depth;
+        if(result!=KERN_SUCCESS){admission->stage="vm_query";return NO;}
+        BOOL fullInfo=count>=VM_REGION_SUBMAP_INFO_COUNT_64;if(fullInfo)admission->vmFields|=4;
+        if(region>at){admission->stage="vm_gap";return NO;}
+        if(!length){admission->stage="vm_empty";return NO;}
+        if(at-region>=length){admission->stage="vm_start";return NO;}
+        admission->vmFields|=2;
         if(info.is_submap){depth++;region=at;continue;}
-        return (info.protection&(VM_PROT_READ|VM_PROT_WRITE))==(VM_PROT_READ|VM_PROT_WRITE)&&bytes<=length-(at-region);
+        if(fullInfo){admission->vmProtection=info.protection;admission->vmFields|=8;}
+        if((info.protection&(VM_PROT_READ|VM_PROT_WRITE))!=(VM_PROT_READ|VM_PROT_WRITE)){admission->stage="vm_protection";return NO;}
+        admission->vmRemaining=length-(at-region);admission->vmFields|=16;
+        if(bytes>admission->vmRemaining){admission->stage="vm_span";return NO;}
+        return YES;
     }
 }
-static BOOL poolNoCopyGeometry(void *memory,size_t bytes,BOOL strict,void **base,size_t *span,size_t *bias){
+static BOOL poolNoCopyGeometry(void *memory,size_t bytes,BOOL strict,void **base,size_t *span,size_t *bias,BWPoolNoCopyAdmission *admission){
     size_t page=(size_t)getpagesize();uintptr_t begin=(uintptr_t)memory;
-    if(!memory||!bytes||bytes>UINTPTR_MAX-begin)return NO;
+    *admission=(BWPoolNoCopyAdmission){.stage="input",.logical="skipped",.access="skipped",.page=page,.mod=begin&(page-1),.strict=strict};
+    if(!memory){admission->stage="null";return NO;}
+    if(!bytes){admission->stage="empty";return NO;}
+    if(bytes>UINTPTR_MAX-begin){admission->stage="address_overflow";return NO;}
     uintptr_t aligned=begin&~(uintptr_t)(page-1),end=begin+bytes;
-    if(end>UINTPTR_MAX-(page-1))return NO;
+    if(end>UINTPTR_MAX-(page-1)){admission->stage="rounding_overflow";return NO;}
     size_t length=((end+page-1)&~(uintptr_t)(page-1))-aligned;
-    BOOL exact=begin==aligned&&length==bytes;
-    if(!exact&&(!memoryValidator||!memoryValidator((void*)aligned,length)))return NO;
+    BOOL exact=begin==aligned&&length==bytes;admission->exact=exact;admission->geometryValid=YES;admission->span=length;admission->bias=begin-aligned;
+    if(!exact){
+        if(!memoryValidator){admission->logical="missing";admission->stage="range_validator_missing";return NO;}
+        if(!memoryValidator((void*)aligned,length)){admission->logical="deny";admission->stage="range_denied";return NO;}
+        admission->logical="allow";
+    }else admission->logical="exact";
     /* Preserve the old ordinary metadata admission: exact NoCopy may be RO/NONE
      * and its actual consumer validates access. New physical backing is strict. */
-    if(strict&&(memoryAccessValidator&&!memoryAccessValidator((void*)aligned,length,1)))return NO;
-    if(strict&&!poolSingleVMRegion((void*)aligned,length))return NO;
-    *base=(void*)aligned;*span=length;*bias=begin-aligned;return YES;
+    if(strict){
+        if(memoryAccessValidator){
+            if(!memoryAccessValidator((void*)aligned,length,1)){admission->access="deny";admission->stage="write_denied";return NO;}
+            admission->access="allow";
+        }else admission->access="missing";
+        if(!poolSingleVMRegion((void*)aligned,length,admission))return NO;
+    }
+    admission->stage="admitted";*base=(void*)aligned;*span=length;*bias=begin-aligned;return YES;
+}
+static int poolReportNoCopyAdmission(const PoolBuilder *builder,BWPoolKind kind,const BWPoolNoCopyAdmission *a){
+    return report("Physical/uncached pool requires coherent host-page-aligned single-VM-region backing: stage=%s flags=0x%x kind=%u strict=%d bytes=%zu page=%zu mod=%zu bias=%zu span=%zu geom=%d exact=%d logical=%s access=%s vm_queries=%u vm_fields=0x%x vm_result=%d vm_count=%u vm_depth=%u vm_prot=0x%x vm_remaining=%llu",
+        a->stage,(unsigned)builder->flags,(unsigned)kind,a->strict,builder->size,a->page,a->mod,a->bias,a->span,a->geometryValid,a->exact,a->logical,a->access,a->vmQueries,a->vmFields,a->vmResult,a->vmCount,a->vmDepth,(unsigned)a->vmProtection,(unsigned long long)a->vmRemaining);
 }
 static void poolRemoveRegistration(BWPool *p){
     if(!p.registered)return;
@@ -126,7 +162,7 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
     [poolUnpublishedPools addObject:p];BOOL published=NO;
     @try{
     if(kind!=BW_POOL_VIRTUAL)@autoreleasepool{
-        void *base=NULL;size_t span=0,bias=0;BOOL noCopy=poolNoCopyGeometry(b.memory,b.size,kind==BW_POOL_PHYSICAL,&base,&span,&bias);
+        void *base=NULL;size_t span=0,bias=0;BWPoolNoCopyAdmission admission;BOOL noCopy=poolNoCopyGeometry(b.memory,b.size,kind==BW_POOL_PHYSICAL,&base,&span,&bias,&admission);
         if(noCopy){
             if(!gpu||span>gpu.maxBufferLength)return report("Metal physical buffer span exceeds maxBufferLength");
             BWPoolBorrowedLifetime *lifetime=[BWPoolBorrowedLifetime new];
@@ -139,7 +175,7 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
             NSMutableData *snapshot=[NSMutableData dataWithLength:b.size];if(!snapshot)return report("Memory pool CPU snapshot allocation failed");
             textureReadBytes(b.memory,snapshot.mutableBytes,b.size,"Memory pool CPU snapshot is unreadable");
             p.buffer=[gpu newBufferWithBytes:snapshot.bytes length:b.size options:MTLResourceStorageModeShared];
-        }else return report("Physical/uncached pool requires coherent host-page-aligned single-VM-region backing");
+        }else return poolReportNoCopyAdmission(&b,kind,&admission);
         if(!p.buffer)return report("Metal memory pool allocation failed");
     }
     int status=NVN_VPOOL_OK;
