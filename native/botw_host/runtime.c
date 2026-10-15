@@ -865,6 +865,11 @@ static int services_memory(void *opaque, uint64_t address, size_t length, int wr
     if (state.kernel && botw_kernel_memory(state.kernel, address, length, writable)) return 1;
     return external_memory(opaque, address, length, writable);
 }
+static int services_prepare_write(void *opaque, uint64_t address, size_t length,
+        char *error, size_t capacity) {
+    (void)opaque;
+    return botw_host_prepare_guest_write((void *)(uintptr_t)address, length, error, capacity);
+}
 #if defined(BOTW_WITH_AUDIO)
 static int audio_copy_error(char *error, size_t capacity, const char *operation, kern_return_t result) {
     if (error && capacity) snprintf(error, capacity, "AudioOut %s failed: Mach result=%d", operation, result);
@@ -1704,6 +1709,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
         state.resource_user_id = ((uint64_t)(uint32_t)getpid() << 32) | ++run_sequence;
         pthread_mutex_unlock(&lifecycle_lock);
         if (!state.services) fail("allocate Horizon service sessions");
+        botw_services_set_memory_write_preparer(state.services, services_prepare_write, NULL);
         botw_services_set_performance_handler(state.services, services_performance, NULL);
         botw_services_set_focus_handler(state.services, services_focus, NULL);
         const botw_services_kernel_api kernel_api = {.opaque = state.kernel,
