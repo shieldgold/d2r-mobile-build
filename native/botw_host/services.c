@@ -71,6 +71,7 @@ struct botw_services {
     botw_services_kernel_api kernel;
     botw_input *input;
     botw_romfs *romfs;
+    botw_savefs *savefs;
     uint32_t input_shared_memory_handle;
     uint32_t hid_supported_styles, hid_npad_ids[10], hid_last_style[10];
     uint32_t hid_style_event_write[10], hid_style_event_read[10];
@@ -257,6 +258,10 @@ int botw_services_refresh_input(botw_services *s, char *error, size_t cap) {
 void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->romfs = romfs; pthread_mutex_unlock(&s->lock);
+}
+void botw_services_set_savefs(botw_services *s, botw_savefs *savefs) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock); s->savefs = savefs; pthread_mutex_unlock(&s->lock);
 }
 static int compare_u32(const void *a, const void *b) {
     uint32_t first = *(const uint32_t *)a, second = *(const uint32_t *)b;

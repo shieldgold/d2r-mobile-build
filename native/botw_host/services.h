@@ -44,6 +44,7 @@ typedef struct {
 void botw_services_set_kernel_api(botw_services *services, const botw_services_kernel_api *api);
 typedef struct botw_input botw_input;
 typedef struct botw_romfs botw_romfs;
+typedef struct botw_savefs botw_savefs;
 /* Borrowed backends must outlive services. Input is already bound to this kernel
  * shared-memory handle; root retains the original handle until services stop. */
 void botw_services_set_input(botw_services *services, botw_input *input, uint32_t shared_memory_handle);
@@ -51,6 +52,9 @@ void botw_services_set_input(botw_services *services, botw_input *input, uint32_
  * order is services -> input/kernel; frontend callbacks must release input first. */
 int botw_services_refresh_input(botw_services *services, char *error, size_t error_capacity);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
+/* Share the actual per-title/per-user host save mount. This borrowed instance
+ * must outlive services; future save requests validate its immutable IDs. */
+void botw_services_set_savefs(botw_services *services, botw_savefs *savefs);
 /* Publish only content actually installed/mounted for this application. Empty
  * lists are valid. base_id=0 means unknown metadata, not an inferred entitlement.
  * Changes signal the persistent AOC event; identical sets do not. */
