@@ -561,6 +561,67 @@ class ServicesTests(unittest.TestCase):
                                     receive=(C.addressof(output), len(output))))
         self.assertEqual(bytes(output), image[:80])
 
+    def test_domain_read_reuses_missing_patch_response_without_clearing_domain_padding(self):
+        image, _ = romfs_fixture()
+        self.attach_romfs(image)
+        fsp = self.filesystem()
+        raw, _ = self.send(fsp, self.request(0, kind=5))
+        root, = struct.unpack_from('<I', self.response(raw)[0])
+        raw, _ = self.send(fsp, self.request(200, domain=root))
+        storage, = struct.unpack_from('<I', self.response(raw, domain=True)[0])
+        self.lib.botw_services_set_patch_absent.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_size_t]
+        self.assertEqual(self.lib.botw_services_set_patch_absent(self.ctx, 1, self.error, 1024), 0)
+        ipc, output = C.create_string_buffer(256), C.create_string_buffer(80)
+        self.ranges.extend([(C.addressof(ipc), len(ipc), True),
+                            (C.addressof(output), len(output), True)])
+        patch_request = self.request(203, domain=root)
+        C.memmove(ipc, patch_request, len(patch_request))
+        self.assertEqual(self.lib.botw_services_send(self.ctx, fsp, ipc, len(ipc), self.error, 1024), 0,
+                         self.error.value)
+        self.assertEqual(struct.unpack_from('<I', ipc, 40)[0], 0x7d402)
+
+        # A B descriptor moves the next domain header from IPC+16 to IPC+32.
+        # BOTW's SDK writes the fields but leaves its padding at IPC+40 intact:
+        # that word still contains the preceding error response's Result.
+        read_request = self.request(0, struct.pack('<qQ', 0, len(output)), domain=storage,
+                                    receive=(C.addressof(output), len(output)))
+        C.memmove(ipc, read_request[:40], 40)
+        C.memmove(C.addressof(ipc) + 44, read_request[44:], len(read_request) - 44)
+        self.assertEqual(struct.unpack_from('<BBHIII', ipc, 32), (1, 0, 32, storage, 0x7d402, 0))
+        self.assertEqual(self.lib.botw_services_send(self.ctx, fsp, ipc, len(ipc), self.error, 1024), 0,
+                         self.error.value)
+        self.assertEqual(bytes(output), image[:80])
+        _, handles, count = self.response(bytes(ipc), domain=True)
+        self.assertEqual((handles, count), ([], 0))
+
+    def test_domain_padding_and_tokens_do_not_replace_real_input_object_count(self):
+        fsp = self.filesystem()
+        raw, _ = self.send(fsp, self.request(0, kind=5))
+        root, = struct.unpack_from('<I', self.response(raw)[0])
+        for kind, version in ((4, 0), (6, 1)):
+            request = bytearray(self.request(1005, kind=kind, domain=root))
+            struct.pack_into('<II', request, 24, 0xffffffff, 0x87654321)  # padding, domain token
+            struct.pack_into('<I', request, 36, version)
+            struct.pack_into('<I', request, 44, 0x12345678)  # CMIF token, distinct from domain token
+            raw, _ = self.send(fsp, bytes(request))
+            self.assertEqual(struct.unpack_from('<I', raw, 16)[0], 0)
+            self.assertEqual(struct.unpack_from('<4sIII', raw, 32), (b'SFCO', 0, 0, 0x12345678))
+            self.assertEqual(struct.unpack_from('<I', raw, 48)[0], 0)
+            request[17] = 1  # This field really is num_in_objects, not padding/token.
+            _, error = self.send(fsp, bytes(request), good=False)
+            self.assertIn('input objects', error)
+            self.assertIn('objects=1', error)
+
+        # Ignoring domain padding does not relax independent header validation.
+        request = bytearray(self.request(1005, domain=root))
+        struct.pack_into('<I', request, 24, 0x7d402)
+        for offset, value in ((4, struct.unpack_from('<I', request, 4)[0] | (1 << 14)),
+                              (16, 3 | (16 << 16)), (16, 1 | (15 << 16)),
+                              (16, 1 | (0xffff << 16)), (36, 2)):
+            invalid = bytearray(request)
+            struct.pack_into('<I', invalid, offset, value)
+            self.send(fsp, bytes(invalid), good=False)
+
     def test_fsp_raw_storage_reads_actual_romfs_in_chunks_larger_than_backend_limit(self):
         payload = bytes(range(256)) * (27 * 1024 * 1024 // 256)
         image, _ = romfs_fixture([('/Bootup.pack', payload)])

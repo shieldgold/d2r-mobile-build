@@ -491,8 +491,13 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         unsigned type = ipc[offset], objects = ipc[offset + 1];
         unsigned data_size = ipc[offset + 2] | (unsigned)ipc[offset + 3] << 8;
         r->object_id = load32(ipc + offset + 4); r->domain = 1;
-        if (load32(ipc + offset + 8) || objects)
-            return problem(error, cap, "CMIF domain input objects/reserved fields unsupported");
+        /* CmifDomainInHeader +8 is padding; SDKs may leave an earlier reply
+         * there when reusing TLS. +12 is a domain token, not an object count.
+         * Only the byte at +1 declares input objects (libnx sf/cmif.h). */
+        if (objects)
+            return problem(error, cap, "CMIF domain input objects unsupported: type=%u objects=%u data_size=%u object=%u padding=0x%x command=0x%x",
+                type, objects, data_size, r->object_id, load32(ipc + offset + 8),
+                checked_span(offset + 16, 16, raw_end) ? load32(ipc + offset + 24) : UINT32_MAX);
         offset += 16;
         if (type == 2) {
             if (data_size || r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data");
