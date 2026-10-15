@@ -30,6 +30,12 @@ void botw_graphics_shutdown(void);
 /* Configure after init and before guest entry. A readable-range validator
  * never authorizes writes. Init/shutdown clear this callback. */
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access validator);
+/* Install after init, before creating pools. The host atomically publishes this
+ * process-lifetime callback pair; replacement is forbidden. No bridge means no
+ * write protection or CLEAN certificate, rather than unhandled host faults. */
+typedef int (*botw_graphics_memory_tracking_registration)(
+    int (*fault)(void*,int,void*),int (*prepare)(void*,size_t,char*,size_t));
+void botw_graphics_set_memory_tracking_registration(botw_graphics_memory_tracking_registration registration);
 /* Configure after init. Init/shutdown clear this callback. A memory callback
  * that needs to run without a safe host invoker is rejected explicitly. */
 void botw_graphics_set_command_memory_invoker(botw_graphics_command_memory_invoker invoker);

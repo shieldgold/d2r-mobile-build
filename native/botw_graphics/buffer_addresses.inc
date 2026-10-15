@@ -8,6 +8,7 @@ static BWAddressRecord *captureBufferAddress(NVNcommandBuffer *raw,uint64_t addr
 static void validateBufferAddress(BWAddressRecord *r,BWDevice *device){
     if(!r||!r.pool.live||r.pool.generation!=r.generation||objects[@(r.generation)]!=r.pool)fatal("stale buffer address pool generation");
     if(r.device!=device||r.pool.device!=device||![objects.allValues containsObject:device])fatal("buffer address device mismatch");
+    nvn_texown_hit hit;if(nvn_texown_find((char*)r.pool.memory+r.offset,r.bytes,&hit))fatal("buffer address aliases private texture storage authority");
     if(!r.bytes||!r.pool.buffer||!range(r.offset,r.bytes,r.pool.size)||r.pool.flags&NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS)fatal("buffer address range/backing is invalid");
 }
 static void validateAddressSubmission(BWQueue *queue,NSArray<NSArray *> *groups){

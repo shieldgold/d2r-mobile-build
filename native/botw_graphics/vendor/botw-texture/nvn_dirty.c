@@ -28,7 +28,7 @@
 #include <unistd.h>
 #include <mach/mach_time.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <sched.h>
 
 enum { PG_NONE = 0, PG_PROT = 1, PG_BUSY = 2, BUSY_WAIT_MS = 2000 };
@@ -81,16 +81,16 @@ static int error_out(char *error, size_t capacity, const char *reason) {
  * pre-existing signal path; it is not a claim of POSIX-wide async-signal safety.
  * The owner must exclude external remap/protection and drain users before free. */
 static int actual_protection(uintptr_t a, size_t len, vm_prot_t *protection) {
-    mach_vm_address_t region = (mach_vm_address_t)a;
-    mach_vm_size_t size = 0;
+    vm_address_t region = (vm_address_t)a;
+    vm_size_t size = 0;
     natural_t depth = 0;
     vm_region_submap_info_data_64_t info;
     for (;;) {
         mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
-        kern_return_t kr = mach_vm_region_recurse(mach_task_self(), &region, &size,
+        kern_return_t kr = vm_region_recurse_64(mach_task_self(), &region, &size,
                 &depth, (vm_region_recurse_info_t)&info, &count);
         if (kr != KERN_SUCCESS || region > a || !size || a - region >= size || len > size - (a - region)) return 0;
-        if (info.is_submap) { depth++; continue; }
+        if (info.is_submap) { depth++; region = (vm_address_t)a; continue; }
         *protection = info.protection;
         return 1;
     }

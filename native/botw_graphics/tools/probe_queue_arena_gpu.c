@@ -9,8 +9,9 @@
 #define API(name) NVNT_##name name = (NVNT_##name)botw_nvn_bootstrap_loader(#name)
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"CHECK failed: %s (%s)\n", #x, botw_graphics_last_error()); return 1; } } while(0)
 static const void *ctl_ptrs[2];
+static void *textureBuilderObject,*textureObject;
 static void *queueArena,*poolObject,*poolBacking;static size_t queueArenaBytes,poolBackingBytes;
-static int queue_access(const void *p,size_t n,int writable){if(!writable)return 1;if(p==poolObject&&n<=sizeof(NVNmemoryPool))return 1;if((uintptr_t)p>=(uintptr_t)poolBacking&&(uintptr_t)p-(uintptr_t)poolBacking<=poolBackingBytes&&n<=poolBackingBytes-((uintptr_t)p-(uintptr_t)poolBacking))return 1;return (uintptr_t)p>=(uintptr_t)queueArena&&(uintptr_t)p-(uintptr_t)queueArena<=queueArenaBytes&&n<=queueArenaBytes-((uintptr_t)p-(uintptr_t)queueArena); }
+static int queue_access(const void *p,size_t n,int writable){if(!writable)return 1;if(p==textureBuilderObject&&n<=sizeof(NVNtextureBuilder))return 1;if(p==textureObject&&n<=sizeof(NVNtexture))return 1;if(p==poolObject&&n<=sizeof(NVNmemoryPool))return 1;if((uintptr_t)p>=(uintptr_t)poolBacking&&(uintptr_t)p-(uintptr_t)poolBacking<=poolBackingBytes&&n<=poolBackingBytes-((uintptr_t)p-(uintptr_t)poolBacking))return 1;return (uintptr_t)p>=(uintptr_t)queueArena&&(uintptr_t)p-(uintptr_t)queueArena<=queueArenaBytes&&n<=queueArenaBytes-((uintptr_t)p-(uintptr_t)queueArena); }
 static int valid(const void *p, size_t n) { return n <= 64 && (p == ctl_ptrs[0] || p == ctl_ptrs[1]); }
 int main(int argc, char **argv) {
     if (!botw_graphics_init(NULL, NULL, valid)) return 77;
@@ -72,7 +73,7 @@ int main(int argc, char **argv) {
     CHECK(nvnSyncWait(&sync,0)==NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED);
     nvnQueueFenceSync(&queue,&sync,NVN_SYNC_CONDITION_ALL_GPU_COMMANDS_COMPLETE,0);
     CHECK(nvnSyncWait(&sync,0)==NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED);
-    NVNtextureBuilder tb; NVNtexture texture;
+    NVNtextureBuilder tb; NVNtexture texture;textureBuilderObject=&tb;textureObject=&texture;
     nvnTextureBuilderSetDefaults(&tb); nvnTextureBuilderSetDevice(&tb,&device);
     nvnTextureBuilderSetSize2D(&tb,4,4); nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);
     nvnTextureBuilderSetFlags(&tb,NVN_TEXTURE_FLAGS_LINEAR_RENDER_TARGET);

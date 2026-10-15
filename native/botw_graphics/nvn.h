@@ -1295,7 +1295,7 @@ typedef void (*PFNNVNTEXTUREBUILDERGETSPARSETILELAYOUTPROC)(const NVNtextureBuil
                                                             NVNtextureSparseTileLayout*);
 typedef uint32_t (*PFNNVNTEXTUREBUILDERGETGLTEXTURENAMEPROC)(const NVNtextureBuilder*);
 typedef size_t (*PFNNVNTEXTUREBUILDERGETZCULLSTORAGESIZEPROC)(const NVNtextureBuilder*);
-typedef NVNmemoryPool (*PFNNVNTEXTUREBUILDERGETMEMORYPOOLPROC)(const NVNtextureBuilder*);
+typedef NVNmemoryPool* (*PFNNVNTEXTUREBUILDERGETMEMORYPOOLPROC)(const NVNtextureBuilder*);
 typedef ptrdiff_t (*PFNNVNTEXTUREBUILDERGETMEMORYOFFSETPROC)(const NVNtextureBuilder*);
 typedef void (*PFNNVNTEXTUREVIEWSETDEFAULTSPROC)(NVNtextureView*);
 typedef void (*PFNNVNTEXTUREVIEWSETLEVELSPROC)(NVNtextureView*, int, int);
@@ -1353,7 +1353,7 @@ typedef void (*PFNNVNTEXTUREFLUSHTEXELSPROC)(const NVNtexture*, const NVNtexture
                                              const NVNcopyRegion*);
 typedef void (*PFNNVNTEXTUREINVALIDATETEXELSPROC)(const NVNtexture*, const NVNtextureView*,
                                                   const NVNcopyRegion*);
-typedef NVNmemoryPool (*PFNNVNTEXTUREGETMEMORYPOOLPROC)(const NVNtexture*);
+typedef NVNmemoryPool* (*PFNNVNTEXTUREGETMEMORYPOOLPROC)(const NVNtexture*);
 typedef ptrdiff_t (*PFNNVNTEXTUREGETMEMORYOFFSETPROC)(const NVNtexture*);
 typedef int (*PFNNVNTEXTUREGETSTORAGESIZEPROC)(const NVNtexture*);
 typedef NVNboolean (*PFNNVNTEXTURECOMPAREPROC)(const NVNtexture*, const NVNtexture*);

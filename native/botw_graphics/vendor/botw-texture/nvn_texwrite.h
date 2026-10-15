@@ -35,3 +35,10 @@ int nvn_texwrite_plan_level(const nvn_texdesc *d, unsigned level, nvn_texwrite_p
 
 // Exact inverse of nvn_texwrite_apply: gathers the planned region of storage into dst with the plan's source strides.
 void nvn_texwrite_extract(const nvn_texdesc *d, const nvn_texwrite_plan *p, const uint8_t *storage, void *dst);
+
+/* Thin host port: visit exactly the same addressed GOB runs without directly
+ * dereferencing guest storage. The callback returns 0 on success, -1 to stop;
+ * previous runs may already be written, so the caller prevalidates all pages.
+ * Source must be an owned snapshot; offsets are relative to texture storage. */
+int nvn_texwrite_apply_checked(const nvn_texdesc *d,const nvn_texwrite_plan *p,
+    const void *src,int (*write_run)(void*,uint64_t,const void*,size_t),void *opaque);

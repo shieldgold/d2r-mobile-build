@@ -7,7 +7,8 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
+#include <dlfcn.h>
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <errno.h>
@@ -32,23 +33,23 @@ static void *port_calloc(size_t count, size_t size) {
     if (countdown > 0 && atomic_fetch_sub(&fail_alloc, 1) == 1) return NULL;
     return calloc(count, size);
 }
-static kern_return_t port_region(vm_map_read_t task, mach_vm_address_t *address,
-        mach_vm_size_t *size, natural_t *depth, vm_region_recurse_info_t info,
+static kern_return_t port_region(vm_map_read_t task, vm_address_t *address,
+        vm_size_t *size, natural_t *depth, vm_region_recurse_info_t info,
         mach_msg_type_number_t *count) {
     if (atomic_load(&fail_query)) return KERN_FAILURE;
     int intercept = atomic_exchange(&query_race, 0);
     if (intercept) { atomic_store(&query_phase, 1); while (atomic_load(&query_phase) < 2) {} }
-    kern_return_t rc = mach_vm_region_recurse(task, address, size, depth, info, count);
+    kern_return_t rc = vm_region_recurse_64(task, address, size, depth, info, count);
     if (intercept) { atomic_store(&query_phase, 3); while (atomic_load(&query_phase) < 4) {} }
     return rc;
 }
 #define mprotect port_mprotect
 #define calloc port_calloc
-#define mach_vm_region_recurse port_region
+#define vm_region_recurse_64 port_region
 #include "../nvn_dirty.c"
 #undef mprotect
 #undef calloc
-#undef mach_vm_region_recurse
+#undef vm_region_recurse_64
 
 static void port_signal(int number, siginfo_t *info, void *context) {
     (void)number;
@@ -94,6 +95,7 @@ static void *remove_worker(void *p) {
 }
 int main(int argc, char **argv) {
     assert(argc == 2); alarm(15); size_t pg = (size_t)getpagesize();
+    if(!strcmp(argv[1],"submap-read")){void *shared=dlsym(RTLD_NEXT,"getpid");assert(shared);vm_prot_t protection=0;assert(actual_protection((uintptr_t)shared,4,&protection)&&(protection&VM_PROT_READ));puts("SHARED_SUBMAP_LEAF_PERMISSION_OK");return 0;}
     uint8_t *p = alloc_pages(pg * 3); char error[160] = {0};
     if (!strcmp(argv[1], "unconfigured")) {
         assert(nvn_dirty_add_range_checked(p, pg, error, sizeof error) == -1 && strstr(error, "not configured"));

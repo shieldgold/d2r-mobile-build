@@ -48,11 +48,16 @@ class TextureModuleAlgorithmTests(unittest.TestCase):
         cls.write = compile_fixture(out, 'texwrite-bounds', [
             TEXTURE / 'tests/t_texwrite_bounds.c', TEXTURE / 'nvn_texwrite.c',
             VENDOR / 'nvn/nvn_tex.c', VENDOR / 'tex/nvn_deswizzle.c'])
+        cls.checked = compile_fixture(out, 'texwrite-checked', [TEXTURE / 'tests/t_texwrite_checked.c',
+            TEXTURE / 'nvn_texwrite.c', VENDOR / 'nvn/nvn_tex.c', VENDOR / 'tex/nvn_deswizzle.c'])
         cls.own = compile_fixture(out, 'texown', [TEXTURE / 'tests/t_texown.c',
                                                 TEXTURE / 'nvn_texown.c'])
 
     def test_upstream_write_bounds_and_exact_storage_roundtrips(self):
         self.assertIn('373 checks, 0 failed', run_fixture(self, self.write))
+
+    def test_checked_write_visits_exact_runs_and_stops_on_copy_failure(self):
+        self.assertIn('CHECKED_TEXWRITE_EXACT_RUNS_AND_FAILURE_STOP_OK', run_fixture(self, self.checked))
 
     def test_upstream_live_retired_byte_claims_and_racing_fresh_claims(self):
         self.assertIn('43 checks, 0 failed', run_fixture(self, self.own))
@@ -111,7 +116,7 @@ class TextureModuleDirtyTests(unittest.TestCase):
         for case in ('unconfigured', 'prepare-failure', 'retirement-failure',
                      'retirement-drains', 'allocation-failure', 'allocation-failure2',
                      'allocation-failure3', 'shared-reregister', 'invalid', 'query-failure',
-                     'prepare-protect-aba'):
+                     'prepare-protect-aba', 'submap-read'):
             with self.subTest(case=case):
                 run_fixture(self, self.dirty, case)
 

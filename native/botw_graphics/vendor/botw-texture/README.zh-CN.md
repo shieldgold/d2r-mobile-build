@@ -17,6 +17,8 @@ int registration(int (*fault)(void *, int, void *),
 
 新的宿主代码使用 checked API：
 
+- `nvn_texwrite_apply_checked`：复用原 GOB/16 字节连续 run 算法，通过宿主 callback 写入相对 offset；callback 失败立即停止，不直接解引用 guest storage。旧 `apply` / `extract` 共用相同 traversal。宿主先快照 source、预检整段目标权限，再用 iOS 公开 `vm_write`，外部并发 remap 不具备事务原子性。
+
 - `nvn_dirty_add_range_checked` / `nvn_dirty_remove_range_checked`：`0` 成功，`-1` 失败并填充 bounded error。登记不会接受不可读写的新页。退役失败保留 retiring 元数据，调用者必须保留 backing，恢复映射后重试。
 - `nvn_dirty_prepare`：空写返回 `0`；非空非法范围、未配置桥或 owned 页解保护失败返回 `-1`。untracked 页保持原状态，调用者仍须独立验证实际内存权限并检查实际写入结果。
 - `nvn_texown_claim_checked`：`0` 成功，`-1` 拒绝非法范围或内存不足。`claim_fresh` 保留 `1` 新 claim / `0` overlap / `-1` 失败的合同，包含分配失败。
@@ -28,7 +30,7 @@ int registration(int (*fault)(void *, int, void *),
 
 保留上游 canonical host page、共享 owner、generation、两 bank reader drain 和保护/退役状态机。去掉其私有 `dm.h`、自动 crash hook、stdio 错误退出；正常错误均受控返回。
 
-修正上游 `PG_NONE && gen != 0` 无条件吞 fault：页曾被解保护不能证明现在仍可写。Darwin 路径查询实际 Mach VM protection，仅在 owned READ 已确实恢复 RW，或另一个线程已将同一页恢复可写时返回 handled；查询失败、PROT_NONE、无归属与读 fault 返回未处理，保留宿主现有信号处置。BUSY 和重新保护竞态会重新核对 canonical state；PG_NONE 的权限查询在 CAS 占有 BUSY 期间完成，防止一次完整的 PROT→NONE ABA 使合法 prepare 被误拒。callback 本身不调用 allocator、stdio 或用户态锁；使用 Darwin VM/protection API，不能将此行为当作跨平台 POSIX signal 合同。
+修正上游 `PG_NONE && gen != 0` 无条件吞 fault：页曾被解保护不能证明现在仍可写。Darwin 路径通过 iOS 公开 `vm_region_recurse_64` 查询实际 Mach VM protection，仅在 owned READ 已确实恢复 RW，或另一个线程已将同一页恢复可写时返回 handled；递归进入 submap 时保持原查询地址并只采用 leaf 权限，避免共享缓存被误拒。查询失败、PROT_NONE、无归属与读 fault 返回未处理，保留宿主现有信号处置。BUSY 和重新保护竞态会重新核对 canonical state；PG_NONE 的权限查询在 CAS 占有 BUSY 期间完成，防止一次完整的 PROT→NONE ABA 使合法 prepare 被误拒。callback 本身不调用 allocator、stdio 或用户态锁；使用 Darwin VM/protection API，不能将此行为当作跨平台 POSIX signal 合同。
 
 caller 仍须排除外部 remap/protection 变更，并在释放前停止新用户、等待已有 upload / 系统调用 / GPU 使用完成。dirty reader drain 只保护跟踪元数据，不会替调用者 pin 一整个 GPU 操作。
 

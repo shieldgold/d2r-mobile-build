@@ -105,3 +105,17 @@ Local adaptations preserve the pure buffer slice/range functions, adapt the
 base-52 builder ABI, add checked host object generations, CPU cache access checks,
 and retain captured GPU address resources through actual Metal completion.
 No-op debug labeling and the unexported newer BuilderGetDevice are excluded.
+
+Texture object and view adapters (texture_family.inc, texture_abi.h), CPU
+storage modules and generic Metal view/attachment behavior:
+https://github.com/TommyLau/botw-mobile
+Commit 5f673ae2ea4f90ad46403aa6fbe13537fb557271
+Original paths: dm/gfx/nvn/hle_nvn.c, nvn_obj.h, nvn_mtl.m,
+nvn_texwrite.c/.h, nvn_texown.c/.h, nvn_texflush.c/.h, nvn_dirty.c/.h,
+nvn_hmap.h. Copyright (c) 2026 jhaizhou, MIT notice reproduced above.
+The complete algorithm modules retain a separate LICENSE and SOURCE.json in
+vendor/botw-texture. Local changes adapt the independently checked base-v0
+object ABI, public iOS VM calls, checked copies/failure paths, per-command
+buffer publication, classic Metal, pool generations and strict unsupported
+semantics. Upstream no-op/fallback results and game-specific rendering policies
+are not imported. See TEXTURES.md for supported scope and validation limits.

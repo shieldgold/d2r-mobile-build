@@ -155,29 +155,39 @@ int nvn_texwrite_plan_level(const nvn_texdesc *d, unsigned level, nvn_texwrite_p
 }
 
 // Copies the planned region between tightly addressed linear rows and block-linear storage in either direction.
-static void copy_runs(const nvn_texdesc *d, const nvn_texwrite_plan *p, uint8_t *lin, uint8_t *storage, int to_storage) {
+static int copy_runs(const nvn_texdesc *d, const nvn_texwrite_plan *p, uint8_t *lin, uint8_t *storage, int to_storage,
+                     int (*write_run)(void*,uint64_t,const void*,size_t),void *opaque) {
     for (uint32_t z = 0; z < p->depth; z++) {
         uint32_t row_bytes, rows, slices, bpb; uint64_t base; unsigned th, td;
         unsigned layer = p->is3d ? 0 : p->layer + z;
         uint32_t slice = p->is3d ? p->z0 + z : 0;
-        if (nvn_deswizzle_geom(d, p->level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb)) return;   //Validated by the plan
+        if (nvn_deswizzle_geom(d, p->level, layer, &row_bytes, &rows, &slices, &base, &th, &td, &bpb)) return -1;   //Validated by the plan
         for (uint32_t y = 0; y < p->hb; y++) {
             uint8_t *line = lin + z * p->src_img + y * p->src_row;
             for (uint32_t x = 0; x < p->wb;) {   //Bytes stay contiguous up to the next 16-byte boundary inside a GOB
                 uint32_t bx = p->xb + x, n = 16 - bx % 16;
                 if (n > p->wb - x) n = p->wb - x;
-                uint8_t *at = storage + base + nvn_bl_offset(bx, p->yb + y, slice, row_bytes, rows, th, td);
-                if (to_storage) memcpy(at, line + x, n); else memcpy(line + x, at, n);
+                uint64_t offset = base + nvn_bl_offset(bx, p->yb + y, slice, row_bytes, rows, th, td);
+                if (write_run) { if (write_run(opaque,offset,line+x,n)) return -1; }
+                else if (to_storage) memcpy(storage+offset,line+x,n);
+                else memcpy(line+x,storage+offset,n);
                 x += n;
             }
         }
     }
+    return 0;
 }
 
 void nvn_texwrite_extract(const nvn_texdesc *d, const nvn_texwrite_plan *p, const uint8_t *storage, void *dst) {
-    copy_runs(d, p, dst, (uint8_t *)storage, 0);
+    (void)copy_runs(d, p, dst, (uint8_t *)storage, 0,NULL,NULL);
 }
 
 void nvn_texwrite_apply(const nvn_texdesc *d, const nvn_texwrite_plan *p, const void *src, uint8_t *storage) {
-    copy_runs(d, p, (uint8_t *)src, storage, 1);
+    (void)copy_runs(d, p, (uint8_t *)src, storage, 1,NULL,NULL);
+}
+
+int nvn_texwrite_apply_checked(const nvn_texdesc *d,const nvn_texwrite_plan *p,
+    const void *src,int (*write_run)(void*,uint64_t,const void*,size_t),void *opaque){
+    if(!d||!p||!src||!write_run)return -1;
+    return copy_runs(d,p,(uint8_t*)src,NULL,1,write_run,opaque);
 }

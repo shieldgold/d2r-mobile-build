@@ -66,7 +66,7 @@ Submit先快照输入句柄并保留全部有效host command arrays，完整核�
 
 `CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
 
-140 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，包含实际ABI入口；对象错误记录expected class、raw地址、单次读取的serial和actual class，不可读的raw明确标记。入口上下文按TLS正确嵌套恢复，先解锁再回调。嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
+239 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，包含实际ABI入口；对象错误记录expected class、raw地址、单次读取的serial和actual class，不可读的raw明确标记。入口上下文按TLS正确嵌套恢复，先解锁再回调。嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 
@@ -162,3 +162,5 @@ int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof erro
 测试夹具全部人工生成，包含 BNSH 恶意边界、局部提取、真实 Metal 拷贝/清屏/绘制/围栏，以及手工 GOB 地址的彩色采样、顶点流、显式 uniform/texture/sampler 映射、深度遮挡和过短绑定范围拒绝。静态 c1 测试覆盖原始 0.25 常量的实际 GPU 像素、动态/越界索引拒绝，以及 loader 对位模式与次数篡改的拒绝。游戏输入、派生 shader、密钥和本地报告都不进入 Git。
 
 上游通用 ABI、对象边界和 Metal 内存/完成时序可复用；D2R 的 `shader_map.py` 依赖 Switch/PC D2R 对应包的 DXBC 顺序映射，`nvn_mtl.m` 含大量 D2R 专用着色器和 UI 特例，因此这里没有复制其游戏身份表或游戏特例。参考固定上游 [e2a0c9a](https://github.com/jhaizhou-ops/d2r-mobile/tree/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/dm/gfx) 与 [BNSH 格式来源](https://github.com/maierfelix/bnsh-decoder/blob/master/BNSH.ksy)。
+
+纹理整组的原版 ABI、采样/渲染视图、CPU 存储一致性、宿主 dirty 桥和实际支持边界见 [TEXTURES.md](TEXTURES.md)。
