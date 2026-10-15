@@ -1,19 +1,21 @@
 # BOTW 原生图形桥
 
-这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 77 个 NVN 接口；完整游戏需要更多状态、资源和命令。
+这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 114 个 NVN 接口；完整游戏需要更多状态、资源和命令。
 
 ## 宿主接入
 
 1. 在进入客体前调用 `botw_graphics_init(layer, error, validator)`。`layer` 是宿主持有的 `CAMetalLayer`，离屏测试可传空。`validator` 核验客体可读内存区间，着色器控制段及扩展到宿主页边界的内存池依赖它。
 2. 强制将游戏的 `nvnBootstrapLoader` 导入/导出解析到 `botw_nvn_bootstrap_loader`，避免执行客体 NVN 驱动。BOTW 此入口定义在 `subsdk0`，不是 `sdk`。
-3. 准确离线翻译并验证资源绑定后，调用 `botw_graphics_register_shader` 登记原始控制段、GPU 数据和本地 MSL。运行时对两段原始数据进行完整 SHA256 匹配，没有匹配则 `nvnProgramSetShaders` 返回失败。
+3. 准确离线翻译后，使用 `botw_graphics_register_shader_with_bindings` 登记原始控制段、GPU 数据、本地 MSL 和逐阶段 NVN→Metal 显式资源槽映射。无资源的着色器可用 `botw_graphics_register_shader`。运行时完整 SHA256 匹配两段原始数据；管线还用 `MTLBinding` 核验每个实际资源均有映射，并核对纹理维数、uniform 大小/对齐、顶点读取范围。
 4. 编译 `graphics.m` 时开启 ARC、blocks，链接 Foundation、Metal、QuartzCore。`tools/validate_msl.m` 是独立命令行工具，不要编入 App。
 
 接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空；布尔接口出错返回 0，不以无操作成功代替实现。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
 
-当前纹理实现仅支持带线性标志的单级 RGBA8/BGRA8 二维颜色纹理，直接使用 Metal buffer-backed texture。未实现块线性/压缩纹理、深度模板、多颜色附件、顶点输入布局、纹理/采样器和 uniform 绑定、混合、索引绘制、计算与嵌套命令。提交立即 commit；围栏只在 GPU 实际完成后放行。内存池优先零拷贝共享映射；不能验证页范围的非对齐 uncached 池拒绝创建，cached 池的复制路径需要显式 flush/invalidate。
+纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理的逐 mip 解排布和 GPU 上传；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、数组/立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
-`CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。当前接口要求单个宿主图形所有者线程；并发录制必须先补对象表与资源同步。
+提交立即 commit；围栏只在 GPU 实际完成后放行。`shutdown` 使用全局提交完成组等待全部已提交命令后才释放零拷贝客体内存。异步 GPU/呈现回调只更新加锁状态，不调用宿主错误回调，避免跨线程 longjmp。内存池优先零拷贝共享映射；不能验证页范围的非对齐 uncached 池拒绝创建，cached 池的复制路径需要显式 flush/invalidate。
+
+`CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。当前接口要求单个宿主图形所有者线程；并发录制必须先补对象表与资源同步。
 
 ## 本地着色器准备
 
@@ -61,6 +63,6 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 
 `python3 -m unittest discover -s tests -p test_botw_graphics.py -v`
 
-测试夹具全部人工生成，包含 BNSH 恶意边界、局部提取、真实 Metal 拷贝/清屏/绘制/围栏和未实现调用失败。游戏输入、派生 shader、密钥和本地报告都不进入 Git。
+测试夹具全部人工生成，包含 BNSH 恶意边界、局部提取、真实 Metal 拷贝/清屏/绘制/围栏，以及手工 GOB 地址的彩色采样、顶点流、显式 uniform/texture/sampler 映射、深度遮挡和过短绑定范围拒绝。游戏输入、派生 shader、密钥和本地报告都不进入 Git。
 
 上游通用 ABI、对象边界和 Metal 内存/完成时序可复用；D2R 的 `shader_map.py` 依赖 Switch/PC D2R 对应包的 DXBC 顺序映射，`nvn_mtl.m` 含大量 D2R 专用着色器和 UI 特例，因此这里没有复制其游戏身份表或游戏特例。参考固定上游 [e2a0c9a](https://github.com/jhaizhou-ops/d2r-mobile/tree/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/dm/gfx) 与 [BNSH 格式来源](https://github.com/maierfelix/bnsh-decoder/blob/master/BNSH.ksy)。

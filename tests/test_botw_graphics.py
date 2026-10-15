@@ -124,6 +124,34 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertNotEqual(partial.returncode, 0)
             self.assertIn('scissored clear', partial.stderr)
 
+    def test_vertex_uniform_sampler_block_linear_and_depth_pixels(self):
+        implemented = (ROOT / 'native/botw_graphics/implemented.inc').read_text()
+        self.assertIn('NVN_BIND(nvnCommandBufferBindUniformBuffer)', implemented,
+                      'GPU resource binding implementation is missing')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'resources.c'
+            harness.write_text(RESOURCE_SMOKE)
+            exe = path / 'resources'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks',
+                '-Werror', '-Wno-deprecated-declarations', '-I', str(source.parent),
+                str(source), str(harness), '-framework', 'Foundation', '-framework',
+                'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
+            for mode, expected in (('bad-bindings', 'binding map'),
+                                   ('short-uniform', 'uniform range'),
+                                   ('short-vertex', 'vertex range')):
+                result = subprocess.run([str(exe), mode], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, mode)
+                self.assertIn(expected, result.stderr)
+
+
 
 METAL_SMOKE = r"""
 #include "graphics.h"
@@ -224,6 +252,78 @@ int main(int argc, char **argv) {
     puts("GPU_COPY_CLEAR_DRAW_OK"); return 0;
 }
 """
+
+
+RESOURCE_FEATURE = r"""
+    API(nvnTexturePoolInitialize); API(nvnTexturePoolRegisterTexture);
+    API(nvnSamplerPoolInitialize); API(nvnSamplerPoolRegisterSampler);
+    API(nvnSamplerBuilderSetDefaults); API(nvnSamplerBuilderSetDevice);
+    API(nvnSamplerBuilderSetMinMagFilter); API(nvnSamplerBuilderSetWrapMode); API(nvnSamplerInitialize);
+    API(nvnDeviceGetTextureHandle); API(nvnCommandBufferSetTexturePool); API(nvnCommandBufferSetSamplerPool);
+    API(nvnCommandBufferBindTexture); API(nvnCommandBufferBindUniformBuffer);
+    API(nvnVertexAttribStateSetDefaults); API(nvnVertexAttribStateSetFormat); API(nvnVertexAttribStateSetStreamIndex);
+    API(nvnVertexStreamStateSetDefaults); API(nvnVertexStreamStateSetStride);
+    API(nvnCommandBufferBindVertexAttribState); API(nvnCommandBufferBindVertexStreamState); API(nvnCommandBufferBindVertexBuffer);
+    API(nvnDepthStencilStateSetDefaults); API(nvnDepthStencilStateSetDepthTestEnable);
+    API(nvnDepthStencilStateSetDepthWriteEnable); API(nvnDepthStencilStateSetDepthFunc);
+    API(nvnCommandBufferBindDepthStencilState); API(nvnCommandBufferClearDepthStencil);
+    NVNtexture tiled; nvnTextureBuilderSetDefaults(&tb); nvnTextureBuilderSetDevice(&tb,&device);
+    nvnTextureBuilderSetSize2D(&tb,2,2); nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);
+    nvnTextureBuilderSetStorage(&tb,&pool,6144);
+    /* Independent hand-calculated single-GOB addresses: x=0/4,y=0/1. */
+    unsigned char *tile=memory+6144; memset(tile,0,512);
+    const unsigned char texels[4][4]={{255,0,0,255},{0,255,0,255},{255,255,255,255},{0,0,255,255}};
+    memcpy(tile,texels[0],4);memcpy(tile+4,texels[1],4);memcpy(tile+16,texels[2],4);memcpy(tile+20,texels[3],4);
+    CHECK(nvnTextureInitialize(&tiled,&tb));
+    NVNtexturePool tp; NVNsamplerPool sp;
+    CHECK(nvnTexturePoolInitialize(&tp,&pool,0,16)); CHECK(nvnSamplerPoolInitialize(&sp,&pool,1024,16));
+    nvnTexturePoolRegisterTexture(&tp,3,&tiled,NULL);
+    NVNsamplerBuilder sb;NVNsampler sampler;nvnSamplerBuilderSetDefaults(&sb);nvnSamplerBuilderSetDevice(&sb,&device);
+    nvnSamplerBuilderSetMinMagFilter(&sb,NVN_MIN_FILTER_NEAREST,NVN_MAG_FILTER_NEAREST);
+    nvnSamplerBuilderSetWrapMode(&sb,NVN_WRAP_MODE_CLAMP_TO_EDGE,NVN_WRAP_MODE_CLAMP_TO_EDGE,NVN_WRAP_MODE_CLAMP_TO_EDGE);
+    CHECK(nvnSamplerInitialize(&sampler,&sb)); nvnSamplerPoolRegisterSampler(&sp,4,&sampler);
+    uint64_t handleTexture=nvnDeviceGetTextureHandle(&device,3,4);
+    const float positions[]={-1,-1,3,-1,-1,3};memcpy(memory+512,positions,sizeof positions);
+    float vsUniform[]={0,0,.25,0},fsUniform[]={1,1,.5,1};memcpy(memory+768,vsUniform,16);memcpy(memory+784,fsUniform,16);
+    NVNvertexAttribState va;NVNvertexStreamState stream;
+    nvnVertexAttribStateSetDefaults(&va);nvnVertexAttribStateSetFormat(&va,NVN_FORMAT_RG32F,0);nvnVertexAttribStateSetStreamIndex(&va,0);
+    nvnVertexStreamStateSetDefaults(&stream);nvnVertexStreamStateSetStride(&stream,8);
+    controls[0][8]=4;controls[1][8]=5;codes[0][8]=4;codes[1][8]=5;
+    memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    const char *resourceMSL="#include <metal_stdlib>\nusing namespace metal;struct In{float2 p [[attribute(0)]];};struct O{float4 p [[position]];};"
+      "vertex O rv(In v [[stage_in]],constant float4& u [[buffer(0)]]) {return {float4(v.p+u.xy,u.z,1)};}"
+      "fragment float4 rf(O v [[stage_in]],constant float4& c [[buffer(1)]],texture2d<float> t [[texture(3)]],sampler s [[sampler(0)]]) {return t.sample(s,float2(.75,.75))*c;}";
+    botw_graphics_shader_binding vb[]={{BOTW_GRAPHICS_UNIFORM,5,0}};
+    botw_graphics_shader_binding fb[]={{BOTW_GRAPHICS_UNIFORM,7,1},{BOTW_GRAPHICS_TEXTURE,9,3},{BOTW_GRAPHICS_SAMPLER,9,0}};
+    if(argc>1&&!strcmp(argv[1],"bad-bindings"))fb[1].metal_slot=2;
+    CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,resourceMSL,"rv",vb,1));
+    CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,resourceMSL,"rf",fb,3));
+    CHECK(nvnProgramSetShaders(&program,2,sd));
+    NVNtexture depth;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);
+    nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,8192);
+    CHECK(nvnTextureInitialize(&depth,&tb));
+    NVNdepthStencilState ds;nvnDepthStencilStateSetDefaults(&ds);nvnDepthStencilStateSetDepthTestEnable(&ds,1);
+    nvnDepthStencilStateSetDepthWriteEnable(&ds,1);nvnDepthStencilStateSetDepthFunc(&ds,NVN_DEPTH_FUNC_LESS);
+    for(int pass=0;pass<2;pass++){
+      if(pass){vsUniform[2]=.75;fsUniform[0]=fsUniform[1]=fsUniform[2]=0;memcpy(memory+768,vsUniform,16);memcpy(memory+784,fsUniform,16);}
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,&depth,NULL);
+      if(!pass)nvnCommandBufferClearDepthStencil(&cb,1,1,0,0);
+      nvnCommandBufferBindDepthStencilState(&cb,&ds);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);
+      nvnCommandBufferBindVertexAttribState(&cb,1,&va);nvnCommandBufferBindVertexStreamState(&cb,1,&stream);
+      nvnCommandBufferBindVertexBuffer(&cb,0,gpu+512,(argc>1&&!strcmp(argv[1],"short-vertex"))?4:sizeof positions);
+      nvnCommandBufferBindUniformBuffer(&cb,NVN_SHADER_STAGE_VERTEX,5,gpu+768,(argc>1&&!strcmp(argv[1],"short-uniform"))?4:16);
+      nvnCommandBufferBindUniformBuffer(&cb,NVN_SHADER_STAGE_FRAGMENT,7,gpu+784,16);
+      nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);
+      nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,9,handleTexture);
+      nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);
+      nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+      CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+      CHECK(pixels[0]==0 && pixels[1]==0 && pixels[2]>=127 && pixels[2]<=128 && pixels[3]==255);
+    }
+    CHECK(botw_graphics_presented_frame_count()==0); /* Offscreen work is not a presented game frame. */
+    puts("GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK");
+"""
+RESOURCE_SMOKE = METAL_SMOKE.replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
 
 
 if __name__ == '__main__':

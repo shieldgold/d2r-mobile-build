@@ -27,6 +27,22 @@ int botw_graphics_register_shader(const void *control, size_t control_bytes,
                                   const void *code, size_t code_bytes,
                                   NVNshaderStage stage, const char *msl,
                                   const char *entry);
+enum botw_graphics_binding_kind {
+    BOTW_GRAPHICS_UNIFORM = 0, BOTW_GRAPHICS_TEXTURE = 1, BOTW_GRAPHICS_SAMPLER = 2
+};
+typedef struct {
+    enum botw_graphics_binding_kind kind;
+    unsigned nvn_slot, metal_slot;
+} botw_graphics_shader_binding;
+int botw_graphics_register_shader_with_bindings(const void *control, size_t control_bytes,
+    const void *code, size_t code_bytes, NVNshaderStage stage, const char *msl,
+    const char *entry, const botw_graphics_shader_binding *bindings, size_t binding_count);
+/* Counts only completed on-screen presents containing a new translated draw.
+ * Clear-only and offscreen submits do not count. Screenshot capture is opt-in. */
+uint64_t botw_graphics_presented_frame_count(void);
+void botw_graphics_set_capture_enabled(int enabled);
+int botw_graphics_copy_latest_frame(void *rgba, size_t capacity, uint32_t *width,
+                                    uint32_t *height, uint64_t *frame_number);
 /* Wait for GPU completion and read a supported linear 2D color texture. */
 int botw_graphics_read_texture(const NVNtexture *texture, void *pixels, size_t bytes);
 #ifdef __cplusplus
