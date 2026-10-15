@@ -36,13 +36,21 @@
 #define LOCAL_USER_TITLE "01007ef00011e000"
 #define PRESELECTED_STORAGE_SIZE 0x88u
 #define AM_NOT_AVAILABLE (128u | (2u << 9))
+/* Nintendo enum order. The old SDK's settings client caches the first fifteen
+ * codes; later canonical codes remain valid for explicit application policy.
+ * This registry describes neither the host locale nor installed title assets. */
+#define LEGACY_LANGUAGE_COUNT 15u
+static const char canonical_language_codes[][8] = {
+    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru",
+    "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"
+};
 
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
     OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE,
-    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE };
+    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE, OBJECT_SETTINGS };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -165,6 +173,7 @@ static void emit(botw_services *s, const char *format, ...) {
 static const char *kind_name(enum ObjectKind kind) {
     switch (kind) {
         case OBJECT_SM: return "sm:";
+        case OBJECT_SETTINGS: return "set.ISettingsServer";
         case OBJECT_LM: return "lm";
         case OBJECT_LOGGER: return "lm.ILogger";
         case OBJECT_APM: return "apm.IPerformanceManager";
@@ -443,18 +452,14 @@ int botw_services_set_application_language(botw_services *s, const char *code,
     /* Generic registry: libnx SetLanguage (20cbcfd90567f7bf84df7725f27e345e2164fa6b)
      * and Switchbrew Settings_services LanguageCode. Asset selection belongs
      * to the caller; notably zh-Hans being canonical does not install assets. */
-    static const char *const canonical[] = {
-        "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru",
-        "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"
-    };
     if (!s || !code || !source || !*source)
         return problem(error, cap, "application language requires explicit code and source");
     size_t length = 0; while (length < 8 && code[length]) length++;
     if (!length || length >= 8)
         return problem(error, cap, "application language code must fit eight NUL-terminated bytes");
     unsigned known = 0;
-    for (size_t i = 0; i < sizeof canonical / sizeof canonical[0]; i++)
-        if (strlen(canonical[i]) == length && !memcmp(code, canonical[i], length)) known = 1;
+    for (size_t i = 0; i < sizeof canonical_language_codes / sizeof canonical_language_codes[0]; i++)
+        if (strlen(canonical_language_codes[i]) == length && !memcmp(code, canonical_language_codes[i], length)) known = 1;
     if (!known) return problem(error, cap, "application language code is not canonical Nintendo LanguageCode");
     size_t source_length = 0;
     while (source_length < 128 && source[source_length]) {
@@ -670,7 +675,11 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         const uint8_t *entry = ipc + raw_end + i * 8;
         uint32_t high = load32(entry + 4);
         uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
-        if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+        /* An old settings OutArray(0) still has a C descriptor with a real
+         * non-NULL client pointer. No bytes are authorized or dereferenced.
+         * stage_pointers subsequently permits this only for its exact schema. */
+        if (!(high >> 16)) r->output_address = address;
+        else if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
         if (high >> 16) r->output_is_static = 1;
         r->pointer_output_bytes += ((size_t)(high >> 16) + 15) & ~(size_t)15;
         r->output_static_count++;
@@ -713,22 +722,26 @@ static int stage_pointers(botw_services *s, Object *object, Request *r, const ui
             r->pointer_output_bytes > POINTER_CAPACITY - r->pointer_input_bytes)
         return problem(error, cap, "IPC pointer arena aggregate budget exceeds capacity=%u", POINTER_CAPACITY);
     if (r->output_static_count) {
-        /* This fixed SDK's ListAllUsers is a VARIABLE OutPointer, not a fixed
-         * C array. Its u16 size table lies after the reserved alignment bytes,
-         * outside domain data_size. Other output-pointer schemas need evidence. */
-        if (object->kind != OBJECT_ACCOUNT || r->command != 2)
+        /* Audited VARIABLE OutPointer schemas: account C128 and the old
+         * settings language catalogue C(0..15)*8. The u16 size table follows
+         * reserved alignment bytes, outside domain data_size. */
+        int account = object->kind == OBJECT_ACCOUNT && r->command == 2;
+        int catalogue = object->kind == OBJECT_SETTINGS && r->command == 1;
+        if (!account && !catalogue)
             return problem(error, cap, "unsupported IPC receive-static pointer schema service=%s command=%u", kind_name(object->kind), r->command);
         size_t table = r->raw_start + 16 + (r->domain ? 16 : 0) + 16;
         size_t raw_size = (16 + (r->domain ? 16 : 0) + 16 + 2 + 3) & ~(size_t)3;
-        if (r->buffer_descriptor_count != 1 || r->output_static_count != 1 || r->output_count != 1 ||
-                !r->output_is_static || r->output_size != 128 || r->input_count ||
+        if (r->buffer_descriptor_count != 1 || r->output_static_count != 1 ||
+                r->output_count != (r->output_size != 0) || r->output_is_static != (r->output_size != 0) ||
+                (account ? r->output_size != 128 : (r->output_size > LEGACY_LANGUAGE_COUNT * 8 || r->output_size % 8)) || r->input_count ||
                 r->raw_end - r->raw_start != raw_size || !checked_span(table, 2, r->raw_end) ||
                 (r->domain && r->payload_size) ||
                 ((unsigned)ipc[table] | (unsigned)ipc[table + 1] << 8) != r->output_size)
-            return problem(error, cap, "acc.ListAllUsers requires exact variable C128 pointer size table and no input parameters");
+            return problem(error, cap, "%s requires exact variable C pointer size table and no input parameters",
+                account ? "acc.ListAllUsers C128" : "set.GetAvailableLanguageCodes C(0..15)*8");
         if (ranges_overlap(r->output_address, r->output_size, transfer->ipc_address, ipc_capacity))
             return problem(error, cap, "IPC receive-static pointer overlaps the client IPC message");
-        if (r->output_address >= (UINT64_C(1) << 42))
+        if (r->output_size && r->output_address >= (UINT64_C(1) << 42))
             return problem(error, cap, "IPC receive-static destination cannot be represented by the 42-bit reply pointer");
         transfer->output_address = r->output_address; transfer->output_size = r->output_size;
         r->output_address = (uint64_t)(uintptr_t)(transfer->arena + POINTER_CAPACITY - r->pointer_output_bytes);
@@ -1379,6 +1392,35 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
     }
     return problem(error, cap, "unsupported read-only IPC service=%s command=%u", kind_name(o->kind), r->command);
 }
+static int settings_request(botw_services *s, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (r->pid || r->copy_count || r->input_count)
+        return problem(error, cap, "set language catalogue does not accept PID, handles or input buffers");
+    if (r->command == 1) {
+        /* The original SDK's MakeLanguageCode caches this ordered array, then
+         * converts enum values locally. A count scalar accompanies the C
+         * output; byte extent and size table were checked before staging. */
+        if (r->output_static_count != 1 || r->buffer_descriptor_count != 1 ||
+                r->output_size > LEGACY_LANGUAGE_COUNT * 8 || r->output_size % 8)
+            return problem(error, cap, "set.GetAvailableLanguageCodes requires the checked legacy C output array");
+        int32_t count = (int32_t)(r->output_size / 8);
+        if (r->output_size) memcpy((void *)(uintptr_t)r->output_address, canonical_language_codes, r->output_size);
+        r->transfer->output_written = r->output_size;
+        response(ipc, capacity, r, &count, sizeof count, 0, 0);
+        emit(s, "settings_language_catalog source=legacy_canonical_registry total=%u returned=%d device_locale_backend=false title_asset_support=false",
+            LEGACY_LANGUAGE_COUNT, count);
+        return 0;
+    }
+    if (r->command == 3) {
+        /* Original no-input proxy leaves eight session framing bytes
+         * uninitialized. Domain data_size excludes those bytes entirely. */
+        if (r->buffer_descriptor_count ||
+                (r->domain ? r->payload_size != 0 : (r->payload_size != 0 && r->payload_size != 8)))
+            return problem(error, cap, "set.GetAvailableLanguageCodeCount requires no input parameters or descriptors");
+        int32_t count = LEGACY_LANGUAGE_COUNT;
+        response(ipc, capacity, r, &count, sizeof count, 0, 0); return 0;
+    }
+    return problem(error, cap, "unsupported IPC service=set.ISettingsServer command=%u", r->command);
+}
 static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (!s->input || !s->input_shared_memory_handle || !s->applet_ready) return problem(error, cap, "hid requires real host input, shared-memory handle and applet resource identity");
     if (r->copy_count || r->output_count) return problem(error, cap, "hid unexpected copy handle/output buffer");
@@ -1565,7 +1607,9 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
     if (stage_pointers(s, o, &r, ipc, transfer, capacity, error, cap)) return -1;
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE &&
+            !(o->kind == OBJECT_SETTINGS && r.command == 1 && r.output_static_count == 1))
+        return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     /* Protected VM writes cannot enter the CPU dirty-fault handler. Preflight
      * the real reply span before logging, consuming storage or host I/O. This
@@ -1590,6 +1634,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "aoc:u\0\0\0", 8)) service_kind = OBJECT_AOC;
             else if (!memcmp(name, "pctl:a\0\0", 8)) service_kind = OBJECT_PCTL_FACTORY;
             else if (!memcmp(name, "acc:u0\0\0", 8)) service_kind = OBJECT_ACCOUNT;
+            else if (!memcmp(name, "set\0\0\0\0\0", 8)) service_kind = OBJECT_SETTINGS;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
@@ -1598,6 +1643,8 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         return save_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_ACCOUNT || o->kind == OBJECT_ACCOUNT_CONTEXT) {
         return account_request(s, session, o, ipc, capacity, &r, error, cap);
+    } else if (o->kind == OBJECT_SETTINGS) {
+        return settings_request(s, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_PCTL_FACTORY || o->kind == OBJECT_PCTL_SERVICE) {
         return parental_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_AOC) {
