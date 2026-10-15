@@ -27,7 +27,7 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已安装、启动 `3e9c786`；完整资源与原身份保留，进入 `nnMain` 后在退出路径停止，尚无游戏画面、操作或游戏存档验收。下列记录保留历次真机证据，不能用旧机结果替代当前手机验证。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已安装、启动 `0f989ca`；完整资源与原身份保留，进入 `nnMain` 并成功启动两个游戏工作线程后，在 HID 调试手柄初始化停止，尚无游戏画面、操作或游戏存档验收。下列记录保留历次真机证据，不能用旧机结果替代当前手机验证。
 
 较早完成的真机测试为 iPhone 15 Pro / iOS 27.2，宿主源码提交 `3d1622c`：
 
@@ -53,7 +53,11 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 
 随后 `ed9f354` 将 37 份私有着色器的实际 Rust SPIR-V 1.4、原始 MSL、最终 MSL 与 scratch 证明接成同一条可复算来源链；`4fb5b23` 整组接入 17 个 Buffer 入口，保留 base-v0 对象布局、池代际和真实 GPU 完成生命周期。该版已在 iPhone 12 更新并装载新 bundle，越过 BufferBuilder，随后停在 16KB 宿主页的线程栈映射边界。
 
-当前手机已安装并启动 `3e9c786`，对应 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38779653810) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38779653775) 均成功。新的显式线程栈对齐 profile 保留原分配器与大小，只把固定版本的分配对齐提高为 16KB；运行前再次审计实际已映射指令。真机已越过原 MapMemory 停止点，实际 SDK 堆为 **1,906,311,168** 字节、根堆 **1,872,756,736** 字节，进入 `nnMain` 并读取 RomFS 文件表。随后出现原程序 `User Backtrace` 和 `am.IApplicationFunctions` 命令 22；原退出原因正在继续取证，不能把最后的服务拒绝当作最初错误。安装收据、完整日志与报告在本地 `outputs/botw-ios-3e9c786-iphone12/`。
+此前手机已安装并启动 `3e9c786`，对应 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38779653810) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38779653775) 均成功。新的显式线程栈对齐 profile 保留原分配器与大小，只把固定版本的分配对齐提高为 16KB；运行前再次审计实际已映射指令。真机已越过原 MapMemory 停止点，实际 SDK 堆为 **1,906,311,168** 字节、根堆 **1,872,756,736** 字节，进入 `nnMain` 并读取 RomFS 文件表。随后出现原程序 `User Backtrace` 和 `am.IApplicationFunctions` 命令 22；原退出原因正在继续取证，不能把最后的服务拒绝当作最初错误。安装收据、完整日志与报告在本地 `outputs/botw-ios-3e9c786-iphone12/`。
+
+更新 `8677910` 后，iPhone 12 已实际使用 `host-pthread-stack-v2`：两个游戏线程分别在 16KB、64KB 的真实 pthread 栈运行，完整 16KB SDK 尾页均保留，旧的线程创建失败已越过。该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38782965455) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38782965686) 成功；新真机停止点为工作线程的 `GetInfo` id 8 查询。证据保留在本地 `outputs/botw-ios-8677910-iphone12/`。
+
+`0f989ca` 已按当前进程的真实 native debugger 状态接入此查询，公开 `sysctl` 失败或短记录均明确停止，不推断为 false；严格区分 handle/subid 的内核错误。36 项内核、26 项运行时及 6 项真实线程回归通过，独立审查无阻塞。该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38785591686) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38785591333) 均成功，已在 iPhone 12 保留数据更新并启动。真机已越过 `GetInfo` id 8，与固定 Mac 原程序同停在 `hid` 命令 1，即原 SDK 的 `ActivateDebugPad`；此处需要激活状态与共享内存中真实断开设备的采样环，不能仅回复成功。证据在本地 `outputs/botw-ios-0f989ca-iphone12/`；安装、启动及工作线程成功仍不代表游戏可玩。
 
 本次更新继续保留完整 14,420,017,152 字节 RomFS，取回的原 UID 逐字节一致，目录与 UID 权限分别为 `0700`、`0600`。37 份着色器已装载，手机 manifest 摘要与本地 direct-v2 一致。实际游戏画面、操作、游戏保存与重开仍未通过。后续按完整模块审计和复用推进，具体范围见[上游复用矩阵](BOTW_UPSTREAM_REUSE.zh-CN.md)。
 
@@ -128,6 +132,8 @@ Host39 框架打包仍核验固定七模块指纹、通用改写摘要及全部�
 
 低内存实验必须显式增加 `--heap-policy bounded-host-memory-v1`，并同时使用 `--host39 --rewrite`，选择新的输出目录保留原产物。框架按实际宿主模块集合使用 `--modules main subsdk0 subsdk1 subsdk2 subsdk3 sdk`；七个原始输入仍全部核验。运行时会审计两个完整 thunk、分支、TSD 槽和真实分配结果；单站点修改、截断或未知载荷均拒绝。
 
+Apple 线程栈适配另用 `--thread-stack-policy host-pthread-stack-v2`，同样要求 `--host39 --rewrite`。仅适配已核验 base-v0 的原线程构造器：对有效的正数、4KB 整倍数且不溢出 SDK 有符号容量的请求，在容量存入对象之前统一计算 `align_up(requested, 16KB) + 16KB`，让原分配器、SDK 参数与释放路径消费同一个真实容量。额外完整尾页保留 SDK 的 entry/fenv；内核仅在已拥有的映射内向下对齐真实 pthread 栈顶，保留至少原请求容量。原始输入、两个改写站点、68 字节 thunk 和实际映射均需审计；其他线程分配路径没有因此被自动准入。
+
 不带 `--rewrite` 只进行模块审计。带此参数会下载 SHA256 固定的开源构建工具，并以 `native` 规则域运行，关闭 D2R 私有门；**不会执行游戏程序**。
 
 输出包括 `report.json`、`ExeFS/`、`rewrite/*.rewrite.log`、改写后的映像与门表。`report.json` 是状态依据；中途失败不能用目录里残留的个别文件判定成功。当前实际实验结果位于本工作区 `outputs/botw-native-base/`。
@@ -143,7 +149,7 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 
 首阶段为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。宿主阶段另增人工程序执行、框架布局、来源校验、ZIP 边界和本地签名流程测试。GitHub Actions 仅使用人工合成输入，不上传游戏文件。
 
-固定源码 `7b4193f` 的完整本地回归运行 **496 项**，90.149 秒通过，包含新纹理模块、服务预写、内存追踪与退出结果诊断；快照初次不含原始 NSO/RomFS，2 项私有数据检查跳过。随后在同一固定快照连接本地只读输入，两项精确检查在 0.893 秒内均通过。线程栈对齐 profile 另有原始指令与实际 ARM64 映射回归。包括实际 ARM64 执行、HIPC 高地址与 x18 保留、宿主边界与线程、真实 Metal 像素、资源路径、账户与保存文件 IPC、写入持久性、回调恢复和音频边界测试。低内存策略另有独立审查、5 档原始指令参数联合执行、8 种打包篡改拒绝，以及 17 个真实 ARM64 线程的 340,000 次 TSD 读取。可选 Mac 窗口测试曾间歇超时，现保留主线程窗口状态和超时前输出以便诊断；这次固定快照运行通过，不代表已确诊原间歇故障。Host39 两个分配器另有 1024 次原始 ARM64 算法和真实映射试验。云端运行 Linux 准备测试及真实 iPhoneOS 编译，再执行 macOS 原生宿主测试；测试通过与安装成功都不能替代可玩验收。
+固定源码 `8677910` 的完整本地回归运行 **500 项**，89.189 秒通过，包含新纹理模块、完整线程栈容量、服务预写、内存追踪与退出结果诊断；快照初次不含原始 NSO/RomFS，2 项私有数据检查跳过。随后在同一固定快照连接本地只读输入，两项精确检查在 0.906 秒内均通过。线程栈 profile 另经实际原程序执行，启动了两个真实游戏工作线程；其余调用族仍按各自分配、释放和尾部数据合同独立审计。包括实际 ARM64 执行、HIPC 高地址与 x18 保留、宿主边界与线程、真实 Metal 像素、资源路径、账户与保存文件 IPC、写入持久性、回调恢复和音频边界测试。低内存策略另有独立审查、5 档原始指令参数联合执行、8 种打包篡改拒绝，以及 17 个真实 ARM64 线程的 340,000 次 TSD 读取。可选 Mac 窗口测试曾间歇超时，现保留主线程窗口状态和超时前输出以便诊断；这次固定快照运行通过，不代表已确诊原间歇故障。Host39 两个分配器另有 1024 次原始 ARM64 算法和真实映射试验。云端运行 Linux 准备测试及真实 iPhoneOS 编译，再执行 macOS 原生宿主测试；测试通过与安装成功都不能替代可玩验收。
 
 AudioOut 已整模块接入真实 AudioUnit、宿主复制、完成事件和前后台暂停，19 项测试及真实 Mac 零 PCM 回调通过；这不是游戏声音验证。若系统重置音频服务，本批明确暂停并要求重开应用，尚不自动重建仍被游戏持有的输出对象。AudioRenderer 仍未实现。
 
