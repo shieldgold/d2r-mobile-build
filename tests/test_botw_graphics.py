@@ -91,6 +91,34 @@ class BnshTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 module.extract_shader_inputs(synthetic_bnsh(), destination)
 
+    def test_reflection_preserves_explicit_sampler_slots(self):
+        data = bytearray(synthetic_bnsh() + bytes(0x400))
+        struct.pack_into('<I', data, 0x1c, len(data))
+        struct.pack_into('<Q', data, 0x178, 0x600)
+        struct.pack_into('<Q', data, 0x620, 0x640)  # fragment reflection
+        struct.pack_into('<Q', data, 0x650, 0x700)  # sampler dictionary
+        struct.pack_into('<IIIIQ', data, 0x668, 0, 0, 1, 1, 0x780)
+        data[0x700:0x704] = b'_DIC'
+        struct.pack_into('<I', data, 0x704, 1)
+        struct.pack_into('<Q', data, 0x720, 0x800)
+        struct.pack_into('<H', data, 0x800, 5)
+        data[0x802:0x807] = b'image'
+        struct.pack_into('<i', data, 0x780, 3)
+        reflection = self.parser().parse_bnsh(data)['variations'][0].get('reflection')
+        self.assertIsNotNone(reflection, 'BNSH reflection parsing is missing')
+        self.assertEqual(reflection['fragment']['samplers'], [{'name': 'image', 'slot': 3}])
+
+    def test_texture_constraints_require_explicit_reflected_slots(self):
+        module = self.parser()
+        self.assertTrue(hasattr(module, 'texture_constraints'), 'Texture constraints are missing')
+        rows = [{'reflection': {'samplers': [{'name': 'one', 'slot': 0}, {'name': 'two', 'slot': 1}]}}]
+        result = module.texture_constraints(rows)
+        self.assertEqual([(x['cbuf_index'], x['cbuf_offset'], x['nvn_slot']) for x in result],
+                         [(0, 0x20, 0), (0, 0x28, 1)])
+        self.assertTrue(all(x['runtime_required_type'] == '2d' for x in result))
+        with self.assertRaisesRegex(ValueError, 'slot'):
+            module.texture_constraints([{'reflection': {'samplers': [{'name': 'bad', 'slot': 128}]}}])
+
     def test_truncation_is_not_silently_accepted(self):
         with self.assertRaisesRegex(ValueError, 'size|bounds'):
             self.parser().parse_bnsh(synthetic_bnsh()[:-1])

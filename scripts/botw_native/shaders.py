@@ -9,6 +9,7 @@ has correct resource bindings. Game code and translated outputs stay local.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -41,6 +42,46 @@ def parse_bnsh(data):
 
     def unpack(fmt, offset, label):
         return struct.unpack(fmt, read(offset, struct.calcsize(fmt), label))
+
+    def dictionary(pointer):
+        if not pointer:
+            return []
+        if read(pointer, 4, 'reflection dictionary') != b'_DIC':
+            raise ValueError('Invalid BNSH reflection dictionary')
+        count, = unpack('<I', pointer + 4, 'reflection dictionary count')
+        if count > 4096:
+            raise ValueError('BNSH reflection dictionary count exceeds limit')
+        read(pointer + 0x18, count * 16, 'reflection dictionary nodes')
+        result = []
+        for i in range(count):
+            text, = unpack('<Q', pointer + 0x20 + i * 16, 'reflection dictionary key')
+            length, = unpack('<H', text, 'reflection string length')
+            try:
+                result.append(read(text + 2, length, 'reflection string').decode('utf-8'))
+            except UnicodeDecodeError as exc:
+                raise ValueError('Invalid reflection UTF-8') from exc
+        return result
+
+    def reflection(pointer):
+        if not pointer:
+            return {}
+        result = {}
+        for stage, record in zip(STAGES, unpack('<6Q', pointer, 'program reflection')):
+            if not record:
+                continue
+            pointers = unpack('<5Q', record, 'stage reflection dictionaries')
+            output, sampler, uniform, storage = unpack('<4I', record + 0x28, 'reflection resource indices')
+            slots, = unpack('<Q', record + 0x38, 'reflection slot array')
+            groups = {}
+            for kind, names, base in zip(('inputs', 'outputs', 'samplers', 'uniforms', 'storage'),
+                                         map(dictionary, pointers), (0, output, sampler, uniform, storage)):
+                if base > 16384:
+                    raise ValueError('Reflection resource index exceeds limit')
+                groups[kind] = [{'name': name, 'slot': unpack('<i', slots + (base + i) * 4,
+                                                             'reflection resource slot')[0]}
+                                for i, name in enumerate(names)]
+            result[stage] = groups
+        return result
 
     if relocation:
         if read(relocation, 4, 'relocation table') != b'_RLT':
@@ -97,7 +138,9 @@ def parse_bnsh(data):
                             'code_sha256': hashlib.sha256(binary).hexdigest()})
         if not shaders:
             raise ValueError('BNSH binary program has no shader stages')
-        variations.append({'index': index, 'program_offset': program, 'shaders': shaders})
+        reflection_pointer, = unpack('<Q', program + 0x78, 'program reflection pointer')
+        variations.append({'index': index, 'program_offset': program, 'shaders': shaders,
+                           'reflection': reflection(reflection_pointer)})
     return {'name': filename, 'version': f'{version >> 16}.{version >> 8 & 255}.{version & 255}',
             'file_bytes': size, 'sha256': hashlib.sha256(data).hexdigest(),
             'target_api': api, 'target_api_version': api_version,
@@ -130,7 +173,8 @@ def extract_shader_inputs(image, destination):
         base = container['offset']
         for variation in container['variations']:
             for shader in variation['shaders']:
-                row = {'container': container['name'], 'variation': variation['index'], **shader}
+                row = {'container': container['name'], 'variation': variation['index'],
+                       'reflection': variation['reflection'].get(shader['stage'], {}), **shader}
                 for kind in ('control', 'code'):
                     filename = shader[kind + '_sha256'] + ('.control' if kind == 'control' else '.nvn')
                     start = base + shader[kind + '_offset']
@@ -144,7 +188,29 @@ def extract_shader_inputs(image, destination):
     return records
 
 
-def compile_shader_inputs(records, inputs, destination, compiler):
+def texture_constraints(records):
+    """Build explicit conditional type requirements, never fabricate cbuf data.
+
+    For this audited NVN build the GPU c0 offsets 0x20/0x28 correspond exactly
+    to the BNSH sampler slots 0/1 across every queried shader. Applying the same
+    bank/offset ABI to another build requires a new audit. Metal's binding
+    reflection must enforce the required type against the real NVN descriptor.
+    """
+    slots = {}
+    for record in records:
+        for sampler in record.get('reflection', {}).get('samplers', []):
+            slot = sampler['slot']
+            if slot == -1:  # Inactive resource, not a bound descriptor.
+                continue
+            if not isinstance(slot, int) or not 0 <= slot < 128:
+                raise ValueError('Reflected texture slot exceeds supported range')
+            slots.setdefault(slot, set()).add(sampler['name'])
+    return [{'nvn_slot': slot, 'names': sorted(names), 'cbuf_index': 0,
+             'cbuf_offset': 0x20 + slot * 8, 'runtime_required_type': '2d'}
+            for slot, names in sorted(slots.items())]
+
+
+def compile_shader_inputs(records, inputs, destination, compiler, *, require_runtime_2d=False):
     """Run the fixed external offline compiler; preserve every failure and log.
 
     Successful syntax conversion does not validate NVN bindings or semantics.
@@ -156,13 +222,26 @@ def compile_shader_inputs(records, inputs, destination, compiler):
     for identity in sorted({row['code_sha256'] for row in records}):
         source = inputs / (identity + '.nvn')
         glsl = destination / (identity + '.glsl')
-        result = subprocess.run([str(compiler), str(source), str(glsl)],
+        constraints = texture_constraints([r for r in records if r['code_sha256'] == identity]) if require_runtime_2d else []
+        environment = dict(os.environ)
+        environment.pop('BOTW_SHADER_2D_CBUFS', None)
+        if constraints:
+            environment['BOTW_SHADER_2D_CBUFS'] = ''.join(
+                f";{q['cbuf_index']}:{q['cbuf_offset']};" for q in constraints)
+        result = subprocess.run([str(compiler), str(source), str(glsl)], env=environment,
                                 capture_output=True, text=True, timeout=120)
         (destination / (identity + '.log')).write_text(result.stdout + result.stderr)
         outputs = [glsl, glsl.with_suffix('.spv'), glsl.with_suffix('.metal')]
         ok = result.returncode == 0 and all(p.is_file() and p.stat().st_size for p in outputs)
+        traces = {}
+        for prefix, key in (('BOTW_ENV ', 'environment_queries'),
+                            ('BOTW_UNRESOLVED_CBUF ', 'unresolved_cbuf'),
+                            ('BOTW_UNRESOLVED_TEXTURE ', 'unresolved_texture'),
+                            ('BOTW_TEXTURE_CONSTRAINT ', 'used_texture_constraints')):
+            traces[key] = [json.loads(line[len(prefix):]) for line in result.stderr.splitlines()
+                           if line.startswith(prefix)]
         results.append({'code_sha256': identity, 'exit_code': result.returncode,
-                        'converted': bool(ok), 'nvn_bindings_validated': False,
+                        'converted': bool(ok), 'nvn_bindings_validated': False, 'texture_type_constraints': constraints, **traces,
                         'outputs': [p.name for p in outputs if p.exists()]})
         # A partial run remains inspectable even if a later compiler process fails.
         (destination / 'translation.json').write_text(json.dumps({'schema': 1, 'results': results}, indent=2) + '\n')
@@ -178,6 +257,8 @@ def main(argv=None):
                         help='Fresh ignored directory for local shader inputs')
     parser.add_argument('--compiler', type=Path, help='Fixed, patched shader-compiler-cli binary')
     parser.add_argument('--compile-dir', type=Path, help='Fresh ignored directory for local converted output')
+    parser.add_argument('--require-runtime-2d-textures', action='store_true',
+                        help='Compile under explicit BNSH slot-based 2D requirements; runtime must check descriptors')
     args = parser.parse_args(argv)
     if bool(args.compiler) != bool(args.compile_dir) or (args.compiler and not args.extract_dir):
         parser.error('--compiler and --compile-dir require --extract-dir')
@@ -194,7 +275,8 @@ def main(argv=None):
     if args.extract_dir:
         records = extract_shader_inputs(image, args.extract_dir)
         if args.compiler:
-            results = compile_shader_inputs(records, args.extract_dir, args.compile_dir, args.compiler)
+            results = compile_shader_inputs(records, args.extract_dir, args.compile_dir, args.compiler,
+                                            require_runtime_2d=args.require_runtime_2d_textures)
             converted = sum(row['converted'] for row in results)
             print(f'Converted {converted}/{len(results)} unique code blobs; NVN bindings remain unvalidated')
             return int(converted != len(results))

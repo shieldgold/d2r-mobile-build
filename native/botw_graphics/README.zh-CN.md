@@ -57,7 +57,11 @@ xcrun clang -fobjc-arc -Wno-deprecated-declarations \
 outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validation.json
 ```
 
-真实本地 BOTW base `main` 的两个内嵌 BNSH 包含 34 个变体、68 个阶段记录和 37 个去重 GPU 程序；37 个均已成功转换且通过本机 Metal 源码编译。该证据只证明语法链可用。外部编译器环境仍默认 `ReadCbufValue=0`、二维纹理类型等，NVN 资源槽、c1 常量、顶点布局与原点/深度约定没有经过等价验证，不能据此声称游戏画面正确，生成结果不会自动登记到运行时。
+真实本地 BOTW base `main` 的两个内嵌 BNSH 包含 34 个变体、68 个阶段记录和 37 个去重 GPU 程序。解析器现读取真实资源字典及 NVN 槽位，保留 uniform、sampler、输入/输出和 storage 的名称/slot。审计逐 shader 记录编译器环境查询：24 个 shader 读取 c0 的 0x20/0x28（共 92 次），46 次纹理类型查询；其余 13 个没有常量查询。这两个偏移在全部相关 BNSH 变体中分别对应 uTexture0/1 的 NVN slot0/1。
+
+新版工具对未知常量数据或纹理类型明确失败。默认无上下文时实测只转换 13/37。可额外使用 `--require-runtime-2d-textures`，按反射 sampler 槽建立明确的二维纹理约束；编译器直接消费类型约束，不伪造常量缓冲数值或句柄。该路径实际转换 37/37 并全部通过 Metal 源码编译，常量值查询为 0，类型约束解析为 46 次。转换报告保存每个 shader 的查询次数、参数与应用约束。运行时必须通过 Metal 反射检查实际 NVN 纹理类型，若不满足则拒绝绘制；约束不等于已经观察过游戏实际描述符。
+
+资源槽、c1 私有常量、驱动常量、storage buffer 与顶点约定仍需分别验证。输出始终标记 `nvn_bindings_validated=false`，不会自动注册到运行时；语法编译成功不能当作正确游戏画面。
 
 ## 验证
 

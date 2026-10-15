@@ -7,5 +7,15 @@
   "target_msl": "iOS 2.3, Apple A9+ base vertex/instance",
   "local_tool_only": true,
   "shader_resource_environment_validated": false,
-  "cargo_lock_sha256": "276ab87f53810d75452adfc76a75fa0a2335376a520ded5b0f2c600d643cd6d1"
+  "cargo_lock_sha256": "276ab87f53810d75452adfc76a75fa0a2335376a520ded5b0f2c600d643cd6d1",
+  "unknown_cbuf_policy": "reject; never guess zero",
+  "unknown_texture_type_policy": "reject; optional BNSH-based constraints require matching runtime NVN descriptor",
+  "environment_diagnostics": "per-shader BOTW_ENV counts and exact cbuf/type query parameters on stderr",
+  "baseline_audit": {
+    "shader_count": 37,
+    "shaders_with_cbuf_queries": 24,
+    "shaders_without_cbuf_queries": 13,
+    "cbuf_queries": 92,
+    "texture_type_queries": 46
+  }
 }

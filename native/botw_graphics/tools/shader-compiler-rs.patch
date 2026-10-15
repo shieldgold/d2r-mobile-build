@@ -15,6 +15,78 @@ index 5d5e83e..8c65140 100644
 @@ -34 +34 @@ fn main() {
 -        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
 +        ; // this is needed to make MinGW build succeed
+diff --git a/bridge/src/bridge.cc b/bridge/src/bridge.cc
+index 21350b2..bd4c491 100644
+--- a/bridge/src/bridge.cc
++++ b/bridge/src/bridge.cc
+@@ -1,0 +2,3 @@
++#include <map>
++#include <cstdio>
++#include <cstdlib>
+@@ -28,0 +32,3 @@ namespace Bridge {
++        mutable std::map<std::string, unsigned long long> queries;
++        std::map<std::pair<u32,u32>,unsigned long long> cbuf_queries;
++        std::map<u32,unsigned long long> texture_queries, format_queries;
+@@ -52,0 +59,11 @@ namespace Bridge {
++        ~DummyEnvironment() {
++            std::fprintf(stderr,"BOTW_ENV {\"counts\":{");bool first=true;
++            for(const auto& [name,count]:queries){std::fprintf(stderr,"%s\"%s\":%llu",first?"":",",name.c_str(),count);first=false;}
++            std::fprintf(stderr,"},\"cbuf\":[");first=true;
++            for(const auto& [key,count]:cbuf_queries){std::fprintf(stderr,"%s{\"index\":%u,\"offset\":%u,\"count\":%llu}",first?"":",",key.first,key.second,count);first=false;}
++            std::fprintf(stderr,"],\"texture_types\":[");first=true;
++            for(const auto& [key,count]:texture_queries){std::fprintf(stderr,"%s{\"handle\":%u,\"count\":%llu}",first?"":",",key,count);first=false;}
++            std::fprintf(stderr,"],\"texture_formats\":[");first=true;
++            for(const auto& [key,count]:format_queries){std::fprintf(stderr,"%s{\"handle\":%u,\"count\":%llu}",first?"":",",key,count);first=false;}
++            std::fprintf(stderr,"]}\n");
++        }
+@@ -53,0 +71 @@ namespace Bridge {
++            queries["ReadInstruction"]++;
+@@ -60,0 +79 @@ namespace Bridge {
++            queries["ReadCbufValue"]++;cbuf_queries[{index,offset}]++;
+@@ -63 +82,2 @@ namespace Bridge {
+-            return 0; // TODO: STUB
++            std::fprintf(stderr,"BOTW_UNRESOLVED_CBUF {\"index\":%u,\"offset\":%u}\n",index,offset);
++            throw std::runtime_error("Constant-buffer data is not available; refusing a guessed zero");
+@@ -66,0 +87,10 @@ namespace Bridge {
++        [[nodiscard]] std::optional<Shader::TextureType> ReadTextureTypeFromBinding(u32 index, u32 offset) final {
++            queries["ReadTextureTypeFromBinding"]++;
++            const char* profile=std::getenv("BOTW_SHADER_2D_CBUFS");
++            if (!profile) return std::nullopt;
++            std::string key=";"+std::to_string(index)+":"+std::to_string(offset)+";";
++            if (std::string(profile).find(key)==std::string::npos) return std::nullopt;
++            std::fprintf(stderr,"BOTW_TEXTURE_CONSTRAINT {\"index\":%u,\"offset\":%u,\"required_type\":\"2d\"}\n",index,offset);
++            return Shader::TextureType::Color2D;
++        }
++
+@@ -67,0 +98 @@ namespace Bridge {
++            queries["ReadTexturePixelFormat"]++;format_queries[handle]++;
+@@ -72,0 +104 @@ namespace Bridge {
++            queries["ReadTextureType"]++;texture_queries[handle]++;
+@@ -74 +106,2 @@ namespace Bridge {
+-            return Shader::TextureType::Color2D; // TODO: ???
++            std::fprintf(stderr,"BOTW_UNRESOLVED_TEXTURE {\"handle\":%u}\n",handle);
++            throw std::runtime_error("Actual texture descriptor type is not available");
+@@ -77,0 +111 @@ namespace Bridge {
++            queries["ReadViewportTransformState"]++;
+@@ -81,0 +116 @@ namespace Bridge {
++            queries["TextureBoundBuffer"]++;
+@@ -85,0 +121 @@ namespace Bridge {
++            queries["LocalMemorySize"]++;
+@@ -89,0 +126 @@ namespace Bridge {
++            queries["SharedMemorySize"]++;
+@@ -93,0 +131 @@ namespace Bridge {
++            queries["WorkgroupSize"]++;
+@@ -97,0 +136 @@ namespace Bridge {
++            queries["HasHLEMacroState"]++;
+@@ -101,0 +141 @@ namespace Bridge {
++            queries["GetReplaceConstBuffer"]++;
+@@ -118,0 +159 @@ namespace Bridge {
++      try {
+@@ -242,0 +284,4 @@ namespace Bridge {
++      } catch(const std::exception& error) {
++        std::fprintf(stderr,"BOTW_TRANSLATION_ERROR %s\n",error.what());
++        return {};
++      }
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index 398b489..20f801f 100644
 --- a/cli/Cargo.toml
@@ -23,10 +95,12 @@ index 398b489..20f801f 100644
 -spirv_cross = { version = "0.23.1", features = ["glsl"] }
 +spirv_cross = { version = "0.23.1", features = ["glsl", "msl"] }
 diff --git a/cli/src/main.rs b/cli/src/main.rs
-index fa0b749..5a652ef 100644
+index fa0b749..4dbe8e3 100644
 --- a/cli/src/main.rs
 +++ b/cli/src/main.rs
-@@ -76 +76,9 @@ fn main() {
+@@ -58,0 +59 @@ fn main() {
++    if spirv.is_empty() { std::process::exit(1); }
+@@ -76 +77,9 @@ fn main() {
 -    std::fs::write(args.output, glsl).unwrap();
 +    std::fs::write(&args.output, glsl).unwrap();
 +    std::fs::write(args.output.with_extension("spv"), spirv.as_byte_slice()).unwrap();
@@ -47,3 +121,20 @@ index 1f57add..3671361 100644
 @@ -75 +75 @@ fn build_shader_compiler() {
 -        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
 +        ; // this is needed to make MinGW build succeed
+diff --git a/vendor/shader_compiler/environment.h b/vendor/shader_compiler/environment.h
+index d3bf6e3..57e32b4 100644
+--- a/vendor/shader_compiler/environment.h
++++ b/vendor/shader_compiler/environment.h
+@@ -22,0 +23,4 @@ public:
++    // Offline caller may provide a runtime-enforced descriptor type constraint.
++    // This is not a fabricated constant-buffer value or descriptor handle.
++    [[nodiscard]] virtual std::optional<TextureType> ReadTextureTypeFromBinding(u32, u32) { return std::nullopt; }
++
+diff --git a/vendor/shader_compiler/ir_opt/texture_pass.cpp b/vendor/shader_compiler/ir_opt/texture_pass.cpp
+index 9d081aa..a6ae0fc 100644
+--- a/vendor/shader_compiler/ir_opt/texture_pass.cpp
++++ b/vendor/shader_compiler/ir_opt/texture_pass.cpp
+@@ -359,0 +360,3 @@ TextureType ReadTextureType(Environment& env, const ConstBufferAddr& cbuf) {
++    if (!cbuf.has_secondary && cbuf.shift_left == 0 && cbuf.count == 1) {
++        if (auto type = env.ReadTextureTypeFromBinding(cbuf.index, cbuf.offset)) return *type;
++    }
