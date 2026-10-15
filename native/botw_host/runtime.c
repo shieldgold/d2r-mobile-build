@@ -121,6 +121,12 @@ static struct {
     uint32_t input_shared_handle;
     uint64_t resource_user_id;
     int graphics_started;
+    /* Guest NVIDIA transport workspace is borrowed by the host platform until
+     * the Metal backend has waited for GPU completion during cleanup. The host
+     * does not construct an original NVIDIA client or write its SDK globals. */
+    void *graphics_workspace;
+    size_t graphics_workspace_size;
+    int host39_transport_audited;
     botw_host_event event;
     sigjmp_buf recovery;
     pthread_t owner;
@@ -376,10 +382,61 @@ static uint64_t host_allocator_allocate(void *object, uint64_t bytes, uint64_t a
         fail("host39 allocator result: %s", error);
     return address;
 }
+#if defined(BOTW_WITH_GRAPHICS)
+static const char *const graphics_platform_initialize = "_ZN2nv18InitializeGraphicsEPvm";
+static void audit_graphics_platform(void) {
+    /* Fixed base-v0 ABI: main+0x9fc4b8 calls through its PLT, and no other
+     * module directly branches to this entry. Keep the original allocator APIs
+     * and SDK/NVIDIA state untouched; only this platform transport is replaced. */
+    Module *m = &state.modules[1];
+    if (state.address_bits != 39 || !state.host39_transport_audited)
+        fail("graphics platform requires the completed host39 transport audit");
+    if (!m->name || strcmp(m->name, "subsdk0") || !m->base ||
+            !in_range(0xc794, 0x94, m->text_end) || !in_range(0xc794, 0x94, m->size))
+        fail("graphics platform profile requires subsdk0 index=1 text entry=0xc794 bytes=0x94");
+    const Sym *entry = NULL;
+    for (unsigned i = 1; i < m->sym_count; i++) {
+        const Sym *s = symbol_at(m, i);
+        if (strcmp(symbol_name(m, s), graphics_platform_initialize)) continue;
+        if (entry || s->section != 1 || s->info != 0x12 || (s->other & 3) ||
+                s->value != 0xc794 || s->size != 0x94)
+            fail("graphics platform symbol does not match the audited subsdk0 profile");
+        entry = s;
+    }
+    if (!entry || find_raw_symbol(graphics_platform_initialize) != (uint64_t)m->base + 0xc794)
+        fail("graphics platform symbol resolution does not match the audited subsdk0 profile");
+}
+static void host_initialize_graphics(void *workspace, size_t bytes) {
+    audit_graphics_platform();
+    if (!state.graphics_started || !graphics_backend_init || !graphics_backend_shutdown || !graphics_backend_loader)
+        fail("graphics platform requires an initialized Metal device and command queue");
+    uint64_t address = (uint64_t)workspace;
+    size_t host_page = (size_t)getpagesize();
+    if (!workspace) fail("graphics platform workspace must not be null");
+    if (host_page < 4096 || (host_page & (host_page - 1)) || address % 4096 || address % host_page)
+        fail("graphics platform workspace must be aligned to guest and host pages");
+    if (!bytes || bytes > UINT32_MAX || bytes % 4096 || bytes % host_page)
+        fail("graphics platform workspace size must be nonzero whole pages and fit the audited u32 ABI");
+    if (bytes > UINT64_MAX - address || !services_memory(NULL, address, bytes, 1))
+        fail("graphics platform workspace is not completely writable guest memory");
+    pthread_mutex_lock(&lifecycle_lock);
+    int duplicate = state.graphics_workspace != NULL;
+    if (!duplicate) { state.graphics_workspace = workspace; state.graphics_workspace_size = bytes; }
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (duplicate) fail("graphics platform is already initialized");
+    report("graphics_platform=Metal initialized=true workspace=0x%llx bytes=%zu nvidia_transport=false",
+        (unsigned long long)address, bytes);
+}
+#endif
 static uint64_t find_symbol(const char *name) {
     if (!strcmp(name, "nvnBootstrapLoader") && graphics_backend_loader)
         return (uint64_t)graphics_backend_loader;
     if (state.address_bits == 39) {
+#if defined(BOTW_WITH_GRAPHICS)
+        if (!strcmp(name, graphics_platform_initialize)) {
+            audit_graphics_platform(); return (uint64_t)host_initialize_graphics;
+        }
+#endif
         if (!strcmp(name, allocator_constructor) || !strcmp(name, allocator_constructor_alias))
             return (uint64_t)host_allocator_constructor;
         if (!strcmp(name, allocator_allocate)) return (uint64_t)host_allocator_allocate;
@@ -968,6 +1025,10 @@ static int cleanup(void) {
     botw_services_destroy(state.services); state.services = NULL;
     pthread_mutex_unlock(&lifecycle_lock);
     if (state.graphics_started && graphics_backend_shutdown) graphics_backend_shutdown();
+    pthread_mutex_lock(&lifecycle_lock);
+    state.graphics_started = 0; state.graphics_workspace = NULL; state.graphics_workspace_size = 0;
+    state.host39_transport_audited = 0;
+    pthread_mutex_unlock(&lifecycle_lock);
     if (state.input) botw_input_unbind_shared_memory(state.input);
     if (state.input_owned) botw_input_destroy(state.input);
     state.input = NULL;
@@ -1024,6 +1085,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                         m->patch_off, error, sizeof error)) fail("host39 transport audit: %s", error);
             }
             report("host39_loaded_transport_audited=true inline_sites=36 host_helpers=5");
+            state.host39_transport_audited = 1;
         }
         initialize_keys();
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");
