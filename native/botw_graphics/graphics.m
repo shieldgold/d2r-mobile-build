@@ -139,6 +139,7 @@ typedef struct { NVNdevice *device; int flags; size_t command, control, compute;
 typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset; size_t size; } BufferBuilder;
 typedef struct { NVNdevice *device; NVNmemoryPool *pool; ptrdiff_t offset, stride; int width,height,depth,levels,samples,format,target,flags; int pkgBlockHeight; } TextureBuilder;
 typedef struct { NVNdevice *device; void *native; NVNtexture *textures[4]; int count, interval; } WindowBuilder;
+enum { BWDescriptorBytes=32, BWReservedDescriptors=256, BWMaxSamplerDescriptors=4096 };
 _Static_assert(sizeof(PoolBuilder)<=sizeof(NVNmemoryPoolBuilder),"pool builder ABI");
 _Static_assert(sizeof(TextureBuilder)<=sizeof(NVNtextureBuilder),"texture builder ABI");
 _Static_assert(sizeof(WindowBuilder)<=sizeof(NVNwindowBuilder),"window builder ABI");
@@ -423,7 +424,28 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_CONTROL_SIZE:*value=256;break;
     case NVN_DEVICE_INFO_UNIFORM_BUFFER_ALIGNMENT:*value=256;break;
     case NVN_DEVICE_INFO_COLOR_BUFFER_BINDINGS:*value=1;break;
-    default:fatal("nvnDeviceGetInteger unsupported capability");}}
+    case NVN_DEVICE_INFO_TEXTURE_DESCRIPTOR_SIZE:
+    case NVN_DEVICE_INFO_SAMPLER_DESCRIPTOR_SIZE:*value=BWDescriptorBytes;break;
+    case NVN_DEVICE_INFO_RESERVED_TEXTURE_DESCRIPTORS:
+    case NVN_DEVICE_INFO_RESERVED_SAMPLER_DESCRIPTORS:*value=BWReservedDescriptors;break;
+    /* These are bridge capabilities, not claims about the host GPU. Their
+     * NVN state/command/shader semantics are not implemented. Querying false
+     * lets applications select a supported path; executing them still fails. */
+    case NVN_DEVICE_INFO_SUPPORTS_MIN_MAX_FILTERING:
+    case NVN_DEVICE_INFO_SUPPORTS_STENCIL8_FORMAT:
+    case NVN_DEVICE_INFO_SUPPORTS_CONSERVATIVE_RASTER:
+    case NVN_DEVICE_INFO_SUPPORTS_ZERO_FROM_UNMAPPED_VIRTUAL_POOL_PAGES:
+    case NVN_DEVICE_INFO_SUPPORTS_PASSTHROUGH_GEOMETRY_SHADERS:
+    case NVN_DEVICE_INFO_SUPPORTS_VIEWPORT_SWIZZLE:
+    case NVN_DEVICE_INFO_SUPPORTS_SPARSE_TILED_PACKAGED_TEXTURES:
+    case NVN_DEVICE_INFO_SUPPORTS_ADVANCED_BLEND_MODES:
+    case NVN_DEVICE_INFO_SUPPORTS_DRAW_TEXTURE:
+    case NVN_DEVICE_INFO_SUPPORTS_TARGET_INDEPENDENT_RASTERIZATION:
+    case NVN_DEVICE_INFO_SUPPORTS_FRAGMENT_COVERAGE_TO_COLOR:
+    case NVN_DEVICE_INFO_SUPPORTS_POST_DEPTH_COVERAGE:
+    case NVN_DEVICE_INFO_SUPPORTS_IMAGES_USING_TEXTURE_HANDLES:
+    case NVN_DEVICE_INFO_SUPPORTS_SAMPLE_LOCATIONS:*value=0;break;
+    default:{char detail[128];snprintf(detail,sizeof detail,"nvnDeviceGetInteger unsupported capability query=0x%x",(unsigned)query);fatal(detail);}}}
 NVN(nvnDeviceFinalizeCommandHandle,void,NVNdevice *d,NVNcommandHandle h){get(d,[BWDevice class]);if(!handles[@(h)])fatal("invalid command handle");[handles removeObjectForKey:@(h)];}
 NVN(nvnMemoryPoolBuilderSetDefaults,void,NVNmemoryPoolBuilder *b){memset(b,0,sizeof *b);}
 NVN(nvnMemoryPoolBuilderSetDevice,void,NVNmemoryPoolBuilder *b,NVNdevice *d){((PoolBuilder*)b)->device=d;}
@@ -574,7 +596,7 @@ _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute 
 _Static_assert(sizeof(VertexStream)==sizeof(NVNvertexStreamState),"stream ABI");
 _Static_assert(sizeof(DepthState)==sizeof(NVNdepthStencilState),"depth ABI");
 NVN(nvnDeviceGetTextureHandle,NVNtextureHandle,const NVNdevice *d,int texture,int sampler){get(d,[BWDevice class]);if(texture<0||texture>0xfffff||sampler<0||sampler>0xfff)fatal("texture/sampler descriptor index");return (uint64_t)texture|((uint64_t)sampler<<20);}
-static int descriptors(void *raw,const NVNmemoryPool *memory,ptrdiff_t offset,int count,BOOL sampler){BWPool *pool=get(memory,[BWPool class]);if(offset<0||count<1||count>0x100000||!range(offset,(size_t)count*32,pool.size))return report("descriptor pool bounds");BWDescriptors *p=[BWDescriptors new];p.pool=pool;p.offset=offset;p.count=count;p.sampler=sampler;p.entries=[NSMutableDictionary new];put(raw,p);return 1;}
+static int descriptors(void *raw,const NVNmemoryPool *memory,ptrdiff_t offset,int count,BOOL sampler){BWPool *pool=get(memory,[BWPool class]);if(sampler&&count>BWMaxSamplerDescriptors)return report("sampler descriptor count exceeds 4096");if(offset<0||count<1||count>0x100000||!range(offset,(size_t)count*BWDescriptorBytes,pool.size))return report("descriptor pool bounds");BWDescriptors *p=[BWDescriptors new];p.pool=pool;p.offset=offset;p.count=count;p.sampler=sampler;p.entries=[NSMutableDictionary new];put(raw,p);return 1;}
 NVN(nvnTexturePoolInitialize,NVNboolean,NVNtexturePool *p,const NVNmemoryPool *m,ptrdiff_t o,int n){return descriptors(p,m,o,n,NO);}
 NVN(nvnSamplerPoolInitialize,NVNboolean,NVNsamplerPool *p,const NVNmemoryPool *m,ptrdiff_t o,int n){return descriptors(p,m,o,n,YES);}
 NVN(nvnTexturePoolFinalize,void,NVNtexturePool *p){get(p,[BWDescriptors class]);removeObject(p);}

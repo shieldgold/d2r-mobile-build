@@ -15,6 +15,27 @@
 
 运行时负责核验客体输出地址并复制 host 局部结果，也负责通过原 SDK `AttachReadableHandleToSystemEvent` 将真实 kernel reader handle 构造成 SystemEvent。原 VI 使用 EventClearMode=1；写端由宿主 CADisplayLink 的真实帧时钟驱动。图形后端不生成事件句柄或合成 vsync，关闭显示/清理事件由运行时在同一生命周期锁下协调。
 
+`DeviceGetInteger` 的 feature 查询描述桥接层可执行的能力。以下已确认缺少对应状态、命令或着色器语义的项返回0，允许客体选择回退；不会复制原 NVIDIA 驱动的支持位。ASTC 有独立纹理路径，仍需单独验证，不归入这组缺失能力。未知查询保留输出原值，诊断包含十六进制 query。
+
+| query | `SUPPORTS_` 名称 | 当前实现缺口 |
+|---|---|---|
+| 0x28 | MIN_MAX_FILTERING | 无 reduction filter 状态 |
+| 0x29 | STENCIL8_FORMAT | 无完整 stencil 读写、测试及清除 |
+| 0x32 | CONSERVATIVE_RASTER | 无 conservative raster 命令 |
+| 0x3b | ZERO_FROM_UNMAPPED_VIRTUAL_POOL_PAGES | 拒绝 virtual pool/map |
+| 0x42 | PASSTHROUGH_GEOMETRY_SHADERS | 仅支持 vertex/fragment |
+| 0x43 | VIEWPORT_SWIZZLE | 无 viewport swizzle 命令 |
+| 0x44 | SPARSE_TILED_PACKAGED_TEXTURES | 拒绝 sparse/virtual 纹理 |
+| 0x45 | ADVANCED_BLEND_MODES | 无 advanced blend 状态 |
+| 0x47 | DRAW_TEXTURE | 无 NVN DrawTexture 命令 |
+| 0x48 | TARGET_INDEPENDENT_RASTERIZATION | 无多采样及 coverage modulation |
+| 0x49 | FRAGMENT_COVERAGE_TO_COLOR | 无 coverage-to-color 状态 |
+| 0x4a | POST_DEPTH_COVERAGE | 无 post-depth coverage 着色器语义 |
+| 0x4b | IMAGES_USING_TEXTURE_HANDLES | 无 image handle/register/bind |
+| 0x4c | SAMPLE_LOCATIONS | 无 sample-location 状态 |
+
+描述符查询0x0f/0x10返回真实 pool 使用的32-byte跨度，0x11/0x12返回原 NVN ABI 保留数256；原客体分配器因此从索引256开始。人工 GPU 测试使用查询值创建池并从texture256、sampler4095真实采样；索引等于实际count、sampler4096及sampler count4097均拒绝。低索引旧人工夹具仍可直接调用；reserved 查询没有把它们改写为客体实际分配行为。
+
 纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。设备窗口原点仅接受 UpperLeft=1，与 Metal 的上左渲染目标、viewport 和 scissor 坐标对应；非对称三角形及顶部裁剪的实际像素已验证，其他原点模式明确拒绝。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
 数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。

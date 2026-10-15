@@ -370,6 +370,51 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_capability_queries_report_unsupported_features_and_preserve_unknown_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'capabilities.c'; harness.write_text(CAPABILITY_SMOKE); exe = path / 'capabilities'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('NVN_UNKNOWN_QUERY_DIAGNOSTIC_PRESERVES_OUTPUT_OK', result.stdout)
+
+    def test_descriptor_abi_reserved_indices_and_sampler_count_reach_gpu_pixels(self):
+        smoke = RESOURCE_SMOKE.replace('page*2', 'page*16')
+        smoke = smoke.replace('API(nvnDeviceGetTextureHandle);', 'API(nvnDeviceGetTextureHandle);API(nvnDeviceGetInteger);')
+        smoke = smoke.replace('    NVNtexturePool tp; NVNsamplerPool sp;', DESCRIPTOR_QUERY_FEATURE + '    NVNtexturePool tp; NVNsamplerPool sp;')
+        smoke = smoke.replace('nvnTexturePoolInitialize(&tp,&pool,0,16)', 'nvnTexturePoolInitialize(&tp,&pool,163840,reservedTextures+1)')
+        smoke = smoke.replace('nvnSamplerPoolInitialize(&sp,&pool,1024,16)',
+            'nvnSamplerPoolInitialize(&sp,&pool,32768,(argc>1&&!strcmp(argv[1],"oversized-sampler"))?4097:4096)')
+        smoke = smoke.replace('nvnTexturePoolRegisterTexture(&tp,3,&tiled,NULL);',
+            'nvnTexturePoolRegisterTexture(&tp,reservedTextures+(argc>1&&!strcmp(argv[1],"texture-index")),&tiled,NULL);')
+        smoke = smoke.replace('nvnSamplerPoolRegisterSampler(&sp,4,&sampler);',
+            'nvnSamplerPoolRegisterSampler(&sp,reservedSamplers,&sampler);nvnSamplerPoolRegisterSampler(&sp,(argc>1&&!strcmp(argv[1],"sampler-index"))?4096:4095,&sampler);')
+        smoke = smoke.replace('nvnDeviceGetTextureHandle(&device,3,4)', 'nvnDeviceGetTextureHandle(&device,reservedTextures,4095)')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'descriptors.c'; harness.write_text(smoke); exe = path / 'descriptors'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
+            for mode, expected in (('oversized-sampler', 'sampler descriptor count exceeds 4096'),
+                                   ('sampler-index', 'sampler descriptor index/type'),
+                                   ('texture-index', 'texture descriptor index/view')):
+                result = subprocess.run([str(exe), mode], capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+
     def test_upper_left_window_origin_matches_ndc_viewport_and_scissor_pixels(self):
         smoke = METAL_SMOKE.replace('API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);',
             'API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize); API(nvnDeviceSetWindowOriginMode); API(nvnCommandBufferSetViewport);')
@@ -881,6 +926,52 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('symlink', result.stderr)
 
+
+CAPABILITY_SMOKE = r"""
+#include "graphics.h"
+#include "nvn_protos.h"
+#include <setjmp.h>
+#include <stdio.h>
+#include <string.h>
+static sigjmp_buf jump;
+static int output=0x12345678;
+static unsigned errors;
+static void error(const char *s){(void)s;++errors;siglongjmp(jump,1);}
+#define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK line %d: %s\n",__LINE__,#x);return 1;}}while(0)
+int main(void){
+ if(!botw_graphics_init(NULL,error,NULL))return 77;
+ NVNT_nvnDeviceBuilderSetDefaults defaults=(NVNT_nvnDeviceBuilderSetDefaults)botw_nvn_bootstrap_loader("nvnDeviceBuilderSetDefaults");
+ NVNT_nvnDeviceInitialize initialize=(NVNT_nvnDeviceInitialize)botw_nvn_bootstrap_loader("nvnDeviceInitialize");
+ NVNT_nvnDeviceGetInteger integer=(NVNT_nvnDeviceGetInteger)botw_nvn_bootstrap_loader("nvnDeviceGetInteger");
+ NVNdeviceBuilder b;NVNdevice d;defaults(&b);CHECK(initialize(&d,&b));
+ static const NVNdeviceInfo unavailable[]={NVN_DEVICE_INFO_SUPPORTS_MIN_MAX_FILTERING,NVN_DEVICE_INFO_SUPPORTS_STENCIL8_FORMAT,
+ NVN_DEVICE_INFO_SUPPORTS_CONSERVATIVE_RASTER,NVN_DEVICE_INFO_SUPPORTS_ZERO_FROM_UNMAPPED_VIRTUAL_POOL_PAGES,
+ NVN_DEVICE_INFO_SUPPORTS_PASSTHROUGH_GEOMETRY_SHADERS,NVN_DEVICE_INFO_SUPPORTS_VIEWPORT_SWIZZLE,
+ NVN_DEVICE_INFO_SUPPORTS_SPARSE_TILED_PACKAGED_TEXTURES,NVN_DEVICE_INFO_SUPPORTS_ADVANCED_BLEND_MODES,
+ NVN_DEVICE_INFO_SUPPORTS_DRAW_TEXTURE,NVN_DEVICE_INFO_SUPPORTS_TARGET_INDEPENDENT_RASTERIZATION,
+ NVN_DEVICE_INFO_SUPPORTS_FRAGMENT_COVERAGE_TO_COLOR,NVN_DEVICE_INFO_SUPPORTS_POST_DEPTH_COVERAGE,
+ NVN_DEVICE_INFO_SUPPORTS_IMAGES_USING_TEXTURE_HANDLES,NVN_DEVICE_INFO_SUPPORTS_SAMPLE_LOCATIONS};
+ if(sigsetjmp(jump,1)){fprintf(stderr,"availability query unexpectedly failed: %s\n",botw_graphics_last_error());return 1;}
+ for(unsigned i=0;i<sizeof unavailable/sizeof *unavailable;i++){output=0x12345678;integer(&d,unavailable[i],&output);CHECK(output==0);}
+ static const NVNdeviceInfo sizes[]={NVN_DEVICE_INFO_TEXTURE_DESCRIPTOR_SIZE,NVN_DEVICE_INFO_SAMPLER_DESCRIPTOR_SIZE,
+ NVN_DEVICE_INFO_RESERVED_TEXTURE_DESCRIPTORS,NVN_DEVICE_INFO_RESERVED_SAMPLER_DESCRIPTORS};
+ for(unsigned i=0;i<4;i++){output=0x12345678;integer(&d,sizes[i],&output);CHECK(output==(i<2?32:256));}
+ output=0x12345678;
+ if(!sigsetjmp(jump,1)){integer(&d,(NVNdeviceInfo)0x7ffe,&output);CHECK(0);}
+ CHECK(output==0x12345678);CHECK(errors==1);
+ CHECK(strstr(botw_graphics_last_error(),"query=0x7ffe"));
+ botw_graphics_shutdown();puts("NVN_UNKNOWN_QUERY_DIAGNOSTIC_PRESERVES_OUTPUT_OK");return 0;
+}
+"""
+
+DESCRIPTOR_QUERY_FEATURE = r"""
+    int textureBytes=0,samplerBytes=0,reservedTextures=0,reservedSamplers=0;
+    nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_TEXTURE_DESCRIPTOR_SIZE,&textureBytes);
+    nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_SAMPLER_DESCRIPTOR_SIZE,&samplerBytes);
+    nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_RESERVED_TEXTURE_DESCRIPTORS,&reservedTextures);
+    nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_RESERVED_SAMPLER_DESCRIPTORS,&reservedSamplers);
+    CHECK(textureBytes==32&&samplerBytes==32&&reservedTextures==256&&reservedSamplers==256);
+"""
 
 ORIGIN_FEATURE = r"""
     CHECK(pixels[0]==255 && pixels[1]==0);
