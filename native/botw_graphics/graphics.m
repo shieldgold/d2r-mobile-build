@@ -117,10 +117,10 @@
 @property(strong) NSDictionary *viewport, *scissor;
 @property(strong) NSData *attributes, *streams, *depthState;
 @property(strong) BWDescriptors *texturePool, *samplerPool;
-@property(strong) NSMutableDictionary *uniforms, *textures, *vertices;
+@property(strong) NSMutableDictionary *uniforms, *storage, *textures, *vertices;
 @end
 @implementation BWReplay
-- (instancetype)init { if((self=[super init])){_uniforms=[NSMutableDictionary new];_textures=[NSMutableDictionary new];_vertices=[NSMutableDictionary new];}return self;}
+- (instancetype)init { if((self=[super init])){_uniforms=[NSMutableDictionary new];_storage=[NSMutableDictionary new];_textures=[NSMutableDictionary new];_vertices=[NSMutableDictionary new];}return self;}
 @end
 @interface BWPipeline : NSObject
 @property(strong) id<MTLRenderPipelineState> state;
@@ -294,7 +294,8 @@ int botw_graphics_register_shader(const void *control,size_t cs,const void *code
 static int registerShaderImpl(const void *control,size_t cs,const void *code,size_t ds,
     NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count){
     if(count>64 || (count&&!bindings))return report("Invalid shader binding metadata");
-    for(size_t i=0;i<count;i++){if(bindings[i].kind>BOTW_GRAPHICS_SAMPLER || bindings[i].nvn_slot>=128 || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:bindings[i].kind==BOTW_GRAPHICS_SAMPLER?16:16))return report("Shader binding metadata exceeds Metal limits");}
+    for(size_t i=0;i<count;i++){if(bindings[i].kind<0 || bindings[i].kind>BOTW_GRAPHICS_STORAGE || bindings[i].nvn_slot>=(bindings[i].kind==BOTW_GRAPHICS_STORAGE?16:128) || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:16))return report("Shader binding metadata exceeds Metal limits");
+        for(size_t j=0;j<i;j++){BOOL same=(bindings[i].kind==bindings[j].kind)||((bindings[i].kind==BOTW_GRAPHICS_UNIFORM||bindings[i].kind==BOTW_GRAPHICS_STORAGE)&&(bindings[j].kind==BOTW_GRAPHICS_UNIFORM||bindings[j].kind==BOTW_GRAPHICS_STORAGE));if(same&&bindings[i].metal_slot==bindings[j].metal_slot)return report("Duplicate Metal resource binding map slot");}}
     if(!gpu || !control || !code || !source || !entry || cs<4 || ds<0x80 || cs>1<<20 || ds>16<<20 ||
        (stage!=NVN_SHADER_STAGE_VERTEX && stage!=NVN_SHADER_STAGE_FRAGMENT))
         return report("Invalid shader registration or unsupported shader stage");
@@ -463,7 +464,8 @@ NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress
 NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){if(n!=1||!colors||dv||(views&&views[0]))fatal("nvnCommandBufferSetRenderTargets supports one color/default view");get(colors[0],[BWTexture class]);if(depth)get(depth,[BWTexture class]);record(c,@{@"op":@"target",@"id":@(((const BWObject*)colors[0])->serial),@"depth":depth?@(((const BWObject*)depth)->serial):@0});}
 NVN(nvnCommandBufferClearColor,void,NVNcommandBuffer *c,int index,const float *color,int mask){if(index||!color||mask!=15)fatal("nvnCommandBufferClearColor color index/mask");record(c,@{@"op":@"clear",@"color":[NSData dataWithBytes:color length:16]});}
 NVN(nvnCommandBufferBindProgram,void,NVNcommandBuffer *c,const NVNprogram *p,int stages){if(stages!=NVN_SHADER_STAGE_ALL_GRAPHICS_BITS && stages!=(NVN_SHADER_STAGE_VERTEX_BIT|NVN_SHADER_STAGE_FRAGMENT_BIT))fatal("nvnCommandBufferBindProgram stages");get(p,[BWProgram class]);record(c,@{@"op":@"program",@"id":@(((const BWObject*)p)->serial)});}
-NVN(nvnCommandBufferDrawArrays,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,int first,int count){if(mode!=NVN_DRAW_PRIMITIVE_TRIANGLES||first<0||count<0)fatal("nvnCommandBufferDrawArrays primitive/range");record(c,@{@"op":@"draw",@"first":@(first),@"count":@(count)});}
+NVN(nvnCommandBufferDrawArrays,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,int first,int count){if(mode!=NVN_DRAW_PRIMITIVE_TRIANGLES||first<0||count<0)fatal("nvnCommandBufferDrawArrays primitive/range");record(c,@{@"op":@"draw",@"first":@(first),@"count":@(count),@"baseInstance":@0,@"instances":@1});}
+NVN(nvnCommandBufferDrawArraysInstanced,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,int first,int count,int baseInstance,int instances){if(mode!=NVN_DRAW_PRIMITIVE_TRIANGLES||first<0||count<0||baseInstance<0||instances<0)fatal("nvnCommandBufferDrawArraysInstanced primitive/instance range");record(c,@{@"op":@"draw",@"first":@(first),@"count":@(count),@"baseInstance":@(baseInstance),@"instances":@(instances)});}
 NVN(nvnCommandBufferSetViewport,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetViewport bounds");record(c,@{@"op":@"viewport",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
 NVN(nvnCommandBufferSetScissor,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetScissor bounds");record(c,@{@"op":@"scissor",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
 typedef struct { NVNdevice *device; int min,mag,wrap[3],compareMode,compareFunc; float lodMin,lodMax,aniso; } SamplerBuilder;
@@ -508,6 +510,8 @@ NVN(nvnCommandBufferBindVertexStreamState,void,NVNcommandBuffer *c,int n,const N
 NVN(nvnCommandBufferBindDepthStencilState,void,NVNcommandBuffer *c,const NVNdepthStencilState *s){if(!s)fatal("null depth state");record(c,@{@"op":@"depthState",@"data":[NSData dataWithBytes:s length:sizeof *s]});}
 NVN(nvnCommandBufferBindVertexBuffer,void,NVNcommandBuffer *c,int slot,NVNbufferAddress address,size_t size){if(slot<0||slot>=15)fatal("vertex buffer slot");record(c,@{@"op":@"vertex",@"slot":@(slot),@"address":@(address),@"size":@(size)});}
 NVN(nvnCommandBufferBindUniformBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if(stage<0||stage>5||slot<0||slot>=128||size>65536)fatal("uniform buffer stage/slot/size");record(c,@{@"op":@"uniform",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
+NVN(nvnCommandBufferBindStorageBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if((stage!=NVN_SHADER_STAGE_VERTEX&&stage!=NVN_SHADER_STAGE_FRAGMENT)||slot<0||slot>=16)fatal("storage buffer stage/slot");record(c,@{@"op":@"storage",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
+NVN(nvnCommandBufferBindStorageBuffers,void,NVNcommandBuffer *c,NVNshaderStage stage,int first,int count,const NVNbufferRange *ranges){if(first<0||count<0||count>16||first>16-count||(!ranges&&count))fatal("storage buffer array range");for(int i=0;i<count;i++)h_nvnCommandBufferBindStorageBuffer(c,stage,first+i,ranges[i].address,ranges[i].size);}
 NVN(nvnCommandBufferBindTexture,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNtextureHandle handle){if(stage<0||stage>5||slot<0||slot>=128)fatal("texture stage/slot");record(c,@{@"op":@"texture",@"stage":@(stage),@"slot":@(slot),@"handle":@(handle)});}
 NVN(nvnCommandBufferSetTexturePool,void,NVNcommandBuffer *c,const NVNtexturePool *p){BWDescriptors *pool=get(p,[BWDescriptors class]);if(pool.sampler)fatal("wrong texture descriptor pool type");record(c,@{@"op":@"texturePool",@"pool":pool});}
 NVN(nvnCommandBufferSetSamplerPool,void,NVNcommandBuffer *c,const NVNsamplerPool *p){BWDescriptors *pool=get(p,[BWDescriptors class]);if(!pool.sampler)fatal("wrong sampler descriptor pool type");record(c,@{@"op":@"samplerPool",@"pool":pool});}
@@ -533,7 +537,7 @@ static BWPipeline *pipeline(BWReplay *state){
         NSArray *arguments=stage.intValue==NVN_SHADER_STAGE_VERTEX?reflection.vertexBindings:reflection.fragmentBindings;
         for(id<MTLBinding> argument in arguments){if(!argument.used)continue;BOOL matched=NO;
             if(stage.intValue==NVN_SHADER_STAGE_VERTEX && argument.type==MTLBindingTypeBuffer && argument.index>=16 && argument.index<31 && state.attributes.length)matched=YES;
-            for(size_t i=0;i<n;i++){MTLBindingType type=b[i].kind==BOTW_GRAPHICS_UNIFORM?MTLBindingTypeBuffer:b[i].kind==BOTW_GRAPHICS_TEXTURE?MTLBindingTypeTexture:MTLBindingTypeSampler;if(argument.type==type&&argument.index==b[i].metal_slot)matched=YES;}
+            for(size_t i=0;i<n;i++){MTLBindingType type=(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind==BOTW_GRAPHICS_STORAGE)?MTLBindingTypeBuffer:b[i].kind==BOTW_GRAPHICS_TEXTURE?MTLBindingTypeTexture:MTLBindingTypeSampler;if(argument.type==type&&argument.index==b[i].metal_slot)matched=YES;}
             if(!matched)fatal("Metal resource has no explicitly validated NVN binding map");
         }
     }
@@ -548,7 +552,9 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
     for(size_t i=0;i<state.attributes.length/sizeof *attributes;i++)if(attributes[i].format){
         const VertexAttribute *a=attributes+i;if(a->stream>=state.streams.length/sizeof *streams)fatal("vertex range missing stream");
         NSDictionary *r=state.vertices[@(a->stream)];uint64_t n=[draw[@"count"] unsignedLongLongValue],first=[draw[@"first"] unsignedLongLongValue];
-        uint64_t last=streams[a->stream].divisor?0:first+(n?n-1:0),need=(uint64_t)a->offset+nvn_fmt_bpb(a->format,NULL,NULL);
+        uint64_t instances=[draw[@"instances"] unsignedLongLongValue],base=[draw[@"baseInstance"] unsignedLongLongValue];
+        if(streams[a->stream].divisor>1&&(instances>1||base))fatal("instance divisor greater than one is not yet validated");
+        uint64_t last=streams[a->stream].divisor?base+(instances?instances-1:0):first+(n?n-1:0),need=(uint64_t)a->offset+nvn_fmt_bpb(a->format,NULL,NULL);
         if(n&&streams[a->stream].stride && last>(UINT64_MAX-need)/streams[a->stream].stride)fatal("vertex range overflow");
         if(n)need+=last*streams[a->stream].stride;
         if(!r||[r[@"size"] unsignedLongLongValue]<need)fatal("vertex range is shorter than the draw requires");
@@ -556,9 +562,9 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
     for(NSNumber *slot in state.vertices){NSDictionary *r=state.vertices[slot];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!pool)fatal("vertex buffer address bounds");[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:16+slot.unsignedIntegerValue];}
     for(NSNumber *stage in state.program.stageShaders){BOOL vertex=stage.intValue==NVN_SHADER_STAGE_VERTEX;BWShader *s=state.program.stageShaders[stage];const botw_graphics_shader_binding *b=s.bindings.bytes;size_t n=s.bindings.length/sizeof *b;
         for(size_t i=0;i<n;i++){NSString *key=resourceKey(stage,@(b[i].nvn_slot));
-            if(b[i].kind==BOTW_GRAPHICS_UNIFORM){NSDictionary *r=state.uniforms[key];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!r||!pool)fatal("unbound uniform buffer or address bounds");
+            if(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind==BOTW_GRAPHICS_STORAGE){BOOL storage=b[i].kind==BOTW_GRAPHICS_STORAGE;NSDictionary *r=(storage?state.storage:state.uniforms)[key];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!r||!pool)fatal(storage?"unbound storage buffer or address bounds":"unbound uniform buffer or address bounds");
                 NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;
-                for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot){id<MTLBufferBinding> buffer=(id<MTLBufferBinding>)argument;if([r[@"size"] unsignedLongLongValue]<buffer.bufferDataSize || (pool.bufferOffset+offset)%MAX(1,buffer.bufferAlignment))fatal("uniform range size/alignment does not satisfy the shader");}
+                for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot){id<MTLBufferBinding> buffer=(id<MTLBufferBinding>)argument;if([r[@"size"] unsignedLongLongValue]<buffer.bufferDataSize || (pool.bufferOffset+offset)%MAX(1,buffer.bufferAlignment))fatal(storage?"storage range size/alignment does not satisfy the shader":"uniform range size/alignment does not satisfy the shader");}
                 if(vertex)[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];else[encoder setFragmentBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];}
             else{NSNumber *h=state.textures[key];if(!h)fatal("unbound combined texture handle");if(b[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=state.texturePool.entries[@(h.unsignedLongLongValue&0xfffff)];if(!t)fatal("texture descriptor missing");NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;for(id<MTLBinding> a in args)if(a.used&&a.type==MTLBindingTypeTexture&&a.index==b[i].metal_slot&&((id<MTLTextureBinding>)a).textureType!=t.texture.textureType)fatal("shader texture type differs from actual NVN descriptor");if(vertex)[encoder setVertexTexture:t.texture atIndex:b[i].metal_slot];else[encoder setFragmentTexture:t.texture atIndex:b[i].metal_slot];}
                 else{BWSampler *s=state.samplerPool.entries[@(h.unsignedLongLongValue>>20)];if(!s)fatal("sampler descriptor missing");if(vertex)[encoder setVertexSamplerState:s.state atIndex:b[i].metal_slot];else[encoder setFragmentSamplerState:s.state atIndex:b[i].metal_slot];}}
@@ -578,9 +584,11 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
             if([op isEqual:@"attributes"]){state.attributes=c[@"data"];continue;}if([op isEqual:@"streams"]){state.streams=c[@"data"];continue;}if([op isEqual:@"depthState"]){state.depthState=c[@"data"];continue;}
             if([op isEqual:@"texturePool"]){state.texturePool=c[@"pool"];continue;}if([op isEqual:@"samplerPool"]){state.samplerPool=c[@"pool"];continue;}
             if([op isEqual:@"uniform"]){state.uniforms[resourceKey(c[@"stage"],c[@"slot"])]=c;continue;}
+            if([op isEqual:@"storage"]){state.storage[resourceKey(c[@"stage"],c[@"slot"])]=c;continue;}
             if([op isEqual:@"texture"]){state.textures[resourceKey(c[@"stage"],c[@"slot"])]=c[@"handle"];continue;}
             if([op isEqual:@"vertex"]){state.vertices[c[@"slot"]]=c;continue;}
             if([op isEqual:@"copy"]){size_t a=0,b=0,n=[c[@"size"] unsignedLongLongValue];BWPool *src=address([c[@"src"] unsignedLongLongValue],n,&a),*dst=address([c[@"dst"] unsignedLongLongValue],n,&b);if(!src||!dst||(src==dst&&a<b+n&&b<a+n))fatal("GPU copy bounds/overlap");id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];[blit copyFromBuffer:src.buffer sourceOffset:src.bufferOffset+a toBuffer:dst.buffer destinationOffset:dst.bufferOffset+b size:n];[blit endEncoding];continue;}
+            if([op isEqual:@"draw"]&&(![c[@"count"] unsignedLongLongValue]||![c[@"instances"] unsignedLongLongValue]))continue;
             BWTexture *target=state.target;NSDictionary *viewport=state.viewport,*scissor=state.scissor;
             if(!target)fatal("render operation without target");BOOL clear=[op isEqual:@"clear"],depthClear=[op isEqual:@"depthClear"];
             if(!clear)uploadTexture(target,cb);if(state.depth&&!depthClear)uploadTexture(state.depth,cb);
@@ -595,7 +603,7 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
                 if(state.depthState.length){DepthState d;[state.depthState getBytes:&d length:sizeof d];if(d.stencil||((d.test||d.write)&&!state.depth))fatal("unsupported depth/stencil state");MTLDepthStencilDescriptor *dd=[MTLDepthStencilDescriptor new];dd.depthCompareFunction=d.test?(MTLCompareFunction)(d.function-1):MTLCompareFunctionAlways;dd.depthWriteEnabled=d.test&&d.write;id<MTLDepthStencilState> ds=[gpu newDepthStencilStateWithDescriptor:dd];[encoder setDepthStencilState:ds];}
                 if(viewport)[encoder setViewport:(MTLViewport){[viewport[@"x"] doubleValue],[viewport[@"y"] doubleValue],[viewport[@"w"] doubleValue],[viewport[@"h"] doubleValue],0,1}];
                 if(scissor){NSUInteger x=[scissor[@"x"] unsignedIntegerValue],y=[scissor[@"y"] unsignedIntegerValue],w=[scissor[@"w"] unsignedIntegerValue],h=[scissor[@"h"] unsignedIntegerValue];if(x>(NSUInteger)target.width||y>(NSUInteger)target.height||w>(NSUInteger)target.width-x||h>(NSUInteger)target.height-y)fatal("scissor outside target");[encoder setScissorRect:(MTLScissorRect){x,y,w,h}];}
-                [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:[c[@"first"] unsignedIntegerValue] vertexCount:[c[@"count"] unsignedIntegerValue]];target.drawEpoch=++serial;
+                [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:[c[@"first"] unsignedIntegerValue] vertexCount:[c[@"count"] unsignedIntegerValue] instanceCount:[c[@"instances"] unsignedIntegerValue] baseInstance:[c[@"baseInstance"] unsignedIntegerValue]];target.drawEpoch=++serial;
             }else if(clear)target.drawEpoch=0;
             [encoder endEncoding];target.gpuWritten=YES;if(state.depth)state.depth.gpuWritten=YES;
         }

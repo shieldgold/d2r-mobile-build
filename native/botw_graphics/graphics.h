@@ -30,7 +30,8 @@ int botw_graphics_register_shader(const void *control, size_t control_bytes,
                                   NVNshaderStage stage, const char *msl,
                                   const char *entry);
 enum botw_graphics_binding_kind {
-    BOTW_GRAPHICS_UNIFORM = 0, BOTW_GRAPHICS_TEXTURE = 1, BOTW_GRAPHICS_SAMPLER = 2
+    BOTW_GRAPHICS_UNIFORM = 0, BOTW_GRAPHICS_TEXTURE = 1, BOTW_GRAPHICS_SAMPLER = 2,
+    BOTW_GRAPHICS_STORAGE = 3
 };
 typedef struct {
     enum botw_graphics_binding_kind kind;

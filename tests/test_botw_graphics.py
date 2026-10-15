@@ -199,6 +199,31 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_storage_buffer_and_instanced_draw_use_real_bindings_and_ids(self):
+        implemented = (ROOT / 'native/botw_graphics/implemented.inc').read_text()
+        self.assertIn('NVN_BIND(nvnCommandBufferBindStorageBuffer)', implemented)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'storage.c'
+            harness.write_text(METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);',
+                                                  STORAGE_FEATURE + '    nvnMemoryPoolFinalize(&pool);'))
+            exe = path / 'storage'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_STORAGE_INSTANCING_BASE_IDS_OK', result.stdout)
+            for mode, expected in (('short-storage', 'storage range'), ('unbound-storage', 'unbound storage'),
+                                   ('negative-instance', 'instance range'), ('duplicate-storage', 'Duplicate Metal')):
+                result = subprocess.run([str(exe), mode], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, mode)
+                self.assertIn(expected, result.stderr)
+
     def test_concurrent_nvn_objects_and_error_callback_escape_release_locks(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)
@@ -619,6 +644,35 @@ RESOURCE_FEATURE = r"""
     puts("GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK");
 """
 RESOURCE_SMOKE = METAL_SMOKE.replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
+
+STORAGE_FEATURE = r"""
+    API(nvnCommandBufferBindStorageBuffer);API(nvnCommandBufferBindStorageBuffers);API(nvnCommandBufferDrawArraysInstanced);
+    const float instances[]={-.5,0,1,0,.5,0,0,1};memcpy(memory+1024,instances,sizeof instances);
+    memset(memory+1280,0,48);
+    controls[0][8]=6;controls[1][8]=7;codes[0][8]=6;codes[1][8]=7;
+    memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    const char *storageMSL="#include <metal_stdlib>\nusing namespace metal;struct S{float4 instance[2];};struct U{uint4 instance[2];};struct W{uint value[12];};struct O{float4 p [[position]];float4 color;};"
+      "vertex O sv(uint v [[vertex_id]],uint bv [[base_vertex]],uint i [[instance_id]],uint bi [[base_instance]],device const S& s [[buffer(2)]],device W& w [[buffer(3)]],device const U& alias [[buffer(4)]]) {"
+      "uint index=i-bi,corner=v-bv;if(index>=2||corner>=6)return {float4(0),float4(0)};float2 p[6]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};"
+      "w.value[index*6+corner]=(index+1)*10+corner+1;return {float4(p[corner]*float2(.5,1)+s.instance[index].xy,0,1),float4(as_type<float2>(alias.instance[index].zw),0,1)};}"
+      "fragment float4 sf(O v [[stage_in]]){return v.color;}";
+    botw_graphics_shader_binding sb[]={{BOTW_GRAPHICS_STORAGE,3,2},{BOTW_GRAPHICS_STORAGE,4,3},{BOTW_GRAPHICS_STORAGE,3,4}};
+    if(argc>1&&!strcmp(argv[1],"duplicate-storage"))sb[2].metal_slot=3;
+    CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,storageMSL,"sv",sb,3));
+    CHECK(botw_graphics_register_shader(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,storageMSL,"sf"));
+    CHECK(nvnProgramSetShaders(&program,2,sd));
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);
+    nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);
+    if(!(argc>1&&!strcmp(argv[1],"unbound-storage")))
+      nvnCommandBufferBindStorageBuffer(&cb,NVN_SHADER_STAGE_VERTEX,3,gpu+1024,(argc>1&&!strcmp(argv[1],"short-storage"))?4:sizeof instances);
+    NVNbufferRange writable={gpu+1280,48};nvnCommandBufferBindStorageBuffers(&cb,NVN_SHADER_STAGE_VERTEX,4,1,&writable);
+    nvnCommandBufferDrawArraysInstanced(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,3,6,5,(argc>1&&!strcmp(argv[1],"negative-instance"))?-1:2);
+    handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+    CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    CHECK(pixels[0]==255&&pixels[1]==0&&pixels[12]==0&&pixels[13]==255);
+    uint32_t *written=(uint32_t*)(memory+1280);for(unsigned i=0;i<12;i++)CHECK(written[i]==(i/6+1)*10+i%6+1);
+    puts("GPU_STORAGE_INSTANCING_BASE_IDS_OK");
+"""
 
 
 BUNDLE_SMOKE = r"""
