@@ -856,6 +856,11 @@ void botw_host_refresh_input(void) {
     pthread_mutex_unlock(&lifecycle_lock);
 }
 static int graphics_memory(const void *address, size_t length) { return services_memory(NULL, (uint64_t)address, length, 0); }
+#if defined(BOTW_WITH_GRAPHICS)
+static int graphics_memory_access(const void *address, size_t length, int writable) {
+    return services_memory(NULL, (uint64_t)address, length, writable != 0);
+}
+#endif
 static int services_focus(void *opaque, uint32_t mode, int foreground, int focused,
                           int suspended, char *error, size_t capacity) {
     (void)opaque; (void)error; (void)capacity;
@@ -1286,6 +1291,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                 if (!graphics_backend_init(configured_graphics_layer, graphics_error, graphics_memory)) fail("initialize Metal graphics backend");
                 state.graphics_started = 1;
 #if defined(BOTW_WITH_GRAPHICS)
+                botw_graphics_set_memory_access_validator(graphics_memory_access);
                 /* Preserve the first actual presented draw for device review.
                  * The frontend disables capture after saving that frame. */
                 botw_graphics_set_capture_enabled(1);

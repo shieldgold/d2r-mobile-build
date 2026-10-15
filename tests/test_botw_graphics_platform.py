@@ -28,6 +28,7 @@ static int fake_vi_ready, fake_display_live, fake_scaling;
 static unsigned attach_calls;
 static uint32_t attached_reader;
 static const char *fake_backend_error = "simulated backend rejection";
+static int (*registered_access)(const void *, size_t, int);
 static _Atomic int ticker_running;
 static _Atomic unsigned ticker_ticks;
 #endif
@@ -54,6 +55,7 @@ void botw_graphics_shutdown(void) {
 }
 #if defined(BOTW_WITH_GRAPHICS)
 const char *botw_graphics_last_error(void) { return fake_backend_error; }
+void botw_graphics_set_memory_access_validator(int (*access)(const void *, size_t, int)) { registered_access = access; }
 int botw_graphics_platform_initialize(void) { if (fake_vi_ready) return 0; fake_vi_ready = 1; return 1; }
 int botw_graphics_platform_open_default_display(uintptr_t *out) {
     if (!fake_vi_ready || fake_display_live) return 0; *out = fake_display; fake_display_live = 1; return 1;
@@ -227,6 +229,22 @@ int main(int argc, char **argv) {
         void *foreign = mmap(NULL, PAGE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
         assert(foreign != MAP_FAILED); reject_call(foreign, PAGE, "writable"); munmap(foreign, PAGE);
         state.graphics_started = 0;
+    } else if (!strcmp(argv[1], "memory-access")) {
+        botw_graphics_set_memory_access_validator(graphics_memory_access);
+        assert(registered_access);
+        assert(registered_access((void *)(uintptr_t)heap, PAGE, 0));
+        assert(registered_access((void *)(uintptr_t)heap, PAGE, 1));
+        assert(!registered_access((void *)(uintptr_t)(heap + unit - 8), PAGE, 0));
+        assert(!registered_access((void *)(uintptr_t)(heap + unit - 8), PAGE, 1));
+        assert(registered_access(m->base + 0xc794, 4, 0));
+        assert(!registered_access(m->base + 0xc794, 4, 1));
+        uint64_t r[31] = {0, heap, PAGE, 1}; char error[512];
+        assert(botw_kernel_dispatch(state.kernel, 0x15, r, error, sizeof error) == BOTW_KERNEL_HANDLED && !r[0]);
+        uint32_t transfer = (uint32_t)r[1];
+        assert(registered_access((void *)(uintptr_t)heap, PAGE, 0));
+        assert(!registered_access((void *)(uintptr_t)heap, PAGE, 1));
+        assert(!botw_kernel_close_handle(state.kernel, transfer, error, sizeof error));
+        assert(registered_access((void *)(uintptr_t)heap, PAGE, 1));
     } else if (!strcmp(argv[1], "borrowed-readonly")) {
         state.graphics_started = 1;
         uint64_t r[31] = {0, heap, PAGE, 1}; char error[512];
@@ -401,6 +419,9 @@ class GraphicsPlatformTests(unittest.TestCase):
 
     def test_workspace_alignment_size_and_complete_guest_range(self):
         self.check_case('workspace')
+
+    def test_graphics_memory_access_distinguishes_readable_and_writable_kernel_ranges(self):
+        self.check_case('memory-access')
 
     def test_kernel_transfer_owner_read_permission_cannot_be_workspace(self):
         self.check_case('borrowed-readonly')
