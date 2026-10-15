@@ -31,6 +31,9 @@ typedef struct Session {
     Object *root;
     Object *objects[DOMAIN_LIMIT];
 } Session;
+/* A nonzero id owns a client kernel handle. session == NULL means its server
+ * endpoint has closed: SendSyncRequest fails, but CloseHandle still releases
+ * that client handle once. This matches the SDK's CMIF-Close/SVC-Close sequence. */
 typedef struct { uint32_t id; Session *session; } Handle;
 struct botw_services {
     Handle handles[HANDLE_LIMIT];
@@ -84,12 +87,12 @@ static void release_session(Session *session) {
     free(session);
 }
 static Handle *find_handle(botw_services *s, uint32_t handle) {
-    for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (s->handles[i].session && s->handles[i].id == handle) return &s->handles[i];
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (s->handles[i].id && s->handles[i].id == handle) return &s->handles[i];
     return NULL;
 }
 static int assign_handle(botw_services *s, Session *session, uint32_t *out, char *error, size_t cap) {
     if (!s->next_handle || s->next_handle == UINT32_MAX) return problem(error, cap, "IPC handle identity space exhausted");
-    for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (!s->handles[i].session) {
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (!s->handles[i].id) {
         s->handles[i].id = s->next_handle++; s->handles[i].session = session; *out = s->handles[i].id;
         return 0;
     }
@@ -124,7 +127,7 @@ int botw_services_connect(botw_services *s, const char *name, size_t length, uin
 int botw_services_close(botw_services *s, uint32_t id, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, id) : NULL;
     if (!handle) return problem(error, cap, "CloseHandle invalid or closed IPC handle=0x%x", id);
-    Session *session = handle->session; handle->session = NULL; release_session(session);
+    Session *session = handle->session; handle->id = 0; handle->session = NULL; release_session(session);
     emit(s, "ipc_close handle=0x%x", id); return 0;
 }
 static int checked_span(size_t offset, size_t length, size_t end) { return offset <= end && length <= end - offset; }
@@ -296,11 +299,16 @@ static int logger_packet(botw_services *s, const Request *r, char *error, size_t
 int botw_services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
+    if (!handle->session) return problem(error, cap, "SendSyncRequest server endpoint closed for IPC handle=0x%x", handle_id);
     if (!buffer || capacity < 0x40 || capacity > IPC_LIMIT || !s->memory(s->opaque, (uint64_t)(uintptr_t)buffer, capacity, 1))
         return problem(error, cap, "SendSyncRequest IPC buffer is not checked guest writable memory or capacity is outside 0x40..0x100");
     uint8_t *ipc = buffer; Session *session = handle->session; Request r = {0};
     if (parse_request(s, session, ipc, capacity, &r, error, cap)) return -1;
-    if (r.type == 2) return botw_services_close(s, handle_id, error, cap);
+    if (r.type == 2) {
+        handle->session = NULL; release_session(session);
+        emit(s, "ipc_session_closed handle=0x%x client_handle_live=true", handle_id);
+        return 0;
+    }
     if (r.type == 5 || r.type == 7) return control(s, session, ipc, capacity, &r, error, cap);
     Object *o = session->root;
     if (r.domain) {

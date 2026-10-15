@@ -252,10 +252,25 @@ class ServicesTests(unittest.TestCase):
         ipc = C.create_string_buffer(self.request(3, kind=5).ljust(256, b'\0'))
         self.assertEqual(self.lib.botw_services_send(self.ctx, sm, ipc, 256, self.error, 1024), -1)
 
-    def test_hipc_close_releases_session(self):
-        sm = self.connect()
+    def test_hipc_close_ends_session_before_kernel_handle_is_closed(self):
+        sm = self.initialized_sm()
         self.send(sm, struct.pack('<II', 2, 0))
+        _, error = self.send(sm, self.request(3, kind=5), good=False)
+        self.assertIn('closed', error)
+        self.assertEqual(self.close(sm), 0)
         self.assertEqual(self.close(sm), -1)
+
+    def test_hipc_close_does_not_close_independent_clone_endpoint(self):
+        sm = self.initialized_sm()
+        raw, _ = self.send(sm, self.request(2, kind=5))
+        _, handles, _ = self.response(raw)
+        clone = handles[0]
+        self.send(sm, struct.pack('<II', 2, 0))
+        self.send(sm, self.request(3, kind=5), good=False)
+        self.service(clone)
+        self.assertEqual(self.close(sm), 0)
+        self.service(clone)
+        self.assertEqual(self.close(clone), 0)
 
     def test_handle_table_exhaustion_is_bounded(self):
         handles = []
