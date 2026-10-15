@@ -84,6 +84,19 @@ class IOSAssemblyTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.assemble()
 
+    def test_audio_module_source_provenance_is_verified(self):
+        relative = 'native/botw_audio/audio.c'
+        source = self.sources / relative
+        source.parent.mkdir()
+        source.write_text('/* synthetic AudioOut backend */\n')
+        self.manifest['source_sha256'][relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        self.write_shell()
+        self.assemble()
+        source.write_text('/* changed after the shell build */\n')
+        self.app = self.root / 'changed-audio' / 'BOTWNative.app'
+        with self.assertRaisesRegex(ValueError, 'Local shell source SHA256 mismatch: ' + relative):
+            self.assemble()
+
     def test_shell_rejects_traversal_duplicate_case_collision_symlink_and_extra_payload(self):
         link = zipfile.ZipInfo('Payload/BOTWNative.app/link')
         link.create_system = 3
