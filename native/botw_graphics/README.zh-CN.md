@@ -1,6 +1,6 @@
 # BOTW 原生图形桥
 
-这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 128 个 NVN 接口；完整游戏需要更多状态、资源和命令。
+这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 140 个 NVN 接口；完整游戏需要更多状态、资源和命令。
 
 ## 宿主接入
 
@@ -48,6 +48,12 @@ TextureBuilderSetDefaults 与原 BOTW SDK 一样保留 +0 的 device；真实 ma
 
 每个 NVN Queue 持有独立的真实 MTLCommandQueue，提交与呈现按该队列排序；QueueBuilder flags 仅接受 NONE=0 与 NO_FRAGMENT_INTERLOCK=1，复制到队列实际策略。当前不支持 fragment interlock，canonical MSL 的 raster-order-group 声明明确拒绝；NO_ZCULL 及其他未验证 flag 拒绝。人工 GPU 测试在 flags1 下验证真实拷贝、围栏和绘制；宿主读回先等待所有 NVN producer queue 的实际完成，避免 transfer queue 提前拷贝。没有 QueueFinish 的清屏/绘制读回曾真实复现抢先读取，现已纳入回归。
 
+CommandBuffer 的12个内存接口使用有界CPU录制表示：command区实际写入16-byte身份/索引token，control区写入对应的16-byte有序索引。EndRecording快照并核对两区token及16-byte分段链接，按验证后的索引实际选择host命令，再写8-byte结束标记；这没有生成NVIDIA指令。host命令字典本身单独管理。两类区间均最多16 MiB，总保留量最多32 MiB、分段最多4096、单次录制最多1048576条；所有加法、索引和大小均检查。control尾部保留16字节，Size/Used/Free仍报告当前完整span，Begin不会暗中清零cursor；这些行为对应原SDK审计，Used不会恒0。
+
+AddCommandMemory借用实际NVN pool内有界区间，AddControlMemory借用CPU区间；完整span在提供、使用和End时重新核验读写权限。对象、队列arena、控制区与GPU pool的冲突在写入前拒绝，QueueInitialize的raw若落在录制区，也在写新arena前拒绝。command/control对齐为4/8、最小size为512/256，与原SDK查询一致，并由真实GPU夹具验证恰好满足而不满足更强对齐的输入。已验证修改token/link、权限撤销、越界、当前段统计、canary和失败后恢复。
+
+容量不足时同步调用真实memory callback：event0请求至少512字节，event1请求至少256字节并包含尾部保留量。callback与userdata保存/查询完整原值；GetMemoryCallbackData按原函数返回void*。图形桥pin对象、清除线程graphics depth并解锁，交给宿主 `botw_graphics_command_memory_invoker` 捕获客体失败，再重新加锁核对对象身份、录制世代和实际补足。callback可重入Add*；其他同对象操作在回调期间明确拒绝。没有安全invoker、没有回调、回调不补内存或客体执行失败均明确失败。生产显式内存/已注册callback的调用不会自动补host容量；无callback且未提供内存的独立host夹具使用每段64 KiB的同一表示。人工fixture覆盖真实补段与无锁并发；另用显式借用区间完成实际GPU拷贝、采样、深度与像素读回，并确认充足容量不触发callback。宿主须在init后注册invoker，init/shutdown均清空。
+
 QueueBuilder 的 command/control 默认各64 KiB，实际分别容纳8192个提交句柄和4096条16-byte POD回放索引；compute默认0，仅接受0，compute执行仍明确拒绝。它们是桥接层实际使用的 CPU arena 容量策略，Metal驱动和Foundation自身的分配独立管理。GetInteger、size setter、GetQueueMemorySize 与布局使用同一合同：4 KiB header页+command+control，每区4 KiB粒度、范围4 KiB–16 MiB；默认总长135168。SetDefaults保留已设置device，所有大小/对齐/加法和32-bit索引范围均有界。
 
 SetQueueMemory提供的完整span必须通过新 `botw_graphics_memory_access` 的读写验证，初始化与每次Submit都重新检查；旧read validator不充当RW许可。生产宿主在graphics init后配置该回调。未提供外部memory时使用同样布局和消费语义的host-owned对齐arena，供独立宿主调用和人工夹具。初始化/GetSize/PoolInitialize先复制Builder到host snapshot，避免另一个guest worker在校验后更改指针。
@@ -60,7 +66,7 @@ Submit先快照输入句柄并保留全部有效host command arrays，完整核�
 
 `CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
 
-128 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，包含实际ABI入口；对象错误记录expected class、raw地址、单次读取的serial和actual class，不可读的raw明确标记。入口上下文按TLS正确嵌套恢复，先解锁再回调。嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
+140 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，包含实际ABI入口；对象错误记录expected class、raw地址、单次读取的serial和actual class，不可读的raw明确标记。入口上下文按TLS正确嵌套恢复，先解锁再回调。嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 

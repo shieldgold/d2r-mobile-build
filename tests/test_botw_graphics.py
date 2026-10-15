@@ -390,6 +390,27 @@ class MetalBridgeTests(unittest.TestCase):
     def test_texture_handle_bit32_signed_low_word_and_descriptor_domain(self):
         self.run_graphics_probe('probe_texture_handle.c', 'TEXTURE_HANDLE_SIGN_EXTENSION_BIT32_AND_DOMAIN_OK')
 
+    def test_command_memory_refill_accounting_rw_tokens_and_error_unlock(self):
+        self.run_graphics_probe('probe_command_memory.c', 'COMMAND_MEMORY_REAL_STORAGE_CALLBACK_ACCOUNTING_AND_UNLOCK_OK')
+
+    def test_command_callback_nested_error_native_exception_and_busy_worker_restore_state(self):
+        self.run_graphics_probe('probe_command_callback_recovery.m', 'ACTUAL_NVN_ERROR_AND_OBJC_EXCEPTION_RESTORE_RECORDING_LOCKS_OK')
+
+    def test_borrowed_command_control_storage_records_real_gpu_copy_sampling_and_depth(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'command-memory.c'; harness.write_text(COMMAND_MEMORY_SMOKE); exe = path / 'command-memory'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
+            self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+
     def test_queue_budgets_use_real_validated_storage_for_gpu_copy_and_draw(self):
         self.run_graphics_probe('probe_queue_arena_gpu.c', 'GPU_COPY_CLEAR_DRAW_OK')
 
@@ -1375,6 +1396,41 @@ RESOURCE_FEATURE = r"""
     puts("GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK");
 """
 RESOURCE_SMOKE = METAL_SMOKE.replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
+
+COMMAND_MEMORY_CALLBACKS = r"""
+static int callbackCount;static unsigned char *controlBase;
+static int all_memory(const void *p,size_t n,int write){(void)p;(void)n;(void)write;return 1;}
+static void callback(NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t n,void *data){
+    (void)c;(void)event;(void)n;if(data!=(void*)&callbackCount)abort();callbackCount++;
+}
+static int invoke(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC f,NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t n,void *data,char *e,size_t cap){
+    (void)e;(void)cap;f(c,event,n,data);return 1;
+}
+"""
+COMMAND_MEMORY_SETUP = r"""
+    botw_graphics_set_memory_access_validator(all_memory);botw_graphics_set_command_memory_invoker(invoke);
+    CHECK(!posix_memalign((void**)&controlBase,8,16384+16));memset(controlBase,0xa5,16384+16);
+    nvnCommandBufferSetMemoryCallback(&cb,callback);nvnCommandBufferSetMemoryCallbackData(&cb,&callbackCount);
+    /* Prove the advertised four/eight byte alignments, not stronger ones. */
+    nvnCommandBufferAddCommandMemory(&cb,&pool,32772,16384);nvnCommandBufferAddControlMemory(&cb,controlBase+8,16384);
+    CHECK(nvnCommandBufferGetCommandMemorySize(&cb)==16384&&nvnCommandBufferGetControlMemorySize(&cb)==16384);
+"""
+COMMAND_MEMORY_VERIFY = r"""
+    CHECK(!callbackCount);CHECK(nvnCommandBufferGetCommandMemoryUsed(&cb)>0);CHECK(nvnCommandBufferGetControlMemoryUsed(&cb)>0);
+    CHECK(nvnCommandBufferGetControlMemoryFree(&cb)+nvnCommandBufferGetControlMemoryUsed(&cb)==16384);
+    for(int i=0;i<8;i++){CHECK(controlBase[i]==0xa5);CHECK(controlBase[16384+8+i]==0xa5);}
+"""
+COMMAND_MEMORY_SMOKE = RESOURCE_SMOKE.replace('page*2', 'page*16').replace(
+    'int main(int argc, char **argv) {', COMMAND_MEMORY_CALLBACKS + 'int main(int argc, char **argv) {').replace(
+    '    API(nvnCommandBufferInitialize);',
+    '    API(nvnCommandBufferSetMemoryCallback);API(nvnCommandBufferSetMemoryCallbackData);'
+    'API(nvnCommandBufferAddCommandMemory);API(nvnCommandBufferAddControlMemory);'
+    'API(nvnCommandBufferGetCommandMemoryUsed);API(nvnCommandBufferGetCommandMemorySize);'
+    'API(nvnCommandBufferGetControlMemoryUsed);API(nvnCommandBufferGetControlMemoryFree);'
+    'API(nvnCommandBufferGetControlMemorySize);\n    API(nvnCommandBufferInitialize);').replace(
+    "    memory[0]='R';", COMMAND_MEMORY_SETUP + "    memory[0]='R';").replace(
+    '    nvnMemoryPoolFinalize(&pool);', COMMAND_MEMORY_VERIFY + '    nvnMemoryPoolFinalize(&pool);').replace(
+    'botw_graphics_shutdown(); free(memory);', 'botw_graphics_shutdown();free(controlBase); free(memory);')
 
 STORAGE_FEATURE = r"""
     API(nvnCommandBufferBindStorageBuffer);API(nvnCommandBufferBindStorageBuffers);API(nvnCommandBufferDrawArraysInstanced);

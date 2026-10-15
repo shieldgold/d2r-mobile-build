@@ -8,6 +8,7 @@
 #import <objc/runtime.h>
 #include "graphics.h"
 #include "queue_arena.h"
+#include "command_memory.h"
 #include "nvn_protos.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -58,8 +59,36 @@
 @end
 @implementation BWProgram
 @end
+@interface BWCommandMemory : NSObject
+@property void *memory,*owned;
+@property size_t size,used;
+@property(strong) BWPool *pool;
+@end
+@implementation BWCommandMemory
+- (void)dealloc { free(_owned); }
+@end
+@interface BWRecordedCommand : NSObject
+@property(strong) BWCommandMemory *command,*control;
+@property size_t commandOffset,controlOffset;
+@end
+@implementation BWRecordedCommand
+@end
+@interface BWRecordedLink : NSObject
+@property(strong) BWCommandMemory *previous,*next;
+@property size_t offset;
+@end
+@implementation BWRecordedLink
+@end
 @interface BWCommands : NSObject
 @property(strong) NSMutableArray<NSDictionary *> *commands;
+@property(strong) NSMutableArray<BWRecordedCommand *> *records;
+@property(strong) NSMutableArray<BWRecordedLink *> *links;
+@property(strong) BWCommandMemory *commandMemory,*controlMemory;
+@property PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC callback;
+@property void *callbackData;
+@property uint64_t generation;
+@property pthread_t callbackOwner;
+@property BOOL callbackActive,externalMemory;
 @property BOOL recording;
 @end
 @implementation BWCommands
@@ -265,6 +294,8 @@ static NSData *digest(const void *bytes,size_t size) {
     return [NSData dataWithBytes:hash length:sizeof hash];
 }
 static BOOL overlapsQueueArena(const void *memory,size_t bytes);
+static BOOL overlapsCommandMemory(const void *memory,size_t bytes);
+static BOOL memoryOverlap(const void *a,size_t na,const void *b,size_t nb);
 static size_t objectStorageSize(id value){
     if([value isKindOfClass:[BWDevice class]])return sizeof(NVNdevice);
     if([value isKindOfClass:[BWPool class]])return sizeof(NVNmemoryPool);
@@ -278,9 +309,13 @@ static size_t objectStorageSize(id value){
     if([value isKindOfClass:[BWDescriptors class]])return ((BWDescriptors*)value).sampler?sizeof(NVNsamplerPool):sizeof(NVNtexturePool);
     fatal("unknown object storage type");
 }
+static void validateObjectStorage(void *raw,size_t bytes){
+    if(!raw||overlapsQueueArena(raw,bytes)||overlapsCommandMemory(raw,bytes))fatal("NVN object storage overlaps live CPU queue arena/recording memory");
+    for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;id existing=objects[key];
+        if([existing isKindOfClass:[BWCommands class]]&&((BWCommands*)existing).callbackActive&&memoryOverlap(raw,bytes,(const void*)span.location,span.length))fatal("NVN object storage is busy in a memory callback");}
+}
 static void put(void *raw,id value) {
-    size_t bytes=objectStorageSize(value);
-    if(!raw||overlapsQueueArena(raw,bytes))fatal("NVN object storage overlaps live CPU queue arena");
+    size_t bytes=objectStorageSize(value);validateObjectStorage(raw,bytes);
     ((BWObject*)raw)->serial=++serial;objects[@(serial)]=value;
     objectSpans[@(serial)]=[NSValue valueWithRange:NSMakeRange((NSUInteger)raw,bytes)];
 }
@@ -482,8 +517,10 @@ NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=52;break;
     case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=32;break;
     case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=4096;break;
-    case NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT:case NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT:*value=8;break;
-    case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_CONTROL_SIZE:*value=256;break;
+    case NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT:*value=BW_COMMAND_MEMORY_ALIGNMENT;break;
+    case NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT:*value=BW_CONTROL_MEMORY_ALIGNMENT;break;
+    case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:*value=BW_MIN_COMMAND_MEMORY;break;
+    case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_CONTROL_SIZE:*value=BW_MIN_CONTROL_MEMORY;break;
     case NVN_DEVICE_INFO_UNIFORM_BUFFER_ALIGNMENT:*value=256;break;
     case NVN_DEVICE_INFO_COLOR_BUFFER_BINDINGS:*value=1;break;
     case NVN_DEVICE_INFO_TEXTURE_DESCRIPTOR_SIZE:
@@ -525,9 +562,9 @@ NVN(nvnMemoryPoolBuilderSetFlags,void,NVNmemoryPoolBuilder *b,int flags){((PoolB
 NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBuilder *builder){
     if(!builder||(memoryAccessValidator&&!memoryAccessValidator(builder,sizeof(PoolBuilder),0)))return report("Memory pool builder is not fully readable");
     PoolBuilder snapshot;memcpy(&snapshot,builder,sizeof snapshot);const PoolBuilder *b=&snapshot;get(b->device,[BWDevice class]);
-    if(overlapsQueueArena(raw,sizeof *raw))return report("NVN object storage overlaps live CPU queue arena");
+    validateObjectStorage(raw,sizeof *raw);
     if(!b->memory || !b->size || b->size>gpu.maxBufferLength || (b->flags&(NVN_MEMORY_POOL_FLAGS_VIRTUAL|NVN_MEMORY_POOL_FLAGS_PHYSICAL)))return report("Unsupported/invalid memory pool");
-    if(overlapsQueueArena(b->memory,b->size))return report("Memory pool overlaps live CPU queue arena");
+    if(overlapsQueueArena(b->memory,b->size)||overlapsCommandMemory(b->memory,b->size))return report("Memory pool overlaps live CPU queue arena/recording memory");
     for(BWPool *p in pools){uintptr_t a=(uintptr_t)p.memory,c=(uintptr_t)b->memory;if(c<=a?a-c<b->size:c-a<p.size)return report("Memory pool ranges overlap");}
     BWPool *p=[BWPool new];p.memory=b->memory;p.size=b->size;p.flags=b->flags;
     size_t page=(size_t)getpagesize();uintptr_t begin=(uintptr_t)b->memory;
@@ -561,7 +598,7 @@ NVN(nvnQueueBuilderSetFlags,void,NVNqueueBuilder *raw,int flags){
 NVN(nvnQueueInitialize,NVNboolean,NVNqueue *raw,const NVNqueueBuilder *builder){
     if(!builder||(memoryAccessValidator&&!memoryAccessValidator(builder,sizeof(QueueBuilder),0)))return report("CPU queue builder is not fully readable");
     QueueBuilder snapshot;memcpy(&snapshot,builder,sizeof snapshot);const QueueBuilder *b=&snapshot;get(b->device,[BWDevice class]);
-    if(overlapsQueueArena(raw,sizeof *raw))return report("NVN object storage overlaps live CPU queue arena");
+    validateObjectStorage(raw,sizeof *raw);
     if(!queueFlagsSupported(b->flags))return report("Unsupported queue flags");
     BWQueue *queue=[BWQueue new];queue.flags=b->flags;
     /* Each NVN queue has its own ordered Metal submission stream. Normal
@@ -671,11 +708,7 @@ NVN(nvnProgramSetShaders,NVNboolean,NVNprogram *raw,int count,const NVNshaderDat
         if(functions[@(found.stage)])return report("Program has duplicate shader stages");functions[@(found.stage)]=found.function;stageShaders[@(found.stage)]=found;
     }
     program.functions=functions;program.stageShaders=stageShaders;return 1;}
-NVN(nvnCommandBufferInitialize,NVNboolean,NVNcommandBuffer *c,NVNdevice *d){get(d,[BWDevice class]);put(c,[BWCommands new]);return 1;}
-NVN(nvnCommandBufferFinalize,void,NVNcommandBuffer *c){BWCommands *cmd=get(c,[BWCommands class]);if(cmd.recording)fatal("finalize recording command buffer");removeObject(c);}
-NVN(nvnCommandBufferBeginRecording,void,NVNcommandBuffer *c){BWCommands *cmd=get(c,[BWCommands class]);if(cmd.recording)fatal("nested recording");cmd.commands=[NSMutableArray new];cmd.recording=YES;}
-NVN(nvnCommandBufferEndRecording,NVNcommandHandle,NVNcommandBuffer *c){BWCommands *cmd=get(c,[BWCommands class]);if(!cmd.recording)fatal("end without recording");cmd.recording=NO;uint64_t h=++serial;handles[@(h)]=[cmd.commands copy];cmd.commands=nil;return h;}
-static void record(NVNcommandBuffer *raw,NSDictionary *command){BWCommands *cmd=get(raw,[BWCommands class]);if(!cmd.recording)fatal("command outside recording");[cmd.commands addObject:command];}
+#include "command_memory.inc"
 NVN(nvnCommandBufferCopyBufferToBuffer,void,NVNcommandBuffer *c,NVNbufferAddress src,NVNbufferAddress dst,size_t bytes,int flags){if(flags || !bytes)fatal("nvnCommandBufferCopyBufferToBuffer flags/size");record(c,@{@"op":@"copy",@"src":@(src),@"dst":@(dst),@"size":@(bytes)});}
 NVN(nvnCommandBufferSetRenderTargets,void,NVNcommandBuffer *c,int n,const NVNtexture *const *colors,const NVNtextureView *const *views,const NVNtexture *depth,const NVNtextureView *dv){if(n!=1||!colors||dv||(views&&views[0]))fatal("nvnCommandBufferSetRenderTargets supports one color/default view");BWTexture *color=get(colors[0],[BWTexture class]);BWTexture *z=depth?get(depth,[BWTexture class]):nil;if(color.texture.textureType!=MTLTextureType2D||(z&&z.texture.textureType!=MTLTextureType2D))fatal("array render targets require unimplemented explicit layer/view semantics");record(c,@{@"op":@"target",@"id":@(((const BWObject*)colors[0])->serial),@"depth":depth?@(((const BWObject*)depth)->serial):@0});}
 NVN(nvnCommandBufferClearColor,void,NVNcommandBuffer *c,int index,const float *color,int mask){if(index||!color||mask!=15)fatal("nvnCommandBufferClearColor color index/mask");record(c,@{@"op":@"clear",@"color":[NSData dataWithBytes:color length:16]});}

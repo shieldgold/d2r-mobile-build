@@ -464,7 +464,7 @@ typedef void (*NVNT_nvnCommandBufferInsertDebugMarkerStatic)(NVNcommandBuffer*, 
 typedef void (*NVNT_nvnCommandBufferInsertDebugMarkerDynamic)(NVNcommandBuffer*, uint32_t, const char*);
 typedef void (*NVNT_nvnCommandBufferInsertDebugMarker)(NVNcommandBuffer*, const char*);
 typedef PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC (*NVNT_nvnCommandBufferGetMemoryCallback)(const NVNcommandBuffer*);
-typedef void (*NVNT_nvnCommandBufferGetMemoryCallbackData)(const NVNcommandBuffer*);
+typedef void* (*NVNT_nvnCommandBufferGetMemoryCallbackData)(const NVNcommandBuffer*);
 typedef NVNboolean (*NVNT_nvnCommandBufferIsRecording)(const NVNcommandBuffer*);
 typedef NVNboolean (*NVNT_nvnSyncInitialize)(NVNsync*, NVNdevice*);
 typedef void (*NVNT_nvnSyncFinalize)(NVNsync*);
