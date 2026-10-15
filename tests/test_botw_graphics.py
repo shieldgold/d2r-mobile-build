@@ -370,6 +370,40 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_queue_flags_use_real_ordered_metal_queue_and_reject_unimplemented_policies(self):
+        smoke = METAL_SMOKE.replace('API(nvnQueueBuilderSetDefaults);', 'API(nvnQueueBuilderSetDefaults);API(nvnQueueBuilderSetFlags);')
+        smoke = smoke.replace('nvnQueueBuilderSetDevice(&qb,&device);',
+            'nvnQueueBuilderSetFlags(&qb,(argc>1&&!strcmp(argv[1],"bad-flags"))?NVN_QUEUE_BUILDER_FLAGS_NO_ZCULL:NVN_QUEUE_BUILDER_FLAGS_NO_FRAGMENT_INTERLOCK);nvnQueueBuilderSetDevice(&qb,&device);')
+        smoke = smoke.replace('    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,msl,"vs"));',
+                              QUEUE_INTERLOCK_FEATURE + '    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,msl,"vs"));')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); graphics = ROOT / 'native/botw_graphics'
+            harness = path / 'flags.c'; harness.write_text(smoke); exe = path / 'flags'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+            self.assertIn('Fragment interlock', result.stderr)
+            # The public readback promises completion even without QueueFinish;
+            # its transfer queue must wait for the separate NVN producer queue.
+            harness.write_text(smoke.replace('nvnQueueFinish(&queue);', '').replace('API(nvnQueueFinish);', ''))
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for _ in range(3):
+                result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+            result = subprocess.run([str(exe), 'bad-flags'], capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('NO_FRAGMENT_INTERLOCK=1', result.stderr)
+
     def test_all_astc_formats_upload_partial_blocks_and_cross_gobs_to_gpu_pixels(self):
         import json
         with tempfile.TemporaryDirectory() as folder:
@@ -951,6 +985,13 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('symlink', result.stderr)
 
+
+QUEUE_INTERLOCK_FEATURE = r"""
+    const char *interlockMSL="#include <metal_stdlib>\nusing namespace metal;fragment float4 interlock(device uint* b [[buffer(0),raster_order_group(0)]]) {b[0]+=1;return float4(1);}";
+    botw_graphics_shader_binding interlockBinding={BOTW_GRAPHICS_STORAGE,0,0};
+    CHECK(!botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,interlockMSL,"interlock",&interlockBinding,1));
+    CHECK(strstr(botw_graphics_last_error(),"Fragment interlock"));
+"""
 
 CAPABILITY_SMOKE = r"""
 #include "graphics.h"

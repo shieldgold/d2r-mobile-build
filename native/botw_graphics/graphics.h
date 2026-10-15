@@ -16,9 +16,13 @@ extern "C" {
  * boolean operations fail with 0. Never reports a no-op as success. */
 typedef void (*botw_graphics_error)(const char *message);
 typedef int (*botw_graphics_memory_range)(const void *address, size_t bytes);
+typedef int (*botw_graphics_memory_access)(const void *address, size_t bytes, int writable);
 int botw_graphics_init(void *layer, botw_graphics_error error,
                        botw_graphics_memory_range validator);
 void botw_graphics_shutdown(void);
+/* Configure after init and before guest entry. A readable-range validator
+ * never authorizes writes. Init/shutdown clear this callback. */
+void botw_graphics_set_memory_access_validator(botw_graphics_memory_access validator);
 void *botw_nvn_bootstrap_loader(const char *name);
 const char *botw_graphics_last_error(void);
 /* Host VI backend. These return 1 only for a live configured CAMetalLayer,

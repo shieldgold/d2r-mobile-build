@@ -65,8 +65,10 @@
 @end
 @class BWReplay;
 @interface BWQueue : NSObject
+@property(strong) id<MTLCommandQueue> native;
 @property(strong) id<MTLCommandBuffer> latest;
 @property(strong) BWReplay *replay;
+@property int flags;
 @end
 @implementation BWQueue
 @end
@@ -157,6 +159,7 @@ static NSMutableArray<BWShader *> *shaders;
 static uint64_t serial;
 static botw_graphics_error errorCallback;
 static botw_graphics_memory_range memoryValidator;
+static botw_graphics_memory_access memoryAccessValidator;
 static _Thread_local char lastError[1024];
 static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
 static _Thread_local unsigned graphicsDepth;
@@ -282,7 +285,7 @@ static void commitBuffer(id<MTLCommandBuffer> cb) {
 }
 static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_graphics_memory_range validator) {
     if(gpu)return report("Graphics already initialized");
-    errorCallback=error; memoryValidator=validator; lastError[0]=0;
+    errorCallback=error; memoryValidator=validator;memoryAccessValidator=NULL;lastError[0]=0;
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
@@ -297,7 +300,7 @@ static void shutdownGraphicsImpl(void) {
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     objects=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
-    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;allGPU=nil;replacePresentation(nil);
+    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;allGPU=nil;replacePresentation(nil);
 }
 /* The runtime owns guest output validation and the real kernel event. Keep
  * these failures return-only: its lifecycle mutex must never be bypassed by
@@ -379,6 +382,7 @@ static int registerShaderImpl(const void *control,size_t cs,const void *code,siz
         if(!matched)return report("Shader draw profile has no matching storage binding");
         for(unsigned i=1;i<=profile->max_instance_count;i++)if(!profile->minimum_storage_bytes[i]||profile->minimum_storage_bytes[i]<profile->minimum_storage_bytes[i-1]||profile->minimum_storage_bytes[i]>gpu.maxBufferLength)return report("Invalid shader draw profile storage minimum");
     }
+    if(strstr(source,"raster_order_group"))return report("Fragment interlock/raster-order-group shaders are not implemented");
     NSError *error=nil; id<MTLLibrary> library=[gpu newLibraryWithSource:@(source) options:nil error:&error];
     if(!library)return report("Metal shader compilation failed: %s",error.localizedDescription.UTF8String);
     id<MTLFunction> function=[library newFunctionWithName:@(entry)];
@@ -397,6 +401,9 @@ static int readTextureImpl(const NVNtexture *raw,unsigned level,unsigned layer,v
     unsigned width=MAX(1,t.width>>level),height=MAX(1,t.height>>level);
     size_t size=(size_t)width*height*4,pitch=((size_t)width*4+255)&~255ull;
     if(!pixels || bytes<size)return report("Texture readback buffer bounds");
+    /* Readback uses the backend transfer queue. Draw/present now use their
+     * owning NVN Metal queues, so a transfer-queue wait alone is insufficient. */
+    for(id value in objects.allValues)if([value isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)value).latest);
     id<MTLBuffer> buffer=[gpu newBufferWithLength:pitch*height options:MTLResourceStorageModeShared];if(!buffer)return report("Texture readback allocation failed");
     id<MTLCommandBuffer> cb=[commandQueue commandBuffer];if(!cb)return report("Texture readback command allocation failed");uploadTexture(t,cb);id<MTLBlitCommandEncoder> b=[cb blitCommandEncoder];if(!b){t.uploadHash=nil;return report("Texture readback encoder allocation failed");}
     [b copyFromTexture:t.texture sourceSlice:layer sourceLevel:level sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(width,height,1) toBuffer:buffer destinationOffset:0 destinationBytesPerRow:pitch destinationBytesPerImage:pitch*height];[b endEncoding];commitBuffer(cb);finishBuffer(cb);
@@ -482,7 +489,21 @@ NVN(nvnMemoryPoolFlushMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset
 NVN(nvnMemoryPoolInvalidateMappedRange,void,const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes){BWPool *p=get(raw,[BWPool class]);if(offset<0||!range(offset,bytes,p.size))fatal("nvnMemoryPoolInvalidateMappedRange bounds");for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);if(!p.coherent)memcpy((char*)p.memory+offset,(char*)p.buffer.contents+p.bufferOffset+offset,bytes);}
 NVN(nvnQueueBuilderSetDefaults,void,NVNqueueBuilder *b){memset(b,0,sizeof *b);}
 NVN(nvnQueueBuilderSetDevice,void,NVNqueueBuilder *b,NVNdevice *d){((QueueBuilder*)b)->device=d;}
-NVN(nvnQueueInitialize,NVNboolean,NVNqueue *raw,const NVNqueueBuilder *b){get(((const QueueBuilder*)b)->device,[BWDevice class]);BWQueue *queue=[BWQueue new];queue.replay=[BWReplay new];put(raw,queue);return 1;}
+static BOOL queueFlagsSupported(int flags){return flags==NVN_QUEUE_BUILDER_FLAGS_NONE||flags==NVN_QUEUE_BUILDER_FLAGS_NO_FRAGMENT_INTERLOCK;}
+NVN(nvnQueueBuilderSetFlags,void,NVNqueueBuilder *raw,int flags){
+    if(!queueFlagsSupported(flags))fatal("queue flags require NONE or NO_FRAGMENT_INTERLOCK=1; other policies are unverified");
+    ((QueueBuilder*)raw)->flags=flags;
+}
+NVN(nvnQueueInitialize,NVNboolean,NVNqueue *raw,const NVNqueueBuilder *builder){
+    const QueueBuilder *b=(const QueueBuilder*)builder;get(b->device,[BWDevice class]);
+    if(!queueFlagsSupported(b->flags))return report("Unsupported queue flags");
+    BWQueue *queue=[BWQueue new];queue.flags=b->flags;
+    /* Each NVN queue has its own ordered Metal submission stream. Normal
+     * Metal fragment execution has no raster-order-group interlock; the
+     * NO_FRAGMENT_INTERLOCK policy needs no added synchronization primitive. */
+    queue.native=[gpu newCommandQueue];if(!queue.native)return report("Metal queue creation failed");
+    queue.replay=[BWReplay new];put(raw,queue);return 1;
+}
 NVN(nvnQueueFinish,void,NVNqueue *q){finishBuffer(((BWQueue*)get(q,[BWQueue class])).latest);}
 NVN(nvnQueueFlush,void,NVNqueue *q){/* Submission commits immediately; no deferred queue exists. */get(q,[BWQueue class]);}
 NVN(nvnQueueFinalize,void,NVNqueue *q){h_nvnQueueFinish(q);removeObject(q);}
@@ -722,7 +743,7 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
 
 NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *input){
     BWQueue *queue=get(raw,[BWQueue class]);if(count<0||(!input&&count))fatal("nvnQueueSubmitCommands handle bounds");
-    id<MTLCommandBuffer> cb=[commandQueue commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;
+    id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal command allocation");BWReplay *state=queue.replay;
     for(int i=0;i<count;i++){
         NSArray *commands=handles[@(input[i])];if(!commands)fatal("invalid/finalized command handle");
         for(NSDictionary *c in commands){NSString *op=c[@"op"];
@@ -775,7 +796,7 @@ NVN(nvnWindowAcquireTexture,NVNwindowAcquireTextureResult,NVNwindow *raw,NVNsync
 NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *queue=get(q,[BWQueue class]);BWWindow *w=get(raw,[BWWindow class]);if(index<0||index>=(int)w.textures.count)fatal("present texture index");BWTexture *t=objects[w.textures[index]];if(!t)fatal("stale swapchain texture");id<CAMetalDrawable> drawable=[displayLayer nextDrawable];if(!drawable)fatal("CAMetalLayer has no drawable");
     if(!presentPipeline){const char *source="#include <metal_stdlib>\nusing namespace metal; struct V{float4 p [[position]];float2 uv;}; vertex V pv(uint i [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return {float4(p[i],0,1),float2((p[i].x+1)*.5,(1-p[i].y)*.5)};} fragment float4 pf(V v [[stage_in]],texture2d<float> t [[texture(0)]]){constexpr sampler s(filter::linear);return t.sample(s,v.uv);}";
         NSError *e=nil;id<MTLLibrary> l=[gpu newLibraryWithSource:@(source) options:nil error:&e];if(!l)fatal(e.localizedDescription.UTF8String);MTLRenderPipelineDescriptor *d=[MTLRenderPipelineDescriptor new];d.vertexFunction=[l newFunctionWithName:@"pv"];d.fragmentFunction=[l newFunctionWithName:@"pf"];d.colorAttachments[0].pixelFormat=displayLayer.pixelFormat;presentPipeline=[gpu newRenderPipelineStateWithDescriptor:d error:&e];if(!presentPipeline)fatal(e.localizedDescription.UTF8String);}
-    id<MTLCommandBuffer> cb=[commandQueue commandBuffer];MTLRenderPassDescriptor *p=[MTLRenderPassDescriptor renderPassDescriptor];p.colorAttachments[0].texture=drawable.texture;p.colorAttachments[0].loadAction=MTLLoadActionDontCare;p.colorAttachments[0].storeAction=MTLStoreActionStore;id<MTLRenderCommandEncoder> e=[cb renderCommandEncoderWithDescriptor:p];[e setRenderPipelineState:presentPipeline];[e setFragmentTexture:t.texture atIndex:0];[e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[e endEncoding];
+    id<MTLCommandBuffer> cb=[queue.native commandBuffer];if(!cb)fatal("Metal presentation command allocation");MTLRenderPassDescriptor *p=[MTLRenderPassDescriptor renderPassDescriptor];p.colorAttachments[0].texture=drawable.texture;p.colorAttachments[0].loadAction=MTLLoadActionDontCare;p.colorAttachments[0].storeAction=MTLStoreActionStore;id<MTLRenderCommandEncoder> e=[cb renderCommandEncoderWithDescriptor:p];[e setRenderPipelineState:presentPipeline];[e setFragmentTexture:t.texture atIndex:0];[e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[e endEncoding];
     BWPresentation *state=presentationSnapshot();BWPresentedFrame *frame=[BWPresentedFrame new];
     frame.epoch=t.drawEpoch!=t.presentedEpoch?t.drawEpoch:0;t.presentedEpoch=t.drawEpoch;
     [state.lock lock];BOOL capture=state.capture;[state.lock unlock];
@@ -806,6 +827,7 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
 #undef NVN_VOID
 WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_graphics_memory_range validator),initializeGraphicsImpl(layer,error,validator))
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
+WRAP_VOID(,botw_graphics_set_memory_access_validator,(botw_graphics_memory_access validator),memoryAccessValidator=validator)
 /* Platform calls may run under the runtime lifecycle lock. Never dispatch a
  * host error here, including Objective-C exceptions from the layer. */
 #define PLATFORM_VALUE(name,parameters,operation) \

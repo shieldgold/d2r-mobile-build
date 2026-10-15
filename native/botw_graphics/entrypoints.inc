@@ -21,6 +21,7 @@ NVN_VOID(nvnMemoryPoolFlushMappedRange,(const NVNmemoryPool *raw,ptrdiff_t offse
 NVN_VOID(nvnMemoryPoolInvalidateMappedRange,(const NVNmemoryPool *raw,ptrdiff_t offset,size_t bytes),(raw,offset,bytes))
 NVN_VOID(nvnQueueBuilderSetDefaults,(NVNqueueBuilder *b),(b))
 NVN_VOID(nvnQueueBuilderSetDevice,(NVNqueueBuilder *b,NVNdevice *d),(b,d))
+NVN_VOID(nvnQueueBuilderSetFlags,(NVNqueueBuilder *b,int flags),(b,flags))
 NVN_VALUE(nvnQueueInitialize,NVNboolean,(NVNqueue *raw,const NVNqueueBuilder *b),(raw,b))
 NVN_VOID(nvnQueueFinish,(NVNqueue *q),(q))
 NVN_VOID(nvnQueueFlush,(NVNqueue *q),(q))

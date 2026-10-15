@@ -1,6 +1,6 @@
 # BOTW 原生图形桥
 
-这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 122 个 NVN 接口；完整游戏需要更多状态、资源和命令。
+这部分把真实 NVN 对象和命令翻译为 Metal。`graphics.m` 已由人工夹具在本机真实 GPU 上验证缓冲拷贝、共享内存可见性、异步围栏、清屏、已登记着色器的管线绘制与像素读回。它目前覆盖 123 个 NVN 接口；完整游戏需要更多状态、资源和命令。
 
 ## 宿主接入
 
@@ -42,11 +42,13 @@
 
 数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。
 
+每个 NVN Queue 持有独立的真实 MTLCommandQueue，提交与呈现按该队列排序；QueueBuilder flags 仅接受 NONE=0 与 NO_FRAGMENT_INTERLOCK=1，复制到队列实际策略。当前不支持 fragment interlock，canonical MSL 的 raster-order-group 声明明确拒绝；NO_ZCULL 及其他未验证 flag 拒绝。人工 GPU 测试在 flags1 下验证真实拷贝、围栏和绘制；宿主读回先等待所有 NVN producer queue 的实际完成，避免 transfer queue 提前拷贝。没有 QueueFinish 的清屏/绘制读回曾真实复现抢先读取，现已纳入回归。队列内存预算接口仍需单独实现，尚未返回虚构的 NVIDIA 默认值。
+
 提交立即 commit；围栏只在 GPU 实际完成后放行。`shutdown` 使用全局提交完成组等待全部已提交命令后才释放零拷贝客体内存。异步 GPU/呈现回调只更新加锁状态，不调用宿主错误回调，避免跨线程 longjmp。内存池优先零拷贝共享映射；不能验证页范围的非对齐 uncached 池拒绝创建，cached 池的复制路径需要显式 flush/invalidate。
 
 `CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
 
-122 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
+123 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 
