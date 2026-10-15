@@ -9,7 +9,11 @@
 3. 准确离线翻译后，使用 `botw_graphics_load_shader_bundle` 加载本地私有包，或用 `botw_graphics_register_shader_with_bindings` 登记原始控制段、GPU 数据、本地 MSL 和逐阶段 NVN→Metal 显式资源槽映射。无资源的着色器可用 `botw_graphics_register_shader`。运行时完整 SHA256 匹配两段原始数据；管线还用 `MTLBinding` 核验每个实际资源均有映射，并核对纹理维数、uniform 大小/对齐、顶点读取范围。
 4. 编译 `graphics.m`、`shader_bundle.m` 时开启 ARC、blocks，链接 Foundation、Metal、QuartzCore。`tools/validate_msl.m` 是独立命令行工具，不要编入 App。
 
-接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空；布尔接口出错返回 0，不以无操作成功代替实现。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
+接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空并记录诊断，不触发宿主错误回调。`DeviceGetProcAddress(NULL, name)` 支持设备创建前的通用查询；非空设备仍核验类型和生命周期。BOTW 固定配置使用原 SDK 的 API 52/32；main 检查主版本等于52、次版本至少32。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
+
+`botw_graphics_platform_*` 为运行时的六个 VI 导入提供真实显示后端。初始化要求已创建的 Metal device/queue、CAMetalLayer 和有效 drawable 尺寸；离屏初始化不能打开显示。Default display 和单个 layer 使用跨初始化不复用的 opaque token，shutdown 后失效。GetNativeWindow 返回与该 layer 绑定的 CAMetalLayer 身份；已核实游戏仅将它作为 opaque 参数传给 NVN WindowBuilder。缩放仅接受公开 [VI FitToLayer=2](https://github.com/switchbrew/libnx/blob/master/nx/include/switch/services/vi.h)，实际呈现管线铺满 drawable，其他模式明确拒绝。所有失败保持输出不变，仅写线程诊断，不调用可能跨栈跳出的宿主错误回调。
+
+运行时负责核验客体输出地址并复制 host 局部结果，也负责通过原 SDK `AttachReadableHandleToSystemEvent` 将真实 kernel reader handle 构造成 SystemEvent。原 VI 使用 EventClearMode=1；写端由宿主 CADisplayLink 的真实帧时钟驱动。图形后端不生成事件句柄或合成 vsync，关闭显示/清理事件由运行时在同一生命周期锁下协调。
 
 纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 

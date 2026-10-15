@@ -21,6 +21,19 @@ int botw_graphics_init(void *layer, botw_graphics_error error,
 void botw_graphics_shutdown(void);
 void *botw_nvn_bootstrap_loader(const char *name);
 const char *botw_graphics_last_error(void);
+/* Host VI backend. These return 1 only for a live configured CAMetalLayer,
+ * write host-local outputs, and report rejection through last_error only.
+ * They never call the error callback, so the runtime may hold its lifecycle
+ * lock, validate/copy guest outputs, and attach a real kernel vsync event.
+ * Display/layer tokens expire on shutdown. Native window identity is the
+ * retained CAMetalLayer. Offscreen graphics init does not create a display. */
+int botw_graphics_platform_initialize(void);
+int botw_graphics_platform_open_default_display(uintptr_t *display);
+int botw_graphics_platform_create_layer(uintptr_t display, uintptr_t *layer);
+int botw_graphics_platform_set_scaling_mode(uintptr_t layer, int mode);
+int botw_graphics_platform_get_native_window(uintptr_t layer, uintptr_t *native);
+int botw_graphics_platform_display_size(uintptr_t display, uint32_t *width, uint32_t *height);
+int botw_graphics_platform_display_is_live(uintptr_t display);
 /* Register locally translated, independently validated MSL for an exact input.
  * NVN data includes its 0x30-byte prefix. No guessed/dummy shader fallback.
  * Returns 0 on invalid identity, stage, Metal compiler failure, or entry point.

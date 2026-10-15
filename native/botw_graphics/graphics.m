@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <math.h>
 #include "vendor/nvn/nvn_tex.c"
 #define mip deswizzle_mip
 #include "vendor/tex/nvn_deswizzle.c"
@@ -143,6 +144,8 @@ _Static_assert(sizeof(WindowBuilder)<=sizeof(NVNwindowBuilder),"window builder A
 static id<MTLDevice> gpu;
 static id<MTLCommandQueue> commandQueue;
 static CAMetalLayer *displayLayer;
+static BOOL platformInitialized;
+static uintptr_t platformDisplay,platformLayer,platformSequence;
 static NSMutableDictionary<NSNumber *, id> *objects;
 static NSMutableDictionary<NSNumber *, NSArray *> *handles;
 static NSMutableDictionary<NSString *, BWPipeline *> *pipelines;
@@ -288,7 +291,68 @@ static void shutdownGraphicsImpl(void) {
     BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     objects=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
+    platformInitialized=NO;platformDisplay=0;platformLayer=0;
     displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;allGPU=nil;replacePresentation(nil);
+}
+/* The runtime owns guest output validation and the real kernel event. Keep
+ * these failures return-only: its lifecycle mutex must never be bypassed by
+ * the NVN error callback's permitted longjmp. All outputs commit on success. */
+static int platformReject(const char *message){
+    snprintf(lastError,sizeof lastError,"VI Metal backend: %s",message);
+    fprintf(stderr,"[botw graphics] %s\n",lastError);return 0;
+}
+static BOOL platformSurfaceSize(uint32_t *width,uint32_t *height){
+    if(!gpu||!commandQueue||!displayLayer||displayLayer.device!=gpu)return NO;
+    CGSize size=displayLayer.drawableSize;
+    if(!isfinite(size.width)||!isfinite(size.height)||size.width<1||size.height<1||
+       size.width>16384||size.height>16384||floor(size.width)!=size.width||floor(size.height)!=size.height)return NO;
+    if(width)*width=(uint32_t)size.width;if(height)*height=(uint32_t)size.height;return YES;
+}
+static uintptr_t platformToken(void){
+    /* Never recycle across shutdown/reinit, including stale runtime tokens. */
+    if(platformSequence==UINTPTR_MAX)return 0;return ++platformSequence;
+}
+static int platformInitializeImpl(void){
+    if(platformInitialized)return platformReject("already initialized");
+    if(!platformSurfaceSize(NULL,NULL))return platformReject("requires a live CAMetalLayer and drawable size");
+    platformInitialized=YES;return 1;
+}
+static int platformOpenDisplayImpl(uintptr_t *out){
+    if(!out)return platformReject("null display output");
+    if(!platformInitialized||!platformSurfaceSize(NULL,NULL))return platformReject("display is not initialized/live");
+    if(platformDisplay)return platformReject("default display already open");
+    uintptr_t token=platformToken();if(!token)return platformReject("display identity exhausted");
+    platformDisplay=token;*out=token;return 1;
+}
+static int platformDisplayLiveImpl(uintptr_t display){
+    if(!platformInitialized||!display||display!=platformDisplay||!platformSurfaceSize(NULL,NULL))return platformReject("unknown, expired, or unavailable display");
+    return 1;
+}
+static int platformDisplaySizeImpl(uintptr_t display,uint32_t *width,uint32_t *height){
+    if(!width||!height)return platformReject("null display size output");
+    if(!platformDisplayLiveImpl(display))return 0;
+    return platformSurfaceSize(width,height);
+}
+static int platformCreateLayerImpl(uintptr_t display,uintptr_t *out){
+    if(!out)return platformReject("null layer output");if(!platformDisplayLiveImpl(display))return 0;
+    if(platformLayer)return platformReject("only one host layer is supported");
+    uintptr_t token=platformToken();if(!token)return platformReject("layer identity exhausted");
+    platformLayer=token;*out=token;return 1;
+}
+static int platformLayerLive(uintptr_t layer){
+    if(!platformInitialized||!layer||layer!=platformLayer||!platformSurfaceSize(NULL,NULL))return platformReject("unknown, expired, or unavailable layer");
+    return 1;
+}
+static int platformScalingImpl(uintptr_t layer,int mode){
+    if(!platformLayerLive(layer))return 0;
+    /* VI FitToLayer=2. Presentation renders the entire source texture onto
+     * the drawable's complete quad, including unequal source/target aspect. */
+    if(mode!=2)return platformReject("unsupported scaling mode (requires FitToLayer=2)");
+    displayLayer.contentsGravity=kCAGravityResize;return 1;
+}
+static int platformNativeWindowImpl(uintptr_t layer,uintptr_t *out){
+    if(!out)return platformReject("null native window output");if(!platformLayerLive(layer))return 0;
+    *out=(uintptr_t)(__bridge void *)displayLayer;return 1;
 }
 int botw_graphics_register_shader(const void *control,size_t cs,const void *code,size_t ds,
                                   NVNshaderStage stage,const char *source,const char *entry) {
@@ -341,11 +405,11 @@ NVN(nvnDeviceBuilderSetDefaults,void,NVNdeviceBuilder *b){memset(b,0,sizeof *b);
 NVN(nvnDeviceBuilderSetFlags,void,NVNdeviceBuilder *b,int flags){((DeviceBuilder*)b)->flags=flags;}
 NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;put(d,device);return 1;}
 NVN(nvnDeviceFinalize,void,NVNdevice *d){get(d,[BWDevice class]);removeObject(d);}
-NVN(nvnDeviceGetProcAddress,PFNNVNGENERICFUNCPTRPROC,const NVNdevice *d,const char *name){get(d,[BWDevice class]);return (PFNNVNGENERICFUNCPTRPROC)botw_nvn_bootstrap_loader(name);}
+NVN(nvnDeviceGetProcAddress,PFNNVNGENERICFUNCPTRPROC,const NVNdevice *d,const char *name){if(d)get(d,[BWDevice class]);return (PFNNVNGENERICFUNCPTRPROC)botw_nvn_bootstrap_loader(name);}
 NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
     get(d,[BWDevice class]);if(!value)fatal("nvnDeviceGetInteger null output");
-    switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=53;break;
-    case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=105;break;
+    switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=52;break;
+    case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=32;break;
     case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=4096;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT:case NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT:*value=8;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_CONTROL_SIZE:*value=256;break;
@@ -707,6 +771,20 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
 #undef NVN_VOID
 WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_graphics_memory_range validator),initializeGraphicsImpl(layer,error,validator))
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
+/* Platform calls may run under the runtime lifecycle lock. Never dispatch a
+ * host error here, including Objective-C exceptions from the layer. */
+#define PLATFORM_VALUE(name,parameters,operation) \
+    int name parameters {int value=0;graphicsBegin(); \
+        @autoreleasepool{@try{value=(operation);}@catch(NSException *exception){platformReject(exception.reason.UTF8String);}} \
+        graphicsEnd();return value;}
+PLATFORM_VALUE(botw_graphics_platform_initialize,(void),platformInitializeImpl())
+PLATFORM_VALUE(botw_graphics_platform_open_default_display,(uintptr_t *out),platformOpenDisplayImpl(out))
+PLATFORM_VALUE(botw_graphics_platform_create_layer,(uintptr_t display,uintptr_t *out),platformCreateLayerImpl(display,out))
+PLATFORM_VALUE(botw_graphics_platform_set_scaling_mode,(uintptr_t layer,int mode),platformScalingImpl(layer,mode))
+PLATFORM_VALUE(botw_graphics_platform_get_native_window,(uintptr_t layer,uintptr_t *out),platformNativeWindowImpl(layer,out))
+PLATFORM_VALUE(botw_graphics_platform_display_size,(uintptr_t display,uint32_t *width,uint32_t *height),platformDisplaySizeImpl(display,width,height))
+PLATFORM_VALUE(botw_graphics_platform_display_is_live,(uintptr_t display),platformDisplayLiveImpl(display))
+#undef PLATFORM_VALUE
 WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,NULL))
 WRAP_VALUE(,botw_graphics_register_shader_with_profile,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count,const botw_graphics_shader_draw_profile *profile),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count,profile))
 WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,0,0,pixels,bytes))
@@ -723,7 +801,10 @@ static void *lookupNVNImpl(const char *name){if(!name)return NULL;
 #define NVN_UNSUPPORTED(name) if(!strcmp(#name,name_))return (void*)unsupported_##name;
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED
-    report("Unknown NVN entry point: %s",name);return NULL;}
+    /* Querying an extension is not execution. Preserve a diagnostic without
+     * invoking the host's fatal callback for an ordinary NULL lookup result. */
+    snprintf(lastError,sizeof lastError,"Unknown NVN entry point: %s",name);
+    fprintf(stderr,"[botw graphics] %s\n",lastError);return NULL;}
 WRAP_VALUE(,botw_nvn_bootstrap_loader,void *,(const char *name),lookupNVNImpl(name))
 #undef WRAP_VALUE
 #undef WRAP_VOID

@@ -370,6 +370,24 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_vi_display_lifetime_and_generic_nvn_lookup_match_game_boot_abi(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'platform.m'; harness.write_text(PLATFORM_SMOKE)
+            exe = path / 'platform'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for mode, expected in (([], 'VI_METAL_DISPLAY_LIFETIME_AND_DIMENSIONS_OK'),
+                                   (['lookup'], 'NVN_GENERIC_LOOKUP_AND_52_32_OK'),
+                                   (['version'], 'NVN_GENERIC_LOOKUP_AND_52_32_OK')):
+                result = subprocess.run([str(exe), *mode], capture_output=True, text=True, timeout=20)
+                if result.returncode == 77:
+                    self.skipTest('No Metal device')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(expected, result.stdout)
+
     def test_triangle_strip_topology_reaches_full_quad_pixels_and_instance_writeback(self):
         ordinary = METAL_SMOKE.replace('float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};',
             'float2 p[4]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(1,1)};')
@@ -840,6 +858,74 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertIn('symlink', result.stderr)
 
 
+PLATFORM_SMOKE = r"""
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#include "graphics.h"
+#include <stdio.h>
+#include <string.h>
+#include <setjmp.h>
+#include <math.h>
+#define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK line %d: %s\n",__LINE__,#x);return 1;}}while(0)
+static int errors;
+static jmp_buf escape;
+static void error(const char *s){(void)s;errors++;longjmp(escape,1);}
+int main(int argc,char **argv){@autoreleasepool{
+ if(!MTLCreateSystemDefaultDevice())return 77;
+ if(argc>1 && (!strcmp(argv[1],"lookup")||!strcmp(argv[1],"version"))){
+  CHECK(botw_graphics_init(NULL,error,NULL));
+  PFNNVNDEVICEGETPROCADDRESSPROC lookup=(PFNNVNDEVICEGETPROCADDRESSPROC)botw_nvn_bootstrap_loader("nvnDeviceGetProcAddress");
+  CHECK(lookup);
+  if(setjmp(escape)){fprintf(stderr,"generic lookup failed: %s\n",botw_graphics_last_error());return 1;}
+  if(!strcmp(argv[1],"lookup")){CHECK(lookup(NULL,"nvnDeviceBuilderSetDefaults"));CHECK(lookup(NULL,"nvnCommandBufferDispatchCompute"));CHECK(!lookup(NULL,"nvnDefinitelyUnknown"));CHECK(errors==0);CHECK(strstr(botw_graphics_last_error(),"Unknown NVN entry"));}
+  NVNdevice device;NVNdeviceBuilder builder;
+  PFNNVNDEVICEBUILDERSETDEFAULTSPROC defaults=(PFNNVNDEVICEBUILDERSETDEFAULTSPROC)botw_nvn_bootstrap_loader("nvnDeviceBuilderSetDefaults");
+  defaults(&builder);
+  PFNNVNDEVICEINITIALIZEPROC init=(PFNNVNDEVICEINITIALIZEPROC)botw_nvn_bootstrap_loader("nvnDeviceInitialize");CHECK(init(&device,&builder));
+  PFNNVNDEVICEGETINTEGERPROC integer=(PFNNVNDEVICEGETINTEGERPROC)lookup(&device,"nvnDeviceGetInteger");
+  int major=0,minor=0;integer(&device,NVN_DEVICE_INFO_API_MAJOR_VERSION,&major);integer(&device,NVN_DEVICE_INFO_API_MINOR_VERSION,&minor);
+  CHECK(major==52&&minor==32);
+  if(!setjmp(escape)){NVNdevice invalid={0};lookup(&invalid,"nvnDeviceInitialize");CHECK(0);}
+  botw_graphics_shutdown();CHECK(errors==1);puts("NVN_GENERIC_LOOKUP_AND_52_32_OK");return 0;
+ }
+ CHECK(!botw_graphics_platform_initialize());
+ CHECK(botw_graphics_init(NULL,error,NULL));
+ CHECK(!botw_graphics_platform_initialize());CHECK(strstr(botw_graphics_last_error(),"CAMetalLayer"));
+ uintptr_t display=123,layer=456,native=789;uint32_t width=11,height=22;
+ CHECK(!botw_graphics_platform_open_default_display(&display));CHECK(display==123);CHECK(errors==0);
+ botw_graphics_shutdown();
+ CAMetalLayer *metal=[CAMetalLayer layer];metal.drawableSize=CGSizeMake(1280,720);
+ CHECK(botw_graphics_init((__bridge void*)metal,error,NULL));
+ CHECK(!botw_graphics_platform_open_default_display(&display));
+ CHECK(botw_graphics_platform_initialize());CHECK(!botw_graphics_platform_initialize());
+ CHECK(botw_graphics_platform_open_default_display(&display));CHECK(display!=0&&display!=123);
+ uintptr_t duplicate=0;CHECK(!botw_graphics_platform_open_default_display(&duplicate));CHECK(!duplicate);
+ CHECK(botw_graphics_platform_display_is_live(display));
+ CHECK(botw_graphics_platform_display_size(display,&width,&height));CHECK(width==1280&&height==720);
+ CHECK(!botw_graphics_platform_create_layer(display+1,&layer));CHECK(layer==456);
+ CHECK(botw_graphics_platform_create_layer(display,&layer));CHECK(layer!=0&&layer!=456);
+ CHECK(!botw_graphics_platform_create_layer(display,&duplicate));
+ CHECK(!botw_graphics_platform_set_scaling_mode(layer,99));
+ CHECK(!botw_graphics_platform_set_scaling_mode(layer+1,2));
+ CHECK(botw_graphics_platform_set_scaling_mode(layer,2));
+ CHECK([metal.contentsGravity isEqualToString:kCAGravityResize]);
+ CHECK(!botw_graphics_platform_get_native_window(layer+1,&native));CHECK(native==789);
+ CHECK(botw_graphics_platform_get_native_window(layer,&native));CHECK(native==(uintptr_t)(__bridge void*)metal);
+ metal.drawableSize=CGSizeMake(640,480);CHECK(botw_graphics_platform_display_size(display,&width,&height));CHECK(width==640&&height==480);
+ id<MTLDevice> savedDevice=metal.device;metal.device=nil;CHECK(!botw_graphics_platform_display_is_live(display));
+ CHECK(!botw_graphics_platform_display_size(display,&width,&height));CHECK(width==640&&height==480);
+ metal.device=savedDevice;CHECK(botw_graphics_platform_display_is_live(display));
+ botw_graphics_shutdown();CHECK(!botw_graphics_platform_display_is_live(display));
+ CHECK(!botw_graphics_platform_get_native_window(layer,&native));
+ CHECK(botw_graphics_init((__bridge void*)metal,error,NULL));CHECK(botw_graphics_platform_initialize());
+ uintptr_t next=0;CHECK(botw_graphics_platform_open_default_display(&next));CHECK(next!=display);
+ CHECK(!botw_graphics_platform_create_layer(display,&duplicate));
+ botw_graphics_shutdown();CHECK(errors==0);puts("VI_METAL_DISPLAY_LIFETIME_AND_DIMENSIONS_OK");return 0;
+}}
+
+"""
+
 METAL_SMOKE = r"""
 #include "graphics.h"
 #include "nvn_protos.h"
@@ -1114,9 +1200,9 @@ int main(void){
         if(sigsetjmp(recovery,1)==0){
             escaping=1;
             if(mode==0){NVNdevice invalid={0};finalize(&invalid);}
-            if(mode==1)(void)botw_nvn_bootstrap_loader("nvnDefinitelyUnknown");
+            if(mode==1){NVNdevice invalid={0};(void)get_proc(&invalid,"nvnDeviceInitialize");}
             if(mode==2){void (*bad)(void)=botw_nvn_bootstrap_loader("nvnCommandBufferDispatchCompute");bad();}
-            if(mode==3){NVNdeviceBuilder b;NVNdevice d;defaults(&b);if(!initialize(&d,&b))return 7;(void)get_proc(&d,"nvnDefinitelyUnknown");}
+            if(mode==3){NVNdeviceBuilder b;NVNdevice d;defaults(&b);if(!initialize(&d,&b))return 7;free_handle(&d,0);}
             return 5;
         }
         escaping=0;botw_graphics_shutdown();
