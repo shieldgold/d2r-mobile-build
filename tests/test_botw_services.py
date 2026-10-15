@@ -187,10 +187,13 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         body = b'SFCI' + struct.pack('<III', 0, command, 0) + payload
         if domain:
             body = struct.pack('<BBHIII', 1, 0, len(body), domain, 0, 0) + body
-        words = (16 + len(body) + 3) // 4
+        table = struct.pack('<H', receive_static[1]) if receive_static else b''
+        words = (16 + len(body) + len(table) + 3) // 4
         header = struct.pack('<II', kind | bool(static) << 16 | bool(buffer) << 20 | bool(receive) << 24,
                              words | (bool(pid or copies) << 31) | (3 << 10 if receive_static else 0))
         message = header + special + descriptor + b'\0' * (-start % 16) + body
+        if table:
+            message = message.ljust(start + 16 + len(body), b'\0') + table
         message = message.ljust(start + words * 4, b'\0')
         if receive_static:
             address, size = receive_static
@@ -209,8 +212,15 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
             self.assertEqual(rc, -1)
         return bytes(ipc), self.error.value.decode()
 
+    def pointer_output_buffer(self, data):
+        # The C destination supports 48 address bits, but its translated reply
+        # X must encode the same real address in 42 bits. Keep portable fixtures
+        # within that actual wire limit, including Linux's high-VA hosts.
+        backing = self.static_buffer(data)
+        return (C.c_char * len(data)).from_buffer(backing)
+
     def response(self, raw, domain=False):
-        _, word1 = struct.unpack_from('<II', raw)
+        word0, word1 = struct.unpack_from('<II', raw)
         offset, handles = 8, []
         if word1 >> 31:
             special, = struct.unpack_from('<I', raw, offset)
@@ -219,6 +229,7 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
             count = ((special >> 1) & 15) + ((special >> 5) & 15)
             handles = list(struct.unpack_from('<' + 'I' * count, raw, offset))
             offset += 4 * count
+        offset += ((word0 >> 16) & 15) * 8
         offset = (offset + 15) & ~15
         if domain:
             nobjects, = struct.unpack_from('<I', raw, offset)
@@ -345,7 +356,7 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         account, _ = self.account(initialize=False)
         self.send(account, self.request(100, bytes(8), pid=True), good=False)
         _, user, _ = self.configure_local_user()
-        output = C.create_string_buffer(128)
+        output = self.pointer_output_buffer(bytes(128))
         self.ranges.append((C.addressof(output), 128, True))
         self.send(account, self.request(2, receive_static=(C.addressof(output), 128)), good=False)
         self.send(account, self.request(101, bytes(user.uid)), good=False)
@@ -363,13 +374,13 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         _, user, _ = self.configure_local_user()
         for domain in (False, True):
             account, root = self.account(domain)
-            output = C.create_string_buffer(b'\xa5' * 144, 144)
+            output = self.pointer_output_buffer(b'\xa5' * 144)
             self.ranges.append((C.addressof(output), 144, True))
             raw, _ = self.send(account, self.request(2, domain=root,
                               receive_static=(C.addressof(output), 128)))
             data, handles, objects = self.response(raw, domain)
             self.assertEqual((handles, objects), ([], 0))
-            self.assertEqual(struct.unpack_from('<I', raw, 4)[0], 10 if domain else 6)
+            self.assertEqual(struct.unpack_from('<II', raw), (1 << 16, 8 if domain else 4))
             self.assertEqual(bytes(output)[:128], bytes(user.uid) + bytes(112))
             self.assertEqual(bytes(output)[128:], b'\xa5' * 16)
             self.assertFalse(any(data))
@@ -394,13 +405,13 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
             for uid in (bytes(16), bytes([user.uid[0] ^ 1]) + bytes(user.uid)[1:], bytes(user.uid) + b'\1'):
                 self.send(account, self.request(101, uid, domain=root), good=False)
             self.send(account, self.request(101, bytes(user.uid), domain=root, pid=True), good=False)
-            output = C.create_string_buffer(b'\xa5' * 128, 128)
+            output = self.pointer_output_buffer(b'\xa5' * 128)
             self.ranges.append((C.addressof(output), 128, True))
             for key in ('receive', 'receive_static'):
                 self.error.value = b''
                 _, error = self.send(account, self.request(101, bytes(user.uid), domain=root,
                                      **{key: (C.addressof(output), 128)}), good=False)
-                self.assertIn('GetBaasAccountManagerForApplication does not accept output buffers', error)
+                self.assertRegex(error, 'receive-static pointer schema|GetBaasAccountManagerForApplication does not accept output buffers')
                 self.assertEqual(bytes(output), b'\xa5' * 128)
             raw, _ = self.send(account, self.request(101, bytes(user.uid), domain=root))
             data, handles, objects = self.response(raw, domain)
@@ -426,7 +437,7 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         store, user, _ = self.configure_local_user()
         account, root = self.account(True)
         other, _, _ = self.local_savefs()
-        output = C.create_string_buffer(b'\xa5' * 128, 128)
+        output = self.pointer_output_buffer(b'\xa5' * 128)
         self.ranges.append((C.addressof(output), 128, True))
         for changed in (None, other):
             self.lib.botw_services_set_savefs(self.ctx, changed)
@@ -528,7 +539,7 @@ unsigned botw_test_savefs_sync_count(void) { return atomic_load(&sync_count); }
         _, user, _ = self.configure_local_user()
         account, root = self.account(True)
         app, app_root = self.application_functions(True)
-        output, ipc = C.create_string_buffer(128), C.create_string_buffer(256)
+        output, ipc = self.pointer_output_buffer(bytes(128)), C.create_string_buffer(256)
         self.ranges.extend(((C.addressof(output), 128, True), (C.addressof(ipc), 256, True)))
         for handle, request, result in (
                 (account, self.request(2, domain=root, receive_static=(C.addressof(output), 128)), 0),
@@ -1763,11 +1774,11 @@ finally:
         new = self.connect()
         self.assertNotEqual(new, sm)
 
-    def test_control_pointer_size_reports_zero_when_no_server_pointer_pool(self):
+    def test_control_pointer_size_reports_real_bounded_server_pointer_pool(self):
         sm = self.connect()
         raw, _ = self.send(sm, self.request(3, kind=5))
         data, _, _ = self.response(raw)
-        self.assertEqual(struct.unpack_from('<H', data)[0], 0)
+        self.assertEqual(struct.unpack_from('<H', data)[0], 0x500)
         self.send(sm, self.request(77, kind=5), good=False)
 
     def test_domain_child_and_close_lifetime(self):

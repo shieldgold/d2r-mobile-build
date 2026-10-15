@@ -17,6 +17,12 @@ typedef int (*botw_services_memory_fn)(void *opaque, uint64_t address, size_t le
  * output are unsupported until a real corresponding sink is connected. */
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque);
 void botw_services_destroy(botw_services *services);
+/* Each transport handle owns a real 16-byte-aligned 0x500-byte pointer arena;
+ * QueryPointerBufferSize reports that capacity. X inputs are copied into the
+ * arena for this serialized send only. C outputs currently support the fixed
+ * SDK's ListAllUsers variable C128 schema, including its u16 size table and
+ * translated reply X. Unknown C schemas fail; A/B map-alias buffers do not
+ * consume this arena. Existing clone/domain object-sharing rules are retained. */
 /* Optional checked preparation immediately before host I/O writes a validated
  * guest output span. This is separate from the memory permission validator;
  * it must not reenter services. Return 0 to continue, -1 to stop before I/O.
@@ -25,6 +31,20 @@ typedef int (*botw_services_write_prepare_fn)(void *opaque, uint64_t address,
     size_t length, char *error, size_t capacity);
 void botw_services_set_memory_write_preparer(botw_services *services,
     botw_services_write_prepare_fn prepare, void *opaque);
+/* Optional protected copies for serialized pointer transfers and IPC snapshots.
+ * Logical guest access is checked first. Write copies run after preparation;
+ * they must not reenter services or retain host snapshot/arena pointers. NULL
+ * restores the portable synchronous-borrow memcpy contract. Register both or
+ * neither. With neither, the validator/caller must keep each accepted range
+ * physically accessible and live throughout the synchronous call; memcpy does
+ * not provide fault recovery. All callbacks/state must outlive this context. */
+typedef int (*botw_services_read_guest_fn)(void *opaque, uint64_t source,
+    void *destination, size_t length, char *error, size_t capacity);
+typedef int (*botw_services_write_guest_fn)(void *opaque, uint64_t destination,
+    const void *source, size_t length, char *error, size_t capacity);
+void botw_services_set_memory_copiers(botw_services *services,
+    botw_services_read_guest_fn read_guest, botw_services_write_guest_fn write_guest,
+    void *opaque);
 /* mode is Horizon Normal=0 or Boost=1. active distinguishes the current host
  * mode from a stored future profile. The handler must validate configuration
  * and apply an actual host policy for active requests; 0 accepts, -1 rejects.

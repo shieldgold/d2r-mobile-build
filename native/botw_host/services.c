@@ -24,6 +24,7 @@
 #define HANDLE_LIMIT 256u
 #define DOMAIN_LIMIT 64u
 #define IPC_LIMIT 0x100u
+#define POINTER_CAPACITY 0x500u
 #define LOG_LIMIT (1024u * 1024u)
 #define BUFFER_LIMIT (16u * 1024u * 1024u)
 #define STORAGE_TOTAL_LIMIT (64u * 1024u * 1024u)
@@ -67,7 +68,12 @@ typedef struct Session {
 /* A nonzero id owns a client kernel handle. session == NULL means its server
  * endpoint has closed: SendSyncRequest fails, but CloseHandle still releases
  * that client handle once. This matches the SDK's CMIF-Close/SVC-Close sequence. */
-typedef struct { uint32_t id; Session *session; } Handle;
+typedef struct { uint32_t id; Session *session; uint8_t *pointer_memory; } Handle;
+typedef struct {
+    uint64_t ipc_address, output_address;
+    uint8_t *arena;
+    size_t output_size, output_written;
+} PointerTransfer;
 struct botw_services {
     pthread_mutex_t lock;
     Handle handles[HANDLE_LIMIT];
@@ -80,6 +86,9 @@ struct botw_services {
     void *focus_opaque;
     botw_services_write_prepare_fn write_prepare;
     void *write_prepare_opaque;
+    botw_services_read_guest_fn read_guest;
+    botw_services_write_guest_fn write_guest;
+    void *copy_opaque;
     uint32_t focus_mode;
     unsigned focus_suspend_out, focus_policy_configured;
     botw_services_kernel_api kernel;
@@ -134,6 +143,9 @@ typedef struct {
     unsigned buffer_descriptor_count;
     uint64_t output_address;
     size_t output_size;
+    size_t raw_start, raw_end, cmif_offset, pointer_input_bytes, pointer_output_bytes;
+    unsigned input_is_static, output_is_static;
+    PointerTransfer *transfer;
 } Request;
 
 static uint32_t load32(const void *p) { uint32_t n; memcpy(&n, p, 4); return n; }
@@ -229,7 +241,11 @@ static Handle *find_handle(botw_services *s, uint32_t handle) {
 static int assign_handle(botw_services *s, Session *session, uint32_t *out, char *error, size_t cap) {
     if (s->next_handle < 0x10000 || s->next_handle >= 0x20000) return problem(error, cap, "IPC handle identity space exhausted before kernel namespace");
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (!s->handles[i].id) {
+        uint8_t *arena = aligned_alloc(16, POINTER_CAPACITY);
+        if (!arena) return problem(error, cap, "allocate bounded IPC pointer arena failed");
+        memset(arena, 0, POINTER_CAPACITY);
         s->handles[i].id = s->next_handle++; s->handles[i].session = session; *out = s->handles[i].id;
+        s->handles[i].pointer_memory = arena;
         return 0;
     }
     return problem(error, cap, "IPC handle table exhausted (%u live sessions)", HANDLE_LIMIT);
@@ -256,6 +272,14 @@ void botw_services_set_memory_write_preparer(botw_services *s,
     if (!s) return;
     pthread_mutex_lock(&s->lock);
     s->write_prepare = prepare; s->write_prepare_opaque = opaque;
+    pthread_mutex_unlock(&s->lock);
+}
+void botw_services_set_memory_copiers(botw_services *s,
+        botw_services_read_guest_fn read_guest, botw_services_write_guest_fn write_guest,
+        void *opaque) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock);
+    s->read_guest = read_guest; s->write_guest = write_guest; s->copy_opaque = opaque;
     pthread_mutex_unlock(&s->lock);
 }
 /* Called only after parsing and whole-descriptor permission validation, and
@@ -474,7 +498,7 @@ void botw_services_destroy(botw_services *s) {
     if (!s) return;
     pthread_mutex_lock(&s->lock);
     if (s->trace_suppressed) emit(s, "ipc_trace_summary unique_commands=%u repeated_requests=%llu", s->trace_seen_count, (unsigned long long)s->trace_suppressed);
-    for (unsigned i = 0; i < HANDLE_LIMIT; i++) release_session(s->handles[i].session);
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) { release_session(s->handles[i].session); free(s->handles[i].pointer_memory); }
     for (unsigned i = 0; i < 3; i++) free(s->capture_images[i]);
     free(s->transition_image);
     char error[128];
@@ -502,6 +526,7 @@ static int services_close(botw_services *s, uint32_t id, char *error, size_t cap
     Handle *handle = s ? find_handle(s, id) : NULL;
     if (!handle) return problem(error, cap, "CloseHandle invalid or closed IPC handle=0x%x", id);
     Session *session = handle->session; handle->id = 0; handle->session = NULL; release_session(session);
+    free(handle->pointer_memory); handle->pointer_memory = NULL;
     emit(s, "ipc_close handle=0x%x", id); return 0;
 }
 static int checked_span(size_t offset, size_t length, size_t end) { return offset <= end && length <= end - offset; }
@@ -523,6 +548,30 @@ static int output_descriptor(botw_services *s, Request *r, uint64_t address, uin
         return problem(error, cap, "IPC output descriptor is not checked guest writable memory address=0x%llx bytes=%llu", (unsigned long long)address, (unsigned long long)length);
     if (++r->output_count > 1) return problem(error, cap, "IPC multiple nonempty output buffers are unsupported");
     r->output_address = address; r->output_size = (size_t)length; return 0;
+}
+static int copy_from_guest(botw_services *s, uint64_t source, void *destination,
+        size_t size, char *error, size_t cap) {
+    if (!size) return 0;
+    if (!source || size > UINT64_MAX - source || !s->memory(s->opaque, source, size, 0))
+        return problem(error, cap, "IPC pointer source is not completely readable guest memory");
+    if (s->read_guest) {
+        if (!s->read_guest(s->copy_opaque, source, destination, size, error, cap)) return 0;
+        if (!error || !cap || !error[0]) problem(error, cap, "protected IPC guest read failed");
+        return -1;
+    }
+    memcpy(destination, (const void *)(uintptr_t)source, size); return 0;
+}
+static int copy_to_guest(botw_services *s, uint64_t destination, const void *source,
+        size_t size, char *error, size_t cap) {
+    if (!size) return 0;
+    if (!destination || size > UINT64_MAX - destination || !s->memory(s->opaque, destination, size, 1))
+        return problem(error, cap, "IPC pointer destination is not completely writable guest memory");
+    if (s->write_guest) {
+        if (!s->write_guest(s->copy_opaque, destination, source, size, error, cap)) return 0;
+        if (!error || !cap || !error[0]) problem(error, cap, "protected IPC guest write failed");
+        return -1;
+    }
+    memcpy((void *)(uintptr_t)destination, source, size); return 0;
 }
 static int parse_request(botw_services *s, Session *session, const uint8_t *ipc, size_t capacity, Request *r, char *error, size_t cap) {
     uint32_t a = load32(ipc), b = load32(ipc + 4);
@@ -559,6 +608,8 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
         uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
         if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
+        if (x >> 16) r->input_is_static = 1;
+        r->pointer_input_bytes += ((size_t)(x >> 16) + 15) & ~(size_t)15;
         r->input_static_count++;
     }
     for (unsigned i = 0; i < sends + recvs; i++, offset += 12) {
@@ -569,6 +620,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         if (i < sends ? input_descriptor(s, r, address, length, error, cap) : output_descriptor(s, r, address, length, error, cap)) return -1;
     }
     size_t raw_end = offset + (size_t)(b & 0x3ff) * 4;
+    r->raw_start = offset; r->raw_end = raw_end;
     if (raw_end > capacity) return problem(error, cap, "HIPC raw data exceeds IPC buffer (end=%zu capacity=%zu)", raw_end, capacity);
     unsigned recv_statics = recv_mode >= 3 ? recv_mode - 2 : 0;
     r->buffer_descriptor_count = statics + sends + recvs + recv_statics;
@@ -578,6 +630,8 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         uint32_t high = load32(entry + 4);
         uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
         if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+        if (high >> 16) r->output_is_static = 1;
+        r->pointer_output_bytes += ((size_t)(high >> 16) + 15) & ~(size_t)15;
         r->output_static_count++;
     }
     offset = (offset + 15) & ~(size_t)15;
@@ -606,12 +660,57 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     uint32_t magic = load32(ipc + offset), version = load32(ipc + offset + 4);
     if (magic != SFCI || version > 1 || (version && r->type != 6 && r->type != 7))
         return problem(error, cap, "invalid CMIF header magic=0x%x version=%u", magic, version);
+    r->cmif_offset = offset;
     r->command = load32(ipc + offset + 8); r->token = load32(ipc + offset + 12);
     r->payload = ipc + offset + 16; r->payload_size = raw_end - offset - 16; return 0;
 }
+static int stage_pointers(botw_services *s, Object *object, Request *r, const uint8_t *ipc,
+        PointerTransfer *transfer, size_t ipc_capacity, char *error, size_t cap) {
+    /* The single server receive arena grows from both ends. The SDK reserves
+     * AlignUp(size,16) for every pointer; map-alias A/B buffers use no arena. */
+    if (r->pointer_input_bytes > POINTER_CAPACITY ||
+            r->pointer_output_bytes > POINTER_CAPACITY - r->pointer_input_bytes)
+        return problem(error, cap, "IPC pointer arena aggregate budget exceeds capacity=%u", POINTER_CAPACITY);
+    if (r->output_static_count) {
+        /* This fixed SDK's ListAllUsers is a VARIABLE OutPointer, not a fixed
+         * C array. Its u16 size table lies after the reserved alignment bytes,
+         * outside domain data_size. Other output-pointer schemas need evidence. */
+        if (object->kind != OBJECT_ACCOUNT || r->command != 2)
+            return problem(error, cap, "unsupported IPC receive-static pointer schema service=%s command=%u", kind_name(object->kind), r->command);
+        size_t table = r->raw_start + 16 + (r->domain ? 16 : 0) + 16;
+        size_t raw_size = (16 + (r->domain ? 16 : 0) + 16 + 2 + 3) & ~(size_t)3;
+        if (r->buffer_descriptor_count != 1 || r->output_static_count != 1 || r->output_count != 1 ||
+                !r->output_is_static || r->output_size != 128 || r->input_count ||
+                r->raw_end - r->raw_start != raw_size || !checked_span(table, 2, r->raw_end) ||
+                (r->domain && r->payload_size) ||
+                ((unsigned)ipc[table] | (unsigned)ipc[table + 1] << 8) != r->output_size)
+            return problem(error, cap, "acc.ListAllUsers requires exact variable C128 pointer size table and no input parameters");
+        if (ranges_overlap(r->output_address, r->output_size, transfer->ipc_address, ipc_capacity))
+            return problem(error, cap, "IPC receive-static pointer overlaps the client IPC message");
+        if (r->output_address >= (UINT64_C(1) << 42))
+            return problem(error, cap, "IPC receive-static destination cannot be represented by the 42-bit reply pointer");
+        transfer->output_address = r->output_address; transfer->output_size = r->output_size;
+        r->output_address = (uint64_t)(uintptr_t)(transfer->arena + POINTER_CAPACITY - r->pointer_output_bytes);
+        r->payload_size = 0;
+        memset((void *)(uintptr_t)r->output_address, 0, r->output_size);
+    }
+    if (r->input_is_static) {
+        if (copy_from_guest(s, r->input_address, transfer->arena, r->input_size, error, cap)) return -1;
+        r->input_address = (uint64_t)(uintptr_t)transfer->arena;
+    }
+    r->transfer = transfer; return 0;
+}
 static void response(uint8_t *ipc, size_t capacity, const Request *r, const void *data, size_t data_size, uint32_t handle, uint32_t object_id) {
     memset(ipc, 0, capacity);
-    size_t raw_start = handle ? 16 : 8, aligned = 16;
+    size_t raw_start = handle ? 16 : 8;
+    if (r->transfer && r->transfer->output_written) {
+        uint64_t address = r->transfer->output_address;
+        uint32_t first = (uint32_t)((address >> 36) & 63) << 6 |
+            (uint32_t)((address >> 32) & 15) << 12 | (uint32_t)r->transfer->output_written << 16;
+        store32(ipc, 1u << 16); store32(ipc + raw_start, first); store32(ipc + raw_start + 4, (uint32_t)address);
+        raw_start += 8;
+    }
+    size_t aligned = (raw_start + 15) & ~(size_t)15;
     size_t payload = aligned + (r->domain ? 16 : 0);
     size_t end = payload + 16 + data_size + (object_id ? 4 : 0);
     store32(ipc + 4, (uint32_t)((end - raw_start + 3) / 4) | (handle ? 0x80000000u : 0));
@@ -656,7 +755,7 @@ static int return_object(botw_services *s, Session *session, Object *o, uint8_t 
     response(ipc, capacity, r, NULL, 0, handle, object_id); return 0;
 }
 static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
-    if (r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
+    if (r->buffer_descriptor_count || r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
     uint32_t handle = 0, object_id;
     switch (r->command) {
         case 0:
@@ -675,9 +774,7 @@ static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capa
             if (assign_handle(s, session, &handle, error, cap)) return -1;
             session->refs++; response(ipc, capacity, r, NULL, 0, handle, 0); return 0;
         case 3: {
-            /* No server pointer pool is exposed; callers select map-alias input
-             * buffers. Incoming explicit pointers remain checked guest memory. */
-            uint16_t size = 0; response(ipc, capacity, r, &size, 2, 0, 0); return 0;
+            uint16_t size = POINTER_CAPACITY; response(ipc, capacity, r, &size, 2, 0, 0); return 0;
         }
         default: return problem(error, cap, "unsupported CMIF control command=%u", r->command);
     }
@@ -758,6 +855,7 @@ static int account_request(botw_services *s, Session *session, Object *o, uint8_
             return problem(error, cap, "acc.ListAllUsers requires one checked C receive-static buffer of exactly 128 bytes");
         uint8_t users[128] = {0}; memcpy(users, s->local_uid, 16);
         memcpy((void *)(uintptr_t)r->output_address, users, sizeof users);
+        r->transfer->output_written = sizeof users;
         /* The original SDK scans eight UID entries for a zero terminator. No
          * response count scalar is present in this command's ABI. */
         response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
@@ -1085,7 +1183,7 @@ static int save_request(botw_services *s, Session *session, Object *o, uint8_t *
         if (write ? r->output_count || r->input_static_count || r->input_count != (length ? 1u : 0u) || length > r->input_size :
             r->input_count || r->output_static_count || r->output_count != (length ? 1u : 0u) || length > r->output_size)
             return problem(error, cap, "SaveFS IFile.%s requires a checked %s buffer covering the full requested span", write ? "Write" : "Read", write ? "A input" : "B output");
-        if (!write && ranges_overlap(r->output_address, r->output_size, (uint64_t)(uintptr_t)ipc, capacity))
+        if (!write && ranges_overlap(r->output_address, r->output_size, r->transfer->ipc_address, capacity))
             return problem(error, cap, "SaveFS IFile.Read output descriptor overlaps IPC message buffer");
         if (!(o->file_mode & (write ? 2u : 1u))) return fs_result_response(ipc, capacity, r, 2u | ((write ? 6203u : 6202u) << 9));
         if (write && length && !(o->file_mode & 4u)) {
@@ -1383,14 +1481,15 @@ static int parental_request(botw_services *s, Session *session, Object *o, uint8
     }
     return problem(error, cap, "unsupported pctl command=%u policy_source=%s (no external account/PIN authorization inferred)", r->command, s->parental_source);
 }
-static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
+static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity,
+        PointerTransfer *transfer, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
     if (!handle->session) return problem(error, cap, "SendSyncRequest server endpoint closed for IPC handle=0x%x", handle_id);
-    if (!buffer || capacity < 0x40 || capacity > IPC_LIMIT || !s->memory(s->opaque, (uint64_t)(uintptr_t)buffer, capacity, 1))
-        return problem(error, cap, "SendSyncRequest IPC buffer is not checked guest writable memory or capacity is outside 0x40..0x100");
     uint8_t *ipc = buffer; Session *session = handle->session; Request r = {0};
     if (parse_request(s, session, ipc, capacity, &r, error, cap)) return -1;
+    if ((r.type == 2 || r.type == 5 || r.type == 7) && s->write_guest &&
+            prepare_host_output(s, transfer->ipc_address, capacity, "IPC reply preflight", error, cap)) return -1;
     if (r.type == 2) {
         handle->session = NULL; release_session(session);
         emit(s, "ipc_session_closed handle=0x%x client_handle_live=true", handle_id);
@@ -1403,14 +1502,20 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             return problem(error, cap, "CMIF invalid or closed domain object=%u", r.object_id);
         o = session->objects[r.object_id - 1];
         if (r.domain_close) {
+            if (s->write_guest && prepare_host_output(s, transfer->ipc_address, capacity, "IPC domain-close reply preflight", error, cap)) return -1;
             session->objects[r.object_id - 1] = NULL;
             if (session->root == o) session->root = NULL;
             release_object(o); memset(ipc, 0, capacity); return 0;
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
+    if (stage_pointers(s, o, &r, ipc, transfer, capacity, error, cap)) return -1;
     if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
+    /* Protected VM writes cannot enter the CPU dirty-fault handler. Preflight
+     * the real reply span before logging, consuming storage or host I/O. This
+     * does not promise a transaction against concurrent guest unmapping. */
+    if (s->write_guest && prepare_host_output(s, transfer->ipc_address, capacity, "IPC reply preflight", error, cap)) return -1;
     trace_request(s, o->kind, &r, handle_id);
     if (o->kind == OBJECT_SM) {
         if (r.input_count) return problem(error, cap, "sm: command=%u unexpected input buffer", r.command);
@@ -1513,6 +1618,30 @@ int botw_services_close(botw_services *s, uint32_t handle, char *error, size_t c
 }
 int botw_services_send(botw_services *s, uint32_t handle, void *buffer, size_t capacity, char *error, size_t cap) {
     if (!s) return problem(error, cap, "SendSyncRequest requires service context");
-    pthread_mutex_lock(&s->lock); int result = services_send(s, handle, buffer, capacity, error, cap);
+    pthread_mutex_lock(&s->lock);
+    int result = -1; Handle *entry = find_handle(s, handle);
+    if (!buffer || capacity < 0x40 || capacity > IPC_LIMIT ||
+            !s->memory(s->opaque, (uint64_t)(uintptr_t)buffer, capacity, 1)) {
+        problem(error, cap, "SendSyncRequest IPC buffer is not checked guest writable memory or capacity is outside 0x40..0x100");
+    } else if (!!s->read_guest != !!s->write_guest) {
+        problem(error, cap, "IPC protected copies require both read and write callbacks");
+    } else if (!entry || !entry->session) {
+        problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle);
+    } else {
+        uint8_t snapshot[IPC_LIMIT];
+        PointerTransfer transfer = {.ipc_address=(uint64_t)(uintptr_t)buffer, .arena=entry->pointer_memory};
+        if (!copy_from_guest(s, transfer.ipc_address, snapshot, capacity, error, cap)) {
+            result = services_send(s, handle, snapshot, capacity, &transfer, error, cap);
+            if (!result && transfer.output_written) {
+                if (transfer.output_written > transfer.output_size ||
+                        prepare_host_output(s, transfer.output_address, transfer.output_written, "IPC pointer copyback", error, cap)) result = -1;
+            }
+            if (!result && transfer.output_written) {
+                uint8_t *output = transfer.arena + POINTER_CAPACITY - ((transfer.output_size + 15) & ~(size_t)15);
+                result = copy_to_guest(s, transfer.output_address, output, transfer.output_written, error, cap);
+            }
+            if (!result) result = copy_to_guest(s, transfer.ipc_address, snapshot, capacity, error, cap);
+        }
+    }
     pthread_mutex_unlock(&s->lock); return result;
 }
