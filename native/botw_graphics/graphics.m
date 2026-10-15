@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 #include "vendor/nvn/nvn_tex.c"
 #define mip deswizzle_mip
 #include "vendor/tex/nvn_deswizzle.c"
@@ -171,6 +172,17 @@ static char completionKey;
 - (instancetype)init{if((self=[super init]))_lock=[NSLock new];return self;}
 @end
 static BWPresentation *presentation;
+static pthread_mutex_t presentationPointerLock=PTHREAD_MUTEX_INITIALIZER;
+/* ARC strong loads also need synchronization: retain the snapshot while the
+ * global pointer cannot be replaced, then use its own lock after releasing. */
+static BWPresentation *presentationSnapshot(void){
+    pthread_mutex_lock(&presentationPointerLock);BWPresentation *state=presentation;
+    pthread_mutex_unlock(&presentationPointerLock);return state;
+}
+static void replacePresentation(BWPresentation *state){
+    pthread_mutex_lock(&presentationPointerLock);presentation=state;
+    pthread_mutex_unlock(&presentationPointerLock);
+}
 static void presented(BWPresentation *state,BWPresentedFrame *frame,BOOL gpuDone,BOOL screenDone,BOOL failed){
     [state.lock lock];frame.gpuDone|=gpuDone;frame.screenDone|=screenDone;frame.failed|=failed;
     if(!state.closed&&!frame.counted&&!frame.failed&&frame.epoch&&frame.gpuDone&&frame.screenDone){
@@ -178,10 +190,10 @@ static void presented(BWPresentation *state,BWPresentedFrame *frame,BOOL gpuDone
     }
     [state.lock unlock];
 }
-uint64_t botw_graphics_presented_frame_count(void){BWPresentation *state=presentation;[state.lock lock];uint64_t count=state.completed;[state.lock unlock];return count;}
-void botw_graphics_set_capture_enabled(int enabled){BWPresentation *state=presentation;[state.lock lock];state.capture=enabled!=0;[state.lock unlock];}
+uint64_t botw_graphics_presented_frame_count(void){BWPresentation *state=presentationSnapshot();[state.lock lock];uint64_t count=state.completed;[state.lock unlock];return count;}
+void botw_graphics_set_capture_enabled(int enabled){BWPresentation *state=presentationSnapshot();[state.lock lock];state.capture=enabled!=0;[state.lock unlock];}
 int botw_graphics_copy_latest_frame(void *rgba,size_t capacity,uint32_t *width,uint32_t *height,uint64_t *number){
-    BWPresentation *state=presentation;[state.lock lock];BWPresentedFrame *frame=state.latest;[state.lock unlock];
+    BWPresentation *state=presentationSnapshot();[state.lock lock];BWPresentedFrame *frame=state.latest;[state.lock unlock];
     if(!frame)return 0;if(width)*width=frame.width;if(height)*height=frame.height;if(number)*number=frame.number;
     if(!rgba||capacity<(size_t)frame.width*frame.height*4)return 0;
     for(uint32_t y=0;y<frame.height;y++){const uint8_t *src=(const uint8_t*)frame.pixels.contents+y*frame.pitch;uint8_t *dst=(uint8_t*)rgba+(size_t)y*frame.width*4;
@@ -241,7 +253,7 @@ int botw_graphics_init(void *layer,botw_graphics_error error,botw_graphics_memor
     errorCallback=error; memoryValidator=validator; lastError[0]=0;
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
-    allGPU=dispatch_group_create();presentation=[BWPresentation new];
+    allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
     objects=[NSMutableDictionary new]; handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];
     pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;
     displayLayer=(__bridge CAMetalLayer *)layer;
@@ -249,10 +261,10 @@ int botw_graphics_init(void *layer,botw_graphics_error error,botw_graphics_memor
     return 1;
 }
 void botw_graphics_shutdown(void) {
-    BWPresentation *state=presentation;[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
+    BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     objects=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
-    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;allGPU=nil;presentation=nil;
+    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;allGPU=nil;replacePresentation(nil);
 }
 int botw_graphics_register_shader(const void *control,size_t cs,const void *code,size_t ds,
                                   NVNshaderStage stage,const char *source,const char *entry) {
@@ -586,7 +598,7 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
     if(!presentPipeline){const char *source="#include <metal_stdlib>\nusing namespace metal; struct V{float4 p [[position]];float2 uv;}; vertex V pv(uint i [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return {float4(p[i],0,1),float2((p[i].x+1)*.5,(1-p[i].y)*.5)};} fragment float4 pf(V v [[stage_in]],texture2d<float> t [[texture(0)]]){constexpr sampler s(filter::linear);return t.sample(s,v.uv);}";
         NSError *e=nil;id<MTLLibrary> l=[gpu newLibraryWithSource:@(source) options:nil error:&e];if(!l)fatal(e.localizedDescription.UTF8String);MTLRenderPipelineDescriptor *d=[MTLRenderPipelineDescriptor new];d.vertexFunction=[l newFunctionWithName:@"pv"];d.fragmentFunction=[l newFunctionWithName:@"pf"];d.colorAttachments[0].pixelFormat=displayLayer.pixelFormat;presentPipeline=[gpu newRenderPipelineStateWithDescriptor:d error:&e];if(!presentPipeline)fatal(e.localizedDescription.UTF8String);}
     id<MTLCommandBuffer> cb=[commandQueue commandBuffer];MTLRenderPassDescriptor *p=[MTLRenderPassDescriptor renderPassDescriptor];p.colorAttachments[0].texture=drawable.texture;p.colorAttachments[0].loadAction=MTLLoadActionDontCare;p.colorAttachments[0].storeAction=MTLStoreActionStore;id<MTLRenderCommandEncoder> e=[cb renderCommandEncoderWithDescriptor:p];[e setRenderPipelineState:presentPipeline];[e setFragmentTexture:t.texture atIndex:0];[e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[e endEncoding];
-    BWPresentation *state=presentation;BWPresentedFrame *frame=[BWPresentedFrame new];
+    BWPresentation *state=presentationSnapshot();BWPresentedFrame *frame=[BWPresentedFrame new];
     frame.epoch=t.drawEpoch!=t.presentedEpoch?t.drawEpoch:0;t.presentedEpoch=t.drawEpoch;
     [state.lock lock];BOOL capture=state.capture;[state.lock unlock];
     if(capture&&frame.epoch){frame.width=(uint32_t)drawable.texture.width;frame.height=(uint32_t)drawable.texture.height;frame.pitch=((size_t)frame.width*4+255)&~255ull;
