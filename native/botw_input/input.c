@@ -20,15 +20,37 @@ typedef struct {
     npad_entry entries[17];
 } npad_ring;
 typedef struct {
+    uint64_t delta_time, sampling;
+    float acceleration[3], angular_velocity[3], angle[3], direction[9];
+    uint32_t attributes, reserved;
+} six_axis_state;
+typedef struct { _Atomic uint64_t sampling; six_axis_state state; } six_axis_entry;
+typedef struct {
+    _Atomic uint64_t ticks, capacity, tail, count;
+    six_axis_entry entries[17];
+} six_axis_ring;
+typedef struct {
     _Atomic uint32_t style, assignment;
     uint32_t colors[8];
     npad_ring rings[7];
-    unsigned char reserved[BOTW_HID_NPAD_STRIDE-0x28-7*0x350];
+    six_axis_ring six_axis[6];
+    unsigned char reserved[BOTW_HID_NPAD_STRIDE-0x4188];
 } npad_memory;
 _Static_assert(sizeof(npad_state)==0x28,"old SDK NpadState");
 _Static_assert(sizeof(npad_entry)==0x30,"old SDK atomic Npad sample");
 _Static_assert(sizeof(npad_ring)==0x350,"old SDK Npad Lifo");
 _Static_assert(offsetof(npad_memory,rings)==0x28,"old SDK FullKey ring");
+_Static_assert(sizeof(six_axis_state)==0x60,"old SDK SixAxisState");
+_Static_assert(offsetof(six_axis_state,sampling)==8,"old SDK SixAxis sampling");
+_Static_assert(offsetof(six_axis_state,acceleration)==0x10,"old SDK SixAxis acceleration");
+_Static_assert(offsetof(six_axis_state,angular_velocity)==0x1c,"old SDK SixAxis angular velocity");
+_Static_assert(offsetof(six_axis_state,angle)==0x28,"old SDK SixAxis angle");
+_Static_assert(offsetof(six_axis_state,direction)==0x34,"old SDK SixAxis direction");
+_Static_assert(offsetof(six_axis_state,attributes)==0x58,"old SDK SixAxis attributes");
+_Static_assert(sizeof(six_axis_entry)==0x68,"old SDK atomic SixAxis sample");
+_Static_assert(sizeof(six_axis_ring)==0x708,"old SDK SixAxis Lifo");
+_Static_assert(offsetof(npad_memory,six_axis)==0x1758,"old SDK SixAxis ring family");
+_Static_assert(offsetof(npad_memory,reserved)==0x4188,"old SDK SixAxis family end");
 _Static_assert(sizeof(npad_memory)==BOTW_HID_NPAD_STRIDE,"old SDK Npad stride");
 typedef struct {
     uint64_t sampling;
@@ -54,10 +76,24 @@ struct botw_input {
     int active;
     uint64_t sampling, debug_pad_sampling;
     int debug_pad_active;
+    uint64_t six_axis_sampling[10][6];
+    unsigned char six_axis_active[10][6];
 };
 static int id_index(uint32_t id) { return id<8?(int)id:id==0x20?8:id==0x10?9:-1; }
 static npad_memory *npad(botw_input *input,unsigned index) {
     return (npad_memory *)(void *)(input->memory+BOTW_HID_NPAD_OFFSET+index*BOTW_HID_NPAD_STRIDE);
+}
+static int six_axis_handle(uint32_t handle,int *index,unsigned *ring) {
+    if(handle>>24)return -1;
+    int id=id_index((handle>>8)&255);if(id<0)return -1;
+    unsigned style=handle&255,sensor=(handle>>16)&255,which;
+    if(style==3&&sensor==2)which=0;
+    else if(style==4&&sensor==2)which=1;
+    else if(style==5&&sensor<2)which=2+sensor;
+    else if(style==6&&sensor==0)which=4;
+    else if(style==7&&sensor==1)which=5;
+    else return -1;
+    *index=id;*ring=which;return 0;
 }
 static int32_t clamp(int32_t value) { return value>32767?32767:value< -32768?-32768:value; }
 static int magnitude(int32_t value) { return value<0?-value:value; }
@@ -97,11 +133,18 @@ static int selected(botw_input *input,uint32_t *style) {
 static void initialize_memory(botw_input *input) {
     memset(input->memory,0,BOTW_HID_SHARED_MEMORY_SIZE);
     input->debug_pad_active=0;input->debug_pad_sampling=0;
+    memset(input->six_axis_sampling,0,sizeof input->six_axis_sampling);
+    memset(input->six_axis_active,0,sizeof input->six_axis_active);
     debug_pad_ring *debug=(debug_pad_ring *)(void *)(input->memory+BOTW_HID_DEBUG_PAD_OFFSET);
     atomic_init(&debug->capacity,17);atomic_init(&debug->tail,16);
     for(unsigned index=0;index<10;index++)for(unsigned ring=0;ring<7;ring++) {
         npad_ring *r=&npad(input,index)->rings[ring];
         atomic_init(&r->capacity,17); atomic_init(&r->tail,16);
+    }
+    for(unsigned index=0;index<10;index++)for(unsigned ring=0;ring<6;ring++) {
+        six_axis_ring *r=&npad(input,index)->six_axis[ring];
+        atomic_init(&r->ticks,0);atomic_init(&r->capacity,17);
+        atomic_init(&r->tail,16);atomic_init(&r->count,0);
     }
 }
 botw_input *botw_input_create(void) {
@@ -205,10 +248,43 @@ int botw_input_activate_debug_pad(botw_input *input,uint64_t ticks) {
     }
     pthread_mutex_unlock(&input->mutex);return 0;
 }
+static void publish_six_axis(botw_input *input,unsigned index,unsigned which,uint64_t ticks) {
+    six_axis_ring *ring=&npad(input,index)->six_axis[which];
+    /* No CoreMotion/controller-motion backend exists yet. A button controller
+     * connection is not evidence of a connected sensor or a measured pose.
+     * delta_time's device unit is deliberately not inferred from header ticks. */
+    six_axis_state state={0};state.sampling=++input->six_axis_sampling[index][which];
+    uint64_t tail=(atomic_load_explicit(&ring->tail,memory_order_relaxed)+1)%17;
+    six_axis_entry *entry=&ring->entries[tail];
+    atomic_store_explicit(&entry->sampling,UINT64_MAX,memory_order_release);
+    memcpy(&entry->state,&state,sizeof state);
+    atomic_store_explicit(&entry->sampling,state.sampling,memory_order_release);
+    atomic_store_explicit(&ring->ticks,ticks,memory_order_relaxed);
+    atomic_store_explicit(&ring->tail,tail,memory_order_release);
+    uint64_t count=atomic_load_explicit(&ring->count,memory_order_relaxed);
+    atomic_store_explicit(&ring->count,count<16?count+1:16,memory_order_release);
+}
+int botw_input_start_six_axis(botw_input *input,uint32_t handle,uint64_t ticks) {
+    int index;unsigned ring;
+    if(!input||!ticks||six_axis_handle(handle,&index,&ring))return -1;
+    pthread_mutex_lock(&input->mutex);
+    if(!input->six_axis_active[index][ring]) {
+        input->six_axis_active[index][ring]=1;publish_six_axis(input,(unsigned)index,ring,ticks);
+    }
+    pthread_mutex_unlock(&input->mutex);return 0;
+}
+int botw_input_stop_six_axis(botw_input *input,uint32_t handle) {
+    int index;unsigned ring;
+    if(!input||six_axis_handle(handle,&index,&ring))return -1;
+    pthread_mutex_lock(&input->mutex);input->six_axis_active[index][ring]=0;
+    pthread_mutex_unlock(&input->mutex);return 0;
+}
 void botw_input_sample(botw_input *input,uint64_t ticks) {
     if(!input)return;
     pthread_mutex_lock(&input->mutex);uint32_t style=0;int index=selected(input,&style);
     if(input->debug_pad_active)publish_debug_pad(input,ticks);
+    for(unsigned n=0;n<10;n++)for(unsigned r=0;r<6;r++)
+        if(input->six_axis_active[n][r])publish_six_axis(input,n,r,ticks);
     npad_state current={0};current.sampling=++input->sampling;
     int32_t axes[4]={0};
     if(index>=0)for(unsigned s=0;s<BOTW_INPUT_SOURCE_COUNT;s++) {

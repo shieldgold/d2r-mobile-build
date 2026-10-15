@@ -61,6 +61,19 @@ int botw_input_disconnect(botw_input *input, uint32_t npad_id);
  * Returns 0 on success, -1 for NULL input. bind/unbind clears this activation
  * and its independent sequence; the frontend source-state rules are unchanged. */
 int botw_input_activate_debug_pad(botw_input *input, uint64_t ticks);
+/* Old SDK standard Npad handles encode style/id/sensor in their low 3 bytes.
+ * FullKey(3)/Handheld(4) sensor=2; JoyDual(5) sensor=0/1; JoyLeft(6) sensor=0;
+ * JoyRight(7) sensor=1. IDs are 0..7/0x20/0x10 and the top byte must be zero.
+ * These handles identify streams, independently of controller connection.
+ * No host motion source is installed: all published states are explicitly
+ * disconnected with no measured pose, acceleration, or angular velocity.
+ * First Start publishes one disconnected sample at nonzero ticks; repeats
+ * are idempotent. Stop freezes that ring without inventing a terminal sample;
+ * restart continues its sequence. bind/unbind clears activations/sequences.
+ * Both return -1 on invalid input/handle, Start also rejects zero ticks;
+ * failure does not change any shared bytes or activation. */
+int botw_input_start_six_axis(botw_input *input, uint32_t handle, uint64_t ticks);
+int botw_input_stop_six_axis(botw_input *input, uint32_t handle);
 /* Call at the host display/input cadence with a real monotonic 19.2 MHz tick.
  * Samples advance even with all buttons released; producer serializes ring writes. */
 void botw_input_sample(botw_input *input, uint64_t timestamp_ticks);
