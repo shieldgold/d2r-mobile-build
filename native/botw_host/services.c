@@ -50,7 +50,8 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
     OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE,
-    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE, OBJECT_SETTINGS };
+    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE, OBJECT_SETTINGS,
+    OBJECT_HID_VIBRATION_LIST };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -67,6 +68,10 @@ typedef struct Object {
     uint32_t file_mode;
     char *file_path;
     uint8_t account_uid[16];
+    /* Each list owns its registration. Clones/domain copies retain this same
+     * refcounted object; the final reference releases all of these bits. This
+     * records no actuator presence, permission, requested value or output. */
+    uint8_t vibration_devices[10];
 } Object;
 typedef struct Session {
     unsigned refs, domain;
@@ -198,6 +203,7 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_ROMFS_FILE: return "fs.IFile(RomFS)";
         case OBJECT_HID: return "hid";
         case OBJECT_HID_APPLET_RESOURCE: return "hid.IAppletResource";
+        case OBJECT_HID_VIBRATION_LIST: return "hid.IActiveVibrationDeviceList";
         case OBJECT_AOC: return "aoc:u";
         case OBJECT_PCTL_FACTORY: return "pctl:a.IParentalControlServiceFactory";
         case OBJECT_PCTL_SERVICE: return "pctl.IParentalControlService";
@@ -344,6 +350,39 @@ void botw_services_set_input(botw_services *s, botw_input *input, uint32_t share
 }
 static uint32_t npad_id(unsigned index) { return index < 8 ? index : index == 8 ? 0x20 : 0x10; }
 static int npad_index(uint32_t id) { return id < 8 ? (int)id : id == 0x20 ? 8 : id == 0x10 ? 9 : -1; }
+static int vibration_handle_bit(uint32_t handle, int *slot) {
+    /* Fixed SDK standard Npad handle: style byte, player byte, device byte,
+     * reserved=0. FullKey/Handheld/JoyDual have left/right indices 0/1;
+     * JoyLeft only 0, JoyRight only 1. System/newer styles stay unsupported. */
+    unsigned style = handle & 255, device = (handle >> 16) & 255;
+    *slot = npad_index((handle >> 8) & 255);
+    if (handle >> 24 || *slot < 0 || device > 1) return -1;
+    if (style >= 3 && style <= 5) return (int)((style - 3) * 2 + device);
+    if (style == 6 && !device) return 6;
+    if (style == 7 && device == 1) return 7;
+    return -1;
+}
+static int vibration_device_active(botw_services *s, uint32_t handle) {
+    int slot, bit = vibration_handle_bit(handle, &slot);
+    if (bit < 0) return 0;
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) {
+        Session *session = s->handles[i].session;
+        if (!session) continue;
+        unsigned count = session->domain ? DOMAIN_LIMIT : 1;
+        for (unsigned j = 0; j < count; j++) {
+            Object *o = session->domain ? session->objects[j] : session->root;
+            if (o && o->kind == OBJECT_HID_VIBRATION_LIST &&
+                    (o->vibration_devices[slot] & (1u << bit))) return 1;
+        }
+    }
+    return 0;
+}
+int botw_services_vibration_device_active(botw_services *s, uint32_t handle) {
+    if (!s) return 0;
+    pthread_mutex_lock(&s->lock);
+    int active = vibration_device_active(s, handle);
+    pthread_mutex_unlock(&s->lock); return active;
+}
 static int refresh_input(botw_services *s, char *error, size_t cap) {
     if (!s->input) return 0;
     for (unsigned index = 0; index < 10; index++) {
@@ -1488,7 +1527,42 @@ static int settings_request(botw_services *s, uint8_t *ipc, size_t capacity, con
     }
     return problem(error, cap, "unsupported IPC service=set.ISettingsServer command=%u", r->command);
 }
+static int vibration_request(botw_services *s, Session *session, Object *o,
+        uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    const char *method = o->kind == OBJECT_HID ? "hid.CreateActiveVibrationDeviceList" :
+        "hid.IActiveVibrationDeviceList.ActivateVibrationDevice";
+    if (r->pid || r->copy_count || r->buffer_descriptor_count)
+        return problem(error, cap, "%s does not accept PID, handles or buffers", method);
+    size_t bytes = o->kind == OBJECT_HID ? 0 : 4;
+    /* The fixed no-PID proxy leaves eight unspecified session framing bytes.
+     * Exact domain data_size excludes them. They are never semantic input. */
+    if (r->domain ? r->payload_size != bytes :
+            (r->payload_size != bytes && r->payload_size != bytes + 8))
+        return problem(error, cap, "%s requires exactly %zu semantic input bytes", method, bytes);
+    if (o->kind == OBJECT_HID) {
+        Object *list = new_object(OBJECT_HID_VIBRATION_LIST);
+        if (!list) return problem(error, cap, "allocate hid.IActiveVibrationDeviceList failed");
+        int result = return_object(s, session, list, ipc, capacity, r, 0, error, cap);
+        if (!result) emit(s, "hid_vibration_list_created registration_only=true haptics_backend=unavailable");
+        return result;
+    }
+    if (r->command != 0)
+        return problem(error, cap, "unsupported IPC service=hid.IActiveVibrationDeviceList command=%u", r->command);
+    uint32_t handle = load32(r->payload);
+    int slot, bit = vibration_handle_bit(handle, &slot);
+    if (bit < 0) return problem(error, cap, "%s rejected invalid or unsupported standard Npad handle=0x%08x", method, handle);
+    unsigned mask = 1u << bit;
+    if (!(o->vibration_devices[slot] & mask)) {
+        o->vibration_devices[slot] |= (uint8_t)mask;
+        emit(s, "hid_vibration_registered handle=0x%08x registration_only=true haptics_backend=unavailable", handle);
+    }
+    response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+}
 static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    /* Registration has no ARUID/PID or physical-input precondition. Keep this
+     * narrow dispatch ahead of the separate input-producing HID contract. */
+    if (o->kind == OBJECT_HID_VIBRATION_LIST || (o->kind == OBJECT_HID && r->command == 203))
+        return vibration_request(s, session, o, ipc, capacity, r, error, cap);
     if (!s->input || !s->input_shared_memory_handle || !s->applet_ready) return problem(error, cap, "hid requires real host input, shared-memory handle and applet resource identity");
     if (r->copy_count || r->output_count) return problem(error, cap, "hid unexpected copy handle/output buffer");
     if (o->kind == OBJECT_HID_APPLET_RESOURCE && r->command == 0) {
@@ -1736,7 +1810,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         return parental_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_AOC) {
         return aoc_request(s, ipc, capacity, &r, error, cap);
-    } else if (o->kind == OBJECT_HID || o->kind == OBJECT_HID_APPLET_RESOURCE) {
+    } else if (o->kind == OBJECT_HID || o->kind == OBJECT_HID_APPLET_RESOURCE || o->kind == OBJECT_HID_VIBRATION_LIST) {
         return hid_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind >= OBJECT_FSP && o->kind <= OBJECT_ROMFS_FILE) {
         return fs_request(s, session, o, ipc, capacity, &r, error, cap);

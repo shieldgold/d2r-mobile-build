@@ -87,6 +87,14 @@ void botw_services_set_input(botw_services *services, botw_input *input, uint32_
 /* Invoke after host input sampling to signal actual Npad style changes. Lock
  * order is services -> input/kernel; frontend callbacks must release input first. */
 int botw_services_refresh_input(botw_services *services, char *error, size_t error_capacity);
+/* Host-only registration query: 1 when any live IActiveVibrationDeviceList
+ * retains this standard Npad handle, 0 otherwise (also NULL/invalid handles).
+ * This is not actuator presence, permission or evidence of vibration output.
+ * CreateActiveVibrationDeviceList/ActivateVibrationDevice have no PID/ARUID.
+ * Clones/domain copies retain the same list until its last reference closes.
+ * This locks services; callbacks already executing under that lock must not
+ * reenter it. No host haptics backend is currently registered or inferred. */
+int botw_services_vibration_device_active(botw_services *services, uint32_t handle);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
 /* Publish verified absence of installed update/patch content for this process.
  * Default/0 means unknown and fails diagnostically; 1 permits fsp command 203
