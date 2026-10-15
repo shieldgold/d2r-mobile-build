@@ -25,6 +25,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +61,54 @@ static void *(*graphics_backend_loader)(const char *);
 #endif
 static void *(*host_pool_push)(void);
 static void (*host_pool_pop)(void *);
+
+/* Immutable after release publication. The signal path never takes the
+ * registration mutex; process-lifetime functions avoid retirement races. */
+static pthread_mutex_t tracking_registration_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int tracking_ready;
+static botw_host_memory_fault tracking_fault;
+static botw_host_memory_prepare tracking_prepare;
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "signal tracking publication must be lock-free");
+
+int botw_host_register_memory_tracking(botw_host_memory_fault fault, botw_host_memory_prepare prepare) {
+    if (!fault || !prepare) return -1;
+    pthread_mutex_lock(&tracking_registration_lock);
+    int result = 0;
+    if (atomic_load_explicit(&tracking_ready, memory_order_acquire)) {
+        if (tracking_fault != fault || tracking_prepare != prepare) result = -1;
+    } else {
+        tracking_fault = fault; tracking_prepare = prepare;
+        atomic_store_explicit(&tracking_ready, 1, memory_order_release);
+    }
+    pthread_mutex_unlock(&tracking_registration_lock);
+    return result;
+}
+int botw_host_prepare_guest_write(void *address, size_t bytes, char *error, size_t capacity) {
+    if (error && capacity) error[0] = 0;
+    if (!bytes) return 0;
+    if (!address || bytes > UINTPTR_MAX - (uintptr_t)address) {
+        if (error && capacity) snprintf(error, capacity, "memory tracking: invalid host write span");
+        return -1;
+    }
+    if (!atomic_load_explicit(&tracking_ready, memory_order_acquire)) return 0;
+    if (tracking_prepare(address, bytes, error, capacity)) {
+        if (error && capacity && !error[0]) snprintf(error, capacity, "memory tracking: host write preparation failed");
+        return -1;
+    }
+    return 0;
+}
+static int handle_memory_tracking_fault(int number, siginfo_t *info, void *context) {
+    if ((number != SIGSEGV && number != SIGBUS) || !info || !context || !info->si_addr ||
+            !atomic_load_explicit(&tracking_ready, memory_order_acquire)) return 0;
+    ucontext_t *uc = context;
+    uint32_t esr = uc->uc_mcontext->__es.__esr;
+    unsigned exception_class = esr >> 26, fault_status = esr & 0x3f;
+    /* ARM64 data-write permission faults only. Instruction/translation/read
+     * faults cannot be attributed to this module's temporary read protection. */
+    if ((exception_class != 0x24 && exception_class != 0x25) || !(esr & (1u << 6)) ||
+            fault_status < 0x0c || fault_status > 0x0f) return 0;
+    return tracking_fault(info->si_addr, 1, context) == 1;
+}
 
 #define PAGE 0x4000u
 #define MODULE_COUNT 6
@@ -839,6 +888,7 @@ static int audio_write_guest(void *opaque, uint64_t destination, const void *sou
     if (!bytes) return 0;
     if (!source || bytes > UINT32_MAX || !services_memory(NULL, destination, bytes, 1))
         return audio_copy_error(error, capacity, "guest write range", KERN_INVALID_ADDRESS);
+    if (botw_host_prepare_guest_write((void *)(uintptr_t)destination, bytes, error, capacity)) return -1;
     kern_return_t result = vm_write(mach_task_self(), (vm_address_t)destination,
         (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
     return result == KERN_SUCCESS ? 0 : audio_copy_error(error, capacity, "protected guest write", result);
@@ -1456,7 +1506,7 @@ static void call_entry(const char *name, int two_args) {
     report("entry_returned=%s guest_execution_tested=true", name);
 }
 static void signal_handler(int number, siginfo_t *info, void *context) {
-    (void)info;
+    if (handle_memory_tracking_fault(number, info, context)) return;
     ucontext_t *uc = context;
     uintptr_t pc = (uintptr_t)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
     /* A callback PC=0 cannot distinguish guest BLR NULL from a host helper's

@@ -39,6 +39,20 @@ int botw_host_set_address_space(unsigned bits);
  * are unchanged on failure. This does not enable the policy or allocate. */
 int botw_host_heap_policy_plan(size_t kernel_available, size_t live_available,
                               size_t *heap, size_t *root, char *error, size_t capacity);
+/* Optional native dirty-page tracker. Registration publishes the pair once;
+ * repeated registration of the same functions is harmless, replacement is
+ * rejected. Both functions and their global state must live for the process.
+ * The tracker must retire/drain every range before freeing its backing memory.
+ * The signal hook may return 1 only for a write protection it owns and actually
+ * resolved; it runs without allocation, logging or locks. Other faults retain
+ * the existing callback/guest/previous signal disposition. */
+typedef int (*botw_host_memory_fault)(void *address, int is_write, void *ucontext);
+typedef int (*botw_host_memory_prepare)(void *address, size_t bytes, char *error, size_t capacity);
+int botw_host_register_memory_tracking(botw_host_memory_fault fault, botw_host_memory_prepare prepare);
+/* Separate from range/permission validation. A successful call only prepares
+ * dirty tracking; the caller must still check its actual memory write result.
+ * Empty writes do not dispatch. Invalid spans or tracker failures return -1. */
+int botw_host_prepare_guest_write(void *address, size_t bytes, char *error, size_t capacity);
 void botw_host_set_applet_state(int foreground, int focused);
 /* Actual host audio-session availability, combined with app focus by the
  * runtime. Interruptions pause real output without completing queued buffers. */
