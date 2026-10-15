@@ -33,9 +33,13 @@ typedef struct botw_input botw_input;
 botw_input *botw_input_create(void);
 void botw_input_destroy(botw_input *input);
 /* The bridge initially owns a zeroed buffer. A bound kernel shared-memory backing
- * remains owned by the kernel and must outlive the input. Bind before guest use. */
+ * remains owned by the kernel. Bind before guest use; unbind before releasing it. */
 void *botw_input_shared_memory(botw_input *input, size_t *size);
 int botw_input_bind_shared_memory(botw_input *input, void *backing, size_t size);
+/* After guest readers have stopped, switch back to the owned buffer. Serializes
+ * with in-flight samples; after return no input operation accesses old backing.
+ * Resets ring/sampling while preserving actual source state. NULL is harmless. */
+void botw_input_unbind_shared_memory(botw_input *input);
 /* Source changes replace a coherent state. No synthetic/latching button presses.
  * Axes clamp to [-32768,32767], positive y means up. Disconnection clears state. */
 int botw_input_set_source(botw_input *input, enum botw_input_source source,

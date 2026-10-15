@@ -1,6 +1,7 @@
 /* Actual UIKit multi-touch / Apple GameController input; no game-specific actions. */
 #import "BOTWInputOverlay.h"
 #import <GameController/GameController.h>
+#import <QuartzCore/QuartzCore.h>
 #include <math.h>
 
 @class BOTWInputButton, BOTWInputStick;
@@ -145,7 +146,7 @@
     [overlay publishTouch];[overlay controllersChanged:nil];
     BOTWInputDisplayTarget *target=[BOTWInputDisplayTarget new];target.owner=overlay;
     overlay.displayLink=[CADisplayLink displayLinkWithTarget:target selector:@selector(sample:)];
-    overlay.displayLink.preferredFramesPerSecond=60;
+    overlay.displayLink.preferredFrameRateRange=CAFrameRateRangeMake(60,60,60);
     [overlay.displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     return overlay;
 }

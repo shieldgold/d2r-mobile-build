@@ -15,6 +15,10 @@ FIXTURE = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 static botw_input *input;
 static unsigned char *shared;
 static uint64_t u64(size_t p) { uint64_t v; memcpy(&v, shared+p, 8); return v; }
@@ -101,6 +105,52 @@ static void config(void) {
     assert(u32(slot(2))==1 && u64(latest(2,0)+16)==BOTW_BUTTON_X);
     botw_input_destroy(input); mapped[0]=1; free(mapped); /* externally owned mapping */
 }
+static void unbind(void) {
+    setup(); unsigned char *owned=shared;
+    unsigned char *mapped=mmap(NULL,0x40000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    assert(mapped!=MAP_FAILED);
+    assert(!botw_input_bind_shared_memory(input,mapped,0x40000)); shared=mapped;
+    assert(!botw_input_set_source(input,BOTW_INPUT_TOUCH,BOTW_BUTTON_Y,123,-456,0,0,1));
+    botw_input_sample(input,7); assert(u64(latest(8,1)+16)==BOTW_BUTTON_Y);
+    unsigned char *snapshot=malloc(0x40000); assert(snapshot); memcpy(snapshot,mapped,0x40000);
+    botw_input_unbind_shared_memory(input);
+    size_t size=0; shared=botw_input_shared_memory(input,&size);
+    assert(shared==owned && size==0x40000);
+    assert(!u64(slot(8)+0x378+24)); /* ring and sampling reset */
+    botw_input_sample(input,8); assert(u64(latest(8,1)+8)==1 && u64(latest(8,1)+16)==BOTW_BUTTON_Y);
+    for(unsigned n=0;n<64;n++)botw_input_sample(input,9+n);
+    assert(!memcmp(snapshot,mapped,0x40000)); free(snapshot);
+    assert(!munmap(mapped,0x40000)); /* fail deterministically if sampling retained backing */
+    for(unsigned n=0;n<64;n++)botw_input_sample(input,100+n);
+    botw_input_unbind_shared_memory(input);botw_input_unbind_shared_memory(input);
+    botw_input_sample(input,200);assert(botw_input_shared_memory(input,NULL)==owned);
+    botw_input_unbind_shared_memory(NULL);botw_input_destroy(input);
+}
+static _Atomic int stop_sampling, samples_started;
+static void *continuous_sampler(void *unused) {
+    (void)unused; uint64_t tick=0;
+    while(!atomic_load(&stop_sampling)) {
+        botw_input_sample(input,++tick); atomic_store(&samples_started,1);
+    }
+    return NULL;
+}
+static void concurrent_unbind(void) {
+    setup(); unsigned char *owned=shared;
+    unsigned char *mapped=mmap(NULL,0x40000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    assert(mapped!=MAP_FAILED);
+    assert(!botw_input_bind_shared_memory(input,mapped,0x40000));
+    pthread_t thread; assert(!pthread_create(&thread,NULL,continuous_sampler,NULL));
+    while(!atomic_load(&samples_started)) { }
+    botw_input_unbind_shared_memory(input);
+    assert(botw_input_shared_memory(input,NULL)==owned);
+    unsigned char *snapshot=malloc(0x40000); assert(snapshot);memcpy(snapshot,mapped,0x40000);
+    for(unsigned n=0;n<100;n++)botw_input_sample(input,n);
+    assert(!memcmp(snapshot,mapped,0x40000));free(snapshot);
+    assert(!munmap(mapped,0x40000));
+    for(unsigned n=0;n<100;n++)botw_input_sample(input,n);
+    atomic_store(&stop_sampling,1);assert(!pthread_join(thread,NULL));
+    botw_input_destroy(input);
+}
 static _Atomic int finished;
 static void *producer(void *unused) {
     (void)unused;
@@ -121,6 +171,7 @@ int main(int argc,char **argv) {
     assert(argc==2);
     if(!strcmp(argv[1],"baseline"))baseline(); else if(!strcmp(argv[1],"buttons"))buttons();
     else if(!strcmp(argv[1],"merge"))merge(); else if(!strcmp(argv[1],"ring"))ring();
+    else if(!strcmp(argv[1],"unbind"))unbind(); else if(!strcmp(argv[1],"concurrent_unbind"))concurrent_unbind();
     else if(!strcmp(argv[1],"timing"))timing(); else if(!strcmp(argv[1],"config"))config(); else if(!strcmp(argv[1],"concurrent"))concurrent(); else abort();
     puts("ok");
 }
@@ -157,6 +208,8 @@ class InputTests(unittest.TestCase):
     def test_old_sdk_ring_repeated_wrap_and_sequence(self): self.case('ring')
     def test_actual_monotonic_tick_source(self): self.case('timing')
     def test_supported_profiles_and_bound_shared_memory(self): self.case('config')
+    def test_unbind_then_release_backing_and_continue_sampling(self): self.case('unbind')
+    def test_unbind_serializes_with_inflight_sampling(self): self.case('concurrent_unbind')
     def test_source_update_and_sampling_are_coherent(self): self.case('concurrent')
 
 

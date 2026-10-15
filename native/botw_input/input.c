@@ -109,6 +109,12 @@ int botw_input_bind_shared_memory(botw_input *input,void *backing,size_t size) {
     input->memory=backing;input->sampling=0;initialize_memory(input);
     pthread_mutex_unlock(&input->mutex);return 0;
 }
+void botw_input_unbind_shared_memory(botw_input *input) {
+    if(!input)return;
+    pthread_mutex_lock(&input->mutex);
+    input->memory=input->owned;input->sampling=0;initialize_memory(input);
+    pthread_mutex_unlock(&input->mutex);
+}
 int botw_input_set_source(botw_input *input,enum botw_input_source source,uint64_t buttons,
         int32_t lx,int32_t ly,int32_t rx,int32_t ry,int connected) {
     if(!input||source<0||source>=BOTW_INPUT_SOURCE_COUNT||(buttons&~UINT64_C(0xffffff)))return -1;

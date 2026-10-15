@@ -11,7 +11,8 @@
 2. HID 服务创建 kernel 共享内存（大小 `0x40000`，guest 只读），将同一宿主 backing 传给 `botw_input_bind_shared_memory`。绑定必须在 guest 开始读共享内存之前。输入桥不释放 kernel backing。
 3. `hid` 的 supported style/ID 配置传入 `botw_input_configure`；style 与 ID 应由服务保存后一起传入。支持 Horizon style mask 位 0..4，但单独的左右 Joy-Con 不会被虚报连接；实际提供 FullKey、Handheld 或 JoyDual。
 4. 在主线程调用 `[BOTWInputOverlay attachToView:metalContainer input:input]`，保持返回对象。overlay 自带显示节奏采样；空白区域 hit-test 透传。
-5. UI 销毁前先 `[overlay invalidate]`，再停止 guest/服务，并最后销毁 input/kernel。若使用其他前端，它必须调用 `botw_input_set_source` 和 `botw_input_sample`，采样时间使用 `botw_input_monotonic_ticks()` 的真实 19.2 MHz tick。
+5. 所有 guest 线程停止且服务销毁后、kernel 共享内存释放前，调用 `botw_input_unbind_shared_memory(input)`；它与采样互斥，返回后显示回调只写输入桥自有缓冲区，原 backing 可安全释放。
+6. UI 销毁前先 `[overlay invalidate]`，再停止 guest/服务，并最后销毁 input/kernel。若使用其他前端，它必须调用 `botw_input_set_source` 和 `botw_input_sample`，采样时间使用 `botw_input_monotonic_ticks()` 的真实 19.2 MHz tick。
 
 这只是输入桥的实现与 C 行为验证，不代表 BOTW 已成功进入游戏或已在真机验证玩法。
 
@@ -38,4 +39,4 @@
 
 `python3 -m unittest discover -s tests -p test_botw_input.py -v`
 
-编译真实 C 核心的夹具验证：默认松开、按下/释放、轴钳位、方向按键位、触屏/手柄合并与断开、失焦清键、支持 ID/style 配置、外部共享内存绑定与所有权、17 槽环多次回绕/顺序、真实单调时钟与并发一致性。UIKit 与 GameController 部分需 iOS SDK 编译，并在 iPhone 检验实际触控与手柄输入。
+编译真实 C 核心的夹具验证：默认松开、按下/释放、轴钳位、方向按键位、触屏/手柄合并与断开、失焦清键、支持 ID/style 配置、外部共享内存绑定与所有权、并发解绑后释放 backing 及连续采样、17 槽环多次回绕/顺序、真实单调时钟与并发一致性。UIKit 与 GameController 部分需 iOS SDK 编译，并在 iPhone 检验实际触控与手柄输入。
