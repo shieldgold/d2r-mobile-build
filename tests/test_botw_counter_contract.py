@@ -57,9 +57,10 @@ int main(int argc,char **argv){
  CHECK(!posix_memalign((void**)&memory,page,page*4));memset(memory,0xa5,page*4);
  NVNmemoryPoolBuilder mb;NVNmemoryPool pool;nvnMemoryPoolBuilderSetDefaults(&mb);
  nvnMemoryPoolBuilderSetDevice(&mb,&d);nvnMemoryPoolBuilderSetStorage(&mb,memory,page*4);
- if(!strcmp(mode,"cpu-noaccess"))nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS);
+ nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);
+ if(!strcmp(mode,"cpu-noaccess"))nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);
  if(!strcmp(mode,"noncoherent")){
-  nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_CACHED);
+  nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_CACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);
   nvnMemoryPoolBuilderSetStorage(&mb,memory+16,page*4-32);
  }
  CHECK(nvnMemoryPoolInitialize(&pool,&mb));uint64_t address=nvnMemoryPoolGetBufferAddress(&pool);

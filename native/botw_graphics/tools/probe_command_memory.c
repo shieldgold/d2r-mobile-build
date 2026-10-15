@@ -10,7 +10,7 @@
 #include <unistd.h>
 #define API(name) static NVNT_##name name
 API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnDeviceFinalize);API(nvnDeviceGetInteger);API(nvnQueueBuilderSetDefaults);API(nvnQueueBuilderSetDevice);API(nvnQueueBuilderSetCommandMemorySize);API(nvnQueueBuilderSetControlMemorySize);API(nvnQueueBuilderSetQueueMemory);API(nvnQueueInitialize);
-API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolInitialize);
+API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolBuilderSetFlags);API(nvnMemoryPoolInitialize);
 API(nvnCommandBufferInitialize);API(nvnCommandBufferFinalize);API(nvnCommandBufferSetMemoryCallback);API(nvnCommandBufferSetMemoryCallbackData);
 API(nvnCommandBufferGetMemoryCallback);API(nvnCommandBufferGetMemoryCallbackData);
 API(nvnCommandBufferAddCommandMemory);API(nvnCommandBufferAddControlMemory);API(nvnCommandBufferGetCommandMemorySize);API(nvnCommandBufferGetCommandMemoryUsed);API(nvnCommandBufferGetCommandMemoryFree);
@@ -19,13 +19,14 @@ API(nvnCommandBufferBeginRecording);API(nvnCommandBufferEndRecording);API(nvnCom
 static sigjmp_buf jump;
 static unsigned char *memory;static unsigned char controls[128][256] __attribute__((aligned(16384)));
 static const void *extra;static size_t extraBytes;
+static const void *poolDefaultsWrite;
 static void *reviewArena;static size_t reviewArenaBytes=135168;
 static NVNmemoryPool pool;static int commandGrants,controlGrants,events[2],mode,denied;
 static void error(const char *s){fprintf(stderr,"ERROR:%s\n",s);siglongjmp(jump,1);}
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK:%s error=%s\n",#x,botw_graphics_last_error());exit(1);}}while(0)
 #define FAILS(op,message) do{if(!sigsetjmp(jump,1)){op;CHECK(0);}CHECK(strstr(botw_graphics_last_error(),message));}while(0)
 static int contains(const void *p,size_t n,const void *base,size_t bytes){uintptr_t a=(uintptr_t)p,b=(uintptr_t)base;return a>=b&&a-b<=bytes&&n<=bytes-(a-b);}
-static int access_memory(const void *p,size_t n,int write){if(!write)return p!=NULL;return !denied&&(contains(p,n,&pool,sizeof pool)||contains(p,n,memory,65536)||contains(p,n,controls,sizeof controls)||(reviewArena&&contains(p,n,reviewArena,reviewArenaBytes))||contains(p,n,extra,extraBytes));}
+static int access_memory(const void *p,size_t n,int write){if(!write)return p!=NULL;return !denied&&((poolDefaultsWrite&&p==poolDefaultsWrite&&n==20)||contains(p,n,&pool,sizeof pool)||contains(p,n,memory,65536)||contains(p,n,controls,sizeof controls)||(reviewArena&&contains(p,n,reviewArena,reviewArenaBytes))||contains(p,n,extra,extraBytes));}
 static void refill(NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t minimum,void *data){
  CHECK(data==&events);CHECK(event==0||event==1);CHECK(minimum==(event?256u:512u));events[event]++;
  if(mode==1)return;
@@ -42,14 +43,14 @@ int main(void){
  if(!botw_graphics_init(NULL,error,NULL))return 77;botw_graphics_set_memory_access_validator(access_memory);botw_graphics_set_command_memory_invoker(invoke);
 #define LOAD(name) name=(NVNT_##name)botw_nvn_bootstrap_loader(#name);CHECK(name)
  LOAD(nvnDeviceBuilderSetDefaults);LOAD(nvnDeviceInitialize);LOAD(nvnDeviceFinalize);LOAD(nvnDeviceGetInteger);LOAD(nvnQueueBuilderSetDefaults);LOAD(nvnQueueBuilderSetDevice);LOAD(nvnQueueBuilderSetCommandMemorySize);LOAD(nvnQueueBuilderSetControlMemorySize);LOAD(nvnQueueBuilderSetQueueMemory);LOAD(nvnQueueInitialize);
- LOAD(nvnMemoryPoolBuilderSetDefaults);LOAD(nvnMemoryPoolBuilderSetDevice);LOAD(nvnMemoryPoolBuilderSetStorage);LOAD(nvnMemoryPoolInitialize);
+ LOAD(nvnMemoryPoolBuilderSetDefaults);LOAD(nvnMemoryPoolBuilderSetDevice);LOAD(nvnMemoryPoolBuilderSetStorage);LOAD(nvnMemoryPoolBuilderSetFlags);LOAD(nvnMemoryPoolInitialize);
  LOAD(nvnCommandBufferInitialize);LOAD(nvnCommandBufferFinalize);LOAD(nvnCommandBufferSetMemoryCallback);LOAD(nvnCommandBufferSetMemoryCallbackData);LOAD(nvnCommandBufferGetMemoryCallback);LOAD(nvnCommandBufferGetMemoryCallbackData);
  LOAD(nvnCommandBufferAddCommandMemory);LOAD(nvnCommandBufferAddControlMemory);LOAD(nvnCommandBufferGetCommandMemorySize);LOAD(nvnCommandBufferGetCommandMemoryUsed);LOAD(nvnCommandBufferGetCommandMemoryFree);
  LOAD(nvnCommandBufferGetControlMemorySize);LOAD(nvnCommandBufferGetControlMemoryUsed);LOAD(nvnCommandBufferGetControlMemoryFree);LOAD(nvnCommandBufferBeginRecording);LOAD(nvnCommandBufferEndRecording);LOAD(nvnCommandBufferCopyBufferToBuffer);
  NVNdeviceBuilder db;NVNdevice device;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));
  int value=-1;nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT,&value);CHECK(value==4);nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT,&value);CHECK(value==8);nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE,&value);CHECK(value==512);nvnDeviceGetInteger(&device,NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_CONTROL_SIZE,&value);CHECK(value==256);
  CHECK(!posix_memalign((void**)&memory,(size_t)getpagesize(),65536));memset(memory,0,65536);memset(controls,0xa5,sizeof controls);
- NVNmemoryPoolBuilder mb;nvnMemoryPoolBuilderSetDefaults(&mb);nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetStorage(&mb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&mb));
+ NVNmemoryPoolBuilder mb;poolDefaultsWrite=(char*)&mb+8;nvnMemoryPoolBuilderSetDefaults(&mb);poolDefaultsWrite=NULL;nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);nvnMemoryPoolBuilderSetStorage(&mb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&mb));
  NVNcommandBuffer cb;CHECK(nvnCommandBufferInitialize(&cb,&device));nvnCommandBufferSetMemoryCallback(&cb,refill);nvnCommandBufferSetMemoryCallbackData(&cb,&events);
  CHECK(nvnCommandBufferGetMemoryCallback(&cb)==refill);CHECK(nvnCommandBufferGetMemoryCallbackData(&cb)==&events);CHECK(!events[0]&&!events[1]);
  nvnCommandBufferAddCommandMemory(&cb,&pool,8192+commandGrants++*512,512);nvnCommandBufferAddControlMemory(&cb,controls[controlGrants++],256);

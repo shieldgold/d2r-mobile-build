@@ -1498,7 +1498,7 @@ int main(int argc, char **argv) {
     }
     API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);
     API(nvnMemoryPoolBuilderSetDefaults); API(nvnMemoryPoolBuilderSetDevice);
-    API(nvnMemoryPoolBuilderSetStorage); API(nvnMemoryPoolInitialize);
+    API(nvnMemoryPoolBuilderSetStorage); API(nvnMemoryPoolBuilderSetFlags); API(nvnMemoryPoolInitialize);
     API(nvnMemoryPoolGetBufferAddress); API(nvnMemoryPoolFinalize);
     API(nvnMemoryPoolInvalidateMappedRange); API(nvnMemoryPoolFlushMappedRange);
     API(nvnQueueBuilderSetDefaults); API(nvnQueueBuilderSetDevice); API(nvnQueueInitialize);
@@ -1520,6 +1520,7 @@ int main(int argc, char **argv) {
     memcpy(memory,"real gpu copy",14);
     NVNmemoryPoolBuilder mb; NVNmemoryPool pool;
     nvnMemoryPoolBuilderSetDefaults(&mb); nvnMemoryPoolBuilderSetDevice(&mb,&device);
+    nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);
     nvnMemoryPoolBuilderSetStorage(&mb,memory,page*2); CHECK(nvnMemoryPoolInitialize(&pool,&mb));
     NVNqueueBuilder qb; NVNqueue queue; nvnQueueBuilderSetDefaults(&qb);
     nvnQueueBuilderSetDevice(&qb,&device); CHECK(nvnQueueInitialize(&queue,&qb));

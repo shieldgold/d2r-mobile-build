@@ -17,7 +17,8 @@ static int mutateBuilder;static NVNT_nvnQueueBuilderSetQueueMemory setMemory;
 static NVNdevice device;static NVNqueue queue,second;static NVNqueueBuilder builder,temporary;static NVNcommandBuffer command;
 static int inside(const void *p,size_t n,const void *a,size_t bytes){uintptr_t x=(uintptr_t)p,y=(uintptr_t)a;return x>=y&&x-y<=bytes&&n<=bytes-(x-y);}
 static void *poolObject;
-static int access_memory(const void *p,size_t n,int write){if(!write)return p!=unreadable;int ok=writable&&(inside(p,n,poolObject,sizeof(NVNmemoryPool))||inside(p,n,arena,arenaBytes)||inside(p,n,other,arenaBytes)||inside(p,n,poolMemory,poolBytes)||inside(p,n,rawStorage,arenaBytes));if(mutateBuilder){mutateBuilder=0;setMemory(&builder,other,arenaBytes);}return ok;}
+static const void *poolDefaultsWrite;
+static int access_memory(const void *p,size_t n,int write){if(!write)return p!=unreadable;int ok=writable&&((poolDefaultsWrite&&p==poolDefaultsWrite&&n==20)||inside(p,n,poolObject,sizeof(NVNmemoryPool))||inside(p,n,arena,arenaBytes)||inside(p,n,other,arenaBytes)||inside(p,n,poolMemory,poolBytes)||inside(p,n,rawStorage,arenaBytes));if(mutateBuilder){mutateBuilder=0;setMemory(&builder,other,arenaBytes);}return ok;}
 static void error(const char *s){fprintf(stderr,"ERROR:%s\n",s);if(escaping)siglongjmp(recovery,1);}
 #define FAILS(operation,reason) do{escaping=1;if(sigsetjmp(recovery,1)==0){operation;CHECK(0);}escaping=0;CHECK(strstr(botw_graphics_last_error(),reason));}while(0)
 #define PRESERVES(operation,reason) do{memcpy(saved,arena,arenaBytes);FAILS(operation,reason);CHECK(!memcmp(saved,arena,arenaBytes));}while(0)
@@ -27,7 +28,7 @@ int main(void){
  API(nvnQueueBuilderSetCommandMemorySize);API(nvnQueueBuilderSetControlMemorySize);API(nvnQueueBuilderSetComputeMemorySize);API(nvnQueueBuilderGetQueueMemorySize);API(nvnQueueBuilderSetQueueMemory);
  API(nvnQueueInitialize);API(nvnQueueFinalize);API(nvnQueueFinish);API(nvnQueueSubmitCommands);
  API(nvnCommandBufferInitialize);API(nvnCommandBufferBeginRecording);API(nvnCommandBufferEndRecording);API(nvnCommandBufferSetViewport);
- API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolInitialize);API(nvnMemoryPoolFinalize);
+ API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolBuilderSetFlags);API(nvnMemoryPoolInitialize);API(nvnMemoryPoolFinalize);
  NVNdeviceBuilder db;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));
  nvnQueueBuilderSetDevice(&builder,&device);nvnQueueBuilderSetDefaults(&builder); /* preserves device */
  nvnQueueBuilderSetFlags(&builder,1);nvnQueueBuilderSetCommandMemorySize(&builder,4096);nvnQueueBuilderSetControlMemorySize(&builder,4096);nvnQueueBuilderSetComputeMemorySize(&builder,0);
@@ -59,7 +60,7 @@ int main(void){
  PRESERVES((void)nvnQueueInitialize((NVNqueue*)arena,&builder),"object storage overlaps live CPU queue arena");
  memcpy(&temporary,&builder,sizeof temporary);nvnQueueBuilderSetQueueMemory(&temporary,other,arenaBytes);
  PRESERVES((void)nvnQueueInitialize((NVNqueue*)arena,&temporary),"object storage overlaps live CPU queue arena");CHECK(((unsigned char*)other)[0]==0x6b);
- NVNmemoryPoolBuilder mb;NVNmemoryPool pool;poolObject=&pool;nvnMemoryPoolBuilderSetDefaults(&mb);nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetStorage(&mb,arena,arenaBytes);
+ NVNmemoryPoolBuilder mb;NVNmemoryPool pool;poolObject=&pool;poolDefaultsWrite=(char*)&mb+8;nvnMemoryPoolBuilderSetDefaults(&mb);poolDefaultsWrite=NULL;nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetFlags(&mb,NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);nvnMemoryPoolBuilderSetStorage(&mb,arena,arenaBytes);
  PRESERVES((void)nvnMemoryPoolInitialize(&pool,&mb),"overlaps live CPU queue arena");
  memcpy(&temporary,&builder,sizeof temporary);nvnQueueBuilderSetQueueMemory(&temporary,other,arenaBytes-4096);
  FAILS((void)nvnQueueInitialize(&second,&temporary),"smaller than");CHECK(((unsigned char*)other)[0]==0x6b);

@@ -11,16 +11,17 @@
 #include <unistd.h>
 #define API(n) static NVNT_##n n
 API(nvnQueueBuilderSetDefaults);API(nvnQueueBuilderSetDevice);API(nvnQueueBuilderSetQueueMemory);API(nvnQueueInitialize);
-API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolInitialize);
+API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolBuilderSetFlags);API(nvnMemoryPoolInitialize);
 API(nvnCommandBufferInitialize);API(nvnCommandBufferFinalize);API(nvnCommandBufferSetMemoryCallback);API(nvnCommandBufferBeginRecording);API(nvnCommandBufferEndRecording);API(nvnCommandBufferCopyBufferToBuffer);API(nvnCommandBufferAddCommandMemory);API(nvnCommandBufferAddControlMemory);API(nvnCommandBufferGetCommandMemoryFree);
 static _Thread_local sigjmp_buf *escape;
 static unsigned char *memory;static unsigned char controls[16][256] __attribute__((aligned(8)));
 static void *arena;static NVNdevice *deviceRef;static const size_t arenaBytes=135168;
 static NVNmemoryPool pool;static int mode,grants;
+static const void *poolDefaultsWrite;
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK:%s at %d error=%s\n",#x,__LINE__,botw_graphics_last_error());exit(1);}}while(0)
 static void error(const char *s){fprintf(stderr,"EXPECTED:%s\n",s);if(escape)siglongjmp(*escape,1);abort();}
 static int inside(const void *p,size_t n,const void *b,size_t bytes){uintptr_t a=(uintptr_t)p,x=(uintptr_t)b;return a>=x&&a-x<=bytes&&n<=bytes-(a-x);}
-static int access_memory(const void *p,size_t n,int write){return write?(inside(p,n,&pool,sizeof pool)||inside(p,n,memory,65536)||inside(p,n,controls,sizeof controls)||inside(p,n,arena,arenaBytes)):p!=NULL;}
+static int access_memory(const void *p,size_t n,int write){return write?((poolDefaultsWrite&&p==poolDefaultsWrite&&n==20)||inside(p,n,&pool,sizeof pool)||inside(p,n,memory,65536)||inside(p,n,controls,sizeof controls)||inside(p,n,arena,arenaBytes)):p!=NULL;}
 static void refill(NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t n,void *data){(void)n;(void)data;
  if(mode==4){NVNqueueBuilder b;nvnQueueBuilderSetDefaults(&b);nvnQueueBuilderSetDevice(&b,deviceRef);nvnQueueBuilderSetQueueMemory(&b,arena,arenaBytes);(void)nvnQueueInitialize((NVNqueue*)c,&b);CHECK(0);}
  if(mode==1){nvnCommandBufferAddCommandMemory(c,&pool,-1,512);CHECK(0);}
@@ -42,9 +43,9 @@ static int invoke(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC f,NVNcommandBuffer *c,NV
 int main(void){if(!botw_graphics_init(NULL,error,NULL))return 77;botw_graphics_set_memory_access_validator(access_memory);botw_graphics_set_command_memory_invoker(invoke);
 #define LOAD(n) n=(NVNT_##n)botw_nvn_bootstrap_loader(#n);CHECK(n)
  LOAD(nvnQueueBuilderSetDefaults);LOAD(nvnQueueBuilderSetDevice);LOAD(nvnQueueBuilderSetQueueMemory);LOAD(nvnQueueInitialize);
- LOAD(nvnDeviceBuilderSetDefaults);LOAD(nvnDeviceInitialize);LOAD(nvnMemoryPoolBuilderSetDefaults);LOAD(nvnMemoryPoolBuilderSetDevice);LOAD(nvnMemoryPoolBuilderSetStorage);LOAD(nvnMemoryPoolInitialize);LOAD(nvnCommandBufferInitialize);LOAD(nvnCommandBufferFinalize);LOAD(nvnCommandBufferSetMemoryCallback);LOAD(nvnCommandBufferBeginRecording);LOAD(nvnCommandBufferEndRecording);LOAD(nvnCommandBufferCopyBufferToBuffer);LOAD(nvnCommandBufferAddCommandMemory);LOAD(nvnCommandBufferAddControlMemory);LOAD(nvnCommandBufferGetCommandMemoryFree);
+ LOAD(nvnDeviceBuilderSetDefaults);LOAD(nvnDeviceInitialize);LOAD(nvnMemoryPoolBuilderSetDefaults);LOAD(nvnMemoryPoolBuilderSetDevice);LOAD(nvnMemoryPoolBuilderSetStorage);LOAD(nvnMemoryPoolBuilderSetFlags);LOAD(nvnMemoryPoolInitialize);LOAD(nvnCommandBufferInitialize);LOAD(nvnCommandBufferFinalize);LOAD(nvnCommandBufferSetMemoryCallback);LOAD(nvnCommandBufferBeginRecording);LOAD(nvnCommandBufferEndRecording);LOAD(nvnCommandBufferCopyBufferToBuffer);LOAD(nvnCommandBufferAddCommandMemory);LOAD(nvnCommandBufferAddControlMemory);LOAD(nvnCommandBufferGetCommandMemoryFree);
  NVNdeviceBuilder db;NVNdevice device;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));deviceRef=&device;CHECK(!posix_memalign(&arena,4096,arenaBytes));memset(arena,0x6b,arenaBytes);CHECK(!posix_memalign((void**)&memory,getpagesize(),65536));memset(memory,0,65536);
- NVNmemoryPoolBuilder pb;nvnMemoryPoolBuilderSetDefaults(&pb);nvnMemoryPoolBuilderSetDevice(&pb,&device);nvnMemoryPoolBuilderSetStorage(&pb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&pb));
+ NVNmemoryPoolBuilder pb;poolDefaultsWrite=(char*)&pb+8;nvnMemoryPoolBuilderSetDefaults(&pb);poolDefaultsWrite=NULL;nvnMemoryPoolBuilderSetDevice(&pb,&device);nvnMemoryPoolBuilderSetFlags(&pb,NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED);nvnMemoryPoolBuilderSetStorage(&pb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&pb));
  for(int badMode=1;badMode<=3;badMode++){NVNcommandBuffer c;CHECK(nvnCommandBufferInitialize(&c,&device));nvnCommandBufferSetMemoryCallback(&c,refill);nvnCommandBufferBeginRecording(&c);mode=badMode==3?4:badMode;sigjmp_buf outer;escape=&outer;
   if(!sigsetjmp(outer,1)){nvnCommandBufferCopyBufferToBuffer(&c,(uintptr_t)memory,(uintptr_t)memory+64,8,0);CHECK(0);}
   CHECK(strstr(botw_graphics_last_error(),badMode==1?"contained nested error":badMode==2?"native invoker exception":"busy in a memory callback"));
