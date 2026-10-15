@@ -21,6 +21,7 @@ def v3_fixture():
     original[ts.VOLANTE_CONTEXT_OFFSET:ts.VOLANTE_CONTEXT_OFFSET + len(ts.VOLANTE_CONTEXT)] = ts.VOLANTE_CONTEXT
     for offset, context in ts.VOLANTE_DATAFLOW_CONTEXTS:
         original[offset:offset + len(context)] = context
+    original[ts.SZS_SITE:ts.SZS_SITE + 4] = ts.SZS_ORIGINAL
     return bytes(original), bytes(original).ljust(0x1c10000, b'\0')
 
 

@@ -104,6 +104,41 @@ static int audit_volante_heap(const unsigned char *bytes, size_t size, char *err
     }
     return 0;
 }
+/* V4 changes only the SZS decompressor child size addition. Preserve its
+ * original parent, size helper, complete object/queue/stack/SDK ownership. */
+static int audit_szs_heap(const unsigned char *bytes, size_t size, char *error, size_t capacity) {
+    static const unsigned char context_0[] = "\xe0\x03\x1d\x32\x2f\xae\xee\x97\x08\xd9\x9f\x52\x00\x00\x08\x8b\x48\x6b\x00\xd0\x08\xa9\x2c\x91\xe1\x03\x00\x91\xe3\x03\x1d\x32\xe4\x03\x00\x32\xf7\x23\x00\xa9\xe5\x03\x00\x32\xe2\x03\x14\xaa\x90\xac\xee\x97\x60\x32\x00\xf9";
+    static const unsigned char context_1[] = "\x28\x00\x40\xf9\xf4\x03\x02\xaa\xf3\x03\x00\xaa\x00\x34\x80\x52\xe2\x03\x1d\x32\xe1\x03\x14\xaa\x68\x56\x00\xf9\x8d\x55\xee\x97";
+    static const unsigned char context_2[] = "\x08\x7c\x40\x93\x00\xc1\x04\x91\xc0\x03\x5f\xd6";
+    static const unsigned char context_3[] = "\x22\xa0\x00\xd0\x61\x32\x40\xf9\x42\x88\x40\xf9\x00\x44\x80\x52\x28\x54\xee\x97\xf5\x03\x00\xaa\x75\x02\x00\xb4\x60\x02\x80\x52\x6a\x00\xef\x97\xe8\x03\x1f\x32\x63\x32\x40\xf9\xe8\x1f\x00\xb9\xe8\x1f\x40\xb9\xe9\x03\x00\x32\xe2\x03\x00\x2a\xe1\x03\x0f\x32\xe5\x03\x00\x91\xe0\x03\x15\xaa\xe4\x03\x14\xaa\x28\x21\xc8\x1a\xe8\x03\x00\xb9\x61\x23\x0e\x94";
+    static const unsigned char context_4[] = "\xf4\x03\x00\xaa\x9f\x7e\x02\xa9\x19\x41\x00\x91\xf3\x03\x05\xaa\xf8\x03\x04\xaa\xf6\x03\x03\xaa\xf7\x03\x02\x2a\xf5\x03\x01\x2a";
+    static const unsigned char context_5[] = "\xe8\x4f\x00\xf0\x4a\x41\x00\x91\xe1\x03\x00\x91\xe5\x7b\x00\x32\xe6\x03\x14\x32\xe7\x03\x1b\x32\xe2\x03\x16\xaa\xe3\x03\x17\x2a\x89\x02\x00\xf9\x08\xd1\x3e\x91\xe4\x03\x1f\x2a\xea\x23\x00\xa9\xc4\xd8\xe0\x97";
+    static const unsigned char context_6[] = "\x60\x32\x40\xf9\x80\x00\x00\xb4\x08\x00\x40\xf9\x08\x11\x40\xf9\x00\x01\x3f\xd6";
+    static const unsigned char context_7[] = "\xf3\x03\x00\xaa\x68\x36\x40\xf9\xe8\x03\x00\xb4\x4a\xd6\x08\x94\x61\x32\x40\xf9\x61\x02\x00\xb4\x68\x3a\x40\xf9\x28\x02\x00\xb4\x95\xa0\x00\xb0\xb5\x52\x40\xf9\xa0\x02\x40\xf9\x3e\xbe\xee\x97\xf4\x03\x00\xaa\x60\x3a\x40\xf9\x80\x00\x00\xb4\x08\x00\x40\xf9\x08\x05\x40\xf9\x00\x01\x3f\xd6\x7f\x3a\x00\xf9\x9f\x06\x00\xf1\x80\x00\x00\x54\xa0\x02\x40\xf9\xe1\x03\x14\xaa\x32\xbe\xee\x97";
+    static const unsigned char context_8[] = "\x62\x02\x40\xf9\xa1\x03\x03\xd1\xe3\x03\x1d\x32\xe4\x03\x00\x32\xe0\x03\x1f\xaa\xe5\x03\x1f\x2a\x89\x3e\xf1\x97\xf6\x03\x00\xaa\x05\x91\x02\x94\x68\x26\x40\xf9\xe8\x2f\x00\xf9\x08\xa6\x00\xb0\x08\x39\x43\xf9\x00\x01\x40\xf9\xe1\x63\x01\x91\xe2\x03\x16\xaa\x92\x91\x02\x94";
+    static const unsigned char context_9[] = "\x53\x5a\x53\x44\x65\x63\x6f\x6d\x70\x72\x65\x73\x73\x6f\x72\x49\x6e\x73\x74\x00";
+    static const unsigned char context_10[] = "\x44\x65\x63\x6f\x6d\x70\x54\x68\x72\x65\x61\x64\x00";
+    const struct { size_t offset; const unsigned char *bytes; size_t size; } contexts[] = {
+        {0xe5decc, context_0, sizeof context_0 - 1},
+        {0xe5dda0, context_1, sizeof context_1 - 1},
+        {0xa0978c, context_2, sizeof context_2 - 1},
+        {0xe5e428, context_3, sizeof context_3 - 1},
+        {0x11e7228, context_4, sizeof context_4 - 1},
+        {0x11e733c, context_5, sizeof context_5 - 1},
+        {0xe5dc60, context_6, sizeof context_6 - 1},
+        {0xe5ea18, context_7, sizeof context_7 - 1},
+        {0xdb9700, context_8, sizeof context_8 - 1},
+        {0x1bc7b2a, context_9, sizeof context_9 - 1},
+        {0x1be6fb4, context_10, sizeof context_10 - 1},
+    };
+    for (size_t i = 0; i < sizeof contexts / sizeof *contexts; i++) {
+        size_t offset = contexts[i].offset, count = contexts[i].size;
+        if (offset > size || count > size - offset || memcmp(bytes + offset, contexts[i].bytes, count))
+            return diagnostic(error, capacity, "SZS child-heap actual ownership/caller context differs at main+0x%zx", offset);
+    }
+    return 0;
+}
+
 int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     size_t text_end, char *error, size_t capacity) {
     const size_t site = 0xa1d758, capacity_site = 0xa1d6a0, original_text_end = 23280432;
@@ -117,6 +152,15 @@ int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     uint32_t heap_word = 0;
     if (size >= 0x7268dc) memcpy(&heap_word, bytes + 0x7268d8, 4);
     int volante = heap_word == 0x52a00020;
+    uint32_t szs_word = 0;
+    if (size >= 0xe5ded8) memcpy(&szs_word, bytes + 0xe5ded4, 4);
+    int szs = szs_word == 0x529fd908;
+    /* Check this later word before every legacy/no-policy early return.
+     * Short synthetic images cannot carry it; complete base-v0 images must. */
+    if (szs && (!native || !volante))
+        return diagnostic(error, capacity, "SZS child-heap change requires the complete v4 stack policy");
+    if (text_end == original_text_end && size > 0xe5ded4 && szs_word != 0x5283c408 && !szs)
+        return diagnostic(error, capacity, "SZS child-heap instruction differs from fixed base-v0 profile");
     if (volante && !native)
         return diagnostic(error, capacity, "Volante child-heap change requires the complete v3 stack policy");
     if (text_end == original_text_end && size >= site + 4 && heap_word != 0x321203e0 && !volante)
@@ -184,5 +228,6 @@ int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
     memcpy(&word, bytes + (size_t)target + 64, 4);
     if (word != expected) return diagnostic(error, capacity, "thread stack capacity return branch differs");
     if (volante && audit_volante_heap(bytes, size, error, capacity)) return -1;
-    return volante ? 3 : 2;
+    if (szs && audit_szs_heap(bytes, size, error, capacity)) return -1;
+    return szs ? 4 : (volante ? 3 : 2);
 }

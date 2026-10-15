@@ -30,8 +30,8 @@ def main(argv=None):
     parser.add_argument('--host39', action='store_true', help='Apply the fixed base-v0 host address transport adaptation')
     parser.add_argument('--heap-policy', choices=('bounded-host-memory-v1',),
                         help='Explicit experimental base-v0 heap/root parameters within actual host memory')
-    parser.add_argument('--thread-stack-policy', choices=('host-page-alignment-v1', 'host-pthread-stack-v2', 'host-pthread-stack-v3'),
-                        help='Fixed base-v0 native stack alignment/capacity; v3 also budgets the one Volante child heap')
+    parser.add_argument('--thread-stack-policy', choices=('host-page-alignment-v1', 'host-pthread-stack-v2', 'host-pthread-stack-v3', 'host-pthread-stack-v4'),
+                        help='Fixed base-v0 native stack alignment/capacity; v3 budgets Volante; v4 additionally budgets the fixed SZS child heap')
     args = parser.parse_args(argv)
     if args.host39 and not args.rewrite:
         parser.error('--host39 requires --rewrite')

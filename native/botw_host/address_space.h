@@ -45,6 +45,7 @@ int botw_address_space_validate_allocation(const botw_address_space_policy *poli
  * alignment instruction+surrounding context verified, 2=capacity/tail-page v2
  * branch, thunk and complete size-consumer/free contexts verified, 3=v2 plus
  * the one Volante child-heap capacity/parent/allocation contexts verified,
+ * 4=v3 plus the fixed SZS child size-helper/parent/thread/queue contexts,
  * 0=no policy,
  * -1=modified/truncated/unknown policy bytes. No memory is modified. */
 int botw_address_space_audit_thread_stack_image(const void *image, size_t image_size,

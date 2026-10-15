@@ -139,11 +139,15 @@ class ThreadStackTests(unittest.TestCase):
                 report['host_address_policy'] = HOST39_POLICY.copy()
                 report['guest_thread_stack_policy'] = policy.copy()
                 original, _, _ = fixture()
-                if policy == ts.VOLANTE_POLICY:
+                if policy in (ts.VOLANTE_POLICY, ts.SZS_POLICY):
                     source = bytearray(original.ljust(0x1c04100, b'\0'))
                     source[ts.VOLANTE_CONTEXT_OFFSET:ts.VOLANTE_CONTEXT_OFFSET + len(ts.VOLANTE_CONTEXT)] = ts.VOLANTE_CONTEXT
                     for offset, context in ts.VOLANTE_DATAFLOW_CONTEXTS:
                         source[offset:offset + len(context)] = context
+                    source[ts.SZS_SITE:ts.SZS_SITE + 4] = ts.SZS_ORIGINAL
+                    if policy == ts.SZS_POLICY:
+                        for offset, context in ((ts.SZS_CONTEXT_OFFSET, ts.SZS_CONTEXT), *ts.SZS_DATAFLOW_CONTEXTS):
+                            source[offset:offset + len(context)] = context
                     original = bytes(source)
                     layout = {'KEY_PAGE_OFF': 0x1c08000, 'PATCH_OFF': 0x1c0c000,
                               'KEY_PAGE_SIZE': 0x4000, 'TEXT_END': 23280432,
@@ -195,6 +199,19 @@ class ThreadStackTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         build_framework(report_path, rewrite, folder / mode, module_names=['main'])
                     self.assertFalse((folder / mode).exists())
+                if policy == ts.SZS_POLICY:
+                    data = bytearray(ts.verify(final, sm))
+                    data[ts.SZS_SITE:ts.SZS_SITE + 4] = ts.SZS_REPLACEMENT
+                    bad = copy.deepcopy(report)
+                    del bad['guest_thread_stack_policy']
+                    del bad['rewrites'][0]['thread_stack_adaptation']
+                    del bad['rewrites'][0]['thread_stack_input_image_sha256']
+                    bad['rewrites'][0]['image_sha256'] = hashlib.sha256(data).hexdigest()
+                    (rewrite / 'main.patched.bin').write_bytes(data)
+                    report_path.write_text(json.dumps(bad))
+                    with self.assertRaisesRegex(ValueError, 'explicit policy'):
+                        build_framework(report_path, rewrite, folder / 'szs_only_no_policy', module_names=['main'])
+                    self.assertFalse((folder / 'szs_only_no_policy').exists())
 
     def test_low_level_source_check_rejects_partial_fixed_module_set(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -210,23 +227,27 @@ class ThreadStackTests(unittest.TestCase):
             audit.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
             audit.restype = ctypes.c_int
             original, image, _ = fixture(); patched, _ = ts.apply(original, image, generic_site_offsets=[])
+            def complete(data):
+                padded = bytearray(data.ljust(23280432, b'\0'))
+                padded[ts.SZS_SITE:ts.SZS_SITE + 4] = ts.SZS_ORIGINAL
+                return bytes(padded)
             def check(data, text=23280432):
                 raw = ctypes.create_string_buffer(data); error = ctypes.create_string_buffer(512)
                 return audit(raw, len(data), text, error, 512)
             self.assertEqual(check(b'\0' * 4096, 0x100), 0)
             self.assertEqual(check(image), 0)
-            self.assertEqual(check(patched.ljust(23280432, b'\0')), 1)
+            self.assertEqual(check(complete(patched)), 1)
             self.assertEqual(check(patched[:ts.SITE + 2]), -1)
             self.assertEqual(check(patched[:ts.SITE + 4]), -1)
             self.assertEqual(check(patched, 0x1000), -1)
-            native, _ = ts.apply(original, image.ljust(23280432, b'\0'), generic_site_offsets=[], policy='host-pthread-stack-v2')
+            native, _ = ts.apply(original, complete(image), generic_site_offsets=[], policy='host-pthread-stack-v2')
             self.assertEqual(check(native), 2)
             # Removing metadata cannot hide the early branch or substitute only alignment.
             for offset in [ts.CAPACITY_SITE - 4, ts.CAPACITY_SITE, ts.DATAFLOW_CONTEXTS[-1][0], len(native) - 8, len(native) - 4]:
                 bad = bytearray(native); bad[offset] ^= 1
                 self.assertEqual(check(bytes(bad)), -1)
             self.assertEqual(check(native[:-4]), -1)
-            bad = bytearray(image.ljust(23280432, b'\0')); bad[ts.CAPACITY_SITE] ^= 1
+            bad = bytearray(complete(image)); bad[ts.CAPACITY_SITE] ^= 1
             self.assertEqual(check(bytes(bad)), -1)
             bad = bytearray(native); bad[ts.SITE:ts.SITE + 4] = ts.ORIGINAL
             self.assertEqual(check(bytes(bad)), -1)
