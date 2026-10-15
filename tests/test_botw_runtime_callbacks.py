@@ -17,6 +17,7 @@ void botw_graphics_shutdown(void) {}
 void *botw_nvn_bootstrap_loader(const char *n) { (void)n; return NULL; }
 const char *botw_graphics_last_error(void) { return "unused simulated graphics"; }
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access a) { (void)a; }
+void botw_graphics_set_memory_tracking_registration(botw_graphics_memory_tracking_registration a) { (void)a; }
 void botw_graphics_set_command_memory_invoker(botw_graphics_command_memory_invoker a) { (void)a; }
 int botw_graphics_platform_initialize(void) { return 0; }
 int botw_graphics_platform_open_default_display(uintptr_t *o) { (void)o; return 0; }

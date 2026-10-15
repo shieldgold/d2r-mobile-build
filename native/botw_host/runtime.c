@@ -1733,6 +1733,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                 state.graphics_started = 1;
 #if defined(BOTW_WITH_GRAPHICS)
                 botw_graphics_set_memory_access_validator(graphics_memory_access);
+                botw_graphics_set_memory_tracking_registration(botw_host_register_memory_tracking);
                 botw_graphics_set_command_memory_invoker(graphics_invoke_memory_callback);
                 /* Preserve the first actual presented draw for device review.
                  * The frontend disables capture after saving that frame. */
