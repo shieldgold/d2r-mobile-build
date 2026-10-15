@@ -8,6 +8,7 @@ This module never installs, launches, or exports a private signing key.
 import argparse
 import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -87,15 +88,19 @@ def _tree(root):
     return files
 
 
-def _shell(archive_path, source_root, limit):
+def _shell(archive_path, source_root, limit, expected_digest):
     if type(limit) is not int or limit <= 0:
         raise ValueError('Invalid shell expansion limit')
     archive_path = Path(archive_path)
     if archive_path.is_symlink() or not archive_path.is_file() or archive_path.stat().st_size > limit:
         raise ValueError('Shell archive exceeds regular file size limit')
+    archive_bytes = _read(archive_path, limit)
+    if _digest(archive_bytes) != expected_digest:
+        raise ValueError('Shell IPA SHA256 differs from the independently trusted build artifact')
     files, seen, total = {}, set(), 0
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        # Parse the exact bytes that matched the trusted digest, not a reopened path.
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             if len(archive.infolist()) > 16:
                 raise ValueError('Shell archive member count exceeds limit')
             for entry in archive.infolist():
@@ -163,20 +168,25 @@ def _shell(archive_path, source_root, limit):
     return files
 
 
-def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, source_root=ROOT,
-                 max_shell_bytes=256 * 1024**2):
+def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, expected_shell_sha256,
+                 source_root=ROOT, max_shell_bytes=256 * 1024**2):
     """Verify the content-free shell and local source provenance, then publish an unsigned .app.
 
     guest_dir is the output root returned by guest_framework.build_framework.
     output_app must not exist. Only fixups/gates and reports enter app/botw;
     rewritten program bytes exist solely in the signed-code framework location.
+    expected_shell_sha256 is required and must come from a trusted build artifact
+    channel verified independently of this IPA, never from its own manifest.
     """
+    if (not isinstance(expected_shell_sha256, str) or
+            not re.fullmatch('[0-9a-fA-F]{64}', expected_shell_sha256)):
+        raise ValueError('A complete independently trusted shell IPA SHA256 is required')
     output_app, guest_dir = Path(output_app), Path(guest_dir)
     if output_app.exists() or output_app.is_symlink():
         raise FileExistsError('Output app already exists')
     if output_app.name != 'BOTWNative.app':
         raise ValueError('Output app must be named BOTWNative.app')
-    shell = _shell(shell_ipa, source_root, max_shell_bytes)
+    shell = _shell(shell_ipa, source_root, max_shell_bytes, expected_shell_sha256.lower())
     published = _tree(guest_dir)
     metadata_bytes = _read(guest_dir / 'guest-framework-report.json', MAX_METADATA_BYTES)
     metadata = _json(metadata_bytes)
@@ -324,6 +334,8 @@ def main(argv=None):
     for flag in ('shell', 'guest', 'report', 'rewrite', 'output-app'):
         assemble.add_argument('--' + flag, type=Path, required=True)
     assemble.add_argument('--source-root', type=Path, default=ROOT)
+    assemble.add_argument('--expected-shell-sha256', required=True,
+                          help='SHA256 from an independently verified build artifact channel, not the IPA manifest')
     sign = subcommands.add_parser('sign', help='Sign locally using an installed identity; no install or launch')
     for flag in ('app', 'profile', 'output-ipa'):
         sign.add_argument('--' + flag, type=Path, required=True)
@@ -333,7 +345,7 @@ def main(argv=None):
     try:
         if args.command == 'assemble':
             path = assemble_app(args.shell, args.guest, args.report, args.rewrite, args.output_app,
-                                source_root=args.source_root)
+                                expected_shell_sha256=args.expected_shell_sha256, source_root=args.source_root)
             print(f'Assembled {path}; unsigned, guest not executed')
         else:
             result = sign_app(args.app, args.profile, args.identity, args.udid, args.output_ipa)

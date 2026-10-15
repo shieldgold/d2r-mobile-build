@@ -65,6 +65,7 @@ class IOSAssemblyTests(unittest.TestCase):
                     archive.writestr(path, data)
 
     def assemble(self, **kwargs):
+        kwargs.setdefault('expected_shell_sha256', hashlib.sha256(self.shell.read_bytes()).hexdigest())
         return assemble_app(self.shell, self.guest, self.report, self.rewrite, self.app,
                             source_root=self.sources, **kwargs)
 
@@ -166,8 +167,26 @@ class IOSAssemblyTests(unittest.TestCase):
         with patch('sys.stdout', new=io.StringIO()):
             self.assertEqual(main(['assemble', '--shell', str(self.shell), '--guest', str(self.guest),
                                    '--report', str(self.report), '--rewrite', str(self.rewrite),
-                                   '--output-app', str(self.app), '--source-root', str(self.sources)]), 0)
+                                   '--output-app', str(self.app), '--source-root', str(self.sources),
+                                   '--expected-shell-sha256', hashlib.sha256(self.shell.read_bytes()).hexdigest()]), 0)
         self.assertTrue((self.app / 'botw/main.gates.tsv').is_file())
+
+    def test_independent_shell_digest_rejects_replaced_binary_and_matching_manifest(self):
+        trusted_digest = hashlib.sha256(self.shell.read_bytes()).hexdigest()
+        self.executable += b'changed-binary-with-unchanged-source-hashes'
+        self.manifest['executable_sha256'] = hashlib.sha256(self.executable).hexdigest()
+        self.write_shell()
+        with self.assertRaisesRegex(ValueError, 'shell.*SHA256|Shell.*SHA256'):
+            self.assemble(expected_shell_sha256=trusted_digest)
+        self.assertFalse(self.app.exists())
+
+    def test_independent_shell_digest_is_required_and_must_be_complete(self):
+        for digest in ('', None, '00', 'g' * 64):
+            with self.subTest(digest=digest), self.assertRaises(ValueError):
+                self.assemble(expected_shell_sha256=digest)
+        with self.assertRaisesRegex(TypeError, 'expected_shell_sha256'):
+            assemble_app(self.shell, self.guest, self.report, self.rewrite, self.app,
+                         source_root=self.sources)
 
 
 class IOSSigningTests(unittest.TestCase):
