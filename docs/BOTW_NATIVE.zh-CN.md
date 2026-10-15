@@ -27,16 +27,17 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `db10e44`：
+2026-10-15 已完成的真机测试，iPhone 15 Pro / iOS 27.2，宿主源码提交 `006ba90`：
 
 - 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
 - `devicectl` 确认安装与解锁后启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、230 个门登记，以及实际映像的 Host39 HIPC 传输检查通过。
 - 真机已分配游戏初始堆 `0xc2600000`（3,261,071,360 字节），完成 SDK 初始化及模块构造，并真实进入游戏 `nnMain`。这仍不是已进入可操作游戏画面的证据。
 - 完整本体 RomFS 已重新传入手机 Documents，14,420,017,152 字节；手机应用真实读到 `/System/Version.txt` 为 `1.0.0`，随后通过 FSP 读取原始镜像头部。升级前后需核验资源与用户数据，不能仅凭安装成功推断容器内容仍完整。
-- 该次真机已通过缺失补丁的正常回退，读取 RomFS 目录与文件元数据；Metal 平台、实际 2556×1179 显示层、FitToLayer 策略和原 SDK SystemEvent 构造均已完成，继续进入 NVN 设备调用。当前停止在未接入的图形能力查询。37 个私有着色器均经实际 Metal 装载通过，尚无原游戏绘制呈现。较早 `973b131` 真机版本还独立验证了原 SDK 16MiB TransferMemory 创建路径。
-- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-db10e44/`。开发界面和报告保持 `gameplay_verified=false`。
+- 该次真机已通过缺失补丁的正常回退，读取 RomFS 目录与文件元数据；Metal 平台、实际 2556×1179 显示层、FitToLayer 策略和原 SDK SystemEvent 构造均已完成。NVN 设备能力、队列预算和纹理设备重置的早期停止点均已越过，当前明确停止在 `nvnCommandBufferSetMemoryCallback`。37 个私有着色器均经实际 Metal 装载通过，尚无原游戏绘制呈现。较早 `973b131` 真机版本还独立验证了原 SDK 16MiB TransferMemory 创建路径。
+- 手机中原有持久离线 UID 已向账户桥发布并显式预选；升级前后身份文件与最初备份逐字节一致。存档后端就绪仍不能证明原游戏已经写入存档。
+- 手机日志、机器可读 `device-run-report.json` 与签名包只保留本地 `outputs/botw-ios-006ba90/`。开发界面和报告保持 `gameplay_verified=false`。
 
-该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38754530568) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38754530561) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
+该次装机对应的 [iOS 宿主构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38761443443) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38761443484) 均通过。外层工件核对 GitHub 官方摘要，宿主源码使用该提交的快照核对。
 
 后续 Mac ARM64 原生执行已读取 RomFS 目录与文件元数据，继续在新触发的兼容层边界逐项验证。最新启动日志保留在 `outputs/botw-host39-probe/`。图形、触摸/手柄、线程、只读资源和存档后端已有独立实现与测试，实际画面、操作及游戏存档验收仍未完成。
 
@@ -124,7 +125,7 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 
 首阶段为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。宿主阶段另增人工程序执行、框架布局、来源校验、ZIP 边界和本地签名流程测试。GitHub Actions 仅使用人工合成输入，不上传游戏文件。
 
-最近完成的一批完整本地回归为 **282 项全部通过、无跳过**。包含实际 ARM64 执行、HIPC 高地址与 x18 保留、宿主边界与线程、真实 Metal 像素、资源路径与写入持久性测试。Host39 两个分配器另有 1024 次原始 ARM64 算法和真实映射试验。云端分别运行 Linux 准备测试与 macOS 原生宿主测试，再编译 iPhoneOS 宿主；测试通过与安装成功都不能替代可玩验收。
+固定源码 `6788bfe` 的完整本地回归运行 **394 项**：393 项通过，1 项真实 RomFS 检查因快照不含私有资源跳过；同一项随后在实际资源目录独立通过。包括实际 ARM64 执行、HIPC 高地址与 x18 保留、宿主边界与线程、真实 Metal 像素、资源路径、账户与保存文件 IPC、写入持久性及回调恢复测试。Host39 两个分配器另有 1024 次原始 ARM64 算法和真实映射试验。云端分别运行 Linux 准备测试与 macOS 原生宿主测试，再编译 iPhoneOS 宿主；测试通过与安装成功都不能替代可玩验收。
 
 未安装可选原生实验依赖或未设置 `BOTW_REWRITER_PATH` 时，相关测试会明确标为跳过；不得把这种运行宣称为完整的原生实验测试通过。
 
