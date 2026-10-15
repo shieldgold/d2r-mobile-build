@@ -90,6 +90,24 @@ int botw_kernel_is_process_handle(botw_kernel *kernel, uint32_t handle);
 int botw_kernel_create_shared_memory(botw_kernel *kernel, size_t size,
     unsigned remote_permission, uint32_t *handle, void **backing,
     char *error, size_t error_capacity);
+/* 0x15 borrows whole host pages of unborrowed RW heap. Owner permission is
+ * None=0, Read=1 or ReadWrite=3. 0x51 maps the complete object once in the alias
+ * region, always RW; its permission argument must equal the original owner
+ * permission. 0x52 removes that mapping. Handles and guest mappings each pin
+ * the source; only their final release restores owner RW access. Darwin uses
+ * public vm_remap(copy=FALSE), without copying or charging the bytes twice.
+ * Other hosts without an equivalent alias mechanism return UNSUPPORTED. */
+typedef struct {
+    void *address;
+    size_t size;
+    uint64_t source;
+    unsigned owner_permission;
+} botw_kernel_transfer_view;
+/* Host services obtain actual RW shared bytes. Keep an independently duplicated
+ * handle alive for the entire access, and close it only after all access ends.
+ * This query itself creates no reference. Never expose address as guest memory. */
+int botw_kernel_transfer_memory_view(botw_kernel *kernel, uint32_t handle,
+    botw_kernel_transfer_view *view, char *error, size_t error_capacity);
 /* Contains only memory actually allocated by this backend. The caller should
  * combine this with its signed-module, TLR/TLS and initial-stack validation. */
 int botw_kernel_memory(botw_kernel *kernel, uint64_t address, size_t length, int writable);

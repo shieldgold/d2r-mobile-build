@@ -381,6 +381,128 @@ static void shared_memory(void) {
     r[0] = duplicate; r[1] = alias + length; svc(0x14, r); assert(!r[0]);
     assert(!botw_kernel_close_handle(ctx, duplicate, error, sizeof error));
 }
+#ifdef __APPLE__
+static uint32_t create_transfer(uint64_t source, size_t size, unsigned permission) {
+    uint64_t r[32] = {0, source, size, permission}; svc(0x15, r); assert(!r[0]);
+    return (uint32_t)r[1];
+}
+#endif
+static void transfer_memory(void) {
+    const size_t unit = 0x200000, size = 0x1000000;
+    assert(!botw_kernel_configure_memory(ctx, size * 2, unit, size * 2, size * 2, 0, error, sizeof error));
+    uint64_t heap = info(4), alias = info(2), r[32] = {0, size * 2}; svc(1, r); assert(!r[0]);
+    unsigned char *source = (void *)(uintptr_t)heap; source[0] = 0x71; source[size - 1] = 0x93;
+#ifndef __APPLE__
+    uint64_t saved[32] = {0, heap, size, 0}; memcpy(r, saved, sizeof saved);
+    assert(botw_kernel_dispatch(ctx, 0x15, r, error, sizeof error) == BOTW_KERNEL_UNSUPPORTED);
+    assert(!memcmp(r, saved, sizeof saved) && readable(heap) && writable(heap));
+    (void)alias; return;
+#else
+    uint32_t handle = create_transfer(heap, size, 0), duplicate;
+    botw_kernel_transfer_view view;
+    assert(!botw_kernel_transfer_memory_view(ctx, handle, &view, error, sizeof error));
+    assert(view.address && view.size == size && view.source == heap && view.owner_permission == 0);
+    unsigned char *host = view.address;
+    assert(host[0] == 0x71 && host[size - 1] == 0x93);
+    host[0] = 0xab; host[size - 1] = 0xcd;
+    assert(!readable(heap) && !writable(heap));
+    assert(!botw_kernel_memory(ctx, heap, size, 0));
+    botw_kernel_memory_info region;
+    assert(botw_kernel_query_memory(ctx, heap, &region) == 1);
+    assert(region.base == heap && region.size == size && region.type == 5 && region.attribute == 1 && !region.permission);
+    r[0] = handle; r[1] = alias; r[2] = size; r[3] = 1; svc(0x51, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_STATE); /* exact original owner permission */
+    r[0] = handle; r[3] = 0; svc(0x51, r); assert(!r[0]);
+    assert(readable(alias) && writable(alias) && botw_kernel_memory(ctx, alias, size, 1));
+    assert(*(unsigned char *)(uintptr_t)alias == 0xab);
+    *(unsigned char *)(uintptr_t)(alias + size - 1) = 0xef; assert(host[size - 1] == 0xef);
+    assert(botw_kernel_query_memory(ctx, alias, &region) == 1);
+    assert(region.type == 0xd && region.permission == 3 && !region.attribute && region.size == size);
+    assert(botw_kernel_query_memory(ctx, alias + size, &region) == 1 && region.base == alias + size);
+    r[0] = handle; r[1] = alias + size; svc(0x51, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_STATE);
+    assert(!botw_kernel_duplicate_handle(ctx, handle, &duplicate, error, sizeof error));
+    assert(!botw_kernel_close_handle(ctx, handle, error, sizeof error));
+    assert(botw_kernel_transfer_memory_view(ctx, handle, &view, error, sizeof error) == -1);
+    r[0] = duplicate; r[1] = alias + size; svc(0x52, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[0] = duplicate; r[1] = alias; r[2] = size / 2; svc(0x52, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_SIZE);
+    r[0] = duplicate; r[2] = size; svc(0x52, r); assert(!r[0]);
+    assert(!readable(alias) && !readable(heap) && host[size - 1] == 0xef);
+    r[1] = 0; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    assert(!botw_kernel_close_handle(ctx, duplicate, error, sizeof error));
+    assert(readable(heap) && writable(heap) && source[0] == 0xab && source[size - 1] == 0xef);
+    /* writable() forks, so its test write must remain private to the child. */
+    assert(botw_kernel_memory(ctx, heap, size, 1));
+    assert(botw_kernel_query_memory(ctx, heap, &region) == 1 && !region.attribute && region.permission == 3);
+#endif
+}
+static void transfer_permissions(void) {
+    const size_t unit = 0x200000, page = (size_t)sysconf(_SC_PAGESIZE);
+    assert(!botw_kernel_configure_memory(ctx, unit * 2, unit, unit, unit * 2, 0, error, sizeof error));
+    uint64_t heap = info(4), alias = info(2), stack = info(14), r[32] = {0, unit * 2}; svc(1, r); assert(!r[0]);
+#ifdef __APPLE__
+    for (unsigned perm = 1; perm <= 3; perm += 2) {
+        uint64_t source = heap + unit; *(unsigned char *)(uintptr_t)source = 0x41;
+        uint32_t h = create_transfer(source, page, perm); botw_kernel_transfer_view view;
+        assert(!botw_kernel_transfer_memory_view(ctx, h, &view, error, sizeof error));
+        unsigned char *host = view.address;
+        assert(readable(source) && writable(source) == (perm == 3));
+        assert(botw_kernel_memory(ctx, source, page, 0));
+        assert(botw_kernel_memory(ctx, source, page, 1) == (perm == 3));
+        host[0] = 0x52; assert(*(unsigned char *)(uintptr_t)source == 0x52);
+        if (perm == 3) { *(unsigned char *)(uintptr_t)source = 0x63; assert(host[0] == 0x63); }
+        r[1] = unit; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+        r[0] = stack; r[1] = source; r[2] = page; svc(4, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+        r[1] = source; r[2] = page; r[3] = perm; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+        uint32_t shared; void *backing;
+        assert(!botw_kernel_create_shared_memory(ctx, page, 3, &shared, &backing, error, sizeof error));
+        r[0] = shared; r[1] = alias; r[2] = page; r[3] = 3; svc(0x13, r); assert(!r[0]);
+        r[0] = h; r[3] = perm; svc(0x51, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+        r[0] = shared; svc(0x14, r); assert(!r[0]);
+        r[0] = h; r[3] = perm; svc(0x51, r); assert(!r[0]);
+        assert(botw_kernel_query_memory(ctx, alias, &(botw_kernel_memory_info){0}) == 1);
+        botw_kernel_memory_info region; botw_kernel_query_memory(ctx, alias, &region);
+        assert(region.type == 0xe && region.permission == 3);
+        r[0] = shared; r[3] = 3; svc(0x13, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+        r[0] = h; svc(0x52, r); assert(!r[0]);
+        assert(!botw_kernel_close_handle(ctx, h, error, sizeof error));
+        assert(!botw_kernel_close_handle(ctx, shared, error, sizeof error));
+        assert(writable(source));
+    }
+    /* Closing the last handle cannot restore a source with a live guest map. */
+    uint32_t h = create_transfer(heap + unit, page, 0);
+    r[0] = h; r[1] = alias; r[2] = page; r[3] = 0; svc(0x51, r); assert(!r[0]);
+    assert(!botw_kernel_close_handle(ctx, h, error, sizeof error));
+    assert(!readable(heap + unit) && readable(alias));
+    r[1] = unit; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    botw_kernel_destroy(ctx); ctx = NULL;
+    assert(!readable(alias) && !readable(heap + unit));
+#else
+    (void)alias; (void)stack; (void)page; (void)heap;
+#endif
+}
+static void transfer_validation(void) {
+    const size_t unit = 0x200000, page = (size_t)sysconf(_SC_PAGESIZE);
+    assert(!botw_kernel_configure_memory(ctx, unit, unit, unit, unit, 0, error, sizeof error));
+    uint64_t heap = info(4), stack = info(14), r[32] = {0, unit}; svc(1, r); assert(!r[0]);
+    r[1] = heap + 1; r[2] = page; r[3] = 0; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_ADDRESS);
+    r[1] = heap; r[2] = 0; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_SIZE);
+    r[2] = page + 1; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_SIZE);
+    r[2] = page; r[3] = 2; svc(0x15, r); assert(r[0] == 0xd801);
+    r[1] = UINT64_MAX & ~(uint64_t)(page - 1); r[3] = 0; svc(0x15, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[1] = heap + unit; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[1] = stack; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[0] = stack; r[1] = heap; r[2] = page; svc(4, r); assert(!r[0]);
+    r[1] = heap; r[2] = page; r[3] = 0; svc(0x15, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[0] = stack; r[1] = heap; r[2] = page; svc(5, r); assert(!r[0]);
+    if (page > 0x1000) {
+        r[1] = heap + 0x1000; r[2] = 0x1000; r[3] = 0;
+        assert(botw_kernel_dispatch(ctx, 0x15, r, error, sizeof error) == BOTW_KERNEL_ERROR);
+        assert(strstr(error, "host page") && readable(heap) && writable(heap + 0x1000) && readable(heap + page));
+    }
+    r[0] = 0x1234; r[1] = info(2); r[2] = page; r[3] = 0; svc(0x51, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+}
 static void returned_thread(uint64_t argument, uint32_t handle) { (void)argument; (void)handle; }
 static void unexpected_return(void) {
     const size_t unit = 0x200000;
@@ -846,10 +968,37 @@ static void pending_wait_memory_is_retained(void) {
     r[1] = unit; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
     r[0] = stack + unit; r[1] = heap + unit; r[2] = unit; svc(4, r);
     assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE && readable(owned_mutex));
+    r[1] = heap + unit; r[2] = (size_t)sysconf(_SC_PAGESIZE); r[3] = 0; svc(0x15, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE && readable(owned_mutex));
     int rc;
     do { rc = botw_kernel_shutdown(ctx, error, sizeof error); if (rc) sched_yield(); }
     while (rc && now() < deadline);
     assert(!rc);
+}
+static void transfer_wait_mapping_is_retained(void) {
+#ifdef __APPLE__
+    const size_t unit = 0x200000, page = (size_t)sysconf(_SC_PAGESIZE);
+    uint64_t stack = prepare_sync(1), heap = info(4), alias = info(2), r[32] = {0, unit * 2};
+    svc(1, r); assert(!r[0]);
+    uint32_t transfer = create_transfer(heap + unit, page, 0);
+    r[0] = transfer; r[1] = alias; r[2] = page; r[3] = 0; svc(0x51, r); assert(!r[0]);
+    owned_mutex = alias; owned_key = alias + 4;
+    sync_worker(stack, 0, (uintptr_t)owned_condition_worker, 0, 44);
+    uint64_t deadline = now() + 1000000000;
+    while ((!__atomic_load_n((uint32_t *)(uintptr_t)owned_key, __ATOMIC_ACQUIRE) ||
+            __atomic_load_n((uint32_t *)(uintptr_t)owned_mutex, __ATOMIC_ACQUIRE)) && now() < deadline) sched_yield();
+    assert(__atomic_load_n((uint32_t *)(uintptr_t)owned_key, __ATOMIC_ACQUIRE) == 1);
+    r[0] = transfer; r[1] = alias; r[2] = page; svc(0x52, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE && readable(alias));
+    int rc;
+    do { rc = botw_kernel_shutdown(ctx, error, sizeof error); if (rc) sched_yield(); }
+    while (rc && now() < deadline);
+    assert(!rc);
+    r[0] = transfer; r[1] = alias; r[2] = page; svc(0x52, r); assert(!r[0]);
+    assert(!botw_kernel_close_handle(ctx, transfer, error, sizeof error));
+    assert(readable(heap + unit) && !readable(alias));
+    assert(!pthread_key_delete(test_tls));
+#endif
 }
 static void *shrink_during_validation(void *opaque) {
     (void)opaque; uint64_t deadline = now() + 1000000000;
@@ -889,6 +1038,9 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "threads")) threads();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
+    else if (!strcmp(argv[1], "transfer")) transfer_memory();
+    else if (!strcmp(argv[1], "transferperms")) transfer_permissions();
+    else if (!strcmp(argv[1], "transfervalidation")) transfer_validation();
     else if (!strcmp(argv[1], "returned")) unexpected_return();
     else if (!strcmp(argv[1], "stopwait")) stop_wait();
     else if (!strcmp(argv[1], "mutex")) mutex_arbitration();
@@ -898,6 +1050,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "defercancel")) condition_cancel_is_deferred();
     else if (!strcmp(argv[1], "stopsync")) shutdown_sync_waits();
     else if (!strcmp(argv[1], "retainwait")) pending_wait_memory_is_retained();
+    else if (!strcmp(argv[1], "transferwait")) transfer_wait_mapping_is_retained();
     else if (!strcmp(argv[1], "validationrace")) revalidate_before_wait_registration();
     else if (!strcmp(argv[1], "priorityinitial")) initial_thread_priority();
     else if (!strcmp(argv[1], "priorityworker")) worker_thread_priority();
@@ -967,6 +1120,18 @@ class KernelTests(unittest.TestCase):
 
     def test_shared_memory_has_real_aliases_and_enforced_guest_permissions(self):
         self.check_case('shared')
+
+    def test_transfer_memory_borrows_real_sdk_16mib_with_shared_alias_and_reference_lifetime(self):
+        self.check_case('transfer')
+
+    def test_transfer_owner_permissions_mapping_references_and_cross_object_overlap(self):
+        self.check_case('transferperms')
+
+    def test_transfer_rejects_nonheap_borrowed_overflow_and_partial_host_pages(self):
+        self.check_case('transfervalidation')
+
+    def test_transfer_guest_mapping_wait_words_survive_until_worker_shutdown(self):
+        self.check_case('transferwait')
 
     def test_callback_return_without_exit_is_reported_to_owner(self):
         self.check_case('returned')

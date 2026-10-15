@@ -34,9 +34,10 @@ typedef struct Object Object;
 typedef struct Thread Thread;
 typedef struct SyncWaiter SyncWaiter;
 typedef struct SharedMemory SharedMemory;
+typedef struct TransferMemory TransferMemory;
 typedef struct { uint64_t address; SharedMemory *memory; unsigned permission; } SharedMapping;
 typedef struct { uint32_t value; unsigned kind; Object *object; } Handle;
-enum { EVENT_WRITE = 1, EVENT_READ = 2, THREAD = 3, SHARED_MEMORY = 4 };
+enum { EVENT_WRITE = 1, EVENT_READ = 2, THREAD = 3, SHARED_MEMORY = 4, TRANSFER_MEMORY = 5 };
 struct Object { unsigned refs, type; int signaled; };
 struct SharedMemory {
     Object object;
@@ -44,6 +45,15 @@ struct SharedMemory {
     void *backing;
     size_t size;
     unsigned remote_permission;
+};
+struct TransferMemory {
+    Object object;
+    TransferMemory *next;
+    botw_kernel *kernel;
+    void *backing;
+    uint64_t source, mapping_address;
+    size_t size;
+    unsigned owner_permission;
 };
 struct Thread {
     Object object;
@@ -95,6 +105,7 @@ struct botw_kernel {
     int memory_configured;
     Mapping mappings[MAX_MAPS];
     SharedMapping shared_mappings[MAX_SHARED_MAPS];
+    TransferMemory *transfer_memories;
     Handle handles[MAX_HANDLES];
 };
 static int memory_owned_locked(botw_kernel *k, uint64_t address, size_t length, int writable);
@@ -144,13 +155,28 @@ static Handle *allocate_handle(botw_kernel *k, Object *object, unsigned kind) {
     }
     return NULL;
 }
-static void release_object(Object *object) {
-    if (--object->refs) return;
+/* A final transfer release can fail at the host VM boundary. Retain its last
+ * reference and report a host error instead of silently unpinning the source. */
+static int release_object(Object *object) {
+    if (object->refs > 1) { object->refs--; return 0; }
+    if (object->type == TRANSFER_MEMORY) {
+        TransferMemory *memory = (TransferMemory *)object;
+        if (mprotect((void *)(uintptr_t)memory->source, memory->size, PROT_READ | PROT_WRITE)) return -1;
+        if (munmap(memory->backing, memory->size)) {
+            int saved = errno;
+            int protection = memory->owner_permission ? PROT_READ | (memory->owner_permission == 3 ? PROT_WRITE : 0) : PROT_NONE;
+            (void)mprotect((void *)(uintptr_t)memory->source, memory->size, protection);
+            errno = saved; return -1;
+        }
+        TransferMemory **link = &memory->kernel->transfer_memories;
+        while (*link && *link != memory) link = &(*link)->next;
+        if (*link) *link = memory->next;
+    }
     if (object->type == SHARED_MEMORY) {
         SharedMemory *memory = (SharedMemory *)object;
         munmap(memory->backing, memory->size); fclose(memory->file);
     }
-    free(object);
+    free(object); return 0;
 }
 botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *opaque) {
     botw_kernel *k = calloc(1, sizeof *k); if (!k) return NULL;
@@ -220,7 +246,26 @@ void botw_kernel_destroy(botw_kernel *k) {
         if (k->callbacks.log) k->callbacks.log(k->opaque, error);
         return;
     }
-    for (unsigned i = 0; i < MAX_HANDLES; i++) if (k->handles[i].object) release_object(k->handles[i].object);
+    for (unsigned i = 0; i < MAX_HANDLES; i++) if (k->handles[i].object) {
+        if (release_object(k->handles[i].object)) {
+            if (k->callbacks.log) k->callbacks.log(k->opaque, "transfer source restoration failed during destroy; kernel resources retained");
+            return;
+        }
+        memset(&k->handles[i], 0, sizeof k->handles[i]);
+    }
+    while (k->transfer_memories) {
+        TransferMemory *memory = k->transfer_memories;
+        /* Remaining objects own exactly one reference for their guest map. */
+        if (mmap((void *)(uintptr_t)memory->mapping_address, memory->size, PROT_NONE,
+                MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) {
+            if (k->callbacks.log) k->callbacks.log(k->opaque, "transfer guest mapping removal failed during destroy; kernel resources retained");
+            return;
+        }
+        if (release_object(&memory->object)) {
+            if (k->callbacks.log) k->callbacks.log(k->opaque, "mapped transfer source restoration failed during destroy; kernel resources retained");
+            return;
+        }
+    }
     for (unsigned i = 0; i < MAX_SHARED_MAPS; i++) if (k->shared_mappings[i].memory)
         release_object(&k->shared_mappings[i].memory->object);
     Thread *thread = k->threads;
@@ -273,9 +318,28 @@ int botw_kernel_close_handle(botw_kernel *k, uint32_t h, char *e, size_t c) {
     if (!k) return diagnostic(e, c, "kernel context is null");
     pthread_mutex_lock(&k->lock); Handle *handle = find_handle(k, h);
     int valid = handle != NULL;
-    if (valid) { release_object(handle->object); memset(handle, 0, sizeof *handle); }
+    if (valid) {
+        if (release_object(handle->object)) {
+            int saved = errno; k->stopping = 1;
+            snprintf(k->thread_failure, sizeof k->thread_failure, "restore final transfer memory source: %s", strerror(saved));
+            pthread_cond_broadcast(&k->changed); pthread_mutex_unlock(&k->lock);
+            return diagnostic(e, c, "restore final transfer memory source: %s", strerror(saved));
+        }
+        memset(handle, 0, sizeof *handle);
+    }
     pthread_mutex_unlock(&k->lock);
     return valid ? 0 : diagnostic(e, c, "kernel handle 0x%x is invalid or closed", h);
+}
+int botw_kernel_transfer_memory_view(botw_kernel *k, uint32_t handle,
+    botw_kernel_transfer_view *view, char *error, size_t capacity) {
+    if (!k || !view) return diagnostic(error, capacity, "transfer view requires kernel and output");
+    pthread_mutex_lock(&k->lock); Handle *h = find_handle(k, handle);
+    if (!h || h->kind != TRANSFER_MEMORY) {
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "handle 0x%x is not transfer memory", handle);
+    }
+    TransferMemory *memory = (TransferMemory *)h->object;
+    *view = (botw_kernel_transfer_view){memory->backing, memory->size, memory->source, memory->owner_permission};
+    pthread_mutex_unlock(&k->lock); return 0;
 }
 int botw_kernel_is_process_handle(botw_kernel *k, uint32_t h) { return k && h == BOTW_KERNEL_CURRENT_PROCESS; }
 int botw_kernel_create_shared_memory(botw_kernel *k, size_t size, unsigned permission,
@@ -636,6 +700,16 @@ static int sync_words_in_use_locked(botw_kernel *k, uint64_t address, size_t siz
             (w->condition_key && overlaps(address, size, w->condition_key, 4))) return 1;
     return 0;
 }
+static int transfer_source_in_use_locked(botw_kernel *k, uint64_t address, size_t size) {
+    for (TransferMemory *m = k->transfer_memories; m; m = m->next)
+        if (overlaps(address, size, m->source, m->size)) return 1;
+    return 0;
+}
+static int transfer_mapping_in_use_locked(botw_kernel *k, uint64_t address, size_t size) {
+    for (TransferMemory *m = k->transfer_memories; m; m = m->next)
+        if (m->mapping_address && overlaps(address, size, m->mapping_address, m->size)) return 1;
+    return 0;
+}
 /* All mappings are internal to the reserved block. Never use MAP_FIXED on a
  * caller-selected or unrelated host address. Nonfixed hints cannot evict VM. */
 static int reserve_memory_locked(botw_kernel *k, char *error, size_t capacity) {
@@ -676,7 +750,8 @@ static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
     size_t size = (size_t)requested;
     if (size < k->heap_size) {
-        if (sync_words_in_use_locked(k, k->heap_base + size, k->heap_size - size)) {
+        if (sync_words_in_use_locked(k, k->heap_base + size, k->heap_size - size) ||
+            transfer_source_in_use_locked(k, k->heap_base + size, k->heap_size - size)) {
             pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
         }
         for (unsigned i = 0; i < MAX_MAPS; i++) if (k->mappings[i].size &&
@@ -740,7 +815,8 @@ static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, si
     size_t size = (size_t)length;
     if (!region_contains(k->heap_base, k->heap_size, source, size) ||
         !region_contains(k->stack_base, k->stack_capacity, destination, size) ||
-        sync_words_in_use_locked(k, source, size) || sync_words_in_use_locked(k, destination, size)) {
+        sync_words_in_use_locked(k, source, size) || sync_words_in_use_locked(k, destination, size) ||
+        transfer_source_in_use_locked(k, source, size)) {
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
     if ((destination | source | size) & (k->host_page - 1)) {
@@ -790,6 +866,9 @@ static int map_shared_memory(botw_kernel *k, int unmap, uint64_t *regs, char *er
     if (!region_contains(k->alias_base, k->alias_capacity, address, memory->size)) {
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
+    if (!unmap && transfer_mapping_in_use_locked(k, address, memory->size)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
     if (address & (k->host_page - 1)) {
         size_t page = k->host_page; pthread_mutex_unlock(&k->lock);
         return diagnostic(error, capacity, "shared-memory address must align to host page (%zu bytes)", page);
@@ -820,6 +899,120 @@ static int map_shared_memory(botw_kernel *k, int unmap, uint64_t *regs, char *er
             pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "map real shared-memory alias: %s", strerror(errno));
         }
         *slot = (SharedMapping){address, memory, permission}; memory->object.refs++;
+    }
+    pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
+}
+/* TransferMemory permission/lifetime semantics follow libnx svc.h and
+ * Atmosphere's svc/kern_svc_transfer_memory.cpp + kern_k_transfer_memory.cpp.
+ * TransferMemory borrows existing physical pages. This remap is a shared view,
+ * not a snapshot; the host view remains RW while owner permissions change.
+ * A nonzero target is always a free range inside our owned reservation. */
+#ifdef __APPLE__
+static int transfer_alias(uint64_t source, size_t size, uint64_t destination,
+                          void **backing, char *error, size_t capacity) {
+    vm_address_t target = (vm_address_t)destination;
+    vm_prot_t current = 0, maximum = 0;
+    int flags = destination ? VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE : VM_FLAGS_ANYWHERE;
+    kern_return_t result = vm_remap(mach_task_self(), &target, (vm_size_t)size, 0,
+        flags, mach_task_self(), (vm_address_t)source, FALSE, &current, &maximum, VM_INHERIT_COPY);
+    if (result != KERN_SUCCESS)
+        return diagnostic(error, capacity, "remap shared transfer backing: kernel=%d", result);
+    if ((destination && target != destination) ||
+        (current & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE)) {
+        if (!destination) munmap((void *)(uintptr_t)target, size);
+        return diagnostic(error, capacity, "transfer alias has unexpected address/protection=0x%x", current);
+    }
+    *backing = (void *)(uintptr_t)target; return 0;
+}
+#endif
+static int create_transfer_memory(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    uint64_t source = regs[1], length = regs[2]; unsigned permission = (uint32_t)regs[3];
+    if (source & (GUEST_PAGE - 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
+    if (!length || length > SIZE_MAX || (length & (GUEST_PAGE - 1))) { regs[0] = BOTW_KERNEL_RESULT_INVALID_SIZE; return BOTW_KERNEL_HANDLED; }
+    if (source > UINT64_MAX - length) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
+    if (permission != 0 && permission != 1 && permission != 3) { regs[0] = 0xd801; return BOTW_KERNEL_HANDLED; }
+    pthread_mutex_lock(&k->lock); size_t size = (size_t)length;
+    if (!k->reservation || !region_contains(k->heap_base, k->heap_size, source, size) ||
+        !memory_owned_locked(k, source, size, 1) || transfer_source_in_use_locked(k, source, size) ||
+        sync_words_in_use_locked(k, source, size)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    if ((source | size) & (k->host_page - 1)) {
+        size_t page = k->host_page; pthread_mutex_unlock(&k->lock);
+        return diagnostic(error, capacity, "transfer memory requires complete host page boundaries (%zu bytes)", page);
+    }
+    if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
+#ifndef __APPLE__
+    (void)error; (void)capacity;
+    pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_UNSUPPORTED;
+#else
+    TransferMemory *memory = calloc(1, sizeof *memory);
+    if (!memory) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_OUT_OF_MEMORY; return BOTW_KERNEL_HANDLED; }
+    memory->object.type = TRANSFER_MEMORY; memory->kernel = k;
+    memory->source = source; memory->size = size; memory->owner_permission = permission;
+    Handle *handle = allocate_handle(k, &memory->object, TRANSFER_MEMORY);
+    if (!handle) { pthread_mutex_unlock(&k->lock); free(memory); regs[0] = 0xd201; return BOTW_KERNEL_HANDLED; }
+    if (transfer_alias(source, size, 0, &memory->backing, error, capacity)) {
+        memset(handle, 0, sizeof *handle); free(memory); pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR;
+    }
+    int protection = permission ? PROT_READ | (permission == 3 ? PROT_WRITE : 0) : PROT_NONE;
+    if (mprotect((void *)(uintptr_t)source, size, protection)) {
+        int saved = errno; munmap(memory->backing, size); memset(handle, 0, sizeof *handle); free(memory);
+        pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "protect transfer memory owner: %s", strerror(saved));
+    }
+    memory->next = k->transfer_memories; k->transfer_memories = memory;
+    regs[0] = 0; regs[1] = handle->value;
+    pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+#endif
+}
+static int map_transfer_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, size_t capacity) {
+    uint64_t address = regs[1], length = regs[2]; unsigned permission = (uint32_t)regs[3];
+    if (address & (GUEST_PAGE - 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
+    if (!length || length > SIZE_MAX || (length & (GUEST_PAGE - 1))) { regs[0] = BOTW_KERNEL_RESULT_INVALID_SIZE; return BOTW_KERNEL_HANDLED; }
+    if (address > UINT64_MAX - length) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
+    if (!unmap && permission != 0 && permission != 1 && permission != 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_STATE; return BOTW_KERNEL_HANDLED; }
+    pthread_mutex_lock(&k->lock); Handle *h = find_handle(k, (uint32_t)regs[0]);
+    if (!h || h->kind != TRANSFER_MEMORY) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED;
+    }
+    TransferMemory *memory = (TransferMemory *)h->object;
+    if (length != memory->size) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_SIZE; return BOTW_KERNEL_HANDLED; }
+    if (!unmap && (memory->owner_permission != permission || memory->mapping_address)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    if (!region_contains(k->alias_base, k->alias_capacity, address, memory->size) ||
+        (unmap && memory->mapping_address != address)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    if (address & (k->host_page - 1)) {
+        size_t page = k->host_page; pthread_mutex_unlock(&k->lock);
+        return diagnostic(error, capacity, "transfer mapping address must align to host page (%zu bytes)", page);
+    }
+    if (sync_words_in_use_locked(k, address, memory->size) ||
+        (!unmap && transfer_mapping_in_use_locked(k, address, memory->size))) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    for (unsigned i = 0; !unmap && i < MAX_SHARED_MAPS; i++) {
+        SharedMapping *m = &k->shared_mappings[i];
+        if (m->memory && overlaps(address, memory->size, m->address, m->memory->size)) {
+            pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+        }
+    }
+    if (unmap) {
+        if (mmap((void *)(uintptr_t)address, memory->size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == MAP_FAILED) {
+            pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "unmap owned transfer alias: %s", strerror(errno));
+        }
+        memory->mapping_address = 0; release_object(&memory->object); /* handle retains another reference */
+    } else {
+#ifdef __APPLE__
+        void *mapped;
+        if (transfer_alias((uintptr_t)memory->backing, memory->size, address, &mapped, error, capacity)) {
+            pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR;
+        }
+        memory->mapping_address = address; memory->object.refs++;
+#else
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_UNSUPPORTED;
+#endif
     }
     pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
 }
@@ -951,6 +1144,9 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
     case 0x29: return get_info(k, regs, error, capacity);
     case 0x13: return map_shared_memory(k, 0, regs, error, capacity);
     case 0x14: return map_shared_memory(k, 1, regs, error, capacity);
+    case 0x15: return create_transfer_memory(k, regs, error, capacity);
+    case 0x51: return map_transfer_memory(k, 0, regs, error, capacity);
+    case 0x52: return map_transfer_memory(k, 1, regs, error, capacity);
     case 8: return create_thread(k, regs, error, capacity);
     case 9: return start_thread(k, regs, error, capacity);
     case 0xd: return set_thread_priority(k, regs, error, capacity);
@@ -999,6 +1195,8 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
         /* Let the IPC owner handle its independent namespace. */
         if ((uint32_t)regs[0] < HANDLE_BASE || (uint32_t)regs[0] >= UINT32_C(0x80000000)) return BOTW_KERNEL_UNSUPPORTED;
         regs[0] = botw_kernel_close_handle(k, (uint32_t)regs[0], error, capacity) ? BOTW_KERNEL_RESULT_INVALID_HANDLE : 0;
+        pthread_mutex_lock(&k->lock); int close_failed = k->thread_failure[0] != 0; pthread_mutex_unlock(&k->lock);
+        if (close_failed) return BOTW_KERNEL_ERROR;
         return BOTW_KERNEL_HANDLED;
     case 0x17: {
         pthread_mutex_lock(&k->lock); Handle *h = find_handle(k, (uint32_t)regs[0]);
@@ -1056,6 +1254,11 @@ static int memory_owned_locked(botw_kernel *k, uint64_t address, size_t length, 
             valid = !writable || m->permission == 3; break;
         }
     }
+    for (TransferMemory *m = k->transfer_memories; m; m = m->next) {
+        if (valid && overlaps(address, length, m->source, m->size) &&
+            (!m->owner_permission || (writable && m->owner_permission != 3))) { valid = 0; break; }
+        if (m->mapping_address && region_contains(m->mapping_address, m->size, address, length)) { valid = 1; break; }
+    }
     return valid;
 }
 int botw_kernel_memory(botw_kernel *k, uint64_t address, size_t length, int writable) {
@@ -1099,6 +1302,20 @@ int botw_kernel_query_memory(botw_kernel *k, uint64_t address, botw_kernel_memor
         }
         if (end <= address && end > lower) lower = end;
         if (m->address > address && m->address < upper) upper = m->address;
+    }
+    for (TransferMemory *m = k->transfer_memories; m; m = m->next) {
+        uint64_t ranges[2] = {m->source, m->mapping_address};
+        for (unsigned j = 0; j < 2; j++) {
+            uint64_t base = ranges[j], end = base + m->size; if (!base) continue;
+            if (address >= base && address < end) {
+                info->base = base; info->size = m->size;
+                info->type = j ? (m->owner_permission ? 0xe : 0xd) : 5;
+                info->attribute = j ? 0 : 1; info->permission = j ? 3 : m->owner_permission;
+                pthread_mutex_unlock(&k->lock); return 1;
+            }
+            if (end <= address && end > lower) lower = end;
+            if (base > address && base < upper) upper = base;
+        }
     }
     info->base = lower; info->size = upper - lower;
     pthread_mutex_unlock(&k->lock); return 1;
