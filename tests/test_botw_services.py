@@ -19,6 +19,10 @@ from test_botw_romfs import fixture as romfs_fixture
 class RomfsError(C.Structure):
     _fields_ = [('code', C.c_int), ('message', C.c_char * 192)]
 
+
+class LocalUser(C.Structure):
+    _fields_ = [('uid', C.c_ubyte * 16), ('uid_hex', C.c_char * 33)]
+
 LOG = C.CFUNCTYPE(None, C.c_void_p, C.c_char_p)
 MEMORY = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint64, C.c_size_t, C.c_int)
 EVENT_CREATE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.POINTER(C.c_uint32), C.POINTER(C.c_uint32), C.c_void_p, C.c_size_t)
@@ -45,8 +49,14 @@ class ServicesTests(unittest.TestCase):
         source = ROOT / 'native/botw_host/services.c'
         if not source.exists():
             raise AssertionError('Horizon services implementation is missing')
-        subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
-                        '-Werror', '-shared', '-fPIC', str(source), str(ROOT / 'native/botw_resources/romfs.c'), str(ROOT / 'native/botw_input/input.c'), '-o', str(cls.library)], check=True)
+        flags = [shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
+                 '-Werror', '-shared', '-fPIC', '-pthread']
+        if platform.system() == 'Darwin':
+            flags += ['-framework', 'Security']
+        subprocess.run(flags + [str(source), str(ROOT / 'native/botw_resources/romfs.c'),
+                                str(ROOT / 'native/botw_resources/savefs.c'),
+                                str(ROOT / 'native/botw_resources/local_user.c'),
+                                str(ROOT / 'native/botw_input/input.c'), '-o', str(cls.library)], check=True)
         cls.lib = C.CDLL(str(cls.library))
         cls.lib.botw_services_create.argtypes = [LOG, MEMORY, C.c_void_p]
         cls.lib.botw_services_create.restype = C.c_void_p
@@ -56,6 +66,15 @@ class ServicesTests(unittest.TestCase):
         cls.lib.botw_services_close.argtypes = [C.c_void_p, C.c_uint32, C.c_char_p, C.c_size_t]
         cls.lib.botw_services_send.argtypes = [C.c_void_p, C.c_uint32, C.c_void_p, C.c_size_t,
                                              C.c_char_p, C.c_size_t]
+        cls.lib.botw_services_set_savefs.argtypes = [C.c_void_p, C.c_void_p]
+        cls.lib.botw_services_set_local_user.argtypes = [C.c_void_p, C.c_void_p, C.c_char_p,
+                                                        C.c_char_p, C.c_size_t]
+        cls.lib.botw_services_set_preselected_local_user.argtypes = [C.c_void_p, C.c_void_p,
+                                                                    C.c_char_p, C.c_size_t]
+        cls.lib.botw_local_user_open.argtypes = [C.c_char_p, C.POINTER(LocalUser), C.POINTER(RomfsError)]
+        cls.lib.botw_savefs_open.argtypes = [C.c_char_p, C.c_char_p, C.c_char_p, C.c_uint64, C.POINTER(RomfsError)]
+        cls.lib.botw_savefs_open.restype = C.c_void_p
+        cls.lib.botw_savefs_close.argtypes = [C.c_void_p]
 
     @classmethod
     def tearDownClass(cls):
@@ -113,7 +132,7 @@ class ServicesTests(unittest.TestCase):
         return buffer
 
     @staticmethod
-    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=(), receive=None):
+    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=(), receive=None, receive_static=None):
         descriptor = b''
         if static:
             address, size = static
@@ -141,9 +160,14 @@ class ServicesTests(unittest.TestCase):
             body = struct.pack('<BBHIII', 1, 0, len(body), domain, 0, 0) + body
         words = (16 + len(body) + 3) // 4
         header = struct.pack('<II', kind | bool(static) << 16 | bool(buffer) << 20 | bool(receive) << 24,
-                             words | (bool(pid or copies) << 31))
+                             words | (bool(pid or copies) << 31) | (3 << 10 if receive_static else 0))
         message = header + special + descriptor + b'\0' * (-start % 16) + body
-        return message.ljust(start + words * 4, b'\0')
+        message = message.ljust(start + words * 4, b'\0')
+        if receive_static:
+            address, size = receive_static
+            assert 0 <= address < 1 << 48 and 0 <= size < 1 << 16
+            message += struct.pack('<II', address & 0xffffffff, size << 16 | address >> 32)
+        return message
 
     def send(self, handle, request, good=True, capacity=256):
         ipc = C.create_string_buffer(max(capacity, len(request)))
@@ -186,6 +210,292 @@ class ServicesTests(unittest.TestCase):
         _, handles, _ = self.response(raw)
         self.assertEqual(len(handles), 1)
         return handles[0]
+
+    def local_savefs(self, uid_hex=None, title=b'01007ef00011e000'):
+        directory = tempfile.TemporaryDirectory(prefix='botw-account-services-')
+        self.addCleanup(directory.cleanup)
+        documents = Path(directory.name) / 'Documents'
+        documents.mkdir(mode=0o700)
+        user, reopened, error = LocalUser(), LocalUser(), RomfsError()
+        self.assertEqual(self.lib.botw_local_user_open(str(documents).encode(), C.byref(user), C.byref(error)), 0, error.message)
+        self.assertEqual(self.lib.botw_local_user_open(str(documents).encode(), C.byref(reopened), C.byref(error)), 0, error.message)
+        self.assertEqual(bytes(user), bytes(reopened))
+        self.assertEqual(user.uid_hex.decode(), bytes(user.uid).hex())
+        store = self.lib.botw_savefs_open(str(documents / 'botw-saves').encode(), title,
+                                         user.uid_hex if uid_hex is None else uid_hex, 0, C.byref(error))
+        self.assertTrue(store, error.message)
+        self.addCleanup(self.lib.botw_savefs_close, store)
+        return store, user, documents
+
+    def configure_local_user(self, preselect=True):
+        store, user, documents = self.local_savefs()
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        self.assertEqual(self.lib.botw_services_set_local_user(self.ctx, user.uid,
+                         b'app-documents:botw-profile/uid.bin', self.error, 1024), 0, self.error.value)
+        if preselect:
+            self.assertEqual(self.lib.botw_services_set_preselected_local_user(self.ctx, user.uid,
+                             self.error, 1024), 0, self.error.value)
+        return store, user, documents
+
+    def account(self, domain=False, initialize=True):
+        handle = self.service(self.initialized_sm(), b'acc:u0')
+        root = 0
+        if domain:
+            raw, _ = self.send(handle, self.request(0, kind=5))
+            data, _, _ = self.response(raw)
+            root, = struct.unpack_from('<I', data)
+        if initialize:
+            self.send(handle, self.request(100, bytes(8), pid=True, domain=root))
+        return handle, root
+
+    def application_functions(self, domain=False):
+        self.applet_kernel()
+        self.applet_state()
+        proxy = self.applet_proxy()
+        if not domain:
+            return self.proxy_child(proxy, 20), 0
+        raw, _ = self.send(proxy, self.request(0, kind=5))
+        data, _, _ = self.response(raw)
+        proxy_root, = struct.unpack_from('<I', data)
+        raw, _ = self.send(proxy, self.request(20, domain=proxy_root))
+        data, handles, count = self.response(raw, domain=True)
+        self.assertEqual((handles, count), ([], 1))
+        return proxy, struct.unpack_from('<I', data)[0]
+
+    def assert_am_unavailable(self, raw, domain=False):
+        self.assertEqual(struct.unpack_from('<I', raw, 4)[0], 10 if domain else 6)
+        offset = 32 if domain else 16
+        self.assertEqual(struct.unpack_from('<4sIII', raw, offset), (b'SFCO', 0, 0x480, 0))
+        if domain:
+            self.assertEqual(struct.unpack_from('<I', raw, 16)[0], 0)
+
+    def test_local_user_configuration_requires_persistent_matching_savefs_and_is_once_only(self):
+        store, user, _ = self.local_savefs()
+        configure = self.lib.botw_services_set_local_user
+        preselect = self.lib.botw_services_set_preselected_local_user
+        self.assertEqual(configure(self.ctx, user.uid, b'local-file', self.error, 1024), -1)
+        self.assertIn(b'SaveFS', self.error.value)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        self.assertEqual(preselect(self.ctx, user.uid, self.error, 1024), -1)
+        for uid, source in ((None, b'local-file'), ((C.c_ubyte * 16)(), b'local-file'),
+                            (user.uid, None), (user.uid, b''), (user.uid, b'x' * 128),
+                            (user.uid, b'fake\nsource')):
+            self.assertEqual(configure(self.ctx, uid, source, self.error, 1024), -1)
+        wrong = (C.c_ubyte * 16).from_buffer_copy(bytes([user.uid[0] ^ 1]) + bytes(user.uid)[1:])
+        self.assertEqual(configure(self.ctx, wrong, b'local-file', self.error, 1024), -1)
+        wrong_store, _, _ = self.local_savefs(uid_hex=user.uid_hex, title=b'0100000000000001')
+        self.lib.botw_services_set_savefs(self.ctx, wrong_store)
+        self.assertEqual(configure(self.ctx, user.uid, b'local-file', self.error, 1024), -1)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        self.assertEqual(configure(self.ctx, user.uid, b'local-file', self.error, 1024), 0, self.error.value)
+        self.assertEqual(configure(self.ctx, user.uid, b'local-file', self.error, 1024), -1)
+        self.assertEqual(preselect(self.ctx, wrong, self.error, 1024), -1)
+        self.assertEqual(preselect(self.ctx, user.uid, self.error, 1024), 0, self.error.value)
+        self.assertEqual(preselect(self.ctx, user.uid, self.error, 1024), -1)
+        self.assertFalse(any(user.uid_hex.decode() in line for line in self.logs))
+
+    def test_account_defaults_unconfigured_and_requires_pid_zero_placeholder_and_initialization(self):
+        account, _ = self.account(initialize=False)
+        self.send(account, self.request(100, bytes(8), pid=True), good=False)
+        _, user, _ = self.configure_local_user()
+        output = C.create_string_buffer(128)
+        self.ranges.append((C.addressof(output), 128, True))
+        self.send(account, self.request(2, receive_static=(C.addressof(output), 128)), good=False)
+        self.send(account, self.request(101, bytes(user.uid)), good=False)
+        self.send(account, self.request(100, bytes(8)), good=False)
+        self.send(account, self.request(100, struct.pack('<Q', 123), pid=True), good=False)
+        self.send(account, self.request(100, bytes(8) + b'\1', pid=True), good=False)
+        self.send(account, self.request(100, bytes(8), pid=True, copies=(0xffff8001,)), good=False)
+        # The real SDK writes PID=0 both as payload and as special-header placeholder.
+        # The host binds the session to its current process instead of trusting either.
+        self.send(account, self.request(100, bytes(8), pid=True))
+        self.send(account, self.request(100, bytes(8), pid=True), good=False)
+        self.assertTrue(any('pid_source=host_process' in line for line in self.logs), self.logs)
+
+    def test_account_exact_c128_enumeration_zero_terminates_and_has_no_reply_count(self):
+        _, user, _ = self.configure_local_user()
+        for domain in (False, True):
+            account, root = self.account(domain)
+            output = C.create_string_buffer(b'\xa5' * 144, 144)
+            self.ranges.append((C.addressof(output), 144, True))
+            raw, _ = self.send(account, self.request(2, domain=root,
+                              receive_static=(C.addressof(output), 128)))
+            data, handles, objects = self.response(raw, domain)
+            self.assertEqual((handles, objects), ([], 0))
+            self.assertEqual(struct.unpack_from('<I', raw, 4)[0], 10 if domain else 6)
+            self.assertEqual(bytes(output)[:128], bytes(user.uid) + bytes(112))
+            self.assertEqual(bytes(output)[128:], b'\xa5' * 16)
+            self.assertFalse(any(data))
+            for kwargs in ({}, {'receive_static': (C.addressof(output), 112)},
+                           {'receive_static': (C.addressof(output), 144)},
+                           {'receive': (C.addressof(output), 128)},
+                           {'receive_static': (C.addressof(output), 128), 'pid': True}):
+                self.send(account, self.request(2, domain=root, **kwargs), good=False)
+            self.send(account, self.request(2, b'\1', domain=root,
+                      receive_static=(C.addressof(output), 128)), good=False)
+            if domain:
+                self.send(account, self.request(2, b'\0', domain=root,
+                          receive_static=(C.addressof(output), 128)), good=False)
+            self.send(account, self.request(2, domain=root,
+                      receive_static=(C.addressof(output) + 256, 128)), good=False)
+            self.send(account, self.request(9999, domain=root), good=False)
+
+    def test_account_context_matches_uid_has_real_object_lifetime_and_rejects_online_commands(self):
+        _, user, _ = self.configure_local_user()
+        for domain in (False, True):
+            account, root = self.account(domain)
+            for uid in (bytes(16), bytes([user.uid[0] ^ 1]) + bytes(user.uid)[1:], bytes(user.uid) + b'\1'):
+                self.send(account, self.request(101, uid, domain=root), good=False)
+            self.send(account, self.request(101, bytes(user.uid), domain=root, pid=True), good=False)
+            output = C.create_string_buffer(b'\xa5' * 128, 128)
+            self.ranges.append((C.addressof(output), 128, True))
+            for key in ('receive', 'receive_static'):
+                self.error.value = b''
+                _, error = self.send(account, self.request(101, bytes(user.uid), domain=root,
+                                     **{key: (C.addressof(output), 128)}), good=False)
+                self.assertIn('GetBaasAccountManagerForApplication does not accept output buffers', error)
+                self.assertEqual(bytes(output), b'\xa5' * 128)
+            raw, _ = self.send(account, self.request(101, bytes(user.uid), domain=root))
+            data, handles, objects = self.response(raw, domain)
+            self.assertEqual((len(handles), objects), (0, 1) if domain else (1, 0))
+            if domain:
+                child, = struct.unpack_from('<I', data)
+                raw, _ = self.send(account, self.request(1, struct.pack('<I', child), kind=5))
+                _, handles, _ = self.response(raw)
+                # The copied context survives domain-object close.
+                close = struct.pack('<II', 4, 8) + bytes(8) + struct.pack('<BBHIII', 2, 0, 0, child, 0, 0)
+                self.send(account, close)
+                self.send(account, self.request(0, domain=child), good=False)
+            context = handles[0]
+            for command in (0, 1, 2, 3, 130):
+                _, error = self.send(context, self.request(command), good=False)
+                self.assertIn('online', error)
+                self.assertIn(str(command), error)
+            self.assertEqual(self.close(context), 0)
+            self.send(context, self.request(0), good=False)
+            self.assertEqual(self.close(context), -1)
+
+    def test_published_account_rechecks_savefs_mount_after_configuration(self):
+        store, user, _ = self.configure_local_user()
+        account, root = self.account(True)
+        other, _, _ = self.local_savefs()
+        output = C.create_string_buffer(b'\xa5' * 128, 128)
+        self.ranges.append((C.addressof(output), 128, True))
+        for changed in (None, other):
+            self.lib.botw_services_set_savefs(self.ctx, changed)
+            self.send(account, self.request(2, domain=root,
+                      receive_static=(C.addressof(output), 128)), good=False)
+            self.assertEqual(bytes(output), b'\xa5' * 128)
+            self.send(account, self.request(101, bytes(user.uid), domain=root), good=False)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        self.send(account, self.request(2, domain=root, receive_static=(C.addressof(output), 128)))
+        self.assertEqual(bytes(output), bytes(user.uid) + bytes(112))
+
+    def test_preselection_launch_storage_exact_bytes_and_accessor_outlives_storage(self):
+        _, user, documents = self.configure_local_user()
+        before = (documents / 'botw-profile/uid.bin').read_bytes()
+        app, root = self.application_functions()
+        # An empty kind1 slot neither returns nor consumes the kind2 selection.
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 1)))
+        self.assert_am_unavailable(raw)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2)))
+        _, handles, _ = self.response(raw)
+        storage = handles[0]
+        raw, _ = self.send(storage, self.request(0))
+        _, handles, _ = self.response(raw)
+        accessor = handles[0]
+        self.assertEqual(self.close(storage), 0)
+        raw, _ = self.send(accessor, self.request(0))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], 0x88)
+        output = C.create_string_buffer(0x88)
+        self.ranges.append((C.addressof(output), 0x88, True))
+        self.send(accessor, self.request(11, bytes(8), receive=(C.addressof(output), 0x88)))
+        expected = struct.pack('<IB3x', 0xc79497ca, 1) + bytes(user.uid) + bytes(0x70)
+        self.assertEqual(bytes(output), expected)
+        self.assertEqual(self.close(accessor), 0)
+        for kind in (2, 1, 2):
+            raw, _ = self.send(app, self.request(1, struct.pack('<I', kind)))
+            self.assert_am_unavailable(raw)
+        self.assertEqual((documents / 'botw-profile/uid.bin').read_bytes(), before)
+        self.assertEqual(self.lib.botw_services_set_preselected_local_user(self.ctx, user.uid, self.error, 1024), -1)
+
+    def test_preselection_is_explicit_strict_and_errors_do_not_consume_it(self):
+        store, user, _ = self.configure_local_user(preselect=False)
+        app, root = self.application_functions(True)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2), domain=root))
+        self.assert_am_unavailable(raw, True)
+        self.assertEqual(self.lib.botw_services_set_preselected_local_user(self.ctx, user.uid, self.error, 1024), 0)
+        for payload in (b'', struct.pack('<I', 0), struct.pack('<I', 3), struct.pack('<I', 2) + b'\0',
+                        struct.pack('<I', 2) + b'\1'):
+            self.send(app, self.request(1, payload, domain=root), good=False)
+        self.send(app, self.request(1, struct.pack('<I', 2), domain=root, pid=True), good=False)
+        self.lib.botw_services_set_savefs(self.ctx, None)
+        self.send(app, self.request(1, struct.pack('<I', 2), domain=root), good=False)
+        self.lib.botw_services_set_savefs(self.ctx, store)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2), domain=root))
+        data, handles, count = self.response(raw, True)
+        self.assertEqual((handles, count), ([], 1))
+        child, = struct.unpack_from('<I', data)
+        self.assertNotEqual(child, root)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2), domain=root))
+        self.assert_am_unavailable(raw, True)
+
+    def test_preselection_allocation_failure_preserves_pending_kind2_domain_object(self):
+        self.configure_local_user()
+        app, root = self.application_functions(True)
+        # Proxy root=1 and ApplicationFunctions=2; 62 actual children fill table.
+        children = []
+        for _ in range(62):
+            raw, _ = self.send(app, self.request(0, domain=1))
+            data, _, _ = self.response(raw, True)
+            children.append(struct.unpack_from('<I', data)[0])
+        _, error = self.send(app, self.request(1, struct.pack('<I', 2), domain=root), good=False)
+        self.assertIn('exhausted', error)
+        close = struct.pack('<II', 4, 8) + bytes(8) + struct.pack('<BBHIII', 2, 0, 0, children[0], 0, 0)
+        self.send(app, close)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2), domain=root))
+        _, _, count = self.response(raw, True)
+        self.assertEqual(count, 1)
+        raw, _ = self.send(app, self.request(1, struct.pack('<I', 2), domain=root))
+        self.assert_am_unavailable(raw, True)
+
+    def test_preselection_concurrent_ipc_delivers_exactly_one_storage_object(self):
+        self.configure_local_user()
+        app, _ = self.application_functions()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            replies = list(pool.map(lambda _: self.send(app, self.request(1, struct.pack('<I', 2)))[0], range(16)))
+        successes = []
+        for raw in replies:
+            # All HIPC requests succeed; the empty queue is a CMIF result.
+            result = struct.unpack_from('<I', raw, 24)[0]
+            if result == 0:
+                _, handles, _ = self.response(raw)
+                successes += handles
+            else:
+                self.assert_am_unavailable(raw)
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(self.close(successes[0]), 0)
+
+    def test_account_and_preselection_reuse_ipc_buffer_and_preserve_nonzero_token(self):
+        _, user, _ = self.configure_local_user()
+        account, root = self.account(True)
+        app, app_root = self.application_functions(True)
+        output, ipc = C.create_string_buffer(128), C.create_string_buffer(256)
+        self.ranges.extend(((C.addressof(output), 128, True), (C.addressof(ipc), 256, True)))
+        for handle, request, result in (
+                (account, self.request(2, domain=root, receive_static=(C.addressof(output), 128)), 0),
+                (app, self.request(1, struct.pack('<I', 2), domain=app_root), 0),
+                (app, self.request(1, struct.pack('<I', 2), domain=app_root), 0x480),
+                (account, self.request(2, domain=root, receive_static=(C.addressof(output), 128)), 0)):
+            # The SDK uses the same TLR message buffer for requests and replies.
+            # Do not clear bytes outside the newly built request.
+            request = bytearray(request)
+            struct.pack_into('<I', request, request.index(b'SFCI') + 12, 0x55667788)
+            C.memmove(ipc, bytes(request), len(request))
+            self.assertEqual(self.lib.botw_services_send(self.ctx, handle, ipc, 256, self.error, 1024), 0, self.error.value)
+            self.assertEqual(struct.unpack_from('<4sIII', bytes(ipc), 32), (b'SFCO', 0, result, 0x55667788))
+        self.assertEqual(bytes(output), bytes(user.uid) + bytes(112))
 
     def performance_handler(self):
         calls = []

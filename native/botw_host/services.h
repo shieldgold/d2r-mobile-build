@@ -65,6 +65,17 @@ int botw_services_set_patch_absent(botw_services *services, int known_absent,
 /* Share the actual per-title/per-user host save mount. This borrowed instance
  * must outlive services; future save requests validate its immutable IDs. */
 void botw_services_set_savefs(botw_services *services, botw_savefs *savefs);
+/* Publish one persistent host-local offline user, once per services context.
+ * The already borrowed SaveFS must have the audited BOTW title identity and
+ * this UID's exact byte-order hex user identity. source identifies the local
+ * identity store, never a Nintendo profile or linked/online authorization. */
+int botw_services_set_local_user(botw_services *services, const uint8_t uid[16],
+    const char *source, char *error, size_t error_capacity);
+/* Explicitly preselect that same local UID once for this process launch.
+ * Prepares kind2 launch storage; only successful PopLaunchParameter delivery
+ * consumes it. Does not populate or consume kind1 or grant online access. */
+int botw_services_set_preselected_local_user(botw_services *services,
+    const uint8_t uid[16], char *error, size_t error_capacity);
 /* Publish only content actually installed/mounted for this application. Empty
  * lists are valid. base_id=0 means unknown metadata, not an inferred entitlement.
  * Changes signal the persistent AOC event; identical sets do not. */

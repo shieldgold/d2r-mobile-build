@@ -10,6 +10,7 @@
  */
 #include "services.h"
 #include "../botw_resources/romfs.h"
+#include "../botw_resources/savefs.h"
 #include "../botw_input/input.h"
 #include <math.h>
 #include <pthread.h>
@@ -17,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define HANDLE_LIMIT 256u
 #define DOMAIN_LIMIT 64u
@@ -29,12 +31,16 @@
 #define FS_ACCESS_LOG_NONE 0u
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
+#define LOCAL_USER_TITLE "01007ef00011e000"
+#define PRESELECTED_STORAGE_SIZE 0x88u
+#define AM_NOT_AVAILABLE (128u | (2u << 9))
 
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
-    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE };
+    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE,
+    OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -48,6 +54,7 @@ typedef struct Object {
     StorageBacking *storage;
     botw_romfs *romfs;
     char *file_path;
+    uint8_t account_uid[16];
 } Object;
 typedef struct Session {
     unsigned refs, domain;
@@ -74,6 +81,10 @@ struct botw_services {
     botw_input *input;
     botw_romfs *romfs;
     botw_savefs *savefs;
+    uint64_t host_process_id;
+    uint8_t local_uid[16];
+    unsigned local_user_ready, preselected_configured, preselected_pending;
+    char local_user_source[128];
     unsigned patch_known_absent;
     uint32_t input_shared_memory_handle;
     uint32_t hid_supported_styles, hid_npad_ids[10], hid_last_style[10];
@@ -114,7 +125,7 @@ typedef struct {
     size_t payload_size;
     uint64_t input_address;
     size_t input_size;
-    unsigned input_count, output_count;
+    unsigned input_count, output_count, output_static_count;
     uint64_t output_address;
     size_t output_size;
 } Request;
@@ -159,6 +170,8 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_AOC: return "aoc:u";
         case OBJECT_PCTL_FACTORY: return "pctl:a.IParentalControlServiceFactory";
         case OBJECT_PCTL_SERVICE: return "pctl.IParentalControlService";
+        case OBJECT_ACCOUNT: return "acc:u0";
+        case OBJECT_ACCOUNT_CONTEXT: return "acc.IBaasAccountManagerForApplication(local-context)";
     }
     return "<invalid>";
 }
@@ -224,7 +237,7 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     if (!memory) return NULL;
     botw_services *s = calloc(1, sizeof *s);
     if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
-    if (s) { s->next_handle = 0x10000; s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->fs_access_log_mode = FS_ACCESS_LOG_NONE; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
+    if (s) { s->next_handle = 0x10000; s->host_process_id = (uint64_t)getpid(); s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->fs_access_log_mode = FS_ACCESS_LOG_NONE; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
@@ -291,6 +304,48 @@ int botw_services_set_patch_absent(botw_services *s, int known_absent, char *err
 void botw_services_set_savefs(botw_services *s, botw_savefs *savefs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->savefs = savefs; pthread_mutex_unlock(&s->lock);
+}
+static int local_user_mount(botw_services *s, const uint8_t uid[16], char *error, size_t cap) {
+    static const char hex[] = "0123456789abcdef";
+    char user_hex[33]; unsigned nonzero = 0;
+    for (unsigned i = 0; i < 16; i++) {
+        nonzero |= uid[i]; user_hex[i * 2] = hex[uid[i] >> 4]; user_hex[i * 2 + 1] = hex[uid[i] & 15];
+    }
+    user_hex[32] = 0;
+    if (!nonzero) return problem(error, cap, "local user UID must be nonzero");
+    if (!s->savefs) return problem(error, cap, "local user requires borrowed SaveFS mount");
+    if (strcmp(botw_savefs_title_id(s->savefs), LOCAL_USER_TITLE) || strcmp(botw_savefs_user_id(s->savefs), user_hex))
+        return problem(error, cap, "local user does not match SaveFS immutable BOTW title/user identity");
+    return 0;
+}
+int botw_services_set_local_user(botw_services *s, const uint8_t uid[16], const char *source, char *error, size_t cap) {
+    if (!s || !uid || !source || !*source) return problem(error, cap, "local user requires context, nonzero UID and explicit local identity source");
+    size_t length = 0;
+    while (length < sizeof s->local_user_source && source[length]) {
+        if ((unsigned char)source[length] < 32 || source[length] == 127) return problem(error, cap, "local user source contains control characters");
+        length++;
+    }
+    if (length == sizeof s->local_user_source) return problem(error, cap, "local user source exceeds limit");
+    pthread_mutex_lock(&s->lock);
+    int result;
+    if (s->local_user_ready) result = problem(error, cap, "local user can only be published once per process launch");
+    else if ((result = local_user_mount(s, uid, error, cap)) == 0) {
+        memcpy(s->local_uid, uid, 16); memcpy(s->local_user_source, source, length + 1); s->local_user_ready = 1;
+        emit(s, "local_user configured=true source=%s scope=host_local_offline nintendo_online_backend=false", source);
+    }
+    pthread_mutex_unlock(&s->lock); return result;
+}
+int botw_services_set_preselected_local_user(botw_services *s, const uint8_t uid[16], char *error, size_t cap) {
+    if (!s || !uid) return problem(error, cap, "local user preselection requires context and matching UID");
+    pthread_mutex_lock(&s->lock);
+    int result;
+    if (!s->local_user_ready || memcmp(s->local_uid, uid, 16)) result = problem(error, cap, "preselection requires the published local user UID");
+    else if (s->preselected_configured) result = problem(error, cap, "local user preselection can only be configured once per process launch");
+    else if ((result = local_user_mount(s, uid, error, cap)) == 0) {
+        s->preselected_configured = 1; s->preselected_pending = 1;
+        emit(s, "local_user preselected=true launch_parameter_kind=2 scope=host_local_offline");
+    }
+    pthread_mutex_unlock(&s->lock); return result;
 }
 static int compare_u32(const void *a, const void *b) {
     uint32_t first = *(const uint32_t *)a, second = *(const uint32_t *)b;
@@ -484,6 +539,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         uint32_t high = load32(entry + 4);
         uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
         if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+        r->output_static_count++;
     }
     offset = (offset + 15) & ~(size_t)15;
     if (session->domain && (r->type == 4 || r->type == 6)) {
@@ -525,6 +581,31 @@ static void response(uint8_t *ipc, size_t capacity, const Request *r, const void
     store32(ipc + payload, SFCO); store32(ipc + payload + 12, r->token);
     if (data_size) memcpy(ipc + payload + 16, data, data_size);
     if (object_id) store32(ipc + payload + 16 + data_size, object_id);
+}
+static int result_response(uint8_t *ipc, size_t capacity, const Request *r, uint32_t result) {
+    response(ipc, capacity, r, NULL, 0, 0, 0);
+    store32(ipc + 16 + (r->domain ? 16 : 0) + 8, result); return 0;
+}
+static int exact_payload(const Request *r, size_t expected, const char *method, char *error, size_t cap) {
+    /* Only nondomain HIPC has unsized trailing alignment. Domain data_size is
+     * exact; neither path may hide unknown nonzero input in that padding. */
+    if (r->payload_size < expected || (r->domain ? r->payload_size != expected : r->payload_size - expected > 15))
+        return problem(error, cap, "%s requires %zu input bytes (got=%zu domain=%u)", method, expected, r->payload_size, r->domain);
+    for (size_t i = expected; i < r->payload_size; i++)
+        if (r->payload[i]) return problem(error, cap, "%s has unexpected input beyond %zu bytes", method, expected);
+    return 0;
+}
+static Object *new_storage(botw_services *s, uint64_t size, char *error, size_t cap) {
+    if (size > BUFFER_LIMIT || size > STORAGE_TOTAL_LIMIT - s->storage_bytes) {
+        problem(error, cap, "CreateStorage size=%llu exceeds per-object/aggregate limit", (unsigned long long)size); return NULL;
+    }
+    StorageBacking *backing = calloc(1, sizeof *backing);
+    Object *storage = new_object(OBJECT_APPLET_STORAGE);
+    if (!backing || !storage) { free(backing); release_object(storage); problem(error, cap, "allocate applet storage metadata failed"); return NULL; }
+    backing->bytes = calloc(1, size ? (size_t)size : 1);
+    if (!backing->bytes) { free(backing); release_object(storage); problem(error, cap, "allocate applet storage bytes failed"); return NULL; }
+    backing->owner = s; backing->refs = 1; backing->size = (size_t)size;
+    s->storage_bytes += (size_t)size; storage->storage = backing; return storage;
 }
 static int return_object(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, int kernel_handle, char *error, size_t cap) {
     uint32_t handle = 0, object_id = 0;
@@ -607,6 +688,51 @@ static int logger_packet(botw_services *s, const Request *r, char *error, size_t
     }
     return 0;
 }
+static int account_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->local_user_ready) return problem(error, cap, "acc:u0 requires explicit persistent host-local user configuration");
+    if (local_user_mount(s, s->local_uid, error, cap)) return -1;
+    if (o->kind == OBJECT_ACCOUNT_CONTEXT) {
+        if (o->pid != s->host_process_id || memcmp(o->account_uid, s->local_uid, 16))
+            return problem(error, cap, "account context lost its local process/user binding");
+        /* cmd101 creates a lifetime-managed local user context for the old
+         * SDK UserHandle. It does not supply BAAS credentials or linked state. */
+        return problem(error, cap, "unsupported account context command=%u: Nintendo online/linked backend is not configured", r->command);
+    }
+    if (r->input_count || r->copy_count) return problem(error, cap, "acc:u0 command=%u unexpected input buffer/handles", r->command);
+    if (r->command == 100) {
+        if (!r->pid || r->output_count || o->initialized || exact_payload(r, 8, "acc.InitializeApplicationInfo", error, cap))
+            return problem(error, cap, "acc.InitializeApplicationInfo requires PID, zero u64 placeholder and uninitialized client");
+        if (load64(r->payload)) return problem(error, cap, "acc.InitializeApplicationInfo unknown nonzero PID payload");
+        /* HIPC SendPid and this SDK's input u64 are zero placeholders. The
+         * service context belongs to one host process running this guest; use
+         * getpid captured at creation, never guest-supplied numeric authority. */
+        o->initialized = 1; o->pid = s->host_process_id;
+        emit(s, "account_initialized scope=host_local_offline pid_source=host_process pid=%llu", (unsigned long long)o->pid);
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (!o->initialized || o->pid != s->host_process_id || r->pid)
+        return problem(error, cap, "acc:u0 requires process-bound initialization and no unexpected PID command=%u", r->command);
+    if (r->command == 2) {
+        if (exact_payload(r, 0, "acc.ListAllUsers", error, cap)) return -1;
+        if (r->output_count != 1 || r->output_static_count != 1 || r->output_size != 128)
+            return problem(error, cap, "acc.ListAllUsers requires one checked C receive-static buffer of exactly 128 bytes");
+        uint8_t users[128] = {0}; memcpy(users, s->local_uid, 16);
+        memcpy((void *)(uintptr_t)r->output_address, users, sizeof users);
+        /* The original SDK scans eight UID entries for a zero terminator. No
+         * response count scalar is present in this command's ABI. */
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    if (r->command == 101) {
+        if (r->output_count) return problem(error, cap, "acc.GetBaasAccountManagerForApplication does not accept output buffers");
+        if (exact_payload(r, 16, "acc.GetBaasAccountManagerForApplication", error, cap)) return -1;
+        if (memcmp(r->payload, s->local_uid, 16)) return problem(error, cap, "account context UID does not match the published local user");
+        Object *context = new_object(OBJECT_ACCOUNT_CONTEXT);
+        if (!context) return problem(error, cap, "allocate local account context failed");
+        context->pid = o->pid; memcpy(context->account_uid, s->local_uid, 16);
+        return return_object(s, session, context, ipc, capacity, r, 0, error, cap);
+    }
+    return problem(error, cap, "unsupported IPC service=acc:u0 command=%u (host-local user path only)", r->command);
+}
 static int applet_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (!s->applet_ready) return problem(error, cap, "appletOE requires measured host lifecycle state");
     if (r->input_count && o->kind != OBJECT_STORAGE_ACCESSOR) return problem(error, cap, "unsupported applet input buffer service=%s command=%u", kind_name(o->kind), r->command);
@@ -675,16 +801,8 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
     if (o->kind == OBJECT_LIBRARY_APPLET_CREATOR) {
         if (r->command == 10) {
             if (r->payload_size < 8) return problem(error, cap, "CreateStorage requires signed size");
-            uint64_t size = load64(r->payload);
-            if (size > BUFFER_LIMIT || size > STORAGE_TOTAL_LIMIT - s->storage_bytes)
-                return problem(error, cap, "CreateStorage size=%llu exceeds per-object/aggregate limit", (unsigned long long)size);
-            StorageBacking *backing = calloc(1, sizeof *backing);
-            Object *storage = new_object(OBJECT_APPLET_STORAGE);
-            if (!backing || !storage) { free(backing); release_object(storage); return problem(error, cap, "allocate applet storage metadata failed"); }
-            backing->bytes = calloc(1, size ? (size_t)size : 1);
-            if (!backing->bytes) { free(backing); release_object(storage); return problem(error, cap, "allocate applet storage bytes failed"); }
-            backing->owner = s; backing->refs = 1; backing->size = (size_t)size;
-            s->storage_bytes += (size_t)size; storage->storage = backing;
+            Object *storage = new_storage(s, load64(r->payload), error, cap);
+            if (!storage) return -1;
             return return_object(s, session, storage, ipc, capacity, r, 0, error, cap);
         }
         if (r->command == 0 && r->payload_size >= 8)
@@ -765,6 +883,30 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             if (!s->applet_foreground || s->applet_focus != 1) return problem(error, cap, "WindowController.AcquireForegroundRights requires active focused host app");
             s->applet_foreground_rights = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
         }
+    } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 1) {
+        if (r->output_count) return problem(error, cap, "ApplicationFunctions.PopLaunchParameter does not accept output buffers");
+        if (exact_payload(r, 4, "ApplicationFunctions.PopLaunchParameter", error, cap)) return -1;
+        uint32_t kind = load32(r->payload);
+        if (kind != 1 && kind != 2) return problem(error, cap, "PopLaunchParameter unsupported kind=%u", kind);
+        /* No application-specific UserChannel (kind1) is supplied by this
+         * launcher. Its empty slot is independent of the explicit kind2 slot. */
+        if (kind == 1) return result_response(ipc, capacity, r, AM_NOT_AVAILABLE);
+        if (!s->local_user_ready) return problem(error, cap, "preselected launch parameter requires configured host-local user");
+        if (local_user_mount(s, s->local_uid, error, cap)) return -1;
+        /* Original SDK TryPopFromApplicationParameterChannel (sdk+e9ec4)
+         * compares Result's low 22 bits with 0x480 and returns false for that
+         * specific empty-slot result. ReceiveMessage's 0x680 is distinct. */
+        if (!s->preselected_pending) return result_response(ipc, capacity, r, AM_NOT_AVAILABLE);
+        Object *storage = new_storage(s, PRESELECTED_STORAGE_SIZE, error, cap);
+        if (!storage) return -1;
+        store32(storage->storage->bytes, 0xc79497cau); storage->storage->bytes[4] = 1;
+        memcpy(storage->storage->bytes + 8, s->local_uid, 16);
+        int result = return_object(s, session, storage, ipc, capacity, r, 0, error, cap);
+        if (!result) {
+            s->preselected_pending = 0;
+            emit(s, "local_user launch_parameter_kind=2 delivered=true bytes=%u scope=host_local_offline", PRESELECTED_STORAGE_SIZE);
+        }
+        return result;
     } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 40) {
         if (!s->applet_foreground) return problem(error, cap, "ApplicationFunctions.NotifyRunning requires foreground host app");
         s->applet_running = 1; uint8_t active = 1;
@@ -774,8 +916,7 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
     return problem(error, cap, "unsupported IPC service=%s command=%u", kind_name(o->kind), r->command);
 }
 static int fs_result_response(uint8_t *ipc, size_t capacity, const Request *r, uint32_t result) {
-    response(ipc, capacity, r, NULL, 0, 0, 0);
-    store32(ipc + 16 + (r->domain ? 16 : 0) + 8, result); return 0;
+    return result_response(ipc, capacity, r, result);
 }
 static int fs_error_response(uint8_t *ipc, size_t capacity, const Request *r, const botw_romfs_error *backend, char *error, size_t cap) {
     if (backend->code == BOTW_ROMFS_ENOENT) {
@@ -1056,7 +1197,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     trace_request(s, o->kind, &r, handle_id);
     if (o->kind == OBJECT_SM) {
@@ -1076,10 +1217,13 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "hid\0\0\0\0\0", 8)) service_kind = OBJECT_HID;
             else if (!memcmp(name, "aoc:u\0\0\0", 8)) service_kind = OBJECT_AOC;
             else if (!memcmp(name, "pctl:a\0\0", 8)) service_kind = OBJECT_PCTL_FACTORY;
+            else if (!memcmp(name, "acc:u0\0\0", 8)) service_kind = OBJECT_ACCOUNT;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_ACCOUNT || o->kind == OBJECT_ACCOUNT_CONTEXT) {
+        return account_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_PCTL_FACTORY || o->kind == OBJECT_PCTL_SERVICE) {
         return parental_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_AOC) {
