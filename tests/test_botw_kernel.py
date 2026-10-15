@@ -194,7 +194,7 @@ static int execute_thread(void *opaque, uint64_t entry, uint64_t argument,
     (void)opaque; (void)message; (void)cap;
     unsigned char on_stack;
     assert((uintptr_t)&on_stack >= callback_stack_low && (uintptr_t)&on_stack < callback_stack_top);
-    assert(top == callback_stack_top);
+    assert(top <= callback_stack_top && (uintptr_t)&on_stack < top);
     assert(!pthread_setspecific(test_tls, (void *)0x1234));
     ((void (*)(uint64_t, uint32_t))(uintptr_t)entry)(argument, handle);
     return 0;
@@ -316,6 +316,215 @@ static void stop_wait(void) {
     int rc = botw_kernel_shutdown(ctx, error, sizeof error); assert(rc == 0 || rc == -1);
     assert(!pthread_join(waiter, NULL)); assert(!botw_kernel_shutdown(ctx, error, sizeof error));
 }
+static _Atomic uint32_t guest_mutex, guest_condition;
+static _Atomic unsigned sync_prepared, sync_finished, sync_order_count;
+static uint32_t sync_order[4], sync_observed_words[4];
+#define MUTEX_WAIT UINT32_C(0x40000000)
+static uint32_t thread_priority(uint32_t handle) {
+    uint64_t r[32] = {0, handle}; svc(0xc, r); assert(!r[0]); return (uint32_t)r[1];
+}
+static void mutex_lock(uint32_t self) {
+    for (;;) {
+        uint32_t value = atomic_load(&guest_mutex);
+        if (!value) {
+            if (atomic_compare_exchange_weak(&guest_mutex, &value, self)) return;
+            continue;
+        }
+        if (!(value & MUTEX_WAIT) && !atomic_compare_exchange_weak(&guest_mutex, &value, value | MUTEX_WAIT)) continue;
+        uint64_t r[32] = {value & ~MUTEX_WAIT, (uintptr_t)&guest_mutex, self}; svc(0x1a, r); assert(!r[0]);
+        if ((atomic_load(&guest_mutex) & ~MUTEX_WAIT) == self) return;
+    }
+}
+static void mutex_unlock(uint32_t self) {
+    uint32_t value = self;
+    if (atomic_compare_exchange_strong(&guest_mutex, &value, 0)) return;
+    assert((value & ~MUTEX_WAIT) == self && (value & MUTEX_WAIT));
+    uint64_t r[32] = {(uintptr_t)&guest_mutex}; svc(0x1b, r); assert(!r[0]);
+}
+static uint64_t prepare_sync(unsigned workers) {
+    const size_t unit = 0x200000;
+    assert(!pthread_key_create(&test_tls, NULL));
+    assert(!botw_kernel_configure_memory(ctx, unit * (workers + 1), unit * (workers + 1), unit,
+        unit * (workers + 1), 0, error, sizeof error));
+    uint64_t heap = info(4), stack = info(14), r[32] = {0, unit * workers}; svc(1, r); assert(!r[0]);
+    for (unsigned i = 0; i < workers; i++) {
+        r[0] = stack + unit * i; r[1] = heap + unit * i; r[2] = unit; svc(4, r); assert(!r[0]);
+    }
+    callback_stack_low = stack; callback_stack_top = stack + unit * workers;
+    return stack;
+}
+static uint32_t sync_worker(uint64_t stack, unsigned index, uint64_t entry, uint64_t argument, unsigned priority) {
+    uint64_t r[32] = {0, entry, argument, stack + (index + 1) * 0x200000, priority, (uint64_t)-2};
+    svc(8, r); assert(!r[0]); uint32_t handle = (uint32_t)r[1];
+    r[0] = handle; svc(9, r); assert(!r[0]); return handle;
+}
+static void exit_worker(void) { uint64_t r[32] = {0}; svc(0xa, r); abort(); }
+static void mutex_contender(uint64_t argument, uint32_t self) {
+    atomic_fetch_add(&sync_prepared, 1); mutex_lock(self);
+    unsigned index = atomic_fetch_add(&sync_order_count, 1);
+    sync_order[index] = (uint32_t)argument; sync_observed_words[index] = atomic_load(&guest_mutex);
+    mutex_unlock(self); atomic_fetch_add(&sync_finished, 1); exit_worker();
+}
+static void until_priority(unsigned value) {
+    uint64_t deadline = now() + 1000000000;
+    while (thread_priority(BOTW_KERNEL_INITIAL_THREAD) != value && now() < deadline) sched_yield();
+    assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == value);
+}
+static void mutex_arbitration(void) {
+    uint64_t stack = prepare_sync(2);
+    atomic_store(&guest_mutex, BOTW_KERNEL_INITIAL_THREAD);
+    uint32_t middle = sync_worker(stack, 0, (uintptr_t)mutex_contender, 20, 20); until_priority(20);
+    uint32_t high = sync_worker(stack, 1, (uintptr_t)mutex_contender, 10, 10); until_priority(10);
+    assert((atomic_load(&guest_mutex) & ~MUTEX_WAIT) == BOTW_KERNEL_INITIAL_THREAD);
+    assert(atomic_load(&sync_finished) == 0);
+    mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    assert(wait_one(high, 1000000000) == 0 && wait_one(middle, 1000000000) == 0);
+    assert(atomic_load(&sync_finished) == 2 && sync_order[0] == 10 && sync_order[1] == 20);
+    assert(sync_observed_words[0] == (high | MUTEX_WAIT) && sync_observed_words[1] == middle);
+    assert(atomic_load(&guest_mutex) == 0 && thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 44);
+    /* Changed guest owner short-circuits without trusting an obsolete handle. */
+    uint64_t r[32] = {0x123456, (uintptr_t)&guest_mutex, BOTW_KERNEL_INITIAL_THREAD}; svc(0x1a, r); assert(!r[0]);
+    r[0] = 0x123456; atomic_store(&guest_mutex, 0x123456 | MUTEX_WAIT); svc(0x1a, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    r[0] = (uintptr_t)&guest_mutex + 1; svc(0x1b, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_ADDRESS);
+}
+static void condition_contender(uint64_t argument, uint32_t self) {
+    mutex_lock(self); atomic_fetch_add(&sync_prepared, 1);
+    uint64_t r[32] = {(uintptr_t)&guest_mutex, (uintptr_t)&guest_condition, self, (uint64_t)-1};
+    svc(0x1c, r); assert(!r[0]);
+    assert((atomic_load(&guest_mutex) & ~MUTEX_WAIT) == self);
+    unsigned index = atomic_fetch_add(&sync_order_count, 1); sync_order[index] = (uint32_t)argument;
+    mutex_unlock(self); atomic_fetch_add(&sync_finished, 1); exit_worker();
+}
+static void condition_relock(void) {
+    uint64_t stack = prepare_sync(2);
+    uint32_t low = sync_worker(stack, 0, (uintptr_t)condition_contender, 20, 20);
+    uint32_t high = sync_worker(stack, 1, (uintptr_t)condition_contender, 10, 10);
+    uint64_t deadline = now() + 1000000000;
+    while (atomic_load(&sync_prepared) != 2 && now() < deadline) sched_yield();
+    assert(atomic_load(&sync_prepared) == 2);
+    mutex_lock(BOTW_KERNEL_INITIAL_THREAD); /* waits for final atomic enqueue/unlock */
+    assert(atomic_load(&guest_condition) == 1);
+    uint64_t r[32] = {(uintptr_t)&guest_condition, 1}; svc(0x1d, r);
+    assert(atomic_load(&guest_condition) == 1 && atomic_load(&sync_finished) == 0);
+    assert(atomic_load(&guest_mutex) == (BOTW_KERNEL_INITIAL_THREAD | MUTEX_WAIT));
+    assert(thread_priority(BOTW_KERNEL_INITIAL_THREAD) == 10);
+    mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    assert(wait_one(high, 1000000000) == 0 && sync_order[0] == 10);
+    assert(atomic_load(&guest_condition) == 1);
+    mutex_lock(BOTW_KERNEL_INITIAL_THREAD);
+    r[0] = (uintptr_t)&guest_condition + 1; r[1] = (uint64_t)-1; svc(0x1d, r); /* key align-down ABI */
+    assert(atomic_load(&guest_condition) == 0);
+    mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    assert(wait_one(low, 1000000000) == 0 && sync_order[1] == 20 && atomic_load(&guest_mutex) == 0);
+}
+static void condition_timeout(void) {
+    atomic_store(&guest_mutex, BOTW_KERNEL_INITIAL_THREAD);
+    uint64_t before = now(), r[32] = {(uintptr_t)&guest_mutex, (uintptr_t)&guest_condition,
+        BOTW_KERNEL_INITIAL_THREAD, 15000000};
+    svc(0x1c, r); assert(r[0] == BOTW_KERNEL_RESULT_TIMED_OUT && now() - before >= 10000000);
+    assert(atomic_load(&guest_mutex) == 0 && atomic_load(&guest_condition) == 1);
+    mutex_lock(BOTW_KERNEL_INITIAL_THREAD); mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    r[0] = (uintptr_t)&guest_condition; r[1] = 0; svc(0x1d, r); assert(atomic_load(&guest_condition) == 0);
+    atomic_store(&guest_mutex, BOTW_KERNEL_INITIAL_THREAD);
+    r[0] = (uintptr_t)&guest_mutex; r[1] = (uintptr_t)&guest_condition; r[2] = BOTW_KERNEL_INITIAL_THREAD; r[3] = 0;
+    svc(0x1c, r); assert(r[0] == BOTW_KERNEL_RESULT_TIMED_OUT && atomic_load(&guest_mutex) == 0);
+    r[0] = 1; r[1] = (uintptr_t)&guest_condition; r[2] = BOTW_KERNEL_INITIAL_THREAD; r[3] = 0;
+    svc(0x1c, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_ADDRESS);
+}
+static _Atomic unsigned cancel_stage;
+static uint32_t cancel_read_handle;
+static void cancelled_waiter(uint64_t argument, uint32_t self) {
+    (void)argument; (void)self;
+    atomic_store(&cancel_stage, 1); assert(wait_one(cancel_read_handle, -1) == BOTW_KERNEL_RESULT_CANCELLED);
+    atomic_store(&cancel_stage, 2); assert(wait_one(cancel_read_handle, 15000000) == BOTW_KERNEL_RESULT_TIMED_OUT);
+    atomic_store(&cancel_stage, 3); exit_worker();
+}
+static void cancellation(void) {
+    uint64_t stack = prepare_sync(1); uint32_t write;
+    assert(!botw_kernel_create_event(ctx, 0, &write, &cancel_read_handle, error, sizeof error));
+    uint32_t worker = sync_worker(stack, 0, (uintptr_t)cancelled_waiter, 0, 44);
+    uint64_t deadline = now() + 1000000000;
+    while (!atomic_load(&cancel_stage) && now() < deadline) sched_yield();
+    assert(atomic_load(&cancel_stage));
+    uint64_t r[32] = {worker}; svc(0x19, r); assert(!r[0]);
+    assert(wait_one(worker, 1000000000) == 0 && atomic_load(&cancel_stage) == 3);
+    r[0] = 0x10000; svc(0x19, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_HANDLE);
+    /* A cancellation issued before a cancellable wait is retained once. */
+    r[0] = BOTW_KERNEL_INITIAL_THREAD; svc(0x19, r); assert(!r[0]);
+    assert(wait_one(cancel_read_handle, 0) == BOTW_KERNEL_RESULT_TIMED_OUT);
+    assert(wait_one(cancel_read_handle, -1) == BOTW_KERNEL_RESULT_CANCELLED);
+    assert(wait_one(cancel_read_handle, 15000000) == BOTW_KERNEL_RESULT_TIMED_OUT);
+}
+static void condition_cancel_worker(uint64_t argument, uint32_t self) {
+    (void)argument; mutex_lock(self); atomic_store(&sync_prepared, 1);
+    uint64_t r[32] = {(uintptr_t)&guest_mutex, (uintptr_t)&guest_condition, self, (uint64_t)-1};
+    svc(0x1c, r); assert(!r[0] && (atomic_load(&guest_mutex) & ~MUTEX_WAIT) == self);
+    mutex_unlock(self);
+    assert(wait_one(cancel_read_handle, -1) == BOTW_KERNEL_RESULT_CANCELLED);
+    assert(wait_one(cancel_read_handle, 0) == BOTW_KERNEL_RESULT_TIMED_OUT);
+    atomic_store(&sync_finished, 1); exit_worker();
+}
+static void condition_cancel_is_deferred(void) {
+    uint64_t stack = prepare_sync(1); uint32_t write;
+    assert(!botw_kernel_create_event(ctx, 0, &write, &cancel_read_handle, error, sizeof error));
+    uint32_t worker = sync_worker(stack, 0, (uintptr_t)condition_cancel_worker, 0, 44);
+    uint64_t deadline = now() + 1000000000;
+    while (!atomic_load(&sync_prepared) && now() < deadline) sched_yield();
+    assert(atomic_load(&sync_prepared)); mutex_lock(BOTW_KERNEL_INITIAL_THREAD);
+    uint64_t r[32] = {worker}; svc(0x19, r); assert(!r[0] && !atomic_load(&sync_finished));
+    r[0] = (uintptr_t)&guest_condition; r[1] = 1; svc(0x1d, r);
+    mutex_unlock(BOTW_KERNEL_INITIAL_THREAD);
+    assert(wait_one(worker, 1000000000) == 0 && atomic_load(&sync_finished));
+}
+static void stopped_condition_worker(uint64_t argument, uint32_t self) {
+    (void)argument; mutex_lock(self); atomic_fetch_add(&sync_prepared, 1);
+    uint64_t r[32] = {(uintptr_t)&guest_mutex, (uintptr_t)&guest_condition, self, (uint64_t)-1};
+    svc(0x1c, r); assert(r[0] == BOTW_KERNEL_RESULT_CANCELLED);
+    atomic_fetch_add(&sync_finished, 1); exit_worker();
+}
+static void stopped_mutex_worker(uint64_t argument, uint32_t self) {
+    (void)argument;
+    atomic_fetch_or(&guest_mutex, MUTEX_WAIT);
+    uint64_t r[32] = {BOTW_KERNEL_INITIAL_THREAD, (uintptr_t)&guest_mutex, self};
+    svc(0x1a, r); assert(r[0] == BOTW_KERNEL_RESULT_CANCELLED);
+    atomic_fetch_add(&sync_finished, 1); exit_worker();
+}
+static void shutdown_sync_waits(void) {
+    uint64_t stack = prepare_sync(2);
+    sync_worker(stack, 0, (uintptr_t)stopped_condition_worker, 0, 44);
+    uint64_t deadline = now() + 1000000000;
+    while (!atomic_load(&sync_prepared) && now() < deadline) sched_yield();
+    assert(atomic_load(&sync_prepared)); mutex_lock(BOTW_KERNEL_INITIAL_THREAD);
+    sync_worker(stack, 1, (uintptr_t)stopped_mutex_worker, 0, 20); until_priority(20);
+    int rc;
+    do { rc = botw_kernel_shutdown(ctx, error, sizeof error); if (rc) sched_yield(); }
+    while (rc && now() < deadline);
+    assert(!rc && atomic_load(&sync_finished) == 2);
+}
+static uint64_t owned_mutex, owned_key;
+static void owned_condition_worker(uint64_t argument, uint32_t self) {
+    (void)argument; __atomic_store_n((uint32_t *)(uintptr_t)owned_mutex, self, __ATOMIC_RELEASE);
+    uint64_t r[32] = {owned_mutex, owned_key, self, (uint64_t)-1}; svc(0x1c, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_CANCELLED); exit_worker();
+}
+static void pending_wait_memory_is_retained(void) {
+    const size_t unit = 0x200000; uint64_t stack = prepare_sync(1), heap = info(4);
+    uint64_t r[32] = {0, unit * 2}; svc(1, r); assert(!r[0]);
+    owned_mutex = heap + unit; owned_key = owned_mutex + 4;
+    sync_worker(stack, 0, (uintptr_t)owned_condition_worker, 0, 44);
+    uint64_t deadline = now() + 1000000000;
+    while ((!__atomic_load_n((uint32_t *)(uintptr_t)owned_key, __ATOMIC_ACQUIRE) ||
+            __atomic_load_n((uint32_t *)(uintptr_t)owned_mutex, __ATOMIC_ACQUIRE)) && now() < deadline) sched_yield();
+    assert(__atomic_load_n((uint32_t *)(uintptr_t)owned_key, __ATOMIC_ACQUIRE) == 1);
+    r[1] = unit; svc(1, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[0] = stack + unit; r[1] = heap + unit; r[2] = unit; svc(4, r);
+    assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE && readable(owned_mutex));
+    int rc;
+    do { rc = botw_kernel_shutdown(ctx, error, sizeof error); if (rc) sched_yield(); }
+    while (rc && now() < deadline);
+    assert(!rc);
+}
 int main(int argc, char **argv) {
     assert(argc == 2); botw_kernel_callbacks callbacks = {0}; callbacks.memory = memory;
     callbacks.executable = executable; callbacks.execute_thread = execute_thread;
@@ -329,6 +538,13 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "shared")) shared_memory();
     else if (!strcmp(argv[1], "returned")) unexpected_return();
     else if (!strcmp(argv[1], "stopwait")) stop_wait();
+    else if (!strcmp(argv[1], "mutex")) mutex_arbitration();
+    else if (!strcmp(argv[1], "condition")) condition_relock();
+    else if (!strcmp(argv[1], "cvtimeout")) condition_timeout();
+    else if (!strcmp(argv[1], "cancel")) cancellation();
+    else if (!strcmp(argv[1], "defercancel")) condition_cancel_is_deferred();
+    else if (!strcmp(argv[1], "stopsync")) shutdown_sync_waits();
+    else if (!strcmp(argv[1], "retainwait")) pending_wait_memory_is_retained();
     else abort();
     botw_kernel_destroy(ctx); puts("ok"); return 0;
 }
@@ -384,6 +600,27 @@ class KernelTests(unittest.TestCase):
 
     def test_shutdown_cancels_infinite_event_wait(self):
         self.check_case('stopwait')
+
+    def test_mutex_priority_handoff_waiter_bits_and_inheritance(self):
+        self.check_case('mutex')
+
+    def test_condition_partial_signal_relocks_mutex_before_return(self):
+        self.check_case('condition')
+
+    def test_condition_timeout_releases_mutex_for_sdk_to_relock(self):
+        self.check_case('cvtimeout')
+
+    def test_cancel_wait_and_pending_cancel_are_consumed_once(self):
+        self.check_case('cancel')
+
+    def test_cancel_condition_is_deferred_until_next_synchronization_wait(self):
+        self.check_case('defercancel')
+
+    def test_shutdown_wakes_condition_and_mutex_waiters(self):
+        self.check_case('stopsync')
+
+    def test_pending_wait_addresses_cannot_be_removed_or_borrowed(self):
+        self.check_case('retainwait')
 
 
 if __name__ == '__main__':

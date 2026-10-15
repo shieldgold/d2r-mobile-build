@@ -24,6 +24,7 @@ enum {
 #define BOTW_KERNEL_CURRENT_THREAD UINT32_C(0xffff8000)
 #define BOTW_KERNEL_CURRENT_PROCESS UINT32_C(0xffff8001)
 #define BOTW_KERNEL_INITIAL_THREAD UINT32_C(0x1001)
+#define BOTW_KERNEL_MUTEX_HAS_WAITERS UINT32_C(0x40000000)
 typedef struct {
     void (*log)(void *opaque, const char *message);
     /* Validate external signed-module/TLS/TLR/initial-stack ranges only. Do not
@@ -50,6 +51,13 @@ void botw_kernel_destroy(botw_kernel *kernel);
  * and the runtime must stop guest execution and show error. */
 int botw_kernel_dispatch(botw_kernel *kernel, unsigned number, uint64_t *regs,
                          char *error, size_t error_capacity);
+/* Synchronization ABI: 0x1a(owner,mutex,self_tag), 0x1b(mutex),
+ * 0x1c(mutex,condition_key,self_tag,timeout_ns), 0x1d(condition_key,count).
+ * Mutex tags are real thread handles plus MUTEX_HAS_WAITERS; condition keys
+ * hold 1 while queued. Successful condition signal reacquires the mutex before
+ * return; timeout returns with it released, and the SDK must lock it again.
+ * 0x19 CancelSynchronization is pending until a cancellable 0x18 wait; it does
+ * not interrupt mutex/condition waits. Cooperative shutdown wakes all waits. */
 /* Handles start at 0x20000, independently of IPC's 0x10000 range. Each event
  * endpoint owns one reference; duplicates own independent references. A write
  * endpoint signals, a read endpoint waits, either endpoint may ClearEvent. */

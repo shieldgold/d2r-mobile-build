@@ -28,6 +28,7 @@
 typedef struct { uint64_t destination, source; size_t size; unsigned users; } Mapping;
 typedef struct Object Object;
 typedef struct Thread Thread;
+typedef struct SyncWaiter SyncWaiter;
 typedef struct SharedMemory SharedMemory;
 typedef struct { uint64_t address; SharedMemory *memory; unsigned permission; } SharedMapping;
 typedef struct { uint32_t value; unsigned kind; Object *object; } Handle;
@@ -47,8 +48,20 @@ struct Thread {
     pthread_t host;
     uint64_t entry, argument, stack_top, id;
     uint32_t handle;
-    int priority, core, started, finished, joined, joining, exit_requested;
+    int priority, effective_priority, core, started, finished, joined, joining, exit_requested;
+    int cancel_pending;
+    SyncWaiter *sync_waiter;
     Mapping *mapping;
+};
+enum { WAIT_MUTEX = 1, WAIT_CONDITION = 2, WAIT_COMPLETE = 3 };
+/* Wait nodes live on the waiting pthread's stack. The kernel lock protects
+ * insertion, phase transitions, ownership handoff and final removal. */
+struct SyncWaiter {
+    SyncWaiter *next;
+    Thread *thread, *owner;
+    uint64_t mutex_address, condition_key, sequence;
+    uint32_t tag, result;
+    unsigned phase;
 };
 struct botw_kernel {
     botw_kernel_callbacks callbacks;
@@ -58,6 +71,9 @@ struct botw_kernel {
     pthread_t owner;
     pthread_key_t current_thread;
     Thread *threads;
+    Thread initial_thread;
+    SyncWaiter *sync_waiters;
+    uint64_t next_wait_sequence;
     uint64_t next_thread_id;
     char thread_failure[512];
     uint32_t next_handle;
@@ -131,6 +147,9 @@ botw_kernel *botw_kernel_create(const botw_kernel_callbacks *callbacks, void *op
     if (callbacks) k->callbacks = *callbacks;
     k->opaque = opaque; k->owner = pthread_self(); k->next_handle = HANDLE_BASE;
     k->next_thread_id = 2;
+    k->initial_thread.kernel = k; k->initial_thread.host = pthread_self();
+    k->initial_thread.handle = BOTW_KERNEL_INITIAL_THREAD; k->initial_thread.id = 1;
+    k->initial_thread.priority = k->initial_thread.effective_priority = 44;
     long page = sysconf(_SC_PAGESIZE);
     if (page <= 0 || (page & (page - 1))) { free(k); return NULL; }
     k->host_page = (size_t)page;
@@ -276,6 +295,160 @@ static int guest_memory(botw_kernel *k, uint64_t address, size_t length, int wri
     return botw_kernel_memory(k, address, length, writable) ||
         (k->callbacks.memory && k->callbacks.memory(k->opaque, address, length, writable));
 }
+static Thread *current_guest_thread(botw_kernel *k) {
+    Thread *thread = pthread_getspecific(k->current_thread);
+    return thread ? thread : pthread_equal(pthread_self(), k->owner) ? &k->initial_thread : NULL;
+}
+static Thread *thread_from_handle_locked(botw_kernel *k, uint32_t handle, int pseudo) {
+    if (handle == BOTW_KERNEL_INITIAL_THREAD) return &k->initial_thread;
+    if (pseudo && handle == BOTW_KERNEL_CURRENT_THREAD) return current_guest_thread(k);
+    Handle *h = find_handle(k, handle);
+    return h && h->kind == THREAD ? (Thread *)h->object : NULL;
+}
+/* Recompute the fixed point of virtual Horizon priority donation, including
+ * chains of owners blocked on another mutex. Queue selection uses these
+ * effective priorities; host QoS remains the pthread policy requested at start. */
+static void recompute_priorities_locked(botw_kernel *k) {
+    k->initial_thread.effective_priority = k->initial_thread.priority;
+    unsigned count = 1;
+    for (Thread *t = k->threads; t; t = t->next) { t->effective_priority = t->priority; count++; }
+    for (unsigned pass = 0; pass < count; pass++) {
+        int changed = 0;
+        for (SyncWaiter *w = k->sync_waiters; w; w = w->next) if (w->phase == WAIT_MUTEX && w->owner &&
+                w->owner->effective_priority > w->thread->effective_priority) {
+            w->owner->effective_priority = w->thread->effective_priority; changed = 1;
+        }
+        if (!changed) break;
+    }
+}
+static void link_sync_waiter_locked(botw_kernel *k, SyncWaiter *w) {
+    w->sequence = k->next_wait_sequence++; w->next = k->sync_waiters; k->sync_waiters = w;
+    w->thread->sync_waiter = w; k->active_waits++; recompute_priorities_locked(k);
+}
+static void unlink_sync_waiter_locked(botw_kernel *k, SyncWaiter *w) {
+    SyncWaiter **cursor = &k->sync_waiters;
+    while (*cursor && *cursor != w) cursor = &(*cursor)->next;
+    if (*cursor) *cursor = w->next;
+    w->thread->sync_waiter = NULL; k->active_waits--; recompute_priorities_locked(k);
+}
+static int waiter_precedes(const SyncWaiter *a, const SyncWaiter *b) {
+    return !b || a->thread->effective_priority < b->thread->effective_priority ||
+        (a->thread->effective_priority == b->thread->effective_priority && a->sequence < b->sequence);
+}
+/* Releasing and selecting the next owner occur under the same kernel lock as
+ * enqueueing. A user-space CAS sees either the old owner or the fully written
+ * next-owner tag, never an unlocked gap when a kernel waiter is selected. */
+static void release_guest_mutex_locked(botw_kernel *k, uint64_t address, Thread *owner) {
+    SyncWaiter *next = NULL;
+    for (SyncWaiter *w = k->sync_waiters; w; w = w->next)
+        if (w->phase == WAIT_MUTEX && w->mutex_address == address && w->owner == owner && waiter_precedes(w, next)) next = w;
+    uint32_t value = 0;
+    if (next) {
+        value = next->tag; int remaining = 0;
+        for (SyncWaiter *w = k->sync_waiters; w; w = w->next) if (w != next && w->phase == WAIT_MUTEX &&
+                w->mutex_address == address && w->owner == owner) { w->owner = next->thread; remaining = 1; }
+        if (remaining) value |= BOTW_KERNEL_MUTEX_HAS_WAITERS;
+        next->phase = WAIT_COMPLETE; next->owner = NULL; next->result = 0;
+    }
+    __atomic_store_n((uint32_t *)(uintptr_t)address, value, __ATOMIC_RELEASE);
+    recompute_priorities_locked(k); pthread_cond_broadcast(&k->changed);
+}
+static int await_sync_waiter_locked(botw_kernel *k, SyncWaiter *w, int64_t timeout,
+                                    char *error, size_t capacity) {
+    uint64_t deadline = timeout_deadline(timeout); int rc = 0;
+    for (;;) {
+        if (k->stopping) { w->result = BOTW_KERNEL_RESULT_CANCELLED; break; }
+        if (w->phase == WAIT_COMPLETE) break;
+        if (!timeout || rc == ETIMEDOUT) { w->result = BOTW_KERNEL_RESULT_TIMED_OUT; break; }
+        if (rc) break;
+        rc = condition_wait(k, deadline, timeout < 0);
+    }
+    unlink_sync_waiter_locked(k, w);
+    if (rc && rc != ETIMEDOUT) return diagnostic(error, capacity, "host guest-mutex/condition wait failed: %s", strerror(rc));
+    return 0;
+}
+static int arbitrate_lock(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    uint32_t owner_handle = (uint32_t)regs[0], tag = (uint32_t)regs[2]; uint64_t address = regs[1];
+    if (address & 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
+    if (!guest_memory(k, address, 4, 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
+    pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "mutex arbitration requires a registered guest thread"); }
+    if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
+    if (__atomic_load_n((uint32_t *)(uintptr_t)address, __ATOMIC_ACQUIRE) != (owner_handle | BOTW_KERNEL_MUTEX_HAS_WAITERS)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
+    }
+    Thread *owner = thread_from_handle_locked(k, owner_handle, 0);
+    if (!owner) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE; return BOTW_KERNEL_HANDLED; }
+    SyncWaiter w = {.thread = current, .owner = owner, .mutex_address = address, .tag = tag, .phase = WAIT_MUTEX};
+    link_sync_waiter_locked(k, &w);
+    int result = await_sync_waiter_locked(k, &w, -1, error, capacity);
+    pthread_mutex_unlock(&k->lock);
+    if (result) return BOTW_KERNEL_ERROR;
+    regs[0] = w.result; return BOTW_KERNEL_HANDLED;
+}
+static int arbitrate_unlock(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    uint64_t address = regs[0];
+    if (address & 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
+    if (!guest_memory(k, address, 4, 1)) { regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED; }
+    pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "mutex unlock requires a registered guest thread"); }
+    release_guest_mutex_locked(k, address, current); pthread_mutex_unlock(&k->lock);
+    regs[0] = 0; return BOTW_KERNEL_HANDLED;
+}
+static int wait_process_key(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    uint64_t address = regs[0], key = regs[1] & ~UINT64_C(3); uint32_t tag = (uint32_t)regs[2];
+    int64_t timeout = (int64_t)regs[3];
+    if (address & 3) { regs[0] = BOTW_KERNEL_RESULT_INVALID_ADDRESS; return BOTW_KERNEL_HANDLED; }
+    if (!guest_memory(k, address, 4, 1) || !guest_memory(k, key, 4, 1)) {
+        regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    pthread_mutex_lock(&k->lock); Thread *current = current_guest_thread(k);
+    if (!current) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "condition wait requires a registered guest thread"); }
+    if (k->stopping) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_CANCELLED; return BOTW_KERNEL_HANDLED; }
+    __atomic_store_n((uint32_t *)(uintptr_t)key, 1, __ATOMIC_RELEASE);
+    release_guest_mutex_locked(k, address, current);
+    if (!timeout) { pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_TIMED_OUT; return BOTW_KERNEL_HANDLED; }
+    SyncWaiter w = {.thread = current, .mutex_address = address, .condition_key = key, .tag = tag, .phase = WAIT_CONDITION};
+    link_sync_waiter_locked(k, &w);
+    int result = await_sync_waiter_locked(k, &w, timeout, error, capacity);
+    pthread_mutex_unlock(&k->lock);
+    if (result) return BOTW_KERNEL_ERROR;
+    regs[0] = w.result; return BOTW_KERNEL_HANDLED;
+}
+static void reacquire_condition_mutex_locked(botw_kernel *k, SyncWaiter *w) {
+    uint32_t *mutex = (uint32_t *)(uintptr_t)w->mutex_address;
+    uint32_t previous = __atomic_load_n(mutex, __ATOMIC_ACQUIRE);
+    for (;;) {
+        uint32_t replacement = previous ? previous | BOTW_KERNEL_MUTEX_HAS_WAITERS : w->tag;
+        if (__atomic_compare_exchange_n(mutex, &previous, replacement, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) break;
+    }
+    if (!previous) { w->phase = WAIT_COMPLETE; w->result = 0; return; }
+    Thread *owner = thread_from_handle_locked(k, previous & ~BOTW_KERNEL_MUTEX_HAS_WAITERS, 0);
+    if (!owner) { w->phase = WAIT_COMPLETE; w->result = BOTW_KERNEL_RESULT_INVALID_STATE; return; }
+    w->phase = WAIT_MUTEX; w->owner = owner;
+}
+static int signal_process_key(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
+    uint64_t key = regs[0] & ~UINT64_C(3); int32_t requested = (int32_t)regs[1];
+    if (!guest_memory(k, key, 4, 1)) return diagnostic(error, capacity, "condition key is not aligned guest writable memory");
+    pthread_mutex_lock(&k->lock);
+    unsigned waiting = 0, woken = 0, remaining = 0;
+    for (SyncWaiter *w = k->sync_waiters; w; w = w->next) if (w->phase == WAIT_CONDITION && w->condition_key == key) waiting++;
+    while (requested <= 0 || woken < (unsigned)requested) {
+        SyncWaiter *next = NULL;
+        for (SyncWaiter *w = k->sync_waiters; w; w = w->next)
+            if (w->phase == WAIT_CONDITION && w->condition_key == key && waiter_precedes(w, next)) next = w;
+        if (!next) break;
+        reacquire_condition_mutex_locked(k, next); woken++; recompute_priorities_locked(k);
+    }
+    for (SyncWaiter *w = k->sync_waiters; w; w = w->next) if (w->phase == WAIT_CONDITION && w->condition_key == key) remaining++;
+    if (!remaining) __atomic_store_n((uint32_t *)(uintptr_t)key, 0, __ATOMIC_RELEASE);
+    pthread_cond_broadcast(&k->changed); pthread_mutex_unlock(&k->lock);
+    if (k->callbacks.log) {
+        char message[160]; snprintf(message, sizeof message, "condition_signal requested=%d waiters=%u woken=%u remaining=%u", requested, waiting, woken, remaining);
+        k->callbacks.log(k->opaque, message);
+    }
+    regs[0] = 0; return BOTW_KERNEL_HANDLED;
+}
 static int wait_synchronization(botw_kernel *k, uint64_t *regs, char *error, size_t capacity) {
     int32_t count = (int32_t)regs[2]; int64_t timeout = (int64_t)regs[3];
     if (count < 0 || count > MAX_WAIT) { regs[0] = BOTW_KERNEL_RESULT_OUT_OF_RANGE; return BOTW_KERNEL_HANDLED; }
@@ -294,6 +467,7 @@ static int wait_synchronization(botw_kernel *k, uint64_t *regs, char *error, siz
     }
     for (int32_t i = 0; i < count; i++) objects[i]->refs++;
     k->active_waits++;
+    Thread *current = current_guest_thread(k);
     uint64_t deadline = timeout_deadline(timeout); uint32_t result = 0; int rc = 0;
     for (;;) {
         if (k->stopping) { result = BOTW_KERNEL_RESULT_CANCELLED; break; }
@@ -309,6 +483,7 @@ static int wait_synchronization(botw_kernel *k, uint64_t *regs, char *error, siz
         for (index = 0; index < count; index++) if (objects[index]->signaled) break;
         if (index < count) { regs[1] = (uint64_t)index; break; }
         if (!timeout || rc == ETIMEDOUT) { result = BOTW_KERNEL_RESULT_TIMED_OUT; break; }
+        if (current && current->cancel_pending) { current->cancel_pending = 0; result = BOTW_KERNEL_RESULT_CANCELLED; break; }
         if (rc) break;
         rc = condition_wait(k, deadline, timeout < 0);
     }
@@ -323,6 +498,12 @@ static int region_contains(uint64_t base, size_t size, uint64_t address, size_t 
 }
 static int overlaps(uint64_t a, size_t an, uint64_t b, size_t bn) {
     return a < b + bn && b < a + an;
+}
+static int sync_words_in_use_locked(botw_kernel *k, uint64_t address, size_t size) {
+    for (SyncWaiter *w = k->sync_waiters; w; w = w->next)
+        if (overlaps(address, size, w->mutex_address, 4) ||
+            (w->condition_key && overlaps(address, size, w->condition_key, 4))) return 1;
+    return 0;
 }
 /* All mappings are internal to the reserved block. Never use MAP_FIXED on a
  * caller-selected or unrelated host address. Nonfixed hints cannot evict VM. */
@@ -359,6 +540,9 @@ static int set_heap_size(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
     size_t size = (size_t)requested;
     if (size < k->heap_size) {
+        if (sync_words_in_use_locked(k, k->heap_base + size, k->heap_size - size)) {
+            pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+        }
         for (unsigned i = 0; i < MAX_MAPS; i++) if (k->mappings[i].size &&
                 overlaps(k->heap_base + size, k->heap_size - size, k->mappings[i].source, k->mappings[i].size)) {
             pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
@@ -387,7 +571,8 @@ static int map_memory(botw_kernel *k, int unmap, uint64_t *regs, char *error, si
     if (reserve_memory_locked(k, error, capacity)) { pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_ERROR; }
     size_t size = (size_t)length;
     if (!region_contains(k->heap_base, k->heap_size, source, size) ||
-        !region_contains(k->stack_base, k->stack_capacity, destination, size)) {
+        !region_contains(k->stack_base, k->stack_capacity, destination, size) ||
+        sync_words_in_use_locked(k, source, size) || sync_words_in_use_locked(k, destination, size)) {
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
     if ((destination | source | size) & (k->host_page - 1)) {
@@ -461,6 +646,9 @@ static int map_shared_memory(botw_kernel *k, int unmap, uint64_t *regs, char *er
         }
     }
     if ((unmap && !found) || (!unmap && !slot)) {
+        pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
+    }
+    if (unmap && sync_words_in_use_locked(k, address, memory->size)) {
         pthread_mutex_unlock(&k->lock); regs[0] = BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE; return BOTW_KERNEL_HANDLED;
     }
     if (unmap) {
@@ -548,7 +736,7 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     }
     t->object.type = THREAD; t->object.refs = 1; t->kernel = k;
     t->entry = entry; t->argument = argument; t->stack_top = stack_top;
-    t->priority = priority; t->core = core; t->id = k->next_thread_id++;
+    t->priority = t->effective_priority = priority; t->core = core; t->id = k->next_thread_id++;
     Handle *h = allocate_handle(k, &t->object, THREAD);
     if (!h) { pthread_mutex_unlock(&k->lock); free(t); regs[0] = 0xd201; return BOTW_KERNEL_HANDLED; }
     t->handle = h->value; t->mapping = mapping; mapping->users++;
@@ -597,6 +785,22 @@ int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *
     case 0x14: return map_shared_memory(k, 1, regs, error, capacity);
     case 8: return create_thread(k, regs, error, capacity);
     case 9: return start_thread(k, regs, error, capacity);
+    case 0xc: {
+        pthread_mutex_lock(&k->lock); Thread *t = thread_from_handle_locked(k, (uint32_t)regs[1], 1);
+        if (t) { regs[0] = 0; regs[1] = (uint64_t)t->effective_priority; }
+        else regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE;
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+    }
+    case 0x19: {
+        pthread_mutex_lock(&k->lock); Thread *t = thread_from_handle_locked(k, (uint32_t)regs[0], 1);
+        if (t) { t->cancel_pending = 1; regs[0] = 0; pthread_cond_broadcast(&k->changed); }
+        else regs[0] = BOTW_KERNEL_RESULT_INVALID_HANDLE;
+        pthread_mutex_unlock(&k->lock); return BOTW_KERNEL_HANDLED;
+    }
+    case 0x1a: return arbitrate_lock(k, regs, error, capacity);
+    case 0x1b: return arbitrate_unlock(k, regs, error, capacity);
+    case 0x1c: return wait_process_key(k, regs, error, capacity);
+    case 0x1d: return signal_process_key(k, regs, error, capacity);
     case 0xa: {
         Thread *t = pthread_getspecific(k->current_thread);
         if (!t) return diagnostic(error, capacity, "SVC ExitThread on the unregistered initial host thread");
