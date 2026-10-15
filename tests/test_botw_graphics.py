@@ -199,6 +199,22 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_concurrent_nvn_objects_and_error_callback_escape_release_locks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'race.c'; harness.write_text(CONCURRENT_SMOKE)
+            exe = path / 'race'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-pthread', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_CONCURRENT_16000_OBJECTS_AND_ERROR_ESCAPE_OK', result.stdout)
+
     def test_static_c1_bundle_loader_matches_original_bits(self):
         import hashlib
         import json
@@ -617,6 +633,67 @@ int main(int argc,char **argv){
     if(!ok){fprintf(stderr,"%s\n",error);botw_graphics_shutdown();return 2;}
     printf("REGISTERED=%zu UNSUPPORTED=%zu TOTAL=%zu\n",result.registered_entries,result.unsupported_entries,result.declared_entries);
     botw_graphics_shutdown();return 0;
+}
+"""
+
+CONCURRENT_SMOKE = r"""
+#include "graphics.h"
+#include "nvn_protos.h"
+#include <pthread.h>
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+static NVNT_nvnDeviceBuilderSetDefaults defaults;
+static NVNT_nvnDeviceInitialize initialize;
+static NVNT_nvnDeviceFinalize finalize;
+static NVNT_nvnDeviceGetProcAddress get_proc;
+static NVNT_nvnDeviceFinalizeCommandHandle free_handle;
+static NVNT_nvnCommandBufferInitialize init_command;
+static NVNT_nvnCommandBufferBeginRecording begin_command;
+static NVNT_nvnCommandBufferEndRecording end_command;
+static NVNT_nvnCommandBufferFinalize free_command;
+static sigjmp_buf recovery;
+static int escaping;
+static void report_error(const char *message){
+    fprintf(stderr,"GFX:%s\n",message);
+    if(escaping)siglongjmp(recovery,1);
+}
+static int readable(const void *p,size_t n){(void)p;(void)n;return 1;}
+static void *worker(void *p){
+    (void)p;
+    for(unsigned i=0;i<2000;i++){
+        NVNdeviceBuilder b;NVNdevice d;NVNcommandBuffer c;
+        defaults(&b);if(!initialize(&d,&b)||!init_command(&c,&d))abort();
+        begin_command(&c);NVNcommandHandle handle=end_command(&c);
+        free_handle(&d,handle);free_command(&c);finalize(&d);
+    }
+    return NULL;
+}
+int main(void){
+    if(!botw_graphics_init(NULL,report_error,readable))return 77;
+#define LOAD(var,name) var=(NVNT_##name)botw_nvn_bootstrap_loader(#name)
+    LOAD(defaults,nvnDeviceBuilderSetDefaults);LOAD(initialize,nvnDeviceInitialize);LOAD(finalize,nvnDeviceFinalize);
+    LOAD(get_proc,nvnDeviceGetProcAddress);
+    LOAD(free_handle,nvnDeviceFinalizeCommandHandle);LOAD(init_command,nvnCommandBufferInitialize);
+    LOAD(begin_command,nvnCommandBufferBeginRecording);LOAD(end_command,nvnCommandBufferEndRecording);
+    LOAD(free_command,nvnCommandBufferFinalize);
+    pthread_t threads[8];
+    for(unsigned i=0;i<8;i++)if(pthread_create(&threads[i],NULL,worker,NULL))return 3;
+    for(unsigned i=0;i<8;i++)if(pthread_join(threads[i],NULL))return 4;
+    for(int mode=0;mode<4;mode++){
+        if(sigsetjmp(recovery,1)==0){
+            escaping=1;
+            if(mode==0){NVNdevice invalid={0};finalize(&invalid);}
+            if(mode==1)(void)botw_nvn_bootstrap_loader("nvnDefinitelyUnknown");
+            if(mode==2){void (*bad)(void)=botw_nvn_bootstrap_loader("nvnCommandBufferDispatchCompute");bad();}
+            if(mode==3){NVNdeviceBuilder b;NVNdevice d;defaults(&b);if(!initialize(&d,&b))return 7;(void)get_proc(&d,"nvnDefinitelyUnknown");}
+            return 5;
+        }
+        escaping=0;botw_graphics_shutdown();
+        if(!botw_graphics_init(NULL,report_error,readable))return 6;
+    }
+    botw_graphics_shutdown();
+    puts("GPU_CONCURRENT_16000_OBJECTS_AND_ERROR_ESCAPE_OK");return 0;
 }
 """
 

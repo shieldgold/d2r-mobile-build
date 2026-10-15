@@ -150,7 +150,27 @@ static NSMutableArray<BWShader *> *shaders;
 static uint64_t serial;
 static botw_graphics_error errorCallback;
 static botw_graphics_memory_range memoryValidator;
-static char lastError[1024];
+static _Thread_local char lastError[1024];
+static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local unsigned graphicsDepth;
+static _Thread_local BOOL pendingError,pendingFatal;
+@interface BWGraphicsFailure : NSException
+@end
+@implementation BWGraphicsFailure
+@end
+/* Public calls serialize all object tables, recording state and GPU submission.
+ * Errors unwind internally first. The host callback may siglongjmp, so it must
+ * run after ARC locals/pools drain and the outermost graphics lock is released. */
+static void graphicsBegin(void){
+    if(graphicsDepth++==0){pthread_mutex_lock(&graphicsLock);pendingError=NO;pendingFatal=NO;}
+}
+static void graphicsEnd(void){
+    if(--graphicsDepth)return;
+    botw_graphics_error callback=errorCallback;BOOL notify=pendingError,terminate=pendingFatal;
+    pendingError=NO;pendingFatal=NO;pthread_mutex_unlock(&graphicsLock);
+    if(notify&&callback)callback(lastError);
+    if(terminate)abort();
+}
 static id<MTLRenderPipelineState> presentPipeline;
 static char completionKey;
 @interface BWPresentedFrame : NSObject
@@ -205,10 +225,11 @@ int botw_graphics_copy_latest_frame(void *rgba,size_t capacity,uint32_t *width,u
 static int report(const char *format, ...) {
     va_list args; va_start(args,format); vsnprintf(lastError,sizeof lastError,format,args); va_end(args);
     fprintf(stderr,"[botw graphics] %s\n",lastError);
-    if(errorCallback)errorCallback(lastError); return 0;
+    pendingError=YES;return 0;
 }
 __attribute__((noreturn)) static void fatal(const char *name) {
-    report("Unsupported or invalid NVN operation: %s",name); abort();
+    report("Unsupported or invalid NVN operation: %s",name);pendingFatal=YES;
+    @throw [[BWGraphicsFailure alloc] initWithName:@"BWGraphicsFailure" reason:nil userInfo:nil];
 }
 const char *botw_graphics_last_error(void) { return lastError; }
 static NSData *digest(const void *bytes,size_t size) {
@@ -248,7 +269,7 @@ static void commitBuffer(id<MTLCommandBuffer> cb) {
     [cb addCompletedHandler:^(id<MTLCommandBuffer> b){(void)b;dispatch_group_leave(group);}];
     [cb commit];
 }
-int botw_graphics_init(void *layer,botw_graphics_error error,botw_graphics_memory_range validator) {
+static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_graphics_memory_range validator) {
     if(gpu)return report("Graphics already initialized");
     errorCallback=error; memoryValidator=validator; lastError[0]=0;
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
@@ -260,7 +281,7 @@ int botw_graphics_init(void *layer,botw_graphics_error error,botw_graphics_memor
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
     return 1;
 }
-void botw_graphics_shutdown(void) {
+static void shutdownGraphicsImpl(void) {
     BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     objects=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
@@ -270,7 +291,7 @@ int botw_graphics_register_shader(const void *control,size_t cs,const void *code
                                   NVNshaderStage stage,const char *source,const char *entry) {
     return botw_graphics_register_shader_with_bindings(control,cs,code,ds,stage,source,entry,NULL,0);
 }
-int botw_graphics_register_shader_with_bindings(const void *control,size_t cs,const void *code,size_t ds,
+static int registerShaderImpl(const void *control,size_t cs,const void *code,size_t ds,
     NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count){
     if(count>64 || (count&&!bindings))return report("Invalid shader binding metadata");
     for(size_t i=0;i<count;i++){if(bindings[i].kind>BOTW_GRAPHICS_SAMPLER || bindings[i].nvn_slot>=128 || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:bindings[i].kind==BOTW_GRAPHICS_SAMPLER?16:16))return report("Shader binding metadata exceeds Metal limits");}
@@ -287,7 +308,7 @@ int botw_graphics_register_shader_with_bindings(const void *control,size_t cs,co
     BWShader *shader=[BWShader new];shader.controlHash=digest(control,cs);shader.codeHash=digest(code,ds);
     shader.controlSize=cs;shader.codeSize=ds;shader.stage=stage;shader.function=function;shader.bindings=[NSData dataWithBytes:bindings length:count*sizeof *bindings];[shaders addObject:shader];return 1;
 }
-int botw_graphics_read_texture(const NVNtexture *raw,void *pixels,size_t bytes) {
+static int readTextureImpl(const NVNtexture *raw,void *pixels,size_t bytes) {
     BWTexture *t=get(raw,[BWTexture class]);
     if(t.format!=NVN_FORMAT_RGBA8 && t.format!=NVN_FORMAT_BGRA8)return report("Readback requires RGBA8/BGRA8 color texture");
     size_t size=(size_t)t.width*t.height*4,pitch=((size_t)t.width*4+255)&~255ull;
@@ -610,11 +631,31 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
 
 /* A public NVN name can be queried speculatively. Unsupported entries remain
  * callable only to give a named fatal error when actually invoked. */
-#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){fatal(#name);}
+#define CATCH_GRAPHICS_FAILURE \
+    @catch(BWGraphicsFailure *failure){(void)failure;} \
+    @catch(NSException *exception){report("Native graphics exception: %s",exception.reason.UTF8String);pendingFatal=YES;}
+#define WRAP_VALUE(scope,name,ret,parameters,operation) \
+    scope ret name parameters {ret value={0};graphicsBegin(); \
+        @autoreleasepool{@try{value=(operation);}CATCH_GRAPHICS_FAILURE}graphicsEnd();return value;}
+#define WRAP_VOID(scope,name,parameters,operation) \
+    scope void name parameters {graphicsBegin(); \
+        @autoreleasepool{@try{operation;}CATCH_GRAPHICS_FAILURE}graphicsEnd();}
+#define NVN_VALUE(name,ret,parameters,arguments) WRAP_VALUE(static,w_##name,ret,parameters,h_##name arguments) \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(&w_##name),NVNT_##name),"NVN wrapper signature: " #name);
+#define NVN_VOID(name,parameters,arguments) WRAP_VOID(static,w_##name,parameters,h_##name arguments) \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(&w_##name),NVNT_##name),"NVN wrapper signature: " #name);
+#include "entrypoints.inc"
+#undef NVN_VALUE
+#undef NVN_VOID
+WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_graphics_memory_range validator),initializeGraphicsImpl(layer,error,validator))
+WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
+WRAP_VALUE(,botw_graphics_register_shader_with_bindings,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count),registerShaderImpl(control,cs,code,ds,stage,source,entry,bindings,count))
+WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,pixels,bytes))
+#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}graphicsEnd();abort();}
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED
-void *botw_nvn_bootstrap_loader(const char *name){if(!name)return NULL;
-#define NVN_BIND(name) if(!strcmp(#name,name_))return (void*)h_##name;
+static void *lookupNVNImpl(const char *name){if(!name)return NULL;
+#define NVN_BIND(name) if(!strcmp(#name,name_))return (void*)w_##name;
     const char *name_=name;
     if(!strcmp(name,"nvnBootstrapLoader"))return (void*)botw_nvn_bootstrap_loader;
 #include "implemented.inc"
@@ -623,3 +664,7 @@ void *botw_nvn_bootstrap_loader(const char *name){if(!name)return NULL;
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED
     report("Unknown NVN entry point: %s",name);return NULL;}
+WRAP_VALUE(,botw_nvn_bootstrap_loader,void *,(const char *name),lookupNVNImpl(name))
+#undef WRAP_VALUE
+#undef WRAP_VOID
+#undef CATCH_GRAPHICS_FAILURE

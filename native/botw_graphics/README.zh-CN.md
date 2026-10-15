@@ -15,7 +15,9 @@
 
 提交立即 commit；围栏只在 GPU 实际完成后放行。`shutdown` 使用全局提交完成组等待全部已提交命令后才释放零拷贝客体内存。异步 GPU/呈现回调只更新加锁状态，不调用宿主错误回调，避免跨线程 longjmp。内存池优先零拷贝共享映射；不能验证页范围的非对齐 uncached 池拒绝创建，cached 池的复制路径需要显式 flush/invalidate。
 
-`CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。当前接口要求单个宿主图形所有者线程；并发录制必须先补对象表与资源同步。
+`CAMetalLayer` 路径在此实现真实纹理显示，使用独立的呈现管线完成格式转换及缩放；它不会替代游戏的绘制着色器。`botw_graphics_presented_frame_count` 仅在新着色器绘制对应的 GPU 工作与 drawable 实际呈现都完成后增加，清屏或离屏工作保持 0。开启 `botw_graphics_set_capture_enabled(1)` 后，`botw_graphics_copy_latest_frame` 提供最近完成屏幕帧的 RGBA 像素、尺寸及帧号；读取失败不会触发宿主错误回调。真机交换链及显示时序尚需在游戏实际调用到该路径后验收。
+
+114 个公开 NVN 入口以保留完整 ABI 类型的 wrapper 串行操作对象表、句柄表、命令记录、资源及提交状态；初始化、登记、读回和 shutdown 使用同一保护。错误先在图形实现内部展开 ARC 作用域，释放全部图形锁后才在调用线程触发宿主 error callback，允许受控 siglongjmp；异步 GPU 回调不进入该路径。错误消息按线程保存，嵌套的 GetProcAddress→Bootstrap 查询只由最外层入口回报一次。8 个 pthread 各完成 2000 次独立 Device/CommandBuffer/handle 创建、录制、销毁的人工夹具已通过，并验证 4 种错误回调跳出后均能 shutdown 和重新初始化。
 
 ## 本地着色器准备
 

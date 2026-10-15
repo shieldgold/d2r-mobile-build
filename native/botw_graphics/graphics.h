@@ -7,11 +7,13 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Configure before guest entry, on a single owning guest graphics thread.
+/* Configure before guest entry; coordinate init/shutdown with guest lifetime.
+ * Public NVN calls, resource tables and submission state serialize internally.
  * layer is a CAMetalLayer (NULL permits offscreen tests). The bridge retains it.
  * validator must confirm every control-section span before it can be hashed.
- * error is diagnostic only: unsupported void-returning NVN calls then abort;
- * boolean-returning operations fail with 0. Never reports a no-op as success. */
+ * error runs on the invoking thread after all graphics locks are released and
+ * may escape to the host. If it returns, unsupported void calls abort and
+ * boolean operations fail with 0. Never reports a no-op as success. */
 typedef void (*botw_graphics_error)(const char *message);
 typedef int (*botw_graphics_memory_range)(const void *address, size_t bytes);
 int botw_graphics_init(void *layer, botw_graphics_error error,

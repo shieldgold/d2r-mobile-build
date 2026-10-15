@@ -12,7 +12,7 @@ typedef struct {
 /* Returns 1 for a valid manifest and its registered subset, 0 for any error.
  * Success is not a claim that unsupported entries work. Result is populated
  * only after a complete preflight. Diagnostic identities/reasons go to stderr.
- * Call after botw_graphics_init on the owning graphics thread. */
+ * Call after botw_graphics_init, before starting guest shader requests. */
 int botw_graphics_load_shader_bundle(const char *directory,
     botw_graphics_shader_bundle_result *result, char *error, size_t error_capacity);
 #ifdef __cplusplus
