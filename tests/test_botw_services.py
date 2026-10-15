@@ -468,6 +468,53 @@ class ServicesTests(unittest.TestCase):
         self.send(fsp, self.request(1, b'\0' * 8, pid=True))
         return fsp
 
+    def test_fs_access_log_mode_reports_disabled_policy_and_strict_no_input_abi(self):
+        fsp = self.service(self.initialized_sm(), b'fsp-srv')
+        _, error = self.send(fsp, self.request(1005), good=False)
+        self.assertIn('initialized', error)
+        self.send(fsp, self.request(1, b'\0' * 8, pid=True))
+        for padding in (0, 4, 8, 12):
+            request = struct.pack('<II', 4, 6 + padding // 4) + b'\0' * 8 + b'SFCI' + struct.pack('<III', 0, 1005, 0) + bytes(padding)
+            raw, _ = self.send(fsp, request)
+            data, handles, count = self.response(raw)
+            self.assertEqual((struct.unpack_from('<I', data)[0], handles, count), (0, [], 0))
+        self.send(fsp, self.request(1005, b'\1'), good=False)
+        self.send(fsp, self.request(1005, bytes(16)), good=False)
+        self.send(fsp, self.request(1005, pid=True), good=False)
+        self.send(fsp, self.request(1005, copies=(0xffff8001,)), good=False)
+        input = C.create_string_buffer(b'access log')
+        self.ranges.append((C.addressof(input), len(input), True))
+        self.send(fsp, self.request(1005, buffer=(C.addressof(input), len(input))), good=False)
+        self.send(fsp, self.request(1005, receive=(C.addressof(input), len(input))), good=False)
+        # No actual SDK Log/SD sink is connected. Settings and SD output cannot
+        # report success, and none of these refusals changes the getter policy.
+        for mode in (0, 1, 2, 3):
+            self.send(fsp, self.request(1004, struct.pack('<I', mode)), good=False)
+        self.send(fsp, self.request(1006, buffer=(C.addressof(input), len(input))), good=False)
+        self.send(fsp, self.request(1007), good=False)
+        raw, _ = self.send(fsp, self.request(1005))
+        self.assertEqual(struct.unpack_from('<I', self.response(raw)[0])[0], 0)
+
+    def test_domain_fs_log_mode_has_no_objects_and_internal_read_diagnostics_are_independent(self):
+        image, _ = romfs_fixture()
+        self.attach_romfs(image)
+        fsp = self.filesystem()
+        raw, _ = self.send(fsp, self.request(0, kind=5))
+        root, = struct.unpack_from('<I', self.response(raw)[0])
+        raw, _ = self.send(fsp, self.request(1005, domain=root))
+        data, handles, count = self.response(raw, domain=True)
+        self.assertEqual((struct.unpack_from('<I', data)[0], handles, count), (0, [], 0))
+        self.send(fsp, self.request(1005, b'\0', domain=root), good=False)
+        raw, _ = self.send(fsp, self.request(200, domain=root))
+        storage, = struct.unpack_from('<I', self.response(raw, domain=True)[0])
+        self.assertEqual(storage, root + 1)
+        output = C.create_string_buffer(80)
+        self.ranges.append((C.addressof(output), len(output), True))
+        self.send(fsp, self.request(0, struct.pack('<qQ', 0, len(output)), domain=storage,
+                                    receive=(C.addressof(output), len(output))))
+        self.assertEqual(bytes(output), image[:80])
+        self.assertTrue(any(line.startswith('romfs_read ') for line in self.logs), self.logs)
+
     def test_patch_storage_unknown_is_distinct_from_verified_not_installed(self):
         fsp = self.filesystem()
         _, error = self.send(fsp, self.request(203), good=False)

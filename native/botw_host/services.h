@@ -12,6 +12,9 @@ typedef struct botw_services botw_services;
 typedef void (*botw_services_log_fn)(void *opaque, const char *message);
 /* Return nonzero only when the entire guest range has the required access. */
 typedef int (*botw_services_memory_fn)(void *opaque, uint64_t address, size_t length, int writable);
+/* SDK FS access logging defaults to None (GetGlobalAccessLogMode=0). Internal
+ * host diagnostics use the separate log callback. SDK mode changes and SD-log
+ * output are unsupported until a real corresponding sink is connected. */
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque);
 void botw_services_destroy(botw_services *services);
 /* mode is Horizon Normal=0 or Boost=1. active distinguishes the current host

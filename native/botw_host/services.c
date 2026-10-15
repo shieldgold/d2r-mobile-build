@@ -26,6 +26,7 @@
 #define STORAGE_TOTAL_LIMIT (64u * 1024u * 1024u)
 #define CAPTURE_SIZE (1280u * 720u * 4u)
 #define TRACE_LIMIT 256u
+#define FS_ACCESS_LOG_NONE 0u
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
@@ -60,7 +61,7 @@ typedef struct { uint32_t id; Session *session; } Handle;
 struct botw_services {
     pthread_mutex_t lock;
     Handle handles[HANDLE_LIMIT];
-    uint32_t next_handle, log_destination;
+    uint32_t next_handle, log_destination, fs_access_log_mode;
     uint32_t performance_mode, performance_configuration[2];
     unsigned performance_configured[2];
     botw_services_performance_fn performance_handler;
@@ -223,7 +224,7 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     if (!memory) return NULL;
     botw_services *s = calloc(1, sizeof *s);
     if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
-    if (s) { s->next_handle = 0x10000; s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
+    if (s) { s->next_handle = 0x10000; s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->fs_access_log_mode = FS_ACCESS_LOG_NONE; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
@@ -777,6 +778,15 @@ static int fs_error_response(uint8_t *ipc, size_t capacity, const Request *r, co
     }
     return problem(error, cap, "RomFS backend error=%d: %s", backend->code, backend->message);
 }
+static int fs_no_input_payload(const Request *r, const char *method, char *error, size_t cap) {
+    /* Nondomain HIPC may carry up to 15 trailing alignment bytes. A domain
+     * request explicitly sizes its CMIF data, so no extra data is accepted. */
+    if ((r->domain && r->payload_size) || r->payload_size > 15)
+        return problem(error, cap, "fsp-srv.%s takes no input payload", method);
+    for (size_t i = 0; i < r->payload_size; i++)
+        if (r->payload[i]) return problem(error, cap, "fsp-srv.%s takes no input payload", method);
+    return 0;
+}
 static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (o->kind == OBJECT_FSP) {
         if (r->input_count || r->output_count || r->copy_count) return problem(error, cap, "fsp-srv command=%u unexpected buffers/handles", r->command);
@@ -785,13 +795,16 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
             o->initialized = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
         }
         if (!o->initialized || r->pid) return problem(error, cap, "fsp-srv requires initialized client and no unexpected PID");
+        if (r->command == 1005) {
+            if (fs_no_input_payload(r, "GetGlobalAccessLogMode", error, cap)) return -1;
+            /* No SDK Log/SD access-log sink has been installed, so this actual
+             * policy stays None. Host diagnostic callbacks are independent.
+             * SetGlobalAccessLogMode/OutputAccessLogToSdCard remain unsupported
+             * until their requested output can really be delivered. */
+            response(ipc, capacity, r, &s->fs_access_log_mode, 4, 0, 0); return 0;
+        }
         if (r->command == 203) {
-            /* No CMIF input arguments. Nondomain HIPC can include up to 15
-             * alignment bytes after the header; domain requests carry a size. */
-            if ((r->domain && r->payload_size) || r->payload_size > 15)
-                return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess takes no input payload");
-            for (size_t i = 0; i < r->payload_size; i++)
-                if (r->payload[i]) return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess takes no input payload");
+            if (fs_no_input_payload(r, "OpenPatchDataStorageByCurrentProcess", error, cap)) return -1;
             if (!s->patch_known_absent)
                 return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess installation state is unknown; installed patch storage backend is not configured");
             /* Public FS module=2, TargetNotFound description=1002:
