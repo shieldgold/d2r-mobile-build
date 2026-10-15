@@ -121,6 +121,15 @@ int botw_services_set_addon_content(botw_services *services, uint64_t applicatio
 int botw_services_set_parental_policy(botw_services *services, const char *source,
     int restrict_communication, int restrict_sns, int restrict_stereo,
     char *error, size_t error_capacity);
+/* Publish the already selected application language once per context. Accepts
+ * canonical Nintendo LanguageCode strings (1..7 bytes); the caller must verify
+ * that its title's installed resources support the selection. This generic
+ * registry is not an asset-support list or a device-locale backend. There is
+ * no implicit default. Copies code and a printable ASCII source (1..127 bytes).
+ * Identical registration is harmless; changing either value is rejected.
+ * GetDesiredLanguage cmd21 returns these exact eight zero-padded code bytes. */
+int botw_services_set_application_language(botw_services *services,
+    const char *code, const char *source, char *error, size_t error_capacity);
 /* Host audio mixer reads the same gain policy queried/set by IAudioController.
  * Values are finite [0,1], initialized to unity. Each output is optional. */
 void botw_services_get_audio_gain(botw_services *services, float *main_applet,

@@ -112,6 +112,8 @@ struct botw_services {
     size_t aoc_installed_count;
     unsigned parental_ready, parental_communication, parental_sns, parental_stereo;
     char parental_source[128];
+    unsigned application_language_ready;
+    char application_language[8], application_language_source[128];
     uint32_t parental_event_write, parental_event_read;
     size_t storage_bytes;
     float audio_main_gain, audio_library_gain, audio_transparent_rate;
@@ -434,6 +436,45 @@ int botw_services_set_parental_policy(botw_services *s, const char *source, int 
     s->parental_ready = 1; s->parental_communication = (unsigned)communication; s->parental_sns = (unsigned)sns; s->parental_stereo = (unsigned)stereo;
     memcpy(s->parental_source, source, length + 1);
     emit(s, "parental_policy source=%s communication_restricted=%d sns_restricted=%d stereo_restricted=%d nintendo_account_linked=false", source, communication, sns, stereo);
+    pthread_mutex_unlock(&s->lock); return 0;
+}
+int botw_services_set_application_language(botw_services *s, const char *code,
+        const char *source, char *error, size_t cap) {
+    /* Generic registry: libnx SetLanguage (20cbcfd90567f7bf84df7725f27e345e2164fa6b)
+     * and Switchbrew Settings_services LanguageCode. Asset selection belongs
+     * to the caller; notably zh-Hans being canonical does not install assets. */
+    static const char *const canonical[] = {
+        "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru",
+        "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"
+    };
+    if (!s || !code || !source || !*source)
+        return problem(error, cap, "application language requires explicit code and source");
+    size_t length = 0; while (length < 8 && code[length]) length++;
+    if (!length || length >= 8)
+        return problem(error, cap, "application language code must fit eight NUL-terminated bytes");
+    unsigned known = 0;
+    for (size_t i = 0; i < sizeof canonical / sizeof canonical[0]; i++)
+        if (strlen(canonical[i]) == length && !memcmp(code, canonical[i], length)) known = 1;
+    if (!known) return problem(error, cap, "application language code is not canonical Nintendo LanguageCode");
+    size_t source_length = 0;
+    while (source_length < 128 && source[source_length]) {
+        unsigned char c = (unsigned char)source[source_length++];
+        if (c < 32 || c > 126) return problem(error, cap, "application language source must be printable ASCII");
+    }
+    if (source_length >= 128) return problem(error, cap, "application language source exceeds limit");
+    char encoded[8] = {0}; memcpy(encoded, code, length);
+    pthread_mutex_lock(&s->lock);
+    if (s->application_language_ready) {
+        int same = !memcmp(s->application_language, encoded, sizeof encoded) &&
+            !strcmp(s->application_language_source, source);
+        pthread_mutex_unlock(&s->lock);
+        return same ? 0 : problem(error, cap, "application language is already configured for this context");
+    }
+    memcpy(s->application_language, encoded, sizeof encoded);
+    memcpy(s->application_language_source, source, source_length + 1);
+    s->application_language_ready = 1;
+    emit(s, "application_language language=%s source=%s device_locale_backend=false",
+        s->application_language, s->application_language_source);
     pthread_mutex_unlock(&s->lock); return 0;
 }
 void botw_services_get_audio_gain(botw_services *s, float *main_applet, float *library_applet, float *transparent_rate) {
@@ -1045,6 +1086,20 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             emit(s, "local_user launch_parameter_kind=2 delivered=true bytes=%u scope=host_local_offline", PRESELECTED_STORAGE_SIZE);
         }
         return result;
+    } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 21) {
+        /* IApplicationFunctions::GetDesiredLanguage: no semantic input,
+         * one inline eight-byte LanguageCode, no buffer/handle transfer.
+         * Original sdk e3c04 proxy and libnx appletGetDesiredLanguage agree. */
+        if (r->buffer_descriptor_count)
+            return problem(error, cap, "ApplicationFunctions.GetDesiredLanguage does not accept buffer descriptors");
+        /* Domain data_size excludes framing padding. Without descriptors or
+         * special headers a session request can retain exactly eight trailing
+         * alignment bytes, whose contents are unspecified, not business data. */
+        if (r->domain ? r->payload_size != 0 : (r->payload_size != 0 && r->payload_size != 8))
+            return problem(error, cap, "ApplicationFunctions.GetDesiredLanguage requires no semantic input bytes");
+        if (!s->application_language_ready)
+            return problem(error, cap, "ApplicationFunctions.GetDesiredLanguage requires explicit application language configuration");
+        response(ipc, capacity, r, s->application_language, sizeof s->application_language, 0, 0); return 0;
     } else if (o->kind == OBJECT_APPLICATION_FUNCTIONS && r->command == 22) {
         /* Switchbrew AM_services: SetTerminateResult takes one u32 Result.
          * Preserve the guest's original failure rather than hiding it behind
