@@ -1,6 +1,6 @@
-# 《旷野之息》原生移植：本地程序准备与改写实验
+# 《旷野之息》原生移植：程序准备、宿主与真机实验
 
-本目录对应用户已确认的 D2R 式原生移植路线。**目前完成程序准备与改写实验，尚无可玩的 iOS 应用。** 现有 D2R 工作流不变。
+本目录对应用户已确认的 D2R 式原生移植路线。**开发版宿主已在 iPhone 上安装和执行原始 SDK 代码，尚不能游玩。** 现有 D2R 工作流不变。
 
 ## 已在当前输入上验证
 
@@ -21,7 +21,37 @@
 
 原版 D2R 改写器在两个模块的间接跳转处拒绝执行。新增的本地适配器识别有 unsigned 上界检查的只读 signed-offset 跳转表，再复用上游的密集落地垫实现；不移除原断言，不写死游戏地址。规则同时检查 W18 写入、标志位来源、控制流入口、表边界、目标地址与展开范围。两种人工合成的跳转形式经过 48 组原始 / 改写后的 Unicorn CPU 状态对比，核对通用寄存器、虚拟 x18、SP、NZCV 和落点。
 
-这项测试只证明新规则的人工合成用例，不代表整个游戏全部改写位置的语义等价验证已完成。JSON 报告始终保持 `semantic_equivalence_verified=false`、`guest_execution_tested=false`、`phone_ready=false`。
+这项测试只证明新规则的人工合成用例，不代表整个游戏全部改写位置的语义等价验证已完成。离线准备报告保持 `semantic_equivalence_verified=false`、`guest_execution_tested=false`、`phone_ready=false`。后续真实执行另记宿主日志，不反写离线报告。
+
+## 原生宿主与手机证据
+
+独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；框架中仍保留经过审计的七模块程序。遇到未知系统服务时记录原程序偏移并停止，不返回伪造的成功状态。
+
+2026-10-15 首轮真机测试，iPhone 15 Pro / iOS 27.2：
+
+- 本机组装 Guest.framework、开发签名与 `codesign --verify --deep --strict` 通过；独立 Bundle ID 为 `local.botw.native`，手机显示 `BOTW Native`。
+- `devicectl` 确认安装与启动成功。手机 `Documents/boot.log` 已取回，证实六模块映射、269,473 条重定位、34 个弱未定义引用归零、230 个门登记。
+- 原始 `_init_libc0` 已真实执行并返回；首轮宿主在 `nnosInitialize` 的线程优先级服务 SVC `0x0c` 停止。这是实际执行边界，不是游戏画面或可玩性验证。
+- 手机日志与签名包只保留本地 `outputs/botw-ios-fadf216/`。日志界面是开发中的真实启动记录，始终标明 `graphics_ready=false`、`gameplay_verified=false`。
+
+云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。
+
+复现组装：
+
+```sh
+PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native.guest_framework \
+  --report outputs/botw-native-base/report.json \
+  --rewrite outputs/botw-native-base/rewrite --output outputs/botw-guest-framework
+
+PYTHONPATH=scripts .tools/botw-venv/bin/python -m botw_native.ios assemble \
+  --shell outputs/botw-ios-shell/BOTWNative-shell.ipa \
+  --guest outputs/botw-guest-framework \
+  --report outputs/botw-native-base/report.json \
+  --rewrite outputs/botw-native-base/rewrite \
+  --output-app outputs/botw-ios-local/BOTWNative.app
+```
+
+下载的宿主必须与本地源码摘要匹配；使用历史构建时通过 `--source-root` 指向该提交的源码快照。`ios sign --help` 列出本地签名参数。签名校验会确认设备、证书、Team、Bundle ID、描述文件有效期，仅使用其允许的普通开发权限。
 
 ## 本地运行
 
@@ -63,7 +93,7 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
   .tools/botw-venv/bin/python -m unittest discover -s tests -v
 ```
 
-本次本地完整结果为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。新增 GitHub Actions 使用人工合成输入执行相同测试，不上传游戏文件。
+首阶段为 **66 项测试通过**：原有 D2R 49 项、新增 17 项，其中一项集成测试执行上述 48 组 CPU 状态对比。宿主阶段另增人工程序执行、框架布局、来源校验、ZIP 边界和本地签名流程测试。GitHub Actions 仅使用人工合成输入，不上传游戏文件。
 
 未安装可选原生实验依赖或未设置 `BOTW_REWRITER_PATH` 时，相关测试会明确标为跳过；不得把这种运行宣称为完整的原生实验测试通过。
 
@@ -72,8 +102,8 @@ BOTW_REWRITER_PATH=.tools/botw-native/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/p
 - 当前只支持已固定本体版本的 solid Zstandard NCZ，要求连续 section；不支持 NCZBLOCK 或直接解密 NSP。本地更新包 1.9.0 与两个 DLC 尚未应用。
 - 资源段尚未完整导出；当前输出不是可以导入 D2R Mobile 的 Data。
 - 上游指令改写器来自固定提交，本地识别扩展的源码摘要也记录在报告中。D2R 专用 cuts、obs、params 全部为零。
-- 下一阶段需建立塞尔达模块装载与启动顺序，接通系统服务，再适配游戏着色器容器和 NVN 图形路径。之后才能编译签名、安装手机，并以实际游戏画面验证。
-- 当前连接设备报告为 iPhone 15 Pro / iOS 27.2；没有向其安装测试包，也没有修改其系统设置。
+- 模块装载、初步 SDK 启动、构建签名及开发版装机路径已建立；后续仍需接通完整系统服务、审计并执行模块构造顺序、适配游戏着色器容器和 NVN 图形路径，最后验证真实游戏画面、操作与存档。
+- 安装的开发版不包含已导出的完整资源，尚未进入游戏；没有修改手机系统设置。
 
 游戏文件、密钥、生成的程序代码与日志只保留在被忽略的本地目录。仓库不分发这些内容。
 

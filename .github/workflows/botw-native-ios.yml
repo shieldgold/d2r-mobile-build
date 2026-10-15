@@ -5,6 +5,16 @@ on:
       - 'native/botw_host/**'
       - 'native/botw_app/**'
       - 'scripts/botw_native/build_ios_shell.py'
+      - 'scripts/source/select_xcode.py'
+      - 'tests/test_botw_runtime.py'
+      - '.github/workflows/botw-native-ios.yml'
+  pull_request:
+    paths:
+      - 'native/botw_host/**'
+      - 'native/botw_app/**'
+      - 'scripts/botw_native/build_ios_shell.py'
+      - 'scripts/source/select_xcode.py'
+      - 'tests/test_botw_runtime.py'
       - '.github/workflows/botw-native-ios.yml'
   workflow_dispatch:
 permissions:
