@@ -239,7 +239,8 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('GPU_STORAGE_INSTANCING_BASE_IDS_OK', result.stdout)
             for mode, expected in (('short-storage', 'storage range'), ('unbound-storage', 'unbound storage'),
-                                   ('negative-instance', 'instance range'), ('duplicate-storage', 'Duplicate Metal')):
+                                   ('negative-instance', 'instance range'), ('duplicate-storage', 'Duplicate Metal'),
+                                   ('wide-driver', 'exactly 32 bits'), ('unbound-driver', 'unbound storage driver')):
                 result = subprocess.run([str(exe), mode], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0, mode)
                 self.assertIn(expected, result.stderr)
@@ -672,13 +673,15 @@ STORAGE_FEATURE = r"""
     controls[0][8]=6;controls[1][8]=7;codes[0][8]=6;codes[1][8]=7;
     memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
     const char *storageMSL="#include <metal_stdlib>\nusing namespace metal;struct S{float4 instance[2];};struct U{uint4 instance[2];};struct W{uint value[12];};struct O{float4 p [[position]];float4 color;};"
-      "vertex O sv(uint v [[vertex_id]],uint bv [[base_vertex]],uint i [[instance_id]],uint bi [[base_instance]],device const S& s [[buffer(2)]],device W& w [[buffer(3)]],device const U& alias [[buffer(4)]]) {"
+      "vertex O sv(uint v [[vertex_id]],uint bv [[base_vertex]],uint i [[instance_id]],uint bi [[base_instance]],device const S& s [[buffer(2)]],device W& w [[buffer(3)]],device const U& alias [[buffer(4)]],constant uint& low [[buffer(5)]]) {"
       "uint index=i-bi,corner=v-bv;if(index>=2||corner>=6)return {float4(0),float4(0)};float2 p[6]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};"
-      "w.value[index*6+corner]=(index+1)*10+corner+1;return {float4(p[corner]*float2(.5,1)+s.instance[index].xy,0,1),float4(as_type<float2>(alias.instance[index].zw),0,1)};}"
+      "w.value[index*6+corner]=low+(index+1)*10+corner+1;return {float4(p[corner]*float2(.5,1)+s.instance[index].xy,0,1),float4(as_type<float2>(alias.instance[index].zw),0,1)};}"
       "fragment float4 sf(O v [[stage_in]]){return v.color;}";
-    botw_graphics_shader_binding sb[]={{BOTW_GRAPHICS_STORAGE,3,2},{BOTW_GRAPHICS_STORAGE,4,3},{BOTW_GRAPHICS_STORAGE,3,4}};
+    botw_graphics_shader_binding sb[]={{BOTW_GRAPHICS_STORAGE,3,2},{BOTW_GRAPHICS_STORAGE,4,3},{BOTW_GRAPHICS_STORAGE,3,4},{BOTW_GRAPHICS_STORAGE_ADDRESS_LOW,3,5}};
     if(argc>1&&!strcmp(argv[1],"duplicate-storage"))sb[2].metal_slot=3;
-    CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,storageMSL,"sv",sb,3));
+    if(argc>1&&!strcmp(argv[1],"wide-driver"))sb[0].kind=BOTW_GRAPHICS_STORAGE_ADDRESS_LOW;
+    if(argc>1&&!strcmp(argv[1],"unbound-driver"))sb[3].nvn_slot=7;
+    CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,storageMSL,"sv",sb,4));
     CHECK(botw_graphics_register_shader(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,storageMSL,"sf"));
     CHECK(nvnProgramSetShaders(&program,2,sd));
     nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);
@@ -690,7 +693,7 @@ STORAGE_FEATURE = r"""
     handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
     CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
     CHECK(pixels[0]==255&&pixels[1]==0&&pixels[12]==0&&pixels[13]==255);
-    uint32_t *written=(uint32_t*)(memory+1280);for(unsigned i=0;i<12;i++)CHECK(written[i]==(i/6+1)*10+i%6+1);
+    uint32_t *written=(uint32_t*)(memory+1280);for(unsigned i=0;i<12;i++)CHECK(written[i]==(uint32_t)((uint32_t)(gpu+1024)+(i/6+1)*10+i%6+1));
     puts("GPU_STORAGE_INSTANCING_BASE_IDS_OK");
 """
 

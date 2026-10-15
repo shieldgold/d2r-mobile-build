@@ -84,6 +84,8 @@ python3 -m scripts.botw_native.shaders \
 
 编译器额外记录 IR storage descriptor 的序号、cbuf bank/offset、数量及写访问标志。真实 37 项中仅两个字体 VS 使用该资源，均为 bank0、0x110、count1、只读；与 BNSH `PerCharacterParamBlock` storage slot0 以及 MSL buffer4/5/6 的 uint/uint2/uint4 别名一致。两个程序的 c0 唯一读取是 data[68]，即 slot0 地址低32位。清单可保留这项 `storage_audit` 证据，同时明确 `access_bounds_validated=false`；动态 c1/SSBO 访问尚未获准登记。
 
+`BOTW_GRAPHICS_STORAGE_ADDRESS_LOW` 可将已核实的单个 c0 地址低位读取映射为一个 32-bit Metal 常量，值直接来自当前 NVN storage 绑定的客体地址，完整范围仍须落在已登记内存池。人工 GPU 夹具将该低位参与写回并与真实客体地址逐字核对，区别于 Metal GPU 地址或默认值；无绑定和大于 32-bit 的声明明确失败。字体动态访问未完成验证前，私有包 loader 仍拒绝登记相关程序。
+
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
 ```c

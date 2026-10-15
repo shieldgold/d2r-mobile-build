@@ -294,8 +294,8 @@ int botw_graphics_register_shader(const void *control,size_t cs,const void *code
 static int registerShaderImpl(const void *control,size_t cs,const void *code,size_t ds,
     NVNshaderStage stage,const char *source,const char *entry,const botw_graphics_shader_binding *bindings,size_t count){
     if(count>64 || (count&&!bindings))return report("Invalid shader binding metadata");
-    for(size_t i=0;i<count;i++){if(bindings[i].kind<0 || bindings[i].kind>BOTW_GRAPHICS_STORAGE || bindings[i].nvn_slot>=(bindings[i].kind==BOTW_GRAPHICS_STORAGE?16:128) || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:16))return report("Shader binding metadata exceeds Metal limits");
-        for(size_t j=0;j<i;j++){BOOL same=(bindings[i].kind==bindings[j].kind)||((bindings[i].kind==BOTW_GRAPHICS_UNIFORM||bindings[i].kind==BOTW_GRAPHICS_STORAGE)&&(bindings[j].kind==BOTW_GRAPHICS_UNIFORM||bindings[j].kind==BOTW_GRAPHICS_STORAGE));if(same&&bindings[i].metal_slot==bindings[j].metal_slot)return report("Duplicate Metal resource binding map slot");}}
+    for(size_t i=0;i<count;i++){if(bindings[i].kind<0 || bindings[i].kind>BOTW_GRAPHICS_STORAGE_ADDRESS_LOW || bindings[i].nvn_slot>=(bindings[i].kind>=BOTW_GRAPHICS_STORAGE?16:128) || bindings[i].metal_slot>=(bindings[i].kind==BOTW_GRAPHICS_TEXTURE?128:16))return report("Shader binding metadata exceeds Metal limits");
+        for(size_t j=0;j<i;j++){BOOL same=(bindings[i].kind==bindings[j].kind)||((bindings[i].kind==BOTW_GRAPHICS_UNIFORM||bindings[i].kind>=BOTW_GRAPHICS_STORAGE)&&(bindings[j].kind==BOTW_GRAPHICS_UNIFORM||bindings[j].kind>=BOTW_GRAPHICS_STORAGE));if(same&&bindings[i].metal_slot==bindings[j].metal_slot)return report("Duplicate Metal resource binding map slot");}}
     if(!gpu || !control || !code || !source || !entry || cs<4 || ds<0x80 || cs>1<<20 || ds>16<<20 ||
        (stage!=NVN_SHADER_STAGE_VERTEX && stage!=NVN_SHADER_STAGE_FRAGMENT))
         return report("Invalid shader registration or unsupported shader stage");
@@ -537,7 +537,7 @@ static BWPipeline *pipeline(BWReplay *state){
         NSArray *arguments=stage.intValue==NVN_SHADER_STAGE_VERTEX?reflection.vertexBindings:reflection.fragmentBindings;
         for(id<MTLBinding> argument in arguments){if(!argument.used)continue;BOOL matched=NO;
             if(stage.intValue==NVN_SHADER_STAGE_VERTEX && argument.type==MTLBindingTypeBuffer && argument.index>=16 && argument.index<31 && state.attributes.length)matched=YES;
-            for(size_t i=0;i<n;i++){MTLBindingType type=(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind==BOTW_GRAPHICS_STORAGE)?MTLBindingTypeBuffer:b[i].kind==BOTW_GRAPHICS_TEXTURE?MTLBindingTypeTexture:MTLBindingTypeSampler;if(argument.type==type&&argument.index==b[i].metal_slot)matched=YES;}
+            for(size_t i=0;i<n;i++){MTLBindingType type=(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind>=BOTW_GRAPHICS_STORAGE)?MTLBindingTypeBuffer:b[i].kind==BOTW_GRAPHICS_TEXTURE?MTLBindingTypeTexture:MTLBindingTypeSampler;if(argument.type==type&&argument.index==b[i].metal_slot)matched=YES;}
             if(!matched)fatal("Metal resource has no explicitly validated NVN binding map");
         }
     }
@@ -562,7 +562,12 @@ static void applyResources(BWReplay *state,BWPipeline *ps,id<MTLRenderCommandEnc
     for(NSNumber *slot in state.vertices){NSDictionary *r=state.vertices[slot];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!pool)fatal("vertex buffer address bounds");[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:16+slot.unsignedIntegerValue];}
     for(NSNumber *stage in state.program.stageShaders){BOOL vertex=stage.intValue==NVN_SHADER_STAGE_VERTEX;BWShader *s=state.program.stageShaders[stage];const botw_graphics_shader_binding *b=s.bindings.bytes;size_t n=s.bindings.length/sizeof *b;
         for(size_t i=0;i<n;i++){NSString *key=resourceKey(stage,@(b[i].nvn_slot));
-            if(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind==BOTW_GRAPHICS_STORAGE){BOOL storage=b[i].kind==BOTW_GRAPHICS_STORAGE;NSDictionary *r=(storage?state.storage:state.uniforms)[key];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!r||!pool)fatal(storage?"unbound storage buffer or address bounds":"unbound uniform buffer or address bounds");
+            if(b[i].kind==BOTW_GRAPHICS_STORAGE_ADDRESS_LOW){NSDictionary *r=state.storage[key];size_t offset=0;
+                if(!r||![r[@"size"] unsignedLongLongValue]||!address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset))fatal("unbound storage driver address");
+                uint32_t low=(uint32_t)[r[@"address"] unsignedLongLongValue];NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;
+                for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot&&((id<MTLBufferBinding>)argument).bufferDataSize!=sizeof low)fatal("storage driver address range must be exactly 32 bits");
+                if(vertex)[encoder setVertexBytes:&low length:sizeof low atIndex:b[i].metal_slot];else[encoder setFragmentBytes:&low length:sizeof low atIndex:b[i].metal_slot];}
+            else if(b[i].kind==BOTW_GRAPHICS_UNIFORM||b[i].kind==BOTW_GRAPHICS_STORAGE){BOOL storage=b[i].kind==BOTW_GRAPHICS_STORAGE;NSDictionary *r=(storage?state.storage:state.uniforms)[key];size_t offset=0;BWPool *pool=address([r[@"address"] unsignedLongLongValue],[r[@"size"] unsignedLongLongValue],&offset);if(!r||!pool)fatal(storage?"unbound storage buffer or address bounds":"unbound uniform buffer or address bounds");
                 NSArray *args=vertex?ps.reflection.vertexBindings:ps.reflection.fragmentBindings;
                 for(id<MTLBinding> argument in args)if(argument.used&&argument.type==MTLBindingTypeBuffer&&argument.index==b[i].metal_slot){id<MTLBufferBinding> buffer=(id<MTLBufferBinding>)argument;if([r[@"size"] unsignedLongLongValue]<buffer.bufferDataSize || (pool.bufferOffset+offset)%MAX(1,buffer.bufferAlignment))fatal(storage?"storage range size/alignment does not satisfy the shader":"uniform range size/alignment does not satisfy the shader");}
                 if(vertex)[encoder setVertexBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];else[encoder setFragmentBuffer:pool.buffer offset:pool.bufferOffset+offset atIndex:b[i].metal_slot];}

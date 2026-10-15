@@ -31,7 +31,10 @@ int botw_graphics_register_shader(const void *control, size_t control_bytes,
                                   const char *entry);
 enum botw_graphics_binding_kind {
     BOTW_GRAPHICS_UNIFORM = 0, BOTW_GRAPHICS_TEXTURE = 1, BOTW_GRAPHICS_SAMPLER = 2,
-    BOTW_GRAPHICS_STORAGE = 3
+    BOTW_GRAPHICS_STORAGE = 3,
+    /* A proven c0 storage-table address-low read, derived from the actual
+     * NVN binding. This is the guest address, never a Metal GPU pointer. */
+    BOTW_GRAPHICS_STORAGE_ADDRESS_LOW = 4
 };
 typedef struct {
     enum botw_graphics_binding_kind kind;
