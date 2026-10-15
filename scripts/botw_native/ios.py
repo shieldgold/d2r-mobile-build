@@ -238,6 +238,8 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
         info['BOTWGuestAddressBits'] = expected['guest_address_bits']
         if 'guest_heap_policy' in expected:
             info['BOTWGuestHeapPolicy'] = expected['guest_heap_policy']['profile']
+        if 'guest_thread_stack_policy' in expected:
+            info['BOTWGuestThreadStackPolicy'] = expected['guest_thread_stack_policy']['profile']
         (app / 'Info.plist').write_bytes(plistlib.dumps(info, sort_keys=True))
         (app / 'BOTWNative').chmod(0o755)
         (app / 'Frameworks').mkdir()

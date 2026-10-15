@@ -91,10 +91,13 @@ def validate_structure(directory, name):
             'semantic_equivalence_verified': False}
 
 
-def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_policy=False):
-    if heap_policy and not host39:
-        raise ValueError('The explicit heap policy requires the audited Host39 pipeline')
+def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_policy=False, thread_stack=False):
+    if (heap_policy or thread_stack) and not host39:
+        raise ValueError('Explicit heap/thread stack policies require the audited Host39 pipeline')
     tool, module, output = verified_tool(tool), Path(module), Path(output)
+    if thread_stack:
+        from .thread_stack import verify_source_modules
+        verify_source_modules(module.parent)
     if heap_policy:
         from .nso import inspect_nso
         profile = json.loads((Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json').read_text())
@@ -124,6 +127,7 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_poli
     sites = output / f'{module.name}.sites.tsv'
     adaptation = None
     heap_adaptation = None
+    stack_adaptation = None
     generic_digest = hashlib.sha256(image.read_bytes()).hexdigest()
     if host39:
         from .hipc_address import apply, verify
@@ -144,6 +148,12 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_poli
             updated, heap_adaptation = apply_heap(initialized_image(module.read_bytes(), module.name),
                 updated, layout, generic_site_offsets=[int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()])
             verify_heap(updated, heap_adaptation, expected_input_sha256=host39_digest)
+        if thread_stack and module.name == 'main':
+            from .thread_stack import apply as apply_stack, verify as verify_stack
+            stack_input_digest = hashlib.sha256(updated).hexdigest()
+            updated, stack_adaptation = apply_stack(initialized_image(module.read_bytes(), module.name),
+                updated, generic_site_offsets=[int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()])
+            verify_stack(updated, stack_adaptation, expected_input_sha256=stack_input_digest)
         temporary = image.with_suffix('.host39.part')
         temporary.write_bytes(updated)
         temporary.replace(image)
@@ -159,4 +169,7 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_poli
     if heap_adaptation is not None:
         result['host39_image_sha256'] = heap_adaptation['input_image_sha256']
         result['heap_adaptation'] = heap_adaptation
+    if stack_adaptation is not None:
+        result['thread_stack_input_image_sha256'] = stack_adaptation['input_image_sha256']
+        result['thread_stack_adaptation'] = stack_adaptation
     return result

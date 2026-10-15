@@ -41,6 +41,11 @@ int botw_address_space_normalize_alignment(uint64_t original_alignment,
 int botw_address_space_validate_allocation(const botw_address_space_policy *policy,
     uint64_t address, uint64_t bytes, uint64_t normalized_alignment,
     char *error, size_t error_capacity);
+/* Inspect actual loaded main bytes, not metadata: 1=fixed base-v0 allocation
+ * alignment instruction+surrounding context verified, 0=legacy/no policy,
+ * -1=modified/truncated/unknown policy bytes. No memory is modified. */
+int botw_address_space_audit_thread_stack_image(const void *image, size_t image_size,
+    size_t text_end, char *error, size_t error_capacity);
 #ifdef __cplusplus
 }
 #endif

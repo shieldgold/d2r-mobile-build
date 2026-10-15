@@ -131,6 +131,23 @@ def _heap_policy(report, originals, rewrites, address_bits):
     return POLICY.copy()
 
 
+def _thread_stack_policy(report, originals, rewrites, address_bits):
+    policy = report.get('guest_thread_stack_policy')
+    adapted = {name for name, item in rewrites.items() if
+               'thread_stack_adaptation' in item or 'thread_stack_input_image_sha256' in item}
+    if policy is None:
+        if adapted:
+            raise ValueError('Thread stack adaptation requires an explicit thread stack policy')
+        return None
+    from .thread_stack import POLICY
+    if (address_bits != 39 or policy != POLICY or
+            any(type(policy.get(key)) is not type(value) for key, value in POLICY.items()) or adapted != {'main'}):
+        raise ValueError('Unsupported or incomplete explicit thread stack policy')
+    profile_path = Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json'
+    verify_profile(list(originals.values()), json.loads(profile_path.read_text()))
+    return POLICY.copy()
+
+
 def _text(data, label):
     try:
         return data.decode('utf-8')
@@ -319,6 +336,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
     originals, rewrites = _module_records(report)
     address_bits = _address_policy(report, originals, rewrites)
     heap_policy = _heap_policy(report, originals, rewrites, address_bits)
+    thread_stack_policy = _thread_stack_policy(report, originals, rewrites, address_bits)
     names = list(MODULE_NAMES if module_names is None else module_names)
     if not names or len(set(names)) != len(names) or any(name not in MODULE_NAMES for name in names):
         raise ValueError('Select unique known BOTW module names')
@@ -336,6 +354,20 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         layout = _layout(files['fixups'], originals[name], len(image))
         _audit_tables(files, image, layout, rewrites[name])
         address_image = image
+        if name == 'main' and not thread_stack_policy:
+            from .thread_stack import SITE, REPLACEMENT
+            if image[SITE:SITE + 4] == REPLACEMENT:
+                raise ValueError('Loaded thread stack instruction requires its explicit policy')
+        if thread_stack_policy and name == 'main':
+            from .thread_stack import verify as verify_stack
+            stack_manifest = rewrites[name]['thread_stack_adaptation']
+            if (not isinstance(stack_manifest, dict) or
+                    stack_manifest.get('source_image_sha256') != rewrites[name]['host_address_adaptation'].get('source_image_sha256')):
+                raise ValueError('Thread stack original identity differs from Host39 source')
+            digest = rewrites[name].get('thread_stack_input_image_sha256')
+            if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
+                raise ValueError('Thread stack adaptation requires its independently anchored input digest')
+            address_image = verify_stack(address_image, stack_manifest, expected_input_sha256=digest)
         if heap_policy and name == 'main':
             from .heap_policy import verify as verify_heap
             heap_manifest = rewrites[name]['heap_adaptation']
@@ -348,7 +380,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
             if heap_manifest.get('layout') != {key: layout[key] for key in
                     ('KEY_PAGE_OFF', 'PATCH_OFF', 'KEY_KRES0_IDX', 'KEY_KRES1_IDX')}:
                 raise ValueError('Heap parameter layout differs from the runtime key table')
-            address_image = verify_heap(image, heap_manifest, expected_input_sha256=digest)
+            address_image = verify_heap(address_image, heap_manifest, expected_input_sha256=digest)
         if address_bits == 39:
             from .hipc_address import verify
             adaptation = rewrites[name]['host_address_adaptation']
@@ -384,6 +416,8 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
                            'image_bytes': len(m['image']), 'layout': m['layout']} for m in modules]}
     if heap_policy:
         result['guest_heap_policy'] = heap_policy
+    if thread_stack_policy:
+        result['guest_thread_stack_policy'] = thread_stack_policy
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f'.{output_dir.name}.tmp-', dir=output_dir.parent))
     try:

@@ -185,6 +185,7 @@ static struct {
     size_t graphics_workspace_size;
     int host39_transport_audited;
     int heap_policy_active, heap_initial_sized;
+    int thread_stack_policy_active;
     size_t heap_size, root_size, image_bytes;
     /* Accessed by the real frontend display callback under lifecycle_lock. */
     void *vi_display, *vi_layer;
@@ -1597,6 +1598,7 @@ static int cleanup(void) {
     pthread_mutex_lock(&lifecycle_lock);
     state.graphics_started = 0; state.graphics_workspace = NULL; state.graphics_workspace_size = 0;
     state.host39_transport_audited = 0;
+    state.thread_stack_policy_active = 0;
     state.vi_initialized = 0; state.vi_display = state.vi_layer = NULL; state.vi_last_target_timestamp = 0;
     pthread_mutex_unlock(&lifecycle_lock);
     if (state.input) botw_input_unbind_shared_memory(state.input);
@@ -1669,6 +1671,18 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                 fail("bounded heap requires the fixed base-v0 Host39 entry profile");
             state.heap_policy_active = 1;
             report("heap_policy_loaded_audited=true parameter_sites=2 tsd_slots=KRES0,KRES1 experimental=true");
+        }
+        char stack_error[512]; Module *stack_main = &state.modules[0];
+        int stack_mode = botw_address_space_audit_thread_stack_image(stack_main->base,
+            stack_main->size, stack_main->text_end, stack_error, sizeof stack_error);
+        if (stack_mode < 0) fail("thread stack policy: %s", stack_error);
+        if (stack_mode) {
+            if (state.address_bits != 39 || !state.host39_transport_audited ||
+                    find_raw_symbol("nninitStartup") != (uint64_t)stack_main->base + 0x7352f8 ||
+                    find_raw_symbol("nnMain") != (uint64_t)stack_main->base + 0x735330)
+                fail("thread stack alignment requires the fixed base-v0 Host39 entry profile");
+            state.thread_stack_policy_active = 1;
+            report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-thread-stack-alignment-v1 alignment=16384 sites=1 size_unchanged=true original_allocator=true");
         }
         initialize_keys();
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");

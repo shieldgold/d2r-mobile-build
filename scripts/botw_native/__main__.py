@@ -30,11 +30,15 @@ def main(argv=None):
     parser.add_argument('--host39', action='store_true', help='Apply the fixed base-v0 host address transport adaptation')
     parser.add_argument('--heap-policy', choices=('bounded-host-memory-v1',),
                         help='Explicit experimental base-v0 heap/root parameters within actual host memory')
+    parser.add_argument('--thread-stack-policy', choices=('host-page-alignment-v1',),
+                        help='Fixed base-v0 source-stack allocator alignment for native 16 KiB pages')
     args = parser.parse_args(argv)
     if args.host39 and not args.rewrite:
         parser.error('--host39 requires --rewrite')
     if args.heap_policy and not args.host39:
         parser.error('--heap-policy requires --host39 and --rewrite')
+    if args.thread_stack_policy and not args.host39:
+        parser.error('--thread-stack-policy requires --host39 and --rewrite')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = {'schema': 1, 'status': 'started', 'phone_ready': False, 'guest_execution_tested': False,
@@ -80,6 +84,8 @@ def main(argv=None):
                 extensions.extend(('hipc_address.py', 'nso.py', 'rewrite.py'))
             if args.heap_policy:
                 extensions.append('heap_policy.py')
+            if args.thread_stack_policy:
+                extensions.append('thread_stack.py')
             report['rewriter'] = {'upstream_commit': UPSTREAM_COMMIT, 'sha256': TOOL_SHA256,
                                   'ruleset': 'native', 'private_gates': False,
                                   'local_extension_sha256': {
@@ -88,7 +94,7 @@ def main(argv=None):
             for module in modules:
                 print('Rewriting ' + module['name'], flush=True)
                 result = rewrite_module(tool, exefs / module['name'], output / 'rewrite', host39=args.host39,
-                                        heap_policy=bool(args.heap_policy))
+                                        heap_policy=bool(args.heap_policy), thread_stack=bool(args.thread_stack_policy))
                 report['rewrites'].append(result)
                 print(module['name'] + ': ' + result['status'], flush=True)
                 write_report(output, report)
@@ -99,6 +105,9 @@ def main(argv=None):
                 if args.heap_policy:
                     from .heap_policy import POLICY
                     report['guest_heap_policy'] = POLICY.copy()
+                if args.thread_stack_policy:
+                    from .thread_stack import POLICY
+                    report['guest_thread_stack_policy'] = POLICY.copy()
         write_report(output, report)
         print('Report: ' + str(output / 'report.json'), flush=True)
         return 1 if report['status'] == 'rewrite_failed' else 0

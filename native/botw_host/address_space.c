@@ -1,6 +1,7 @@
 #include "address_space.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 #define HOST39_LIMIT (UINT64_C(1) << 39)
 #define SDK_GUARD UINT64_C(0x4000)
@@ -70,4 +71,25 @@ int botw_address_space_validate_allocation(const botw_address_space_policy *poli
         ((address - guard) & (alignment - 1)))
         return diagnostic(error, capacity, "SDK allocation or guard lies outside its host39 region/alignment");
     return 0;
+}
+int botw_address_space_audit_thread_stack_image(const void *image, size_t size,
+    size_t text_end, char *error, size_t capacity) {
+    const size_t site = 0xa1d758, original_text_end = 23280432;
+    const uint32_t context[9] = {0xb900fa7b, 0xf9005273, 0x940059a1, 0x93407f17,
+        0x321203e2, 0xaa1703e0, 0xaa1603e1, 0x97ff5740, 0xf9007660};
+    if (!image) return diagnostic(error, capacity, "thread stack image is null");
+    if (size <= site) return 0; /* Small generic/synthetic image has no opt-in. */
+    if (size - site < sizeof(uint32_t))
+        return diagnostic(error, capacity, "thread stack allocation instruction is truncated");
+    uint32_t word; memcpy(&word, (const unsigned char *)image + site, sizeof word);
+    if (word == 0x321403e2) return 0; /* Original allocation alignment. */
+    if (word != context[4] || text_end != original_text_end || size < text_end ||
+        site + 20 > size)
+        return diagnostic(error, capacity, "thread stack instruction/layout differs from fixed base-v0 profile");
+    for (unsigned i = 0; i < 9; i++) {
+        memcpy(&word, (const unsigned char *)image + site - 16 + i * 4, sizeof word);
+        if (word != context[i])
+            return diagnostic(error, capacity, "thread stack actual allocation context differs at main+0x%zx", site - 16 + i * 4);
+    }
+    return 1;
 }
