@@ -21,6 +21,7 @@ static TextureBuilder *textureBuilderWrite(NVNtextureBuilder *raw){textureMemory
 static TextureView textureView(const NVNtextureView *raw){TextureView v={0};if(raw){textureMemory(raw,sizeof v,NO);memcpy(&v,raw,sizeof v);}return v;}
 static TextureView *textureViewWrite(NVNtextureView *raw){textureMemory(raw,sizeof(TextureView),YES);return (TextureView*)raw;}
 static void textureOut(void *p,size_t n){if(!p||(memoryAccessValidator&&!memoryAccessValidator(p,n,1)))fatal("texture getter output is not writable");texturePrepareWrite(p,n);}
+#include "../botw_host/protected_copy.h"
 static void textureEnsureMapping(BWTexture *t,const char *reason);
 static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView view,BOOL attachment);
 /* Selected views can outlive their descriptor entry or object-table record in
@@ -257,8 +258,8 @@ static void uploadTexture(BWTexture *input,id<MTLCommandBuffer> cb){
     textureEnsureMapping(input,"texture upload");BWTexture *t=input.base?:input;poolRetainForGPU(cb,t.mapping,NO);textureAuthority(t,cb);if(!t.blockLinear)return;
     const void *poolStorage=t.mapping.canonical;
     NSArray *bufferWrites=objc_getAssociatedObject(cb,&textureBufferWritesKey);for(NSValue *value in bufferWrites){NSRange r=value.rangeValue;if(memoryOverlap(poolStorage,t.layout.size,(const void*)r.location,r.length))fatal("private texture import aliases pending buffer writes");}
-    NSMutableData *snapshot=[NSMutableData dataWithLength:t.layout.size];if(!snapshot)fatal("texture pool snapshot allocation failed");vm_size_t got=0;
-    if((memoryAccessValidator&&!memoryAccessValidator(poolStorage,t.layout.size,0))||vm_read_overwrite(mach_task_self(),(vm_address_t)poolStorage,t.layout.size,(vm_address_t)snapshot.mutableBytes,&got)!=KERN_SUCCESS||got!=t.layout.size)fatal("texture pool storage is not readable");
+    NSMutableData *snapshot=[NSMutableData dataWithLength:t.layout.size];if(!snapshot)fatal("texture pool snapshot allocation failed");
+    if((memoryAccessValidator&&!memoryAccessValidator(poolStorage,t.layout.size,0))||botw_protected_vm_read(snapshot.mutableBytes,poolStorage,t.layout.size)!=KERN_SUCCESS)fatal("texture pool storage is not readable");
     const void *source=snapshot.bytes;NSData *hash=digest(source,t.layout.size);
     NSMutableDictionary *pending=texturePendingRecord(t,cb,NO);NSData *expected=pending[@"hash"]?:t.uploadHash;
     if(t.gpuWritten||[pending[@"gpu"] boolValue]){if(![hash isEqual:expected])fatal("texture CPU storage changed outside host writes; GPU content cannot be reconciled");return;}
@@ -334,7 +335,7 @@ NVN(nvnTextureGetViewOffset,ptrdiff_t,const NVNtexture *raw,const NVNtextureView
 static void textureDrain(void){for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);}
 static void textureReadBytes(const void *src,void *dst,size_t bytes,const char *reason){
     if(!src||bytes>UINTPTR_MAX-(uintptr_t)src||(memoryAccessValidator&&!memoryAccessValidator(src,bytes,0)))fatal(reason);
-    vm_size_t got=0;if(vm_read_overwrite(mach_task_self(),(vm_address_t)src,bytes,(vm_address_t)dst,&got)!=KERN_SUCCESS||got!=bytes)fatal(reason);
+    if(botw_protected_vm_read(dst,src,bytes)!=KERN_SUCCESS)fatal(reason);
 }
 static void texturePrepareWrite(void *dst,size_t bytes){if(memoryAccessValidator&&!memoryAccessValidator(dst,bytes,1))fatal("texture destination storage is not writable");char error[256];if(textureTrackingAvailable&&nvn_dirty_prepare(dst,bytes,error,sizeof error))fatal(error);textureVMAccess(dst,bytes,YES);}
 static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyRegion *raw,ptrdiff_t row,ptrdiff_t image){
@@ -354,9 +355,12 @@ static NSMutableData *textureSourceSnapshot(const void *source,nvn_texwrite_plan
     p->src_row=p->wb;p->src_img=image;p->src_bytes=bytes;return copy;
 }
 static void textureWriteBytes(void *destination,const void *source,size_t bytes,const char *reason){
-    while(bytes){mach_msg_type_number_t count=(mach_msg_type_number_t)MIN(bytes,1024u*1024u);if(vm_write(mach_task_self(),(vm_address_t)destination,(vm_offset_t)source,count)!=KERN_SUCCESS)fatal(reason);destination=(char*)destination+count;source=(const char*)source+count;bytes-=count;}
+    if(botw_protected_vm_write(destination,source,bytes)!=KERN_SUCCESS)fatal(reason);
 }
-static int textureWriteRun(void *opaque,uint64_t offset,const void *source,size_t bytes){return vm_write(mach_task_self(),(vm_address_t)((char*)opaque+offset),(vm_offset_t)source,(mach_msg_type_number_t)bytes)==KERN_SUCCESS?0:-1;}
+static int textureWriteRun(void *opaque,uint64_t offset,const void *source,size_t bytes){
+    uintptr_t address=(uintptr_t)opaque;if(offset>UINTPTR_MAX-address)return -1;
+    return botw_protected_vm_write((void*)(address+(uintptr_t)offset),source,bytes)==KERN_SUCCESS?0:-1;
+}
 static void textureCPUWrite(const NVNtexture *raw,const NVNtextureView *view,const NVNcopyRegion *region,const void *source,ptrdiff_t row,ptrdiff_t image){
     BWTexture *t=textureObject(raw);TextureView v=textureView(view);nvn_texwrite_plan p=texturePlan(t,v,region,row,image);if(!p.width)return;
     if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS)fatal("texture storage has no CPU mapping");

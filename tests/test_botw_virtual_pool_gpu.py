@@ -43,6 +43,8 @@ class VirtualPoolGPUTests(unittest.TestCase):
         self.assertNotIn('runtime error:', result.stderr)
         self.assertNotIn('ERROR: AddressSanitizer', result.stderr)
         self.assertNotIn('failed assertion', result.stderr)
+        if name == 'nocopy-entry-metadata':
+            print(result.stderr, end='')
 
     def test_finalize_waits_for_shared_event_controlled_inflight_gpu_and_releases_backing(self):
         self.mode('inflight-finalize')
@@ -74,6 +76,12 @@ class VirtualPoolGPUTests(unittest.TestCase):
 
     def test_copied_code_matches_gpu_producer_and_requires_cpu_cache_flush(self):
         self.mode('copied-code')
+
+    def test_graphics_copies_preserve_real_nocopy_gpu_coherence_and_finalize_ack(self):
+        self.mode('graphics-copy-coherence')
+
+    def test_driver_nocopy_subrange_vm_entry_effect_is_observed_with_actual_release(self):
+        self.mode('nocopy-entry-metadata')
 
     def test_recorded_logical_address_consumes_current_mapping_at_submit(self):
         self.mode('copy-remap')

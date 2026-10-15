@@ -9,6 +9,7 @@
 #include "kernel.h"
 #include "hipc_address.h"
 #include "address_space.h"
+#include "protected_copy.h"
 #include "../botw_input/input.h"
 #include "../botw_resources/romfs.h"
 #include "../botw_resources/savefs.h"
@@ -871,32 +872,8 @@ static int services_memory(void *opaque, uint64_t address, size_t length, int wr
     return external_memory(opaque, address, length, writable);
 }
 static kern_return_t writable_vm_span(uint64_t address, size_t bytes) {
-    if (!bytes) return KERN_SUCCESS;
-    if (!address || address > UINTPTR_MAX || bytes > UINTPTR_MAX - (uintptr_t)address)
-        return KERN_INVALID_ADDRESS;
-    vm_address_t cursor = (vm_address_t)address;
-    while (bytes) {
-        natural_t depth = 0;
-        for (unsigned submaps = 0;; submaps++) {
-            vm_address_t region = cursor; vm_size_t size = 0;
-            vm_region_submap_info_data_64_t info;
-            mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
-            kern_return_t result = vm_region_recurse_64(mach_task_self(), &region, &size,
-                &depth, (vm_region_recurse_info_t)&info, &count);
-            if (result != KERN_SUCCESS) return result;
-            if (count < VM_REGION_SUBMAP_INFO_COUNT_64) return KERN_FAILURE;
-            if (region > cursor || !size || cursor - region >= size) return KERN_INVALID_ADDRESS;
-            if (info.is_submap) {
-                if (submaps >= 64 || depth == UINT32_MAX) return KERN_FAILURE;
-                depth++; continue; /* Retain the queried address inside the submap. */
-            }
-            if (!(info.protection & VM_PROT_WRITE)) return KERN_PROTECTION_FAILURE;
-            vm_size_t available = size - (cursor - region);
-            size_t step = available < bytes ? (size_t)available : bytes;
-            cursor += step; bytes -= step; break;
-        }
-    }
-    return KERN_SUCCESS;
+    if (address > UINTPTR_MAX) return KERN_INVALID_ADDRESS;
+    return botw_protected_vm_span((const void *)(uintptr_t)address, bytes, VM_PROT_WRITE);
 }
 static int services_prepare_write(void *opaque, uint64_t address, size_t length,
         char *error, size_t capacity) {
@@ -917,11 +894,9 @@ static int protected_read_guest(const char *scope, uint64_t source, void *destin
     if (!bytes) return 0;
     if (!destination || !services_memory(NULL, source, bytes, 0))
         return guest_copy_error(scope, error, capacity, "guest read range", KERN_INVALID_ADDRESS);
-    vm_size_t copied = 0;
-    kern_return_t result = vm_read_overwrite(mach_task_self(), (vm_address_t)source, (vm_size_t)bytes,
-        (vm_address_t)(uintptr_t)destination, &copied);
-    if (result != KERN_SUCCESS || copied != bytes)
-        return guest_copy_error(scope, error, capacity, "protected guest read", result == KERN_SUCCESS ? KERN_FAILURE : result);
+    kern_return_t result = botw_protected_vm_read(destination, (const void *)(uintptr_t)source, bytes);
+    if (result != KERN_SUCCESS)
+        return guest_copy_error(scope, error, capacity, "protected guest read", result);
     return 0;
 }
 static int protected_write_guest(const char *scope, uint64_t destination, const void *source,
@@ -936,8 +911,7 @@ static int protected_write_guest(const char *scope, uint64_t destination, const 
     kern_return_t result = writable_vm_span(destination, bytes);
     if (result != KERN_SUCCESS)
         return guest_copy_error(scope, error, capacity, "protected guest write permissions", result);
-    result = vm_write(mach_task_self(), (vm_address_t)destination,
-        (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
+    result = botw_protected_vm_write((void *)(uintptr_t)destination, source, bytes);
     return result == KERN_SUCCESS ? 0 : guest_copy_error(scope, error, capacity, "protected guest write", result);
 }
 static int services_read_guest(void *opaque, uint64_t source, void *destination, size_t bytes,

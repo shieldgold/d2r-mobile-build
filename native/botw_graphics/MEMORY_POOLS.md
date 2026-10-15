@@ -54,6 +54,12 @@ ordinary copied cache 仍需要既有 Flush/Invalidate 同步。代码匹配和�
 
 Map 请求先验证 count/全数组可读性再分配并读取一次快照；整个 batch 校验后才执行 interval 事务。桥接每批上限4096请求，两份40B快照共320KiB；该上限不是 NVN 硬件限制。count0不读数组，unknown class、unaligned/bounds/unmap-offset错误或分配失败不发布 span/generation。
 
+## 受保护的宿主复制
+
+runtime 与 graphics 共用 `botw_host/protected_copy.h` 的 Mach 复制原语。图形的 private upload snapshot、通用读取、通用写入与 block-linear run 写入保留原 logical、authority、dirty preparation 和已有 snapshot 顺序；实际复制先校验完整 source READ/destination WRITE VM 跨度，再按4095字节上限及两侧宿主页边界分块。数值 VA 重叠选择 memmove 方向，所有 Mach 错误和短读取仍受控返回；没有新增整幅 snapshot 或裸指针复制。
+
+4095 是桥接的保守分块上限，依据已审公开 XNU small kernel-buffer 分支和自有映射实测，不是 OS 公共 API 的“不分裂 VM entry”保证，也不修复已有分裂。NoCopy 的单 VM region 硬检查继续有效；ordinary exact 的旧 RO/NONE metadata 准入不能作为满足 Apple 真实 NoCopy 合同的证据。每次复制仍要求调用方维持操作数所有权与寿命，不承诺并发 remap 的事务，也不对不同数值 VA 的任意 physical-alias 重叠提供无条件 memmove 语义。
+
 ## GPU 与借用后备寿命
 
 CPU lease 同线程获取释放，GPU command 使用独立 resource snapshot/pins；每次 commit 在提交前登记，提交后不再分配登记对象。completion/deallocator 不获取 graphics/registry 锁。已完成和错误 command record 在串行维护点回收，错误继续报告，不能无限积累。

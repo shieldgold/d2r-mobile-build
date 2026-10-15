@@ -27,6 +27,15 @@ static int vpMap(NVNmemoryPool *virt,NVNmemoryPool *physical,uint64_t poff,uint6
 static NVNcommandHandle vpCopy(NVNcommandBuffer *command,uint64_t source,uint64_t destination,size_t bytes){
     vp_nvnCommandBufferBeginRecording(command);vp_nvnCommandBufferCopyBufferToBuffer(command,source,destination,bytes,0);return vp_nvnCommandBufferEndRecording(command);
 }
+static unsigned vpOwnedVMLeaves(void *memory,size_t bytes){
+    uintptr_t at=(uintptr_t)memory,end=at+bytes;unsigned leaves=0;
+    while(at<end){natural_t depth=0;vm_address_t region=at;vm_size_t span=0;vm_region_submap_info_data_64_t info={0};
+        for(;;){mach_msg_type_number_t count=VM_REGION_SUBMAP_INFO_COUNT_64;
+            if(vm_region_recurse_64(mach_task_self(),&region,&span,&depth,(vm_region_recurse_info_t)&info,&count)!=KERN_SUCCESS||count<VM_REGION_SUBMAP_INFO_COUNT_64||region>at||!span||at-region>=span)return 0;
+            if(info.is_submap){depth++;region=at;continue;}break;}
+        at+=MIN((size_t)(end-at),(size_t)(span-(at-region)));leaves++;
+    }return leaves;
+}
 /* A real shared-event wait keeps the command in flight until this fixture
  * explicitly releases it. Finalize runs on a cooperating bounded worker. */
 @interface VPGatedQueue : NSObject
@@ -81,6 +90,16 @@ int main(int argc,char **argv){
     VP_LOAD(nvnCommandBufferInitialize);VP_LOAD(nvnCommandBufferBeginRecording);VP_LOAD(nvnCommandBufferEndRecording);VP_LOAD(nvnCommandBufferCopyBufferToBuffer);
     size_t page=65536;unsigned char *p=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*q=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*out=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
     VP_CHECK(p!=MAP_FAILED&&q!=MAP_FAILED&&out!=MAP_FAILED);for(size_t i=0;i<page*2;i++){p[i]=(unsigned char)(i*13+7);q[i]=(unsigned char)(i*17+29);}memset(out,0xa5,page*2);
+    if(!strcmp(mode,"nocopy-entry-metadata")){
+        unsigned before=vpOwnedVMLeaves(p,page*2);VP_CHECK(before==1);dispatch_group_t released=dispatch_group_create();dispatch_group_enter(released);__weak id<MTLBuffer> weak;
+        unsigned during=0;@autoreleasepool{id<MTLBuffer> resource=[gpu newBufferWithBytesNoCopy:p+getpagesize() length:page options:MTLResourceStorageModeShared deallocator:^(void *bytes,NSUInteger length){(void)bytes;(void)length;dispatch_group_leave(released);}];VP_CHECK(resource);weak=resource;during=vpOwnedVMLeaves(p,page*2);resource=nil;}
+        VP_CHECK(!dispatch_group_wait(released,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC))&&!weak);unsigned after=vpOwnedVMLeaves(p,page*2);VP_CHECK(during&&after);
+        fprintf(stderr,"NOCOPY_DRIVER_VM_ENTRIES before=%u during=%u after_release=%u actual_deallocator_ack=1\n",before,during,after);botw_graphics_shutdown();VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_nocopy-entry-metadata_OK");return 0;
+    }
+    if(!strcmp(mode,"graphics-copy-coherence")){
+        size_t offset=(size_t)getpagesize()/2;textureReadBytes(q+offset,p+offset,page,"graphics bulk read before NoCopy");textureWriteBytes(p+offset,q+offset,page,"graphics bulk write before NoCopy");VP_CHECK(!textureWriteRun(p,offset,q+offset,page));
+        unsigned pLeaves=vpOwnedVMLeaves(p,page*2),qLeaves=vpOwnedVMLeaves(q,page*2);fprintf(stderr,"GRAPHICS_COPY_BEFORE_NOCOPY p_leaves=%u q_leaves=%u\n",pLeaves,qLeaves);VP_CHECK(pLeaves==1&&qLeaves==1);
+    }
     NVNdeviceBuilder db;NVNdevice device;vp_nvnDeviceBuilderSetDefaults(&db);VP_CHECK(vp_nvnDeviceInitialize(&device,&db));
     NVNmemoryPool physical,other,virtualPool,destination;VP_CHECK(vpPool(&physical,&device,p,page*2,0x189));VP_CHECK(vpPool(&other,&device,q,page*2,0x189));VP_CHECK(vpPool(&virtualPool,&device,NULL,page*2,0x221));VP_CHECK(vpPool(&destination,&device,out,page*2,0x22));
     VP_CHECK(!vp_nvnMemoryPoolMap(&physical)&&!vp_nvnMemoryPoolGetBufferAddress(&physical)&&!vp_nvnMemoryPoolMap(&virtualPool));
@@ -143,7 +162,12 @@ int main(int argc,char **argv){
     if(encodeError||shortUniform){int (*checked)(char*,size_t)=dlsym(RTLD_DEFAULT,"botw_graphics_shutdown_checked");VP_CHECK(checked);char error[512];int result=checked(error,sizeof error);fprintf(stderr,"CHECKED_SHUTDOWN_AFTER_ERROR=%d %s\n",result,error);VP_CHECK(result);VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));printf("VIRTUAL_POOL_REAL_GPU_%s_OK\n",mode);return 0;}
     int physicalRetired=0;
 
-    if(!strcmp(mode,"shader-buffers")||!strcmp(mode,"sampler-device")||copiedCode){/* Completed in the resource fixture above. */}
+    if(!strcmp(mode,"graphics-copy-coherence")){
+        __weak id<MTLBuffer> borrowed;@autoreleasepool{borrowed=((BWPool*)get(&physical,[BWPool class])).buffer;}VP_CHECK(borrowed);size_t offset=(size_t)getpagesize()/2;
+        memset(q+offset,0x4b,page);textureReadBytes(q+offset,p+offset,page,"graphics live NoCopy read");textureWriteBytes(p+offset,q+offset,page,"graphics live NoCopy write");VP_CHECK(!textureWriteRun(p,offset,q+offset,page));
+        VP_CHECK(vpOwnedVMLeaves(p,page*2)==1&&vpOwnedVMLeaves(q,page*2)==1);handle=vpCopy(&command,base,(uintptr_t)out,page*2);vp_nvnQueueSubmitCommands(&queue,1,&handle);vp_nvnQueueFinish(&queue);VP_CHECK(!memcmp(out,p,page*2));
+        vp_nvnMemoryPoolFinalize(&physical);physicalRetired=1;VP_CHECK(!borrowed);VP_CHECK(!munmap(p,page*2));p=MAP_FAILED;
+    }else if(!strcmp(mode,"shader-buffers")||!strcmp(mode,"sampler-device")||copiedCode){/* Completed in the resource fixture above. */}
     else if(!strcmp(mode,"inflight-finalize")||!strcmp(mode,"inflight-remap")){
         int remap=!strcmp(mode,"inflight-remap");uint64_t oldGeneration=nvn_vpool_generation();
         BWQueue *queueObject=get(&queue,[BWQueue class]);BWPool *physicalObject=get(&physical,[BWPool class]);__weak id<MTLBuffer> weakBacking=physicalObject.buffer;
