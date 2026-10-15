@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = ('main', 'subsdk0', 'subsdk1', 'subsdk2', 'subsdk3', 'sdk')
 
 
-def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False, entropy_service=False, query_stack=False, priority_service=False, query_zero=False):
+def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False, entropy_service=False, query_stack=False, priority_service=False, query_zero=False, corrupt_stack=False, symbol_interposition=False, protected_override=False):
     out = root / 'botw'
     out.mkdir(exist_ok=True)
     raw = bytearray(0x14000)
@@ -33,6 +33,8 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
             symbols.append((sum(len(s) + 1 for s in names[:-1]), 0x12, 0, 0, 0, 0))
             delta = (0x8200 - 0x100) // 4
             struct.pack_into('<II', raw, 0x100, 0x58000010 | (delta << 5), 0xd61f0200)
+    if name == 'sdk' and corrupt_stack:
+        struct.pack_into('<III', raw, 0x100, 0xd2800000, 0x9100001f, 0xd61f0000)
     if name == 'sdk' and (entropy_service or priority_service):
         # A genuine rewritten SVC gate obtains the host entry from the TSD key page.
         struct.pack_into('<IIIII', raw, 0x100, 0xd2820021 if priority_service else 0xd2800161, 0x14003fbf,
@@ -52,6 +54,16 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
         gate = (0xa9bf7bfd, 0xd53bd07e, adrp, 0xf9400fbd, 0x8b1d03de,
                 0xf94003de, 0xf94003fd, 0xd63f03c0, 0xa8c17bfd, back)
         struct.pack_into('<' + 'I' * len(gate), raw, 0x10000, *gate)
+    override_index = None
+    if symbol_interposition and name in ('main', 'sdk'):
+        names.append('application_override')
+        override_index = len(symbols)
+        symbols.append((sum(len(s) + 1 for s in names[:-1]), 0x22 if name == 'sdk' else 0x12,
+                        3 if name == 'sdk' and protected_override else 0, 1, 0x200, 4))
+        struct.pack_into('<I', raw, 0x200, 0xd4200000 if name == 'sdk' else 0xd65f03c0)
+        if name == 'sdk':
+            delta = (0x8200 - 0x100) // 4
+            struct.pack_into('<II', raw, 0x100, 0x58000010 | (delta << 5), 0xd61f0200)
     names.append('optional_weak')
     symbols.append((sum(len(s) + 1 for s in names[:-1]), 0x22, 0, 0, 0, 0))
     strings = ('\0'.join(names) + '\0').encode()
@@ -61,6 +73,8 @@ def image(root, name, *, bad_type=False, text_reloc=False, invoke_missing=False,
     struct.pack_into('<II', raw, 0x8a00, 1, len(symbols))
     relocs = [(0x100 if text_reloc else 0x8210, 999 if bad_type else 1027, 0x120),
               (0x8218, ((len(symbols) - 1) << 32) | 1025, 0)]
+    if symbol_interposition and name == 'sdk':
+        relocs.append((0x8200, (override_index << 32) | 1025, 0))
     if query_stack or query_zero:
         relocs.append((0x8208, 1027, 0x8220))
     if invoke_missing:
@@ -107,7 +121,7 @@ class NativeRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='botw-synthetic-') as d:
             root = Path(d)
             for name in MODULES:
-                image(root, name, **(options if name == 'sdk' else {}))
+                image(root, name, **(options if name == 'sdk' or options.get('symbol_interposition') else {}))
             return subprocess.run([str(self.exe), str(root), *flags], capture_output=True,
                                   text=True, timeout=10)
 
@@ -156,6 +170,23 @@ class NativeRuntimeTests(unittest.TestCase):
         p = self.run_host('--sdk-probe', query_zero=True)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn('query_memory=free', p.stdout)
+
+    def test_guest_corrupt_stack_fault_is_recovered_on_signal_stack(self):
+        p = self.run_host('--sdk-probe', corrupt_stack=True)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('error=guest CPU fault signal=', p.stdout)
+        self.assertIn('host_stage=stopped', p.stdout)
+        self.assertNotIn('restore alternate signal stack failed', p.stdout)
+
+    def test_sdk_weak_definition_uses_main_application_override(self):
+        p = self.run_host('--sdk-probe', symbol_interposition=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn('sdk_probe_completed=true', p.stdout)
+
+    def test_protected_definition_stays_local(self):
+        p = self.run_host('--sdk-probe', symbol_interposition=True, protected_override=True)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn('error=guest CPU fault signal=', p.stdout)
 
     def test_unimplemented_strong_call_stops_instead_of_returning_success(self):
         p = self.run_host('--sdk-probe', invoke_missing=True)

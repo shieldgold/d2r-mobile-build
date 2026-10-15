@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/ucontext.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -57,13 +58,18 @@ static struct {
     botw_host_event event;
     sigjmp_buf recovery;
     pthread_t owner;
-    volatile sig_atomic_t active, fault_signal;
+    volatile sig_atomic_t active, fault_signal, guest_executing;
+    volatile uintptr_t fault_pc;
+    stack_t previous_stack;
+    void *signal_stack;
+    unsigned signal_count;
+    int alternate_stack_installed;
     int guest_started;
-    struct sigaction previous[3];
+    struct sigaction previous[4];
 } state;
 extern void botw_gate(void);
 extern unsigned char botw_unimplemented_stubs[];
-static const int caught_signals[] = {SIGSEGV, SIGBUS, SIGILL};
+static const int caught_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
 
 static void report(const char *format, ...) {
     char message[2048]; va_list ap; va_start(ap, format);
@@ -75,6 +81,7 @@ static void fail(const char *format, ...) {
     char message[1536]; va_list ap; va_start(ap, format);
     vsnprintf(message, sizeof message, format, ap); va_end(ap);
     report("error=%s", message);
+    state.guest_executing = 0;
     siglongjmp(state.recovery, 1);
 }
 static int in_range(size_t off, size_t size, size_t total) { return off <= total && size <= total - off; }
@@ -229,7 +236,7 @@ static uint64_t find_symbol(const char *name) {
         Module *m = &state.modules[j];
         for (unsigned i = 1; i < m->sym_count; i++) {
             const Sym *s = symbol_at(m, i);
-            if (s->section && !strcmp(symbol_name(m, s), name)) return defined_value(m, s);
+            if (s->section && s->info >= 0x10 && !strcmp(symbol_name(m, s), name)) return defined_value(m, s);
         }
     }
     return 0;
@@ -257,7 +264,11 @@ static void relocate(Module *m) {
             value = (uint64_t)m->base + r.addend;
         } else if (type == 257 || type == 1025 || type == 1026) {
             const Sym *s = symbol_at(m, index); const char *name = symbol_name(m, s);
-            value = s->section ? defined_value(m, s) : find_symbol(name);
+            /* BOTW rtld +0xcd8 checks visibility; default-visible symbols use
+               global first-definition lookup at +0xd28 even when defined here.
+               This allows main's strong allocators to preempt SDK weak exports. */
+            if (s->section && ((s->other & 3) || (s->info >> 4) == 0)) value = defined_value(m, s);
+            else { value = find_symbol(name); if (!value && s->section) value = defined_value(m, s); }
             if (!value && !s->section) {
                 if (s->info >> 4 == 2) { state.weak_zero++; value = 0; }
                 else value = unsupported_stub(name);
@@ -380,20 +391,53 @@ static uint64_t need_entry(const char *name) {
     report("entry_resolved=%s", name); return p;
 }
 static void call_entry(const char *name, int two_args) {
-    uint64_t p = need_entry(name); report("entry_called=%s", name); state.guest_started = 1;
+    uint64_t p = need_entry(name); report("entry_called=%s", name); state.guest_started = 1; state.guest_executing = 1;
     if (two_args) ((void (*)(uint64_t, uint64_t))p)(0x1001, 0);
     else ((void (*)(void))p)();
+    state.guest_executing = 0;
     report("entry_returned=%s guest_execution_tested=true", name);
 }
 static void signal_handler(int number, siginfo_t *info, void *context) {
-    (void)info; (void)context;
-    if (state.active && pthread_equal(pthread_self(), state.owner)) { state.fault_signal = number; siglongjmp(state.recovery, 1); }
-    for (unsigned i = 0; i < 3; i++) if (caught_signals[i] == number) {
+    (void)info;
+    ucontext_t *uc = context;
+    uintptr_t pc = (uintptr_t)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+    int guest_pc = pc == 0; /* A guest indirect branch to NULL also needs recovery. */
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
+        uintptr_t base = (uintptr_t)state.modules[i].base;
+        if (base && pc >= base && pc - base < state.modules[i].size) guest_pc = 1;
+    }
+    if (state.active && state.guest_executing && guest_pc && pthread_equal(pthread_self(), state.owner)) {
+        state.fault_signal = number; state.fault_pc = pc;
+        state.guest_executing = 0; siglongjmp(state.recovery, 1);
+    }
+    /* Do not relabel bugs in the loader, host callbacks, or unrelated app threads
+       as guest CPU faults. Preserve the process's previous signal disposition. */
+    for (unsigned i = 0; i < state.signal_count; i++) if (caught_signals[i] == number) {
         sigaction(number, &state.previous[i], NULL); raise(number); return;
     }
 }
+static void install_signal_boundary(void) {
+    if (sigaltstack(NULL, &state.previous_stack)) fail("read existing alternate signal stack");
+    size_t size = 64 * 1024; state.signal_stack = malloc(size);
+    if (!state.signal_stack) fail("allocate guest fault signal stack");
+    stack_t alternate = {.ss_sp = state.signal_stack, .ss_size = size, .ss_flags = 0};
+    if (sigaltstack(&alternate, NULL)) fail("install guest fault signal stack");
+    state.alternate_stack_installed = 1;
+    struct sigaction action; memset(&action, 0, sizeof action);
+    action.sa_sigaction = signal_handler; action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    for (unsigned i = 0; i < sizeof caught_signals / sizeof caught_signals[0]; i++) {
+        if (sigaction(caught_signals[i], &action, &state.previous[i])) fail("install guest CPU fault handler");
+        state.signal_count++;
+    }
+}
 static void cleanup(void) {
-    for (unsigned i = 0; i < 3; i++) sigaction(caught_signals[i], &state.previous[i], NULL);
+    for (unsigned i = 0; i < state.signal_count; i++) sigaction(caught_signals[i], &state.previous[i], NULL);
+    /* Darwin validates ss_size even with SS_DISABLE (an initially disabled
+       stack is reported with size zero). Supply the documented minimum. */
+    if (state.previous_stack.ss_flags & SS_DISABLE) state.previous_stack.ss_size = MINSIGSTKSZ;
+    if (!state.alternate_stack_installed || !sigaltstack(&state.previous_stack, NULL)) free(state.signal_stack);
+    else report("error=restore alternate signal stack failed; retaining fault stack memory");
     for (unsigned i = 0; i < state.key_count; i++) { pthread_setspecific(state.keys[i], NULL); pthread_key_delete(state.keys[i]); }
     for (unsigned i = 0; i < MODULE_COUNT; i++) if (state.modules[i].base) munmap(state.modules[i].base, state.modules[i].size);
     for (unsigned i = 0; i < state.stub_count; i++) free(state.stubs[i]);
@@ -403,16 +447,13 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
     (void)documents; /* This stage never opens saves or other user files. */
     if (pthread_mutex_trylock(&run_lock)) return 2;
     memset(&state, 0, sizeof state); state.event = event; state.owner = pthread_self();
-    struct sigaction action; memset(&action, 0, sizeof action); action.sa_sigaction = signal_handler; action.sa_flags = SA_SIGINFO;
-    sigemptyset(&action.sa_mask);
-    for (unsigned i = 0; i < 3; i++) sigaction(caught_signals[i], &action, &state.previous[i]);
     int result = 0;
     if (sigsetjmp(state.recovery, 1)) {
         result = 1;
-        if (state.fault_signal) report("error=guest CPU fault signal=%d", state.fault_signal);
+        if (state.fault_signal) report("error=guest CPU fault signal=%d pc=0x%llx", state.fault_signal, (unsigned long long)state.fault_pc);
         report("host_stage=stopped guest_execution_started=%s phone_ready=false nnMain_completed=false", state.guest_started ? "true" : "false");
     } else {
-        state.active = 1;
+        install_signal_boundary(); state.active = 1;
         if (!root || !*root || mode < BOTW_HOST_LOAD_ONLY || mode > BOTW_HOST_BOOT_GAME) fail("invalid host run arguments");
         report("host_stage=loading phone_ready=false guest_execution_tested=false");
 #if TARGET_OS_IPHONE
