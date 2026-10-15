@@ -370,6 +370,34 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_triangle_strip_topology_reaches_full_quad_pixels_and_instance_writeback(self):
+        ordinary = METAL_SMOKE.replace('float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};',
+            'float2 p[4]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(1,1)};')
+        ordinary = ordinary.replace('nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);',
+                                    'nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLE_STRIP,0,4);')
+        strip = STORAGE_FEATURE.replace('corner>=6', 'corner>=4').replace('uint value[12]', 'uint value[8]')
+        strip = strip.replace('float2 p[6]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(-1,1),float2(1,-1),float2(1,1)};',
+                              'float2 p[4]={float2(-1,-1),float2(1,-1),float2(-1,1),float2(1,1)};')
+        strip = strip.replace('index*6+corner', 'index*4+corner').replace('i<12', 'i<8').replace('(i/6+1)*10+i%6+1', '(i/4+1)*10+i%4+1')
+        strip = strip.replace('writable={gpu+1280,48}', 'writable={gpu+1280,32}').replace('profile={6,2,3', 'profile={4,2,3')
+        strip = strip.replace('NVN_DRAW_PRIMITIVE_TRIANGLES,3,6,5', 'NVN_DRAW_PRIMITIVE_TRIANGLE_STRIP,3,4,5')
+        instanced = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', strip + '    nvnMemoryPoolFinalize(&pool);')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            for name, smoke in (('ordinary', ordinary), ('instanced', instanced)):
+                harness = path / (name + '.c'); harness.write_text(smoke); exe = path / name
+                result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                    '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                    '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = subprocess.run([str(exe)], capture_output=True, text=True)
+                if result.returncode == 77:
+                    self.skipTest('No Metal device')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+                if name == 'instanced':
+                    self.assertIn('GPU_STORAGE_INSTANCING_BASE_IDS_OK', result.stdout)
+
     def test_array_texture_layers_mips_scalar_types_and_cpu_updates_reach_gpu_pixels(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'

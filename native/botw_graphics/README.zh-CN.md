@@ -11,7 +11,7 @@
 
 接口查询可返回尚未实现的公开 NVN 函数地址；真正调用时按名字报错并终止。未知名称返回空；布尔接口出错返回 0，不以无操作成功代替实现。`implemented.inc` 是实现表，`unsupported.inc` 是明确失败表。每个已实现接口与公开 NVN 原型有编译期签名断言。
 
-纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArraysInstanced 已验证非零 first/baseInstance 下的相对顶点/实例编号与两块不同颜色的实际像素；实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
+纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
 数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。
 
@@ -103,6 +103,8 @@ int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof erro
 ```
 
 `directory` 在手机为用户私有 `Documents/botw-shaders`。loader 只读有界相对文件名，拒绝 symlink 和路径穿越，核验文件长度/摘要、NVN 原始头、入口阶段及全部阶段引用。所有 ready 项先完成 Metal 编译预检，逐项从实际 MSL 声明反推资源槽，再与清单和 BNSH 反射交叉核对。成功后 `declared_entries` 是 unique 身份总数，`registered_entries` 是已登记数量，`unsupported_entries` 是仅诊断数量；每个未支持项都在 stderr 记录完整身份和原因。遇到未知 shader 的 `ProgramSetShaders` 仍明确失败。
+
+本地私有 GPU 探针还按原始 control/code 匹配，分别运行真实普通/扩展字体 VS 与字体 FS，绑定人工矩阵、字符 SSBO、顶点流和两层图集。firstVertex=3、baseInstance=5、两实例 triangle strip 输出的左右红绿矩形逐像素一致；普通/扩展 SSBO 少1字节均在绘制前拒绝。这是人工输入下的真实 shader 验证，离屏工作没有增加游戏呈现帧数。
 
 本机严格编译并实际 Metal 加载新私有包的结果为 `REGISTERED=37 UNSUPPORTED=0 TOTAL=37`。此前 `ranges-v2`/`storage-audit` 的 35/2 包保留用于旧版本兼容核验。登记全部身份不等于游戏图形功能齐备；字体片元的二维数组采样已由人工 GPU 夹具验证；实际游戏的纹理格式、view、混合及命令仍须逐项验收。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
 
