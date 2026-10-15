@@ -18,18 +18,45 @@ HOST = r'''
 #include <string.h>
 #include <unistd.h>
 static unsigned ticks;
+static void diagnose_window(const char *phase) {
+    assert(NSThread.isMainThread);
+    NSApplication *app = NSApplication.sharedApplication;
+    NSWindow *window = app.windows.firstObject;
+    fprintf(stdout, "synthetic_window_diagnostic phase=%s windows=%lu visible=%d key=%d "
+        "occlusion=%lu screen=%s app_active=%d app_hidden=%d ticks=%u run_loop=%s\n",
+        phase, (unsigned long)app.windows.count, window.visible, window.keyWindow,
+        (unsigned long)window.occlusionState, window.screen.localizedName.UTF8String ?: "(none)",
+        app.active, app.hidden, ticks, NSRunLoop.currentRunLoop.currentMode.UTF8String ?: "(none)");
+    fflush(stdout);
+}
 int botw_host_set_address_space(unsigned bits) {
     assert(bits == 39);
     return getenv("BOTW_MAC_TEST_CONFIG_FAIL") ? 1 : 0;
 }
 int botw_host_set_graphics_layer(void *layer) {
-    assert([(__bridge id)layer isKindOfClass:CAMetalLayer.class]); return 0;
+    assert([(__bridge id)layer isKindOfClass:CAMetalLayer.class]);
+    diagnose_window("layer_configured");
+    if (getenv("BOTW_MAC_TEST_CLOSE")) {
+        /* Observation only: this timer never supplies display ticks, changes
+         * focus or closes the window. It distinguishes a live main run loop
+         * without display callbacks from a stalled main run loop. */
+        NSTimer *probe = [NSTimer timerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
+            (void)timer; diagnose_window("waiting_for_display");
+        }];
+        [NSRunLoop.mainRunLoop addTimer:probe forMode:NSRunLoopCommonModes];
+    }
+    return 0;
 }
 void botw_host_refresh_input(void) {}
 void botw_host_set_applet_state(int foreground, int focused) { (void)foreground; (void)focused; }
 void botw_host_display_tick(double target) {
     assert(NSThread.isMainThread && target > 0);
-    if (++ticks == 2 && getenv("BOTW_MAC_TEST_CLOSE")) {
+    ++ticks;
+    if (ticks == 1) {
+        diagnose_window("first_real_display_tick");
+        fprintf(stdout, "synthetic_first_display_target=%.9f\n", target); fflush(stdout);
+    }
+    if (ticks == 2 && getenv("BOTW_MAC_TEST_CLOSE")) {
         assert(NSApplication.sharedApplication.windows.count == 1);
         fprintf(stdout, "synthetic_host_real_display_ticks=%u\n", ticks); fflush(stdout);
         [NSApplication.sharedApplication.windows.firstObject performClose:nil];
@@ -71,8 +98,19 @@ class MacFrontendTests(unittest.TestCase):
         environment.pop('BOTW_MAC_TEST_CLOSE', None)
         environment.pop('BOTW_MAC_TEST_CONFIG_FAIL', None)
         environment.update(env)
-        return subprocess.run([str(self.binary), *arguments], capture_output=True, text=True,
-                              timeout=15, env=environment)
+        try:
+            return subprocess.run([str(self.binary), *arguments], capture_output=True, text=True,
+                                  timeout=15, env=environment)
+        except subprocess.TimeoutExpired as error:
+            # TimeoutExpired may retain bytes even when text=True was requested.
+            def partial_text(value):
+                if isinstance(value, bytes):
+                    return value.decode('utf-8', errors='replace')
+                return value or '(empty)'
+
+            self.fail(f'macOS frontend timed out after {error.timeout} seconds: {error.cmd!r}\n'
+                      f'Partial stdout:\n{partial_text(error.stdout)}\n'
+                      f'Partial stderr:\n{partial_text(error.stderr)}')
 
     def test_usage_and_invalid_paths_exit_before_appkit_or_guest(self):
         help_result = self.run_frontend('--help')
