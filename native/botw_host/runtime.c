@@ -601,6 +601,10 @@ static void configure_resource_backends(const char *documents) {
     if (botw_romfs_pread(state.romfs, "/System/Version.txt", 0, version, sizeof version - 1, &actual, &fs_error))
         fail("read game resource version: %s", fs_error.message);
     report("romfs_available=true bytes=%llu version=%s", (unsigned long long)botw_romfs_image_size(state.romfs), version);
+    /* This target registers only the mounted base image. A downloaded update
+     * archive is not installed content and must not stand in for patch RomFS. */
+    if (botw_services_set_patch_absent(state.services, 1, error, sizeof error))
+        fail("configure uninstalled patch storage: %s", error);
     /* The fixed base-v0 profile's verified main.npdm ACI0 program id. Only the
      * base RomFS is mounted: downloaded DLC packages are not installed content.
      * NACP add-on base metadata has not been extracted, so it stays unknown. */
