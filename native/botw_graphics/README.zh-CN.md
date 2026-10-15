@@ -63,7 +63,7 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 
 新版工具对未知常量数据或纹理类型明确失败。默认无上下文时实测只转换 13/37。可额外使用 `--require-runtime-2d-textures`，按反射 sampler 槽建立明确的二维纹理约束；编译器直接消费类型约束，不伪造常量缓冲数值或句柄。该路径实际转换 37/37 并全部通过 Metal 源码编译，常量值查询为 0，类型约束解析为 46 次。转换报告保存每个 shader 的查询次数、参数与应用约束。运行时必须通过 Metal 反射检查实际 NVN 纹理类型，若不满足则拒绝绘制；约束不等于已经观察过游戏实际描述符。
 
-转换报告保留 `nvn_bindings_validated=false`，表示仅完成翻译。后续打包器分别核验资源槽、静态 c1 常量及顶点反射；未知驱动常量、动态 c1 索引和 storage buffer 仍拒绝登记。语法编译成功不能当作正确游戏画面。
+转换报告保留 `nvn_bindings_validated=false`，表示仅完成翻译。后续打包器和 loader 分别核验资源槽、原始 c1 常量及顶点反射；动态访问还需独立闭包证明与实际 Metal 边界探针。未知输入仍拒绝登记，语法编译成功不能当作正确游戏画面。
 
 ## 私有运行时包
 
@@ -72,23 +72,25 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 ```sh
 python3 -m scripts.botw_native.shaders \
   --bundle-inputs outputs/botw-shader-inputs-reflection \
-  --bundle-compiled outputs/botw-shader-strict-runtime-2d-final \
-  --bundle-dir outputs/botw-private-shader-bundle-ranges-v2
+  --bundle-compiled outputs/botw-shader-storage-audit \
+  --bundle-dir outputs/botw-private-shader-bundle-finite-font-v2
 ```
 
 包内保留每个原始 control/code/stage 的完整 SHA256 身份、68 个阶段引用、实际 BNSH 资源反射、明确的 NVN→Metal 槽映射、MSL 入口与纹理/顶点约束。NVN uniform slot r 对应 Maxwell c[3+r]，纹理 slot r 对应真实反射已确认的 c0[0x20+8r]；无法据此核实的项带 `unsupported` 及原因，保留身份供诊断。登记数只表明这些 shader 可以准确匹配及绑定；数组纹理、其他 NVN 命令和游戏实际呈现仍有各自的运行时检查。
 
-固定上游 `dm/gfx/tools/dmsh_build.py` 记录 control+0x700/+0x704 为原始 code 内的 c1 起止偏移。本地 37 项全部核实该边界，8 项含真实 256-byte c1，其余为空。打包器只对固定且有界的 uint/float 数据读取作特化，MSL 通过 `as_type<float>(0x原始位模式u)` 精确保留浮点输入；不创建补零的常量缓冲。清单记录 bank、偏移、位模式、标量类型和出现次数，loader 对原始 control/code 和实际 MSL 表达式重新核验。6 个片元程序共 14 处固定读取已因此接通；2 个字体顶点程序的动态索引及 c0/SSBO 仍明确拒绝。
+固定上游 `dm/gfx/tools/dmsh_build.py` 记录 control+0x700/+0x704 为原始 code 内的 c1 起止偏移。本地 37 项全部核实该边界，8 项含真实 256-byte c1，其余为空。固定且有界的 uint/float 读取通过 `as_type<float>(0x原始位模式u)` 特化；不创建补零常量缓冲。清单记录 bank、偏移、位模式、标量类型和出现次数，loader 对原始 control/code 和实际 MSL 表达式重新核验。6 个片元程序共 14 处固定读取已因此接通；2 个字体顶点程序的动态索引使用下述有限输入路径。
 
 转换器原本将 uniform 数组统一声明为 64 KiB。打包器对完全固定的索引逐资源复制类型并缩小数组，67 个绑定别名的准确范围为 4–560 bytes；实际 GPU 测试已验证缩小后的 16-byte 绑定。5 个含动态 uint2 索引的顶点绑定继续要求声明的完整 64 KiB，清单标记 `declared_dynamic`，不猜测游戏属性或 uniform 值。loader 重新核验数组元素步长、读索引和范围证明，实际绘制还按 Metal 反射验证 NVN 绑定长度。
 
-编译器额外记录 IR storage descriptor 的序号、cbuf bank/offset、数量及写访问标志。真实 37 项中仅两个字体 VS 使用该资源，均为 bank0、0x110、count1、只读；与 BNSH `PerCharacterParamBlock` storage slot0 以及 MSL buffer4/5/6 的 uint/uint2/uint4 别名一致。两个程序的 c0 唯一读取是 data[68]，即 slot0 地址低32位。清单可保留这项 `storage_audit` 证据，同时明确 `access_bounds_validated=false`；动态 c1/SSBO 访问尚未获准登记。
+编译器额外记录 IR storage descriptor 的序号、cbuf bank/offset、数量及写访问标志。真实 37 项中仅两个字体 VS 使用该资源，均为 bank0、0x110、count1、只读；与 BNSH `PerCharacterParamBlock` storage slot0 以及 MSL buffer4/5/6 的 uint/uint2/uint4 别名一致。两个程序的 c0 唯一读取是 data[68]，即 slot0 地址低32位。`storage_audit` 保留绑定证据，离线阶段仍标记 `access_bounds_validated=false`，实际访问边界由 loader 独立计算。
 
-`BOTW_GRAPHICS_STORAGE_ADDRESS_LOW` 可将已核实的单个 c0 地址低位读取映射为一个 32-bit Metal 常量，值直接来自当前 NVN storage 绑定的客体地址，完整范围仍须落在已登记内存池。人工 GPU 夹具将该低位参与写回并与真实客体地址逐字核对，区别于 Metal GPU 地址或默认值；无绑定和大于 32-bit 的声明明确失败。字体动态访问未完成验证前，私有包 loader 仍拒绝登记相关程序。
+`BOTW_GRAPHICS_STORAGE_ADDRESS_LOW` 可将已核实的单个 c0 地址低位读取映射为一个 32-bit Metal 常量，值直接来自当前 NVN storage 绑定的客体地址，完整范围仍须落在已登记内存池。人工 GPU 夹具将该低位参与写回并与真实客体地址逐字核对；无绑定和大于 32-bit 的声明明确失败。字体的每个基址使用均满足精确的 uint32 加减抵消恒等式，所以新字体包可消去该依赖；它没有用零地址替代驱动值。
 
-`build_dynamic_c1_probe` 可从 MSL 取出动态 c1 索引的单赋值依赖闭包，仅接受相对 VertexID 和原始 c1 的固定字；属性、uniform、SSBO 输入、未知语法及多次赋值均拒绝。它生成的私有 compute shader 由独立 `tools/probe_msl_indices.m` 在真实 Metal 上穷举 1–64 个输入。两个字体 VS 已各测试 64 个相对顶点：连续安全前缀均为 16，下一项读 index64 超出真实 64-word c1；顶点0–3的三个索引分别为 `[0,16,20]`、`[4,24,28]`、`[8,32,36]`、`[12,40,44]`。这是明确输入范围下的离线条件证据，尚不包含 SSBO 范围证明，也不会自动登记字体程序。
+`build_dynamic_c1_probe` 可从 MSL 取出动态 c1 索引的单赋值依赖闭包，仅接受完整的 `gl_VertexIndex-gl_BaseVertex` 与原始 c1 固定字；属性、uniform、SSBO 输入、残余绝对编号、未知语法、多次赋值与副作用均拒绝。两个字体 VS 各测试 64 个相对顶点后，连续安全前缀均为 16，下一项 index64 超出真实 64-word c1；顶点0–3的三个索引分别为 `[0,16,20]`、`[4,24,28]`、`[8,32,36]`、`[12,40,44]`。
 
-`build_storage_index_probe` 验证同一 uint32 基址的加减抵消，再提取只依赖相对 InstanceID 的 SSBO 访问闭包；它不会用零地址替代真实驱动数据。两个字体程序各穷举实例0–63后，完整读取范围分别为普通字体 `64*N` bytes 和扩展字体 `96*N` bytes，包含 uint/uint2/uint4 别名的完整读宽。独立像素测试已验证非零 baseInstance 的实际 Metal 编号语义。上述证据均保存在本地 ignored 输出，仍须把顶点/实例范围和实际 NVN slot0 长度约束接入绘制前校验后才能登记字体程序。
+`build_storage_index_probe` 验证同一 uint32 基址加减抵消，再提取只依赖完整 `gl_InstanceIndex-gl_BaseInstance` 的 SSBO 访问闭包。证明只接受整条相对编号表达式或明确括号包住的子表达式，避免运算优先级改变语义；相消同样拒绝不在加法根节点的表达式。新包把原始 c1 精确字数组内嵌到 MSL，将 SSBO 单元素数组改为真实只读 uint/uint2/uint4 指针。loader 从实际 MSL 重新构建闭包，核验每个 c1 字和 IR descriptor/BNSH 槽位，在本机 Metal 上各穷举 64 个输入，再派生并复制运行时绘制约束，不信任清单中的长度结果。仅接受固定编译器的受限纯函数语法；额外数组、局部引用/取址、辅助函数、宏、绝对编号、条件定义和包括括号左值在内的多次赋值明确失败。
+
+两字体程序的完整读取范围分别为普通字体 `64*N` bytes 和扩展字体 `96*N` bytes，包含所有别名的完整读宽。新包登记时得到相对顶点≤16、相对实例≤64、NVN slot0 长度≥对应前缀读取范围；每次实际绘制前再次核验。超界直接失败，不作未经证明的分批。人工像素测试覆盖 firstVertex=3/baseInstance=5 以及 107/105，清单伪造最小长度不能绕过实际 32-byte 绑定要求；原始字、绝对编号、复合赋值和指针逃逸篡改也被拒绝。5 个动态 uniform 的完整声明长度要求不变。
 
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
@@ -100,7 +102,7 @@ int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof erro
 
 `directory` 在手机为用户私有 `Documents/botw-shaders`。loader 只读有界相对文件名，拒绝 symlink 和路径穿越，核验文件长度/摘要、NVN 原始头、入口阶段及全部阶段引用。所有 ready 项先完成 Metal 编译预检，逐项从实际 MSL 声明反推资源槽，再与清单和 BNSH 反射交叉核对。成功后 `declared_entries` 是 unique 身份总数，`registered_entries` 是已登记数量，`unsupported_entries` 是仅诊断数量；每个未支持项都在 stderr 记录完整身份和原因。遇到未知 shader 的 `ProgramSetShaders` 仍明确失败。
 
-本机严格编译并实际 Metal 加载该私有包的结果为 `REGISTERED=35 UNSUPPORTED=2 TOTAL=37`。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
+本机严格编译并实际 Metal 加载新私有包的结果为 `REGISTERED=37 UNSUPPORTED=0 TOTAL=37`。此前 `ranges-v2`/`storage-audit` 的 35/2 包保留用于旧版本兼容核验。登记全部身份不等于游戏图形功能齐备；字体片元所需的数组纹理等仍有独立运行时限制。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
 
 ## 验证
 

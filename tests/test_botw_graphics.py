@@ -45,6 +45,31 @@ def synthetic_storage_index_shader():
         {'descriptor_index': 0, 'cbuf_index': 0, 'cbuf_offset': 0x110, 'count': 1, 'is_written': False}]
 
 
+def synthetic_finite_shader():
+    """Artificial constants/IDs mirror no game bytes or translated shader."""
+    control, code = bytearray(0x708), bytearray(0x180)
+    struct.pack_into('<I', control, 0, 0x98761234)
+    struct.pack_into('<I', code, 0, 0x12345678)
+    control[8] = code[8] = 6
+    struct.pack_into('<II', control, 0x700, 0x80, len(code))
+    for index, (x, y) in enumerate(((-1, -1), (1, -1), (-1, 1), (-1, 1), (1, -1), (1, 1))):
+        struct.pack_into('<ff', code, 0x80 + index*16, x, y)
+    source = ('#include <metal_stdlib>\nusing namespace metal;struct C{uint data[16384];};'
+              'struct S{uint4 _m0[1];};struct O{float4 p [[position]];float4 color;};'
+              'vertex O main0(uint gl_VertexIndex [[vertex_id]],uint gl_BaseVertex [[base_vertex]],'
+              'uint gl_InstanceIndex [[instance_id]],uint gl_BaseInstance [[base_instance]],'
+              'constant C& c0 [[buffer(0)]],constant C& c1 [[buffer(1)]],device S& ssbo0 [[buffer(4)]]) {'
+              'uint _1=gl_InstanceIndex-gl_BaseInstance;uint _2=_1*16u;'
+              'uint _3=uint(max(int((_2+c0.data[68u])-(c0.data[68u]&4294967295u)),int(0u)))>>4u;'
+              'uint _4=gl_VertexIndex-gl_BaseVertex;uint _5=_4*4u;uint _6=_5+1u;'
+              'float x=as_type<float>(c1.data[_5]);float y=as_type<float>(c1.data[_6]);'
+              'return {float4(x*.5+as_type<float>(ssbo0._m0[_3].x),y,0,1),'
+              'float4(as_type<float2>(ssbo0._m0[_3].yz),0,1)};}')
+    reflection = {'storage': [{'name': 'fixture_instances', 'slot': 0}]}
+    descriptors = [{'descriptor_index': 0, 'cbuf_index': 0, 'cbuf_offset': 0x110, 'count': 1, 'is_written': False}]
+    return source, control, code, reflection, descriptors
+
+
 class BnshTests(unittest.TestCase):
     def parser(self):
         spec = importlib.util.find_spec('scripts.botw_native.shaders')
@@ -138,6 +163,58 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_stager_keeps_distinct_controls_sharing_code_separate(self):
+        import hashlib
+        import json
+        module = BnshTests().parser()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); inputs, converted, bundle = path / 'inputs', path / 'converted', path / 'bundle'
+            inputs.mkdir(); converted.mkdir(); records = []
+            code = bytearray(0x180); struct.pack_into('<I', code, 0, 0x12345678)
+            struct.pack_into('<II', code, 0x80, 0x3e800000, 0)
+            struct.pack_into('<II', code, 0x100, 0x3f000000, 0)
+            code_hash = hashlib.sha256(code).hexdigest(); (inputs / (code_hash + '.nvn')).write_bytes(code)
+            for offset in (0x80, 0x100):
+                control = bytearray(0x708); struct.pack_into('<I', control, 0, 0x98761234)
+                struct.pack_into('<II', control, 0x700, offset, len(code))
+                control_hash = hashlib.sha256(control).hexdigest(); (inputs / (control_hash + '.control')).write_bytes(control)
+                records.append({'control_sha256': control_hash, 'code_sha256': code_hash, 'stage': 'fragment',
+                                'container': 'synthetic', 'variation': len(records)})
+            (inputs / 'inputs.json').write_text(json.dumps({'records': records}))
+            (converted / (code_hash + '.metal')).write_text('struct C{float data[16384];};'
+                'fragment float4 fs(constant C& c1 [[buffer(0)]]){return float4(c1.data[0u]);}')
+            self.assertEqual(module.stage_shader_bundle(inputs, converted, bundle)['ready'], 2)
+            entries = json.loads((bundle / 'manifest.json').read_text())['entries']
+            self.assertEqual(len({row['msl']['path'] for row in entries}), 2)
+            self.assertEqual({row['constant_specializations'][0]['bits'] for row in entries}, {'3e800000', '3f000000'})
+            for row in entries:
+                self.assertEqual(hashlib.sha256((bundle / row['msl']['path']).read_bytes()).hexdigest(), row['msl']['sha256'])
+
+    def test_finite_storage_specialization_preserves_original_constants_and_readonly_types(self):
+        module = BnshTests().parser()
+        source, control, code, reflection, descriptors = synthetic_finite_shader()
+        transformed, profile = module.specialize_finite_storage_shader(source, control, code, 'vertex', reflection, descriptors)
+        self.assertIn('constant uint botw_c1_words[64]', transformed)
+        self.assertIn('device const uint4* ssbo0 [[buffer(4)]]', transformed)
+        self.assertNotIn('c0.data', transformed)
+        self.assertNotIn('c1.data', transformed)
+        self.assertNotIn('botw_storage_base_', transformed)
+        self.assertEqual(profile['storage_slot'], 0)
+        self.assertEqual(module.shader_binding_map(transformed, 'vertex', reflection, descriptors)['bindings'],
+                         [{'kind': 'storage', 'nvn_slot': 0, 'metal_slot': 4}])
+        with self.assertRaisesRegex(ValueError, 'readonly'):
+            module.specialize_finite_storage_shader(source, control, code, 'vertex', reflection,
+                                                   [dict(descriptors[0], is_written=True)])
+        with self.assertRaisesRegex(ValueError, 'assignment'):
+            module.specialize_finite_storage_shader(source.replace('float x=', '_4+=1u;float x='), control, code,
+                                                   'vertex', reflection, descriptors)
+        for changed in (source.replace('float x=', '(_4)+=100u;float x='),
+                        source.replace('float x=', 'thread uint& alias=_4;alias+=100u;float x='),
+                        source.replace('c1.data[_5]', '(*(&(c1.data[_5])+100u))'),
+                        source.replace('ssbo0._m0[_3].x', '(*(&(ssbo0._m0[_3])+100u)).x'),
+                        source.replace('(_2+c0.data[68u])', '(_2&3u+c0.data[68u])')):
+            with self.assertRaises(ValueError):
+                module.specialize_finite_storage_shader(changed, control, code, 'vertex', reflection, descriptors)
     def test_storage_index_probe_closes_instance_dependencies_after_address_proof(self):
         module = BnshTests().parser()
         source, control, code, reflection, descriptors = synthetic_storage_index_shader()
@@ -153,6 +230,9 @@ class ShaderBundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'external'):
             module.build_storage_index_probe(source.replace('gl_InstanceIndex-gl_BaseInstance', 'gl_InstanceIndex'),
                                             control, code, 'vertex', reflection, descriptors, 4)
+        with self.assertRaisesRegex(ValueError, 'external'):
+            module.build_storage_index_probe(source.replace('gl_InstanceIndex-gl_BaseInstance', 'gl_InstanceIndex-gl_BaseInstance*2u'),
+                                            control, code, 'vertex', reflection, descriptors, 4)
     def test_storage_address_cancellation_requires_exact_unsigned_identity(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'cancel_u32_storage_bases'), 'Storage address cancellation proof is missing')
@@ -167,6 +247,9 @@ class ShaderBundleTests(unittest.TestCase):
             module.cancel_u32_storage_bases(expression, {'base'}, set())
         mismatched = module.cancel_u32_storage_bases(expression.replace('base &', 'other &'), {'base'}, {'_20'})
         self.assertIn('base', mismatched)
+        for operator in ('&', '|', '^', '<<', '>>'):
+            invalid = f'(_20{operator}3u+base)-base'
+            self.assertIn('base', module.cancel_u32_storage_bases(invalid, {'base'}, {'_20'}))
 
     def test_dynamic_c1_probe_closes_dependencies_and_rejects_other_inputs(self):
         module = BnshTests().parser()
@@ -188,6 +271,8 @@ class ShaderBundleTests(unittest.TestCase):
             module.build_dynamic_c1_probe(source.replace('_1*4u', 'in.in_attr0.x'), control, code, 4)
         with self.assertRaisesRegex(ValueError, 'external|input'):
             module.build_dynamic_c1_probe(source.replace('gl_VertexIndex-gl_BaseVertex', 'gl_VertexIndex'), control, code, 4)
+        with self.assertRaisesRegex(ValueError, 'external|input'):
+            module.build_dynamic_c1_probe(source.replace('gl_VertexIndex-gl_BaseVertex', 'gl_VertexIndex-gl_BaseVertex*2u'), control, code, 4)
         with self.assertRaisesRegex(ValueError, 'ambiguous|assignment'):
             module.build_dynamic_c1_probe(source.replace('return float4', '_2=0u;return float4'), control, code, 4)
 
@@ -285,6 +370,114 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_finite_bundle_recomputes_bounds_and_draws_with_nonzero_base_ids(self):
+        import hashlib
+        import json
+        module = BnshTests().parser()
+        original, control, code, reflection, descriptors = synthetic_finite_shader()
+        fragment_control, fragment_code = bytearray(64), bytearray(128)
+        struct.pack_into('<I', fragment_control, 0, 0x98761234)
+        struct.pack_into('<I', fragment_code, 0, 0x12345678)
+        fragment_control[8] = fragment_code[8] = 7
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            inputs, converted, bundle = path / 'inputs', path / 'converted', path / 'bundle'
+            inputs.mkdir(); converted.mkdir()
+            records = []
+            for stage, ctl, binary, source, reflected in (
+                    ('vertex', control, code, original, reflection),
+                    ('fragment', fragment_control, fragment_code,
+                     '#include <metal_stdlib>\nusing namespace metal;struct O{float4 p [[position]];float4 color;};'
+                     'fragment float4 fs(O in [[stage_in]]){return in.color;}', {})):
+                ctl_hash, code_hash = hashlib.sha256(ctl).hexdigest(), hashlib.sha256(binary).hexdigest()
+                (inputs / (ctl_hash + '.control')).write_bytes(ctl)
+                (inputs / (code_hash + '.nvn')).write_bytes(binary)
+                (converted / (code_hash + '.metal')).write_text(source)
+                records.append({'control_sha256': ctl_hash, 'code_sha256': code_hash, 'stage': stage,
+                                'container': 'synthetic', 'variation': 0, 'reflection': reflected})
+            (inputs / 'inputs.json').write_text(json.dumps({'records': records}))
+            (converted / 'translation.json').write_text(json.dumps({'results': [
+                {'code_sha256': records[0]['code_sha256'], 'storage_descriptors': descriptors}]}))
+            self.assertEqual(module.stage_shader_bundle(inputs, converted, bundle)['ready'], 2)
+            manifest = json.loads((bundle / 'manifest.json').read_text())
+            vertex = next(row for row in manifest['entries'] if row['stage'] == 'vertex')
+            # A forged length claim must not weaken the independently computed
+            # profile. The short-storage draw below still requires 32 bytes.
+            vertex['draw_profile']['minimum_storage_bytes'] = [0, 1, 1]
+            (bundle / 'manifest.json').write_text(json.dumps(manifest))
+            source = ROOT / 'native/botw_graphics'
+            feature = r'''
+    API(nvnCommandBufferBindStorageBuffer);API(nvnCommandBufferDrawArraysInstanced);
+    const float instances[]={-.5,1,0,0,.5,0,1,0};memcpy(memory+1024,instances,sizeof instances);
+    memcpy(controls[0],VERTEX_CONTROL,sizeof VERTEX_CONTROL-1);memcpy(controls[1],FRAGMENT_CONTROL,sizeof FRAGMENT_CONTROL-1);
+    memcpy(memory+128,VERTEX_CODE,sizeof VERTEX_CODE-1);memcpy(memory+768,FRAGMENT_CODE,sizeof FRAGMENT_CODE-1);sd[1].data=gpu+768;
+    botw_graphics_shader_bundle_result loaded;char error[1024];
+    if(!botw_graphics_load_shader_bundle(argv[1],&loaded,error,sizeof error)){fprintf(stderr,"%s\n",error);return 3;}
+    CHECK(loaded.registered_entries==2&&loaded.unsupported_entries==0);CHECK(nvnProgramSetShaders(&program,2,sd));
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);
+    nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);
+    nvnCommandBufferBindStorageBuffer(&cb,NVN_SHADER_STAGE_VERTEX,0,gpu+1024,(argc>2&&!strcmp(argv[2],"short"))?16:32);
+    int first=(argc>2&&!strcmp(argv[2],"large-base"))?107:3;
+    int base=(argc>2&&!strcmp(argv[2],"large-base"))?105:5;
+    nvnCommandBufferDrawArraysInstanced(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,first,
+      (argc>2&&!strcmp(argv[2],"vertices"))?17:6,base,(argc>2&&!strcmp(argv[2],"instances"))?65:2);
+    handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+    CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    CHECK(pixels[0]==255&&pixels[1]==0&&pixels[12]==0&&pixels[13]==255);
+    puts("FINITE_BUNDLE_GPU_BASE_IDS_OK");
+'''
+            for name, value in (('VERTEX_CONTROL', control), ('VERTEX_CODE', code),
+                                ('FRAGMENT_CONTROL', fragment_control), ('FRAGMENT_CODE', fragment_code)):
+                feature = '    static const char ' + name + '[]="' + ''.join('\\x%02x' % x for x in value) + '";\n' + feature
+            smoke = METAL_SMOKE.replace('#include "graphics.h"', '#include "graphics.h"\n#include "shader_bundle.h"')
+            smoke = smoke.replace('return n <= 64', 'return n <= 0x708')
+            smoke = smoke.replace('controls[2][64]', 'controls[2][0x708]')
+            smoke = smoke.replace('    nvnMemoryPoolFinalize(&pool);', feature + '    nvnMemoryPoolFinalize(&pool);')
+            harness = path / 'finite.c'; harness.write_text(smoke)
+            exe = path / 'finite'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source), str(source / 'graphics.m'), str(source / 'shader_bundle.m'), str(harness),
+                '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for args in ([], ['large-base']):
+                result = subprocess.run([str(exe), str(bundle), *args], capture_output=True, text=True)
+                if result.returncode == 77:
+                    self.skipTest('No Metal device')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('FINITE_BUNDLE_GPU_BASE_IDS_OK', result.stdout)
+                self.assertIn('relative_vertices=16 relative_instances=64 storage_slot=0 bytes_at_max=1024', result.stderr)
+            for mode, expected in (('short', 'storage range'), ('vertices', 'vertex count'), ('instances', 'instance count')):
+                result = subprocess.run([str(exe), str(bundle), mode], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, mode)
+                self.assertIn(expected, result.stderr)
+            asset = bundle / vertex['msl']['path']
+            saved = asset.read_text()
+            for replacement, expected in (
+                    (saved.replace('0xbf800000u', '0xbf800001u', 1), 'Original finite c1 bits'),
+                    (saved.replace('gl_VertexIndex-gl_BaseVertex', 'gl_VertexIndex'), 'external finite profile input'),
+                    (saved.replace('gl_InstanceIndex-gl_BaseInstance', 'gl_InstanceIndex'), 'external finite profile input'),
+                    (saved.replace('gl_VertexIndex-gl_BaseVertex', 'gl_VertexIndex-gl_BaseVertex*2u'), 'external finite profile input'),
+                    (saved.replace('gl_InstanceIndex-gl_BaseInstance', 'gl_InstanceIndex-gl_BaseInstance*2u'), 'external finite profile input'),
+                    (saved.replace('float x=', '_4+=1u;float x='), 'Ambiguous finite profile assignment'),
+                    (saved.replace('ssbo0[_3].x', '(&ssbo0[_3])->x'), 'address escape'),
+                    (saved.replace('ssbo0[_3].x', '(*(&(ssbo0[_3])+100u)).x'), 'address escape'),
+                    (saved.replace('botw_c1_words[_5]', '(*(&(botw_c1_words[_5])+100u))'), 'address escape'),
+                    (saved.replace('float x=', 'thread uint& alias=_4;alias+=100u;float x='), 'address escape'),
+                    (saved.replace('float x=', '(_4)+=100u;float x='), 'Ambiguous finite profile assignment'),
+                    (saved.replace('float x=', 'if(_1){uint _999=_4;}float x=').replace('_5 = _4*4u', '_5 = _999*4u'), 'Conditional finite profile assignment'),
+                    (saved.replace('using namespace metal;', 'using namespace metal;float abs(float x){return x+100;}'), 'helper definition'),
+                    (saved.replace('float x=', 'frexp(1.0,_4);float x='), 'mutable finite source function'),
+                    (saved.replace('#include <metal_stdlib>', '#include <metal_stdlib>\n#define abs(x) (x+100)'), 'preprocessor directive'),
+                    (saved.replace('float x=', 'float unproven[6];float x='), 'Unproven extra array')):
+                self.assertNotEqual(replacement, saved)
+                data = replacement.encode(); asset.write_bytes(data)
+                vertex['msl'].update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+                (bundle / 'manifest.json').write_text(json.dumps(manifest))
+                result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+
     def test_dynamic_c1_index_probe_executes_exact_finite_vertex_inputs(self):
         import json
         tool = ROOT / 'native/botw_graphics/tools/probe_msl_indices.m'

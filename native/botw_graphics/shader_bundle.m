@@ -63,6 +63,8 @@ static NSData *verifiedAsset(int directory,id spec,size_t limit,size_t *total,ch
 @property(strong) NSString *source,*entry,*identity,*reason;
 @property NVNshaderStage stage;
 @property BOOL unsupported;
+@property unsigned maxVertices,maxInstances,storageSlot;
+@property(strong) NSData *storageMinimum;
 @end
 @implementation BWBundleShader
 @end
@@ -74,10 +76,10 @@ static NSData *bindings(id list,id reflection,char *error,size_t capacity){
     if(![list isKindOfClass:[NSArray class]]||[list count]>64||![reflection isKindOfClass:[NSDictionary class]]){bundleError(error,capacity,"Invalid binding metadata");return nil;}
     NSMutableData *result=[NSMutableData new];NSMutableSet *used=[NSMutableSet new];
     for(id row in list){if(![row isKindOfClass:[NSDictionary class]]){bundleError(error,capacity,"Invalid binding entry");return nil;}
-        NSString *kind=row[@"kind"];int type=[kind isEqual:@"uniform"]?BOTW_GRAPHICS_UNIFORM:[kind isEqual:@"texture"]?BOTW_GRAPHICS_TEXTURE:[kind isEqual:@"sampler"]?BOTW_GRAPHICS_SAMPLER:-1;
-        uint64_t nvn,metal;if(type<0||!integer(row[@"nvn_slot"],127,&nvn)||!integer(row[@"metal_slot"],type==BOTW_GRAPHICS_TEXTURE?127:15,&metal)){bundleError(error,capacity,"Unknown or out-of-bounds binding kind/slot");return nil;}
-        NSString *key=[NSString stringWithFormat:@"%d:%llu",type,(unsigned long long)metal];
-        if([used containsObject:key]||!reflectedSlot(reflection,type==BOTW_GRAPHICS_UNIFORM?@"uniforms":@"samplers",(unsigned)nvn)){bundleError(error,capacity,"Duplicate Metal slot or NVN binding absent from reflection");return nil;}
+        NSString *kind=row[@"kind"];int type=[kind isEqual:@"uniform"]?BOTW_GRAPHICS_UNIFORM:[kind isEqual:@"texture"]?BOTW_GRAPHICS_TEXTURE:[kind isEqual:@"sampler"]?BOTW_GRAPHICS_SAMPLER:[kind isEqual:@"storage"]?BOTW_GRAPHICS_STORAGE:-1;
+        uint64_t nvn,metal;if(type<0||!integer(row[@"nvn_slot"],type==BOTW_GRAPHICS_STORAGE?15:127,&nvn)||!integer(row[@"metal_slot"],type==BOTW_GRAPHICS_TEXTURE?127:15,&metal)){bundleError(error,capacity,"Unknown or out-of-bounds binding kind/slot");return nil;}
+        NSString *key=[NSString stringWithFormat:@"%d:%llu",type==BOTW_GRAPHICS_STORAGE?BOTW_GRAPHICS_UNIFORM:type,(unsigned long long)metal];
+        if([used containsObject:key]||!reflectedSlot(reflection,type==BOTW_GRAPHICS_UNIFORM?@"uniforms":type==BOTW_GRAPHICS_STORAGE?@"storage":@"samplers",(unsigned)nvn)){bundleError(error,capacity,"Duplicate Metal slot or NVN binding absent from reflection");return nil;}
         [used addObject:key];botw_graphics_shader_binding entry={(enum botw_graphics_binding_kind)type,(unsigned)nvn,(unsigned)metal};[result appendBytes:&entry length:sizeof entry];
     }
     return result;
@@ -134,6 +136,7 @@ static BOOL uniformRanges(BWBundleShader *shader,id list,char *error,size_t capa
     }
     return YES;
 }
+#include "shader_profile.inc"
 /* The bundle accepts the fixed offline compiler's explicit resource grammar.
  * Re-derive NVN slots from the actual compiled source, rather than trusting a
  * manifest to remap one reflected slot onto another. Unknown grammar fails. */
@@ -147,10 +150,17 @@ static BOOL sourceMetadata(BWBundleShader *shader,NSDictionary *entry,char *erro
     NSMutableDictionary *expected=[NSMutableDictionary new],*actual=[NSMutableDictionary new],*types=[NSMutableDictionary new];
     const botw_graphics_shader_binding *map=shader.bindings.bytes;
     for(size_t i=0;i<shader.bindings.length/sizeof *map;i++)expected[[NSString stringWithFormat:@"%d:%u",map[i].kind,map[i].metal_slot]]=@(map[i].nvn_slot);
-    for(NSTextCheckingResult *row in matches(@"\\b(constant|device)\\s+\\w+\\s*[&*]\\s+(\\w+)\\s+\\[\\[buffer\\((\\d+)\\)\\]\\]",signature)){
-        NSString *variable=part(signature,row,2);NSArray *banks=matches(@"^c(\\d+)(?:_\\d+)?$",variable);
-        if(![part(signature,row,1) isEqual:@"constant"]||banks.count!=1)return bundleError(error,capacity,"Unknown private/driver buffer in Metal source");
-        NSUInteger bank=[part(variable,banks[0],1) integerValue],metal=[part(signature,row,3) integerValue];
+    for(NSTextCheckingResult *row in matches(@"\\b(constant|device)\\s+(?:(const)\\s+)?(\\w+)\\s*([&*])\\s+(\\w+)\\s+\\[\\[buffer\\((\\d+)\\)\\]\\]",signature)){
+        NSString *variable=part(signature,row,5);NSUInteger metal=[part(signature,row,6) integerValue];
+        if([part(signature,row,1) isEqual:@"device"]){
+            NSArray *aliases=matches(@"^ssbo(\\d+)(?:_\\d+)?$",variable);unsigned slot;
+            if(row.numberOfRanges<7||[row rangeAtIndex:2].location==NSNotFound||![part(signature,row,4) isEqual:@"*"]||matches(@"^uint(?:2|4)?$",part(signature,row,3)).count!=1||aliases.count!=1||metal>15||!storageDescriptorSlot(entry,shader.stage,[part(variable,aliases[0],1) integerValue],&slot,error,capacity))return bundleError(error,capacity,"Unknown or unproven readonly storage pointer");
+            NSString *key=[NSString stringWithFormat:@"%d:%lu",BOTW_GRAPHICS_STORAGE,(unsigned long)metal];
+            if(actual[key])return bundleError(error,capacity,"Duplicate Metal storage declaration");actual[key]=@(slot);continue;
+        }
+        NSArray *banks=matches(@"^c(\\d+)(?:_\\d+)?$",variable);
+        if([row rangeAtIndex:2].location!=NSNotFound||![part(signature,row,4) isEqual:@"&"]||banks.count!=1)return bundleError(error,capacity,"Unknown private/driver buffer in Metal source");
+        NSUInteger bank=[part(variable,banks[0],1) integerValue];
         if(bank<3||bank>16||metal>15)return bundleError(error,capacity,"Metal uniform bank/index outside supported bounds");
         NSString *key=[NSString stringWithFormat:@"%d:%lu",BOTW_GRAPHICS_UNIFORM,(unsigned long)metal];
         if(actual[key])return bundleError(error,capacity,"Duplicate Metal buffer declaration");actual[key]=@(bank-3);
@@ -215,6 +225,7 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
         if(!constantSpecializations(shader,entry[@"constant_specializations"],error,capacity)){close(directory);return 0;}
         if(!uniformRanges(shader,entry[@"uniform_ranges"],error,capacity)){close(directory);return 0;}
         if(!sourceMetadata(shader,entry,error,capacity)){close(directory);return 0;}
+        if(!finiteDrawProfile(shader,entry,device,error,capacity)){close(directory);return 0;}
         NSError *metalError=nil;id<MTLLibrary> library=[device newLibraryWithSource:shader.source options:nil error:&metalError];id<MTLFunction> function=[library newFunctionWithName:shader.entry];
         if(!function||function.functionType!=(nvnStage==NVN_SHADER_STAGE_VERTEX?MTLFunctionTypeVertex:MTLFunctionTypeFragment)){close(directory);return bundleError(error,capacity,"Metal entry/stage preflight failed: %s",metalError.localizedDescription.UTF8String?:"entry missing");}
         [prepared addObject:shader];
@@ -232,7 +243,8 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
     size_t registered=0;
     for(BWBundleShader *shader in prepared){
         if(shader.unsupported){fprintf(stderr,"[botw shaders] unsupported identity=%s reason=%s\n",shader.identity.UTF8String,shader.reason.UTF8String);continue;}
-        if(!botw_graphics_register_shader_with_bindings(shader.control.bytes,shader.control.length,shader.code.bytes,shader.code.length,shader.stage,shader.source.UTF8String,shader.entry.UTF8String,shader.bindings.bytes,shader.bindings.length/sizeof(botw_graphics_shader_binding)))return bundleError(error,capacity,"Shader registration failed: %s",shader.identity.UTF8String);
+        botw_graphics_shader_draw_profile profile={shader.maxVertices,shader.maxInstances,shader.storageSlot,shader.storageMinimum.bytes};
+        if(!botw_graphics_register_shader_with_profile(shader.control.bytes,shader.control.length,shader.code.bytes,shader.code.length,shader.stage,shader.source.UTF8String,shader.entry.UTF8String,shader.bindings.bytes,shader.bindings.length/sizeof(botw_graphics_shader_binding),shader.maxVertices?&profile:NULL))return bundleError(error,capacity,"Shader registration failed: %s",shader.identity.UTF8String);
         registered++;
     }
     result->declared_entries=prepared.count;result->registered_entries=registered;result->unsupported_entries=unsupported;

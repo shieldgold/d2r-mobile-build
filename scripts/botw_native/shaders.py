@@ -332,6 +332,15 @@ def cancel_u32_storage_bases(value, bases, unsigned_variables):
 
     def split(text, operator):
         depth = 0
+        # A '+' inside a top-level bitwise/shift/comparison expression is
+        # not its root operator. Decline that grammar rather than changing
+        # C++ precedence while proving a uint32 cancellation.
+        forbidden = '<>&|^=!?,:"' if operator in ('+', '-') else '|^=!?,:"' if operator == '&' else ''
+        for char in text:
+            depth += (char == '(') - (char == ')')
+            if depth == 0 and char in forbidden:
+                return None
+        depth = 0
         for i in range(len(text)-1, -1, -1):
             depth += (text[i] == ')') - (text[i] == '(')
             if depth == 0 and text[i] == operator and i:
@@ -426,9 +435,15 @@ def _build_closed_index_probe(msl, control, code, relative_vertex_count, target_
             return 'as_type<float>(' + literal + ')' if kinds[variable] == 'float' else literal
         value = re.sub(r'\b(c1(?:_\d+)?)\.data\[(\d+)u?\]', constant, value)
         basis = 'gl_VertexIndex\\s*-\\s*gl_BaseVertex' if relative_input == 'vertex' else 'gl_InstanceIndex\\s*-\\s*gl_BaseInstance'
-        value = re.sub(r'\b' + basis + r'\b', 'botw_relative_vertex', value)
+        # A textual prefix is insufficient: a-b*2 is not (a-b)*2. Accept
+        # only the whole expression or an explicitly parenthesized subtree.
+        value = re.sub(r'\(\s*\b' + basis + r'\b\s*\)', '(botw_relative_vertex)', value)
+        if re.fullmatch(r'\s*\b' + basis + r'\b\s*', value):
+            value = 'botw_relative_vertex'
         if not re.fullmatch(r'[\w\s.+*/%<>=!&|^~?:(),-]+', value) or any(x in value for x in ('//', '/*', '*/')):
             raise ValueError('Unknown external input or probe expression grammar')
+        if re.search(r'(?<![=!<>])=(?!=)|\+\+|--', value):
+            raise ValueError('Side effect in probe expression')
         for identifier in re.findall(r'\b[A-Za-z_]\w*\b', value):
             if re.fullmatch(r'_\d+', identifier):
                 variable(identifier)
@@ -441,10 +456,14 @@ def _build_closed_index_probe(msl, control, code, relative_vertex_count, target_
             return
         if name in visiting:
             raise ValueError('Cyclic probe assignment')
-        assignments = re.findall(r'\b' + re.escape(name) + r'\s*=(?!=)', msl)
+        assignments = re.findall(r'\b' + re.escape(name) + r'\s*\)*\s*(?:=(?!=)|[+*/%&|^\-]=|<<=|>>=|\+\+|--)|(?:\+\+|--)\s*\(*\s*\b' + re.escape(name) + r'\b', msl)
         definitions = re.findall(r'\b(uint|int|float)\s+' + re.escape(name) + r'\s*=\s*([^;]+);', msl)
         if len(assignments) != 1 or len(definitions) != 1:
             raise ValueError('Ambiguous scalar probe assignment: ' + name)
+        definition = re.search(r'\b(uint|int|float)\s+' + re.escape(name) + r'\s*=', msl)
+        prefix = msl[:definition.start()]
+        if prefix.count('{') - prefix.count('}') != 1:
+            raise ValueError('Conditional scalar probe assignment: ' + name)
         visiting.add(name)
         kind, value = definitions[0]
         value = expression(value)
@@ -566,6 +585,121 @@ def specialize_static_c1(msl, control, code):
                          for (offset, bits, kind), count in sorted(uses.items())]
 
 
+def _remove_resource_parameter(source, parameter):
+    escaped = re.escape(parameter)
+    result, count = re.subn(escaped + r'\s*,\s*', '', source, count=1)
+    if not count:
+        result, count = re.subn(r',\s*' + escaped, '', source, count=1)
+    if not count:
+        result, count = re.subn(escaped, '', source, count=1)
+    if count != 1:
+        raise ValueError('Missing exact resource parameter')
+    return result
+
+
+def _array_reads(source, pattern):
+    """Yield full balanced accesses, including an index containing brackets."""
+    result = []
+    for match in re.finditer(pattern, source):
+        end, level = match.end(), 1
+        while end < len(source) and level:
+            level += (source[end] == '[') - (source[end] == ']')
+            end += 1
+        if level:
+            raise ValueError('Unbalanced finite-profile array access')
+        result.append((match.start(), end, source[match.end():end-1], match))
+    return result
+
+
+def _validate_finite_source(source):
+    # This deliberately narrow compiler grammar has no local references,
+    # pointers to elements, mutable helper calls, or additional functions.
+    # The current font shaders use no remaining '&' after driver cancellation.
+    stripped = re.sub(r'\bconstant\s+\w+\s*&\s*c(?:[3-9]|1[0-6])(?:_\d+)?\s+\[\[buffer\(\d+\)\]\]', '', source)
+    if '&' in stripped:
+        raise ValueError('Unproven finite source reference or address escape')
+    no_using = re.sub(r'\busing\s+namespace\s+metal\s*;', '', source)
+    if re.search(r'\b(?:thread|threadgroup|typedef|auto|decltype|template|namespace|using)\b', no_using):
+        raise ValueError('Unproven finite source alias grammar')
+    for line in source.splitlines():
+        if line.lstrip().startswith('#') and not re.fullmatch(r'\s*#include\s+<(?:metal_stdlib|simd/simd\.h)>\s*', line):
+            raise ValueError('Unknown finite source preprocessor directive')
+    entry = re.search(r'\bvertex\s+\w+\s+(\w+)\s*\(', source)
+    if not entry:
+        raise ValueError('Missing finite vertex entry')
+    calls = re.findall(r'\b([A-Za-z_]\w*)\s*(?:<[^<>]+>)?\s*\(', source)
+    allowed = {'as_type', 'extract_bits', 'abs', 'fma', 'clamp', 'trunc', 'max', 'min', 'isnan',
+               'if', 'buffer', 'attribute', 'user', entry[1]}
+    allowed.update(scalar + width for scalar in ('uint', 'int', 'float', 'bool') for width in ('', '2', '3', '4'))
+    if calls.count(entry[1]) != 1 or set(calls)-allowed:
+        raise ValueError('Unknown or mutable finite source function')
+    definitions = re.findall(r'(?:^|[;{}])\s*(?:(?:inline|static|constexpr|vertex|fragment|kernel)\s+)*\w+\s+(\w+)\s*\([^;{}]*\)\s*\{', source)
+    if [name for name in definitions if name not in ('if', 'for', 'while', 'switch')] != [entry[1]]:
+        raise ValueError('Unproven finite source helper definition')
+
+
+def specialize_finite_storage_shader(msl, control, code, stage, reflection, descriptors):
+    """Prepare a conditional shader whose actual MSL must be probed at load.
+
+    The loader independently closes every dynamic c1/storage access over
+    relative IDs and evaluates all finite inputs on Metal before registration.
+    No claimed lengths or offline probe result in this manifest are trusted.
+    """
+    if stage != 'vertex':
+        raise ValueError('Finite storage profiles require a vertex stage')
+    audit = audit_storage_resources(msl, stage, reflection, descriptors)
+    slots = {row['nvn_slot'] for row in audit['bindings']}
+    if len(slots) != 1 or not audit['bindings'] or any(row['is_written'] for row in audit['bindings']):
+        raise ValueError('Finite storage profiles require one reflected readonly storage slot')
+    # These closed probes reject attributes, other memory, absolute IDs and
+    # ambiguous assignments before any address algebra or source edits occur.
+    build_dynamic_c1_probe(msl, control, code, 64)
+    build_storage_index_probe(msl, control, code, stage, reflection, descriptors, 64)
+    symbols = {row['offset']: 'botw_storage_base_' + str(row['nvn_slot']) for row in audit['driver_reads']}
+    if any(re.search(r'\b' + value + r'\b', msl) for value in symbols.values()):
+        raise ValueError('Generated storage symbol collides with source')
+    source = re.sub(r'\bc0(?:_\d+)?\.data\[(\d+)u?\]', lambda match: symbols[int(match[1])*4], msl)
+    unsigned = set(re.findall(r'\buint\s+(_\d+)\b', source))
+    def normalize(value):
+        return cancel_u32_storage_bases(value, set(symbols.values()), unsigned)
+    source = re.sub(r'\b(uint|int|float)\s+(_\d+)\s*=\s*([^;]+);',
+                    lambda match: match[1] + ' ' + match[2] + ' = ' + normalize(match[3]) + ';', source)
+    for start, end, index, match in reversed(_array_reads(source, r'\b(ssbo\d+(?:_\d+)?)\._m0\[')):
+        source = source[:start] + match[1] + '[' + normalize(index) + ']' + source[end:]
+    if any(re.search(r'\b' + value + r'\b', source) for value in symbols.values()):
+        raise ValueError('Uncanceled storage guest address')
+    for declaration in list(re.finditer(r'constant\s+\w+\s*&\s*(c0(?:_\d+)?)\s+\[\[buffer\(\d+\)\]\]', source)):
+        if len(re.findall(r'\b' + declaration[1] + r'\b', source)) != 1:
+            raise ValueError('Remaining unknown driver constant use')
+        source = _remove_resource_parameter(source, declaration[0])
+    for declaration in list(re.finditer(r'device\s+(?:const\s+)?(\w+)\s*&\s*(ssbo\d+(?:_\d+)?)\s+\[\[buffer\((\d+)\)\]\]', source)):
+        layout = re.search(r'\bstruct\s+' + re.escape(declaration[1]) + r'\s*\{\s*(uint[24]?)\s+_m0\[1\];\s*\};', source)
+        if not layout:
+            raise ValueError('Unknown finite storage pointer layout')
+        source = source.replace(declaration[0], f'device const {layout[1]}* {declaration[2]} [[buffer({declaration[3]})]]', 1)
+    if re.search(r'\bbotw_c1_words\b', source):
+        raise ValueError('Generated c1 array collides with source')
+    start, end = struct.unpack_from('<II', control, 0x700)
+    for declaration in list(re.finditer(r'constant\s+(\w+)\s*&\s*(c1(?:_\d+)?)\s+\[\[buffer\(\d+\)\]\]', source)):
+        block, variable = declaration[1], declaration[2]
+        layout = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*(uint|float)\s+data\[\d+\];\s*\};', source)
+        reads = _array_reads(source, r'\b' + re.escape(variable) + r'\.data\[')
+        if not layout or len(re.findall(r'\b' + re.escape(variable) + r'\b', source)) != len(reads)+1:
+            raise ValueError('Unknown finite c1 array use')
+        for begin, finish, index, _ in reversed(reads):
+            replacement = 'botw_c1_words[' + index + ']'
+            if layout[1] == 'float':
+                replacement = 'as_type<float>(' + replacement + ')'
+            source = source[:begin] + replacement + source[finish:]
+        source = _remove_resource_parameter(source, declaration[0])
+    words = struct.unpack_from('<' + 'I'*((end-start)//4), code, start)
+    entry = re.search(r'\bvertex\s+\w+\s+\w+\s*\(', source)
+    source = source[:entry.start()] + 'constant uint botw_c1_words[' + str(len(words)) + '] = {' + ','.join(f'0x{x:08x}u' for x in words) + '};\n' + source[entry.start():]
+    _validate_finite_source(source)
+    return source, {'schema': 1, 'storage_slot': slots.pop(), 'storage_descriptors': descriptors,
+                    'relative_vertex_inputs': 64, 'relative_instance_inputs': 64}
+
+
 def bound_static_uniforms(msl):
     """Give fixed-index resources their exact scalar-array footprint.
 
@@ -610,12 +744,13 @@ def bound_static_uniforms(msl):
     return transformed, ranges
 
 
-def shader_binding_map(msl, stage, reflection):
+def shader_binding_map(msl, stage, reflection, storage_descriptors=()):
     """Match this compiler's named resources to explicit BNSH NVN slots.
 
     c[3+r] -> uniform slot r is the fixed NVN ABI documented by the upstream
     Maxwell reference reader. Every proposed slot must also occur in this
-    program's actual BNSH reflection. Private c0/c1 and SSBOs are rejected.
+    program's actual BNSH reflection. Readonly pointer SSBOs additionally need
+    the compiler IR's exact descriptor-table offset. Unknown c0/c1 fail.
     """
     entry = re.search(r'\b(vertex|fragment)\s+\w+\s+(\w+)\s*\(', msl)
     if not entry or entry[1] != stage:
@@ -627,9 +762,24 @@ def shader_binding_map(msl, stage, reflection):
     uniforms = {x['slot'] for x in reflection.get('uniforms', []) if x['slot'] >= 0}
     samplers = {x['slot'] for x in reflection.get('samplers', []) if x['slot'] >= 0}
     result, covered, types = [], set(), []
-    for space, variable, metal in re.findall(r'\b(constant|device)\s+\w+\s*[&*]\s*(\w+)\s+\[\[buffer\((\d+)\)\]\]', signature):
+    for space, readonly, scalar, pointer, variable, metal in re.findall(r'\b(constant|device)\s+(?:(const)\s+)?(\w+)\s*([&*])\s*(\w+)\s+\[\[buffer\((\d+)\)\]\]', signature):
+        storage = re.fullmatch(r'ssbo(\d+)(?:_\d+)?', variable)
+        if space == 'device' and readonly and pointer == '*' and scalar in ('uint', 'uint2', 'uint4') and storage:
+            index = int(storage[1])
+            matching = [x for x in storage_descriptors if type(x.get('descriptor_index')) is int and x['descriptor_index'] == index]
+            if stage != 'vertex' or len(matching) != 1:
+                raise ValueError('Missing unique readonly storage descriptor')
+            descriptor = matching[0]
+            slot = (descriptor['cbuf_offset']-0x110)//16
+            if (descriptor['cbuf_index'] != 0 or descriptor['count'] != 1 or descriptor['is_written'] is not False
+                    or not 0 <= slot < 16 or descriptor['cbuf_offset'] != 0x110+slot*16
+                    or slot not in {x['slot'] for x in reflection.get('storage', [])}):
+                raise ValueError('Readonly storage descriptor absent from BNSH reflection')
+            result.append({'kind': 'storage', 'nvn_slot': slot, 'metal_slot': int(metal)})
+            covered.add(('buffer', int(metal)))
+            continue
         bank = re.fullmatch(r'c(\d+)(?:_\d+)?', variable)
-        if space != 'constant' or not bank or not 3 <= int(bank[1]) <= 16:
+        if space != 'constant' or readonly or pointer != '&' or not bank or not 3 <= int(bank[1]) <= 16:
             raise ValueError('Unknown private/driver constant or storage resource: ' + variable)
         slot = int(bank[1]) - 3
         if slot not in uniforms:
@@ -678,6 +828,9 @@ def stage_shader_bundle(inputs, converted, destination):
     for identity, rows in sorted(groups.items()):
         control_hash, code_hash, stage = identity
         row = rows[0]
+        # One code blob can have different control/c1 bounds. Keep each exact
+        # identity's transformed MSL separate instead of overwriting an alias.
+        msl_name = hashlib.sha256(':'.join(identity).encode()).hexdigest() + '.metal'
         entry = {'stage': stage, 'control_sha256': control_hash, 'code_sha256': code_hash,
                  'reflection': row.get('reflection', {})}
         for kind, directory, filename in (('control', inputs, control_hash + '.control'),
@@ -689,25 +842,31 @@ def stage_shader_bundle(inputs, converted, destination):
             digest = hashlib.sha256(payload).hexdigest()
             if kind != 'msl' and digest != entry[kind + '_sha256']:
                 raise ValueError('Original shader SHA256 mismatch: ' + filename)
-            files[filename] = payload
-            entry[kind] = {'path': filename, 'bytes': len(payload), 'sha256': digest}
-        if re.search(r'\bssbo\d+(?:_\d+)?\b', files[code_hash + '.metal'].decode('utf-8')):
+            target = msl_name if kind == 'msl' else filename
+            files[target] = payload
+            entry[kind] = {'path': target, 'bytes': len(payload), 'sha256': digest}
+        if re.search(r'\bssbo\d+(?:_\d+)?\b', files[msl_name].decode('utf-8')):
             try:
-                entry['storage_audit'] = audit_storage_resources(files[code_hash + '.metal'].decode('utf-8'), stage,
+                entry['storage_audit'] = audit_storage_resources(files[msl_name].decode('utf-8'), stage,
                                                                   row.get('reflection', {}), descriptor_audits.get(code_hash, []))
             except ValueError as exc:
                 entry['storage_audit'] = {'access_bounds_validated': False, 'reason': str(exc)}
         try:
-            msl, constants = specialize_static_c1(files[code_hash + '.metal'].decode('utf-8'),
-                                                  files[control_hash + '.control'], files[code_hash + '.nvn'])
+            source = files[msl_name].decode('utf-8')
+            try:
+                msl, constants = specialize_static_c1(source, files[control_hash + '.control'], files[code_hash + '.nvn'])
+            except ValueError:
+                msl, profile = specialize_finite_storage_shader(source, files[control_hash + '.control'], files[code_hash + '.nvn'],
+                                                                stage, row.get('reflection', {}), descriptor_audits.get(code_hash, []))
+                entry['draw_profile'] = profile
+                constants = []
             msl, uniform_ranges = bound_static_uniforms(msl)
             maps = [shader_binding_map(msl, stage,
-                                       candidate.get('reflection', {})) for candidate in rows]
+                                       candidate.get('reflection', {}), descriptor_audits.get(code_hash, [])) for candidate in rows]
             if any(mapping != maps[0] for mapping in maps):
                 raise ValueError('Conflicting BNSH resource reflection for one exact identity')
-            files[code_hash + '.metal'] = msl.encode('utf-8')
-            entry['msl'].update(bytes=len(files[code_hash + '.metal']),
-                                sha256=hashlib.sha256(files[code_hash + '.metal']).hexdigest())
+            files[msl_name] = msl.encode('utf-8')
+            entry['msl'].update(bytes=len(files[msl_name]), sha256=hashlib.sha256(files[msl_name]).hexdigest())
             entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {}),
                           'constant_specializations': constants, 'uniform_ranges': uniform_ranges})
         except ValueError as exc:
