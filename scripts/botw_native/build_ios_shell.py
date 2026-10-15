@@ -15,10 +15,11 @@ SOURCES = ('native/botw_host/runtime.c', 'native/botw_host/services.c', 'native/
            'native/botw_host/address_space.c',
            'native/botw_host/entry.S', 'native/botw_resources/romfs.c', 'native/botw_resources/savefs.c',
            'native/botw_resources/local_user.c',
+           'native/botw_audio/audio.c',
            'native/botw_input/input.c', 'native/botw_input/BOTWInputOverlay.m',
            'native/botw_graphics/graphics.m', 'native/botw_graphics/shader_bundle.m',
            'native/botw_app/main.m')
-SOURCE_DIRECTORIES = ('botw_host', 'botw_app', 'botw_resources', 'botw_input', 'botw_graphics')
+SOURCE_DIRECTORIES = ('botw_host', 'botw_app', 'botw_resources', 'botw_input', 'botw_graphics', 'botw_audio')
 
 
 def package_shell(app_dir, output_ipa, source_sha256, sdk_version):
@@ -72,7 +73,7 @@ def build_shell(repo_root, output_dir):
         app.mkdir()
         objects = []
         base = [clang, '-target', 'arm64-apple-ios' + MINIMUM_IOS, '-isysroot', sdk,
-                '-O2', '-Wall', '-Wextra', '-Werror', '-DBOTW_WITH_GRAPHICS=1', '-fblocks',
+                '-O2', '-Wall', '-Wextra', '-Werror', '-DBOTW_WITH_GRAPHICS=1', '-DBOTW_WITH_AUDIO=1', '-fblocks',
                 *[argument for directory in SOURCE_DIRECTORIES for argument in ('-I', str(root / 'native' / directory))]]
         for index, source in enumerate(SOURCES):
             obj = work / f'{index}.o'
@@ -81,7 +82,8 @@ def build_shell(repo_root, output_dir):
             objects.append(str(obj))
         subprocess.run([*base, *objects, '-framework', 'UIKit', '-framework', 'Foundation',
                         '-framework', 'Metal', '-framework', 'QuartzCore', '-framework', 'GameController',
-                        '-framework', 'CoreGraphics', '-framework', 'Security', '-lobjc',
+                        '-framework', 'CoreGraphics', '-framework', 'Security',
+                        '-framework', 'AudioToolbox', '-framework', 'AVFAudio', '-lobjc',
                         '-Wl,-rpath,@executable_path/Frameworks', '-o', str(app / 'BOTWNative')], check=True)
         info = {'CFBundleIdentifier': 'local.botw.native', 'CFBundleExecutable': 'BOTWNative',
                 'CFBundleName': 'BOTWNative', 'CFBundleDisplayName': 'BOTW Native',

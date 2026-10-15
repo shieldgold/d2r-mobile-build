@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 #include <pthread.h>
@@ -35,6 +36,9 @@
 #include <sys/ucontext.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(BOTW_WITH_AUDIO)
+#include "../botw_audio/audio.h"
+#endif
 #if TARGET_OS_IPHONE
 #include <os/proc.h>
 #endif
@@ -90,6 +94,7 @@ static void *configured_graphics_layer;
 static botw_input *configured_input;
 static unsigned configured_address_bits = 36;
 static int host_foreground = 1, host_focused = 1;
+static int host_audio_session_active = 1;
 static uint32_t run_sequence;
 /* Kernel condition waiters must register here before waiting. The current host
  * rejects CreateThread and WaitProcessWideKeyAtomic, so this list is provably
@@ -118,6 +123,9 @@ static struct {
     botw_romfs *romfs;
     botw_savefs *savefs;
     botw_local_user local_user;
+#if defined(BOTW_WITH_AUDIO)
+    botw_audio *audio;
+#endif
     int input_owned;
     uint32_t input_shared_handle;
     uint64_t resource_user_id;
@@ -172,6 +180,10 @@ typedef struct CallbackContext {
     sig_atomic_t previous_guest_executing;
 } CallbackContext;
 static _Thread_local CallbackContext *callback_context;
+#if defined(BOTW_WITH_GRAPHICS) || defined(BOTW_WITH_AUDIO)
+static int invoke_guest_callback(uint64_t target, const char *entry, const char *fault_prefix,
+    void (*invoke)(uint64_t, void *), void *arguments, char *error, size_t capacity);
+#endif
 extern void botw_gate(void);
 extern unsigned char botw_unimplemented_stubs[];
 static const int caught_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
@@ -345,16 +357,23 @@ static uint64_t defined_value(Module *m, const Sym *s) {
     if (s->section == 0xfff1) return s->value; /* ELF SHN_ABS. */
     require_range(m, s->value, s->size, "defined symbol"); return (uint64_t)m->base + s->value;
 }
-static uint64_t find_raw_symbol(const char *name) {
+static uint64_t find_raw_definition(const char *name, Module **module, const Sym **symbol) {
+    if (module) *module = NULL;
+    if (symbol) *symbol = NULL;
     for (unsigned j = 0; j < MODULE_COUNT; j++) {
         Module *m = &state.modules[j];
         for (unsigned i = 1; i < m->sym_count; i++) {
             const Sym *s = symbol_at(m, i);
-            if (s->section && s->info >= 0x10 && !strcmp(symbol_name(m, s), name)) return defined_value(m, s);
+            if (s->section && s->info >= 0x10 && !strcmp(symbol_name(m, s), name)) {
+                if (module) *module = m;
+                if (symbol) *symbol = s;
+                return defined_value(m, s);
+            }
         }
     }
     return 0;
 }
+static uint64_t find_raw_symbol(const char *name) { return find_raw_definition(name, NULL, NULL); }
 static int services_memory(void *opaque, uint64_t address, size_t length, int writable);
 static const char *const allocator_constructor = "_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm";
 static const char *const allocator_constructor_alias = "_ZN2nn2os6detail21AddressSpaceAllocatorC2Emmm";
@@ -590,7 +609,24 @@ static uint64_t find_symbol(const char *name) {
         uintptr_t bridge = botw_hipc_address_resolve(name);
         if (bridge) return bridge;
     }
+#if defined(BOTW_WITH_AUDIO)
+    Module *module = NULL; const Sym *symbol = NULL;
+    uint64_t raw = find_raw_definition(name, &module, &symbol);
+    if (module && symbol) {
+        char error[512]; void *function = NULL;
+        int resolved = botw_audio_resolve_symbol(module->name, (unsigned)(module - state.modules),
+            name, symbol->value, symbol->size, module->text_end, &function, error, sizeof error);
+        if (resolved < 0) fail("AudioOut symbol profile: %s", error);
+        if (resolved) {
+            if (!function || symbol->section != 1 || symbol->info != 0x12 || (symbol->other & 3))
+                fail("AudioOut symbol must be a default-visible SDK function: %s", name);
+            return (uint64_t)function;
+        }
+    }
+    return raw;
+#else
     return find_raw_symbol(name);
+#endif
 }
 static uint64_t unsupported_stub(const char *name) {
     for (unsigned i = 0; i < state.stub_count; i++) if (!strcmp(state.stubs[i], name)) return (uint64_t)botw_unimplemented_stubs + i * 8;
@@ -678,6 +714,59 @@ static int services_memory(void *opaque, uint64_t address, size_t length, int wr
     if (state.kernel && botw_kernel_memory(state.kernel, address, length, writable)) return 1;
     return external_memory(opaque, address, length, writable);
 }
+#if defined(BOTW_WITH_AUDIO)
+static int audio_copy_error(char *error, size_t capacity, const char *operation, kern_return_t result) {
+    if (error && capacity) snprintf(error, capacity, "AudioOut %s failed: Mach result=%d", operation, result);
+    return -1;
+}
+static int audio_read_guest(void *opaque, uint64_t source, void *destination, size_t bytes,
+        char *error, size_t capacity) {
+    (void)opaque;
+    if (!bytes) return 0;
+    if (!destination || !services_memory(NULL, source, bytes, 0))
+        return audio_copy_error(error, capacity, "guest read range", KERN_INVALID_ADDRESS);
+    mach_vm_size_t copied = 0;
+    kern_return_t result = mach_vm_read_overwrite(mach_task_self(), source, bytes,
+        (mach_vm_address_t)(uintptr_t)destination, &copied);
+    if (result != KERN_SUCCESS || copied != bytes)
+        return audio_copy_error(error, capacity, "protected guest read", result == KERN_SUCCESS ? KERN_FAILURE : result);
+    return 0;
+}
+static int audio_write_guest(void *opaque, uint64_t destination, const void *source, size_t bytes,
+        char *error, size_t capacity) {
+    (void)opaque;
+    if (!bytes) return 0;
+    if (!source || bytes > UINT32_MAX || !services_memory(NULL, destination, bytes, 1))
+        return audio_copy_error(error, capacity, "guest write range", KERN_INVALID_ADDRESS);
+    kern_return_t result = mach_vm_write(mach_task_self(), destination,
+        (vm_offset_t)(uintptr_t)source, (mach_msg_type_number_t)bytes);
+    return result == KERN_SUCCESS ? 0 : audio_copy_error(error, capacity, "protected guest write", result);
+}
+typedef struct { uint64_t event; uint32_t reader; } AudioAttachArguments;
+static void call_audio_attach(uint64_t function, void *opaque) {
+    AudioAttachArguments *args = opaque;
+    ((void (*)(void *, uint32_t, _Bool, int))(uintptr_t)function)((void *)(uintptr_t)args->event, args->reader, 1, 1);
+}
+static int audio_attach_system_event(void *opaque, uint64_t event, uint32_t reader,
+        char *error, size_t capacity) {
+    (void)opaque;
+    const char *name = "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE";
+    Module *module = NULL; const Sym *symbol = NULL;
+    uint64_t target = find_raw_definition(name, &module, &symbol);
+    if (!reader || !event || (event & 7) || !services_memory(NULL, event, 48, 1) ||
+            module != &state.modules[5] || !symbol || !module->name || strcmp(module->name, "sdk") ||
+            symbol->value != 0x851c8 || symbol->size != 0x3c || symbol->section != 1 ||
+            symbol->info != 0x12 || (symbol->other & 3) || !in_range(0x851c8, 0x3c, module->text_end)) {
+        if (error && capacity) snprintf(error, capacity, "AudioOut SystemEvent requires the audited SDK profile and writable 48-byte event");
+        return -1;
+    }
+    AudioAttachArguments args = {event, reader};
+    return invoke_guest_callback(target, "AudioOut SystemEvent attach", "audio attach ",
+        call_audio_attach, &args, error, capacity) ? 0 : -1;
+}
+static void audio_fault(void *opaque, const char *message) { (void)opaque; fail("AudioOut: %s", message); }
+static void audio_log(void *opaque, const char *message) { (void)opaque; report("%s", message); }
+#endif
 static void services_log(void *opaque, const char *message) { (void)opaque; report("%s", message); }
 static int executable_address(void *opaque, uint64_t pointer) {
     (void)opaque;
@@ -774,9 +863,41 @@ static int kernel_signal(void *ctx, uint32_t handle, char *error, size_t cap) { 
 static int kernel_clear(void *ctx, uint32_t handle, char *error, size_t cap) { return botw_kernel_clear_event(ctx, handle, error, cap); }
 static int kernel_close(void *ctx, uint32_t handle, char *error, size_t cap) { return botw_kernel_close_handle(ctx, handle, error, cap); }
 static int kernel_process(void *ctx, uint32_t handle) { return botw_kernel_is_process_handle(ctx, handle); }
+#if defined(BOTW_WITH_AUDIO)
+static void initialize_audio(void) {
+    const botw_audio_callbacks callbacks = {.opaque = state.kernel,
+        .read_guest = audio_read_guest, .write_guest = audio_write_guest,
+        .create_event = kernel_event_create, .signal_event = kernel_signal,
+        .close_handle = kernel_close, .attach_system_event = audio_attach_system_event,
+        .fault = audio_fault, .log = audio_log};
+    char error[512];
+    pthread_mutex_lock(&lifecycle_lock);
+    state.audio = botw_audio_create(&callbacks, host_foreground && host_focused && host_audio_session_active, error, sizeof error);
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (!state.audio) fail("initialize AudioOut backend: %s", error);
+    report("audio_backend=AudioUnit guest_audio_renderer_implemented=false");
+}
+static void update_audio_active(void) {
+    char error[512];
+    if (state.audio && botw_audio_set_active(state.audio,
+            host_foreground && host_focused && host_audio_session_active, error, sizeof error))
+        report("audio_lifecycle_error=%s", error);
+}
+#endif
+void botw_host_set_audio_session_active(int active) {
+    pthread_mutex_lock(&lifecycle_lock);
+    host_audio_session_active = !!active;
+#if defined(BOTW_WITH_AUDIO)
+    update_audio_active();
+#endif
+    pthread_mutex_unlock(&lifecycle_lock);
+}
 void botw_host_set_applet_state(int foreground, int focused) {
     pthread_mutex_lock(&lifecycle_lock);
     host_foreground = !!foreground; host_focused = !!focused;
+#if defined(BOTW_WITH_AUDIO)
+    update_audio_active();
+#endif
     if (state.services) {
         char error[512];
         if (botw_services_set_applet_state(state.services, state.resource_user_id, host_foreground, host_focused, 0, error, sizeof error))
@@ -1112,19 +1233,18 @@ static void require_executable(uint64_t pointer, const char *entry) {
     }
     fail("guest entry %s does not point to signed code", entry);
 }
-#if defined(BOTW_WITH_GRAPHICS)
-static int graphics_invoke_memory_callback(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC function,
-        NVNcommandBuffer *command, NVNcommandBufferMemoryEvent event, size_t minimum,
-        void *userdata, char *error, size_t capacity) {
+#if defined(BOTW_WITH_GRAPHICS) || defined(BOTW_WITH_AUDIO)
+static int invoke_guest_callback(uint64_t target, const char *entry, const char *fault_prefix,
+        void (*invoke)(uint64_t, void *), void *arguments, char *error, size_t capacity) {
     int owner = pthread_equal(pthread_self(), state.owner);
     if (!(owner && state.active && state.guest_executing) && !(child_context && child_context->active)) {
-        if (error && capacity) snprintf(error, capacity, "graphics callback requires an active guest thread");
+        if (error && capacity) snprintf(error, capacity, "%s requires an active guest thread", entry);
         return 0;
     }
     /* Heap storage avoids indeterminate automatic values after siglongjmp. */
     CallbackContext *context = calloc(1, sizeof *context);
     if (!context) {
-        if (error && capacity) snprintf(error, capacity, "allocate graphics callback recovery boundary");
+        if (error && capacity) snprintf(error, capacity, "allocate %s recovery boundary", entry);
         return 0;
     }
     context->previous = callback_context;
@@ -1133,11 +1253,11 @@ static int graphics_invoke_memory_callback(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC
     int accepted = 0;
     if (!sigsetjmp(context->recovery, 1)) {
         context->active = 1;
-        require_executable((uint64_t)(uintptr_t)function, "NVN command-memory callback");
-        function(command, event, minimum, userdata);
+        require_executable(target, entry);
+        invoke(target, arguments);
         accepted = 1;
     } else if (context->fault_signal) {
-        describe_fault(context->error, sizeof context->error, "graphics callback ",
+        describe_fault(context->error, sizeof context->error, fault_prefix,
             context->fault_signal, context->fault_pc, context->fault_address, context->fault_registers);
     }
     context->active = 0;
@@ -1146,6 +1266,26 @@ static int graphics_invoke_memory_callback(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC
     if (error && capacity) snprintf(error, capacity, "%s", accepted ? "" : context->error);
     free(context);
     return accepted;
+}
+#endif
+#if defined(BOTW_WITH_GRAPHICS)
+typedef struct {
+    NVNcommandBuffer *command;
+    NVNcommandBufferMemoryEvent event;
+    size_t minimum;
+    void *userdata;
+} GraphicsCallbackArguments;
+static void call_graphics_memory_callback(uint64_t function, void *opaque) {
+    GraphicsCallbackArguments *args = opaque;
+    ((PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC)(uintptr_t)function)(
+        args->command, args->event, args->minimum, args->userdata);
+}
+static int graphics_invoke_memory_callback(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC function,
+        NVNcommandBuffer *command, NVNcommandBufferMemoryEvent event, size_t minimum,
+        void *userdata, char *error, size_t capacity) {
+    GraphicsCallbackArguments args = {command, event, minimum, userdata};
+    return invoke_guest_callback((uint64_t)(uintptr_t)function, "NVN command-memory callback",
+        "graphics callback ", call_graphics_memory_callback, &args, error, capacity);
 }
 #endif
 static void run_module_constructors(void) {
@@ -1251,6 +1391,15 @@ static int cleanup(void) {
     if (pending) {
         report("error=guest workers still active; retaining code and host resources: %s", error); return -1;
     }
+#if defined(BOTW_WITH_AUDIO)
+    pthread_mutex_lock(&lifecycle_lock);
+    int audio_pending = botw_audio_shutdown(state.audio, error, sizeof error);
+    if (!audio_pending) state.audio = NULL;
+    pthread_mutex_unlock(&lifecycle_lock);
+    if (audio_pending) {
+        report("error=audio still active; retaining kernel and host resources: %s", error); return -1;
+    }
+#endif
     pthread_mutex_lock(&lifecycle_lock);
     botw_services_destroy(state.services); state.services = NULL;
     if (state.vi_vsync_write && botw_kernel_close_handle(state.kernel, state.vi_vsync_write, error, sizeof error))
@@ -1353,6 +1502,9 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             .is_process_handle = kernel_process};
         botw_services_set_kernel_api(state.services, &kernel_api);
         configure_resource_backends(documents);
+#if defined(BOTW_WITH_AUDIO)
+        initialize_audio();
+#endif
         botw_host_set_applet_state(host_foreground, host_focused);
         for (unsigned i = 0; i < MODULE_COUNT; i++) relocate(&state.modules[i]);
         report("modules_loaded=6 relocations=%zu weak_undefined_zero=%zu unsupported_imports=%u gates=%u", state.relocations, state.weak_zero, state.stub_count, state.gate_count);

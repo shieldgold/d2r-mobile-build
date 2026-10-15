@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
+#import <AVFAudio/AVAudioSession.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -28,17 +29,20 @@
 @interface BOTWController : UIViewController
 @property(nonatomic, strong) UITextView *logView;
 @property(nonatomic, assign) BOOL started;
+@property(nonatomic, assign) BOOL bootstrapReady;
 @property(nonatomic, strong) BOTWMetalView *metalView;
 @property(nonatomic, strong) BOTWInputOverlay *inputOverlay;
 @property(nonatomic, strong) CADisplayLink *frameObserver;
 @property(nonatomic, assign) BOOL firstFrameObserved;
 - (void)appendEvent:(NSString *)message;
+- (void)startGuestIfReady;
 @end
 
 static __weak BOTWController *activeController;
 static NSString *bundleRoot;
 static NSString *documentsRoot;
 static botw_input *frontendInput; /* Process lifetime: guest threads borrow it. */
+static BOOL audioSessionPrepared, audioInterrupted, audioServicesLost;
 
 static void hostEvent(const char *message) {
     fprintf(stdout, "%s\n", message);
@@ -46,6 +50,33 @@ static void hostEvent(const char *message) {
     NSString *text = [NSString stringWithUTF8String:message];
     if (!text) text = @"日志含无法解码的字节";
     dispatch_async(dispatch_get_main_queue(), ^{ [activeController appendEvent:text]; });
+}
+
+static BOOL activateHostAudioSession(void) {
+    if (audioInterrupted || audioServicesLost) return NO;
+    botw_host_set_audio_session_active(0);
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    NSError *error = nil;
+    BOOL success = [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault
+        options:AVAudioSessionCategoryOptionMixWithOthers error:&error] && [session setActive:YES error:&error];
+    audioSessionPrepared = success;
+    botw_host_set_audio_session_active(success);
+    if (!success) {
+        hostEvent("error=unable to activate actual host audio session");
+        if (error) hostEvent(error.localizedDescription.UTF8String);
+    }
+    return success;
+}
+static void pauseHostAudioSession(void) {
+    /* Stop RemoteIO before deactivating its session. Queued PCM stays owned by
+     * the audio module; lifecycle changes never fabricate release events. */
+    botw_host_set_audio_session_active(0);
+    if (!audioSessionPrepared) return;
+    audioSessionPrepared = NO;
+    NSError *error = nil;
+    if (![AVAudioSession.sharedInstance setActive:NO
+            withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&error] && error)
+        hostEvent(error.localizedDescription.UTF8String);
 }
 
 static void saveFirstPresentedFrame(void) {
@@ -119,6 +150,10 @@ static void *runGuest(void *unused) {
     self.frameObserver = [CADisplayLink displayLinkWithTarget:self selector:@selector(observeFrame:)];
     [self.frameObserver addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     activeController = self;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterruption:)
+        name:AVAudioSessionInterruptionNotification object:AVAudioSession.sharedInstance];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioServicesReset:)
+        name:AVAudioSessionMediaServicesWereResetNotification object:AVAudioSession.sharedInstance];
 }
 - (void)observeFrame:(CADisplayLink *)sender {
     botw_host_display_tick(sender.targetTimestamp);
@@ -131,7 +166,34 @@ static void *runGuest(void *unused) {
         self.logView.hidden = YES;
     }
 }
-- (void)dealloc { [self.frameObserver invalidate]; [self.inputOverlay invalidate]; }
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [self.frameObserver invalidate]; [self.inputOverlay invalidate];
+}
+- (void)audioInterruption:(NSNotification *)notification {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self audioInterruption:notification]; }); return;
+    }
+    NSUInteger kind = [notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+    if (kind == AVAudioSessionInterruptionTypeBegan) {
+        audioInterrupted = YES; audioSessionPrepared = NO;
+        botw_host_set_audio_session_active(0);
+    } else if (kind == AVAudioSessionInterruptionTypeEnded) {
+        audioInterrupted = NO;
+        NSUInteger options = [notification.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue];
+        if ((options & AVAudioSessionInterruptionOptionShouldResume) &&
+                UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
+                activateHostAudioSession()) [self startGuestIfReady];
+    }
+}
+- (void)audioServicesReset:(NSNotification *)notification {
+    (void)notification;
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self audioServicesReset:notification]; }); return;
+    }
+    botw_host_set_audio_session_active(0); audioSessionPrepared = NO; audioServicesLost = YES;
+    hostEvent("error=audio media services reset; restart the app to reopen audio");
+}
 - (void)appendEvent:(NSString *)message {
     self.logView.text = [self.logView.text stringByAppendingFormat:@"%@\n", message];
     if (self.logView.text.length > 65536) self.logView.text = [self.logView.text substringFromIndex:self.logView.text.length - 65536];
@@ -143,8 +205,7 @@ static void *runGuest(void *unused) {
 }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    if (self.started) return;
-    self.started = YES;
+    if (self.started || self.bootstrapReady) return;
     bundleRoot = NSBundle.mainBundle.bundlePath;
     documentsRoot = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *path = [documentsRoot stringByAppendingPathComponent:@"boot.log"];
@@ -169,6 +230,12 @@ static void *runGuest(void *unused) {
         botw_host_set_input(frontendInput) || botw_host_set_graphics_layer((__bridge void *)self.metalView.layer)) {
         hostEvent("error=unable to configure Metal/input frontend"); return;
     }
+    self.bootstrapReady = YES;
+    [self startGuestIfReady];
+}
+- (void)startGuestIfReady {
+    if (!self.bootstrapReady || self.started || audioInterrupted || audioServicesLost) return;
+    if (!audioSessionPrepared && !activateHostAudioSession()) return;
     pthread_attr_t attributes; pthread_t thread;
     int result = pthread_attr_init(&attributes);
     if (result) { hostEvent("error=pthread_attr_init"); return; }
@@ -177,6 +244,7 @@ static void *runGuest(void *unused) {
     if (!result) result = pthread_create(&thread, &attributes, runGuest, NULL);
     pthread_attr_destroy(&attributes);
     if (result) hostEvent("error=unable to start guest thread");
+    else self.started = YES;
 }
 @end
 
@@ -188,13 +256,18 @@ static void *runGuest(void *unused) {
     (void)scene;
     UIApplication.sharedApplication.idleTimerDisabled = YES;
     botw_host_set_applet_state(1, 1);
+    if (!audioSessionPrepared && !audioInterrupted) (void)activateHostAudioSession();
+    [activeController startGuestIfReady];
 }
-- (void)sceneWillResignActive:(UIScene *)scene { (void)scene; botw_host_set_applet_state(1, 0); }
+- (void)sceneWillResignActive:(UIScene *)scene {
+    (void)scene; botw_host_set_applet_state(1, 0); pauseHostAudioSession();
+}
 - (void)sceneWillEnterForeground:(UIScene *)scene { (void)scene; botw_host_set_applet_state(1, 0); }
 - (void)sceneDidEnterBackground:(UIScene *)scene {
     (void)scene;
     UIApplication.sharedApplication.idleTimerDisabled = NO;
     botw_host_set_applet_state(0, 0);
+    pauseHostAudioSession();
 }
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     (void)session; (void)options;

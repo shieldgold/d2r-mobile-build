@@ -32,6 +32,9 @@ int botw_host_set_input(botw_input *input);
  * 1 for unsupported widths, 2 while running, 0 after saving configuration. */
 int botw_host_set_address_space(unsigned bits);
 void botw_host_set_applet_state(int foreground, int focused);
+/* Actual host audio-session availability, combined with app focus by the
+ * runtime. Interruptions pause real output without completing queued buffers. */
+void botw_host_set_audio_session_active(int active);
 /* Call after frontend sampling to publish controller style notifications. */
 void botw_host_refresh_input(void);
 #ifdef __cplusplus
