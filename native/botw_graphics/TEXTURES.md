@@ -4,10 +4,9 @@
 
 ## 原版 ABI 与范围
 
-原版 base SDK 的 82 个相关入口中，76 个已有真实实现；现代头文件中另外两项 Strided 读写也有实际实现。以下六个 driver/sparse/ZCull 查询保留具名拒绝，不能将未经证明的 storage class 返回为成功：
+原版 base SDK 的 82 个相关入口中，78 个已有真实实现，其中两项 StorageClass 仅实现已确证的 pitch 分支；现代头文件中另外两项 Strided 读写也有实际实现。以下四个 driver/sparse/ZCull 查询保留具名拒绝：
 
 - `nvnTextureBuilderGetSparseTileLayout`、`nvnTextureGetSparseTileLayout`
-- `nvnTextureBuilderGetStorageClass`、`nvnTextureGetStorageClass`
 - `nvnTextureBuilderGetZCullStorageSize`、`nvnTextureGetZCullStorageSize`
 
 `texture_abi.h` 按本地原 SDK 可执行 oracle 定义 Builder 的实际 `0x64` 字节字段区和 View 的 `0x24` 字节布局，保留对象预算尾部及原版 padding。Builder Defaults 保留 device，尺寸和 samples 为 0、levels 为 1、swizzle 为 R/G/B/A；SetSize2D 将 depth 复位为 1。stride 是无符号 32 位截断值。Packaged layout 保存原版三个四位字段；只有已验证的 block height 会被 GPU 布局消费，未实现的其他字段严格拒绝。两个 MemoryPool getter 返回指针。
@@ -49,3 +48,11 @@ GPU 私有的最新内容建立 `texown` claim。别名纹理、buffer 地址以
 设备日志记录实际 Metal 来源、格式集合范围、最大格式对齐、最终两项 stride 对齐、Apple RT 能力和 coherent-only 范围。Mac 的结果只证明当台 Mac；A14 需要读取该手机实际启动日志和运行结果。本地合成测试的查询、真实 clear/draw/CPU 读写、padding 和整批拒绝证据不表示原游戏可玩。
 
 此策略依据 [Apple linear alignment API](https://developer.apple.com/documentation/metal/mtldevice/minimumlineartexturealignment(for:))、[buffer-backed texture 契约](https://developer.apple.com/documentation/metal/mtlbuffer/maketexture(descriptor:offset:bytesperrow:))。固定上游的 Tegra 32/128 表用于保留 guest 最低约束；它不替代当前 Metal 设备测量。
+
+## Base-v0 pitch storage class 元数据
+
+BuilderGetStorageClass 与 TextureGetStorageClass 共用纯元数据规则：target 为 BUFFER 或 flags 含 `0x10/0x40` 任一位时返回 `0x100`。这来自原版 base-v0 SDK 的独立分支：raw kind 为 0，最终编码为 `0x100 | rawKind`。Builder 查询允许尚未 SetStorage；该分支与 format、维度、samples、device 和 pool 均无关，不因 Metal 尚不支持该格式而拒绝，也不会调用 Metal。它不代表 GPU 创建能力；BUFFER 的存储尺寸/类别可查，当前 GPU BUFFER texture 创建仍明确拒绝。
+
+Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别。block-linear 的原生类别还需要 format、samples、压缩与 device 的 ChooseKind 逻辑，目前明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。它不会将所有格式压成 ordinary-pool 实验的单个宿主 token。
+
+两个现代 RawStorageClass、physical/virtual pool、MapVirtual、sparse 和 ZCull 未因此开放。公开固定上游的 RawStorageClass=1 没有本目标 ABI 证明；其 ordinary-pool `0x100` adapter 也明确属于实验策略。本桥不采用这些未经证明的替代答案。原字节合成 oracle 验证 288 组 pitch Builder、256 组 Texture 已保存 raw byte，以及 4 个需要原生 ChooseKind 的分支边界；这些仅证明元数据，不证明 driver 映射或游戏运行。

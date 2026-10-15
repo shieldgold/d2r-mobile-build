@@ -72,6 +72,14 @@ static size_t textureBytes(const TextureBuilder *b){
     nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;
 }
 NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return b.width>0&&bytes?(size_t)b.width*bytes:0;}return textureBytes(&b);}
+/* Base-v0 returns 0x100 | rawKind. BUFFER and flags&0x50 take the
+ * device-independent rawKind=0 branch, even before storage is assigned.
+ * This is metadata, not permission to create a Metal texture or GPU mapping. */
+static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
+    if(b->target==NVN_TEXTURE_TARGET_BUFFER||(b->flags&0x50))return 0x100;
+    char detail[256];snprintf(detail,sizeof detail,"texture storage class requires unimplemented native ChooseKind target=%u flags=0x%x format=0x%x samples=%d source=base-v0-storage-metadata",b->target,b->flags,b->format,b->samples);fatal(detail);
+}
+NVN(nvnTextureBuilderGetStorageClass,NVNstorageClass,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);return textureMetadataStorageClass(&b);}
 NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureViewSetDefaults,void,NVNtextureView *raw){memset(textureViewWrite(raw),0,sizeof(TextureView));}
 NVN(nvnTextureViewSetLevels,void,NVNtextureView *raw,int base,int count){TextureView *v=textureViewWrite(raw);v->flags|=1;v->baseLevel=base;v->numLevels=count;}
@@ -173,6 +181,7 @@ static void uploadTexture(BWTexture *input,id<MTLCommandBuffer> cb){
     texturePendingRecord(t,cb,YES)[@"hash"]=hash;
 }
 static BWTexture *textureObject(const NVNtexture *raw){BWTexture *t=get(raw,[BWTexture class]);textureLive(t);return t;}
+NVN(nvnTextureGetStorageClass,NVNstorageClass,const NVNtexture *raw){TextureBuilder b=textureObject(raw).metadata;return textureMetadataStorageClass(&b);}
 NVN(nvnTextureFinalize,void,NVNtexture *raw){BWTexture *t=get(raw,[BWTexture class]);if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))fatal("texture object memory is not writable");texturePrepareWrite(raw,sizeof *raw);nvn_texown_retire(t.identity);nvn_texflush_forget(t.identity);removeObject(raw);}
 NVN(nvnTextureSetDebugLabel,void,NVNtexture *raw,const char *label){BWTexture *t=textureObject(raw);if(!label)fatal("texture debug label is null");size_t n=0;for(;n<4096;n++){textureMemory(label+n,1,NO);if(!label[n])break;}if(n==4096)fatal("texture debug label too long");t.label=[[NSString alloc] initWithBytes:label length:n encoding:NSUTF8StringEncoding];t.texture.label=t.label;}
 #define TEXTURE_FIELD(Name,Type,field) NVN(nvnTextureGet##Name,Type,const NVNtexture *raw){return (Type)textureObject(raw).metadata.field;}
