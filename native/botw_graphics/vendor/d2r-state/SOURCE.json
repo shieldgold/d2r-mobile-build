@@ -1,0 +1,49 @@
+{
+  "repository": "https://github.com/jhaizhou-ops/d2r-mobile",
+  "commit": "9de307ecaff42b3c9d45e58992c848ee89b8f6a1",
+  "license": "MIT",
+  "sources": {
+    "hle_nvn.c": "18032e49eb1384d883b371a5e510d85bb584cf03ce2e655e4b213e234472af66",
+    "nvn_obj.h": "bba1a4c7a11909b34dc2f481d0b1df3cc9f0fd1490e8a6d01fe7b46c41c96e88",
+    "nvn_mtl.m": "26ebf9ce1ed3c8852e0739b34e2a8585e164b244dc7c45ceb9c86cd09446151d"
+  },
+  "changes": [
+    "entry macro NVN renamed D2R_STATE",
+    "sample locations no-op not imported",
+    "pure fields/default setters reused through checked host adapters",
+    "Metal enum/descriptor/raster/depth logic adapted without game hash optimizations"
+  ],
+  "pure_entry_count": 25,
+  "pure_entries": [
+    "nvnBlendStateSetDefaults",
+    "nvnBlendStateSetBlendTarget",
+    "nvnBlendStateSetBlendFunc",
+    "nvnBlendStateSetBlendEquation",
+    "nvnColorStateSetDefaults",
+    "nvnColorStateSetBlendEnable",
+    "nvnChannelMaskStateSetDefaults",
+    "nvnChannelMaskStateSetChannelMask",
+    "nvnMultisampleStateSetDefaults",
+    "nvnMultisampleStateSetMultisampleEnable",
+    "nvnMultisampleStateSetSamples",
+    "nvnMultisampleStateSetAlphaToCoverageEnable",
+    "nvnMultisampleStateSetSampleLocationsEnable",
+    "nvnPolygonStateSetDefaults",
+    "nvnPolygonStateSetCullFace",
+    "nvnPolygonStateSetFrontFace",
+    "nvnPolygonStateSetPolygonMode",
+    "nvnPolygonStateSetPolygonOffsetEnables",
+    "nvnDepthStencilStateSetDefaults",
+    "nvnDepthStencilStateSetDepthTestEnable",
+    "nvnDepthStencilStateSetDepthWriteEnable",
+    "nvnDepthStencilStateSetDepthFunc",
+    "nvnDepthStencilStateSetStencilTestEnable",
+    "nvnDepthStencilStateSetStencilFunc",
+    "nvnDepthStencilStateSetStencilOp"
+  ],
+  "source_ranges": {
+    "hle_nvn.c": "734-777 (SampleLocations no-op excluded)",
+    "nvn_obj.h": "pure color/channel/blend/multisample/polygon/depth state structs",
+    "nvn_mtl.m": "bfac, bop, pso_desc generic color attachment block, raster encoder mapping, dss_get generic depth branch"
+  }
+}

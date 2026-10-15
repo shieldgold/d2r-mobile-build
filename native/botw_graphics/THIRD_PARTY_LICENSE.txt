@@ -82,3 +82,16 @@ redistribute it freely, subject to the following restrictions:
    must not be misrepresented as being the original software.
 3. This notice may not be removed or altered from any source
    distribution.
+
+Render-state module (vendor/d2r-state/states.h, states.inc, and generic Metal
+state mappings adapted in render_state.inc):
+https://github.com/jhaizhou-ops/d2r-mobile
+Commit 9de307ecaff42b3c9d45e58992c848ee89b8f6a1
+Original paths: dm/gfx/nvn/hle_nvn.c (six pure state families),
+dm/gfx/nvn/nvn_obj.h (state layouts), dm/gfx/nvn/nvn_mtl.m (blend mappings,
+color masks, raster/depth descriptor and encoder state).
+Copyright (c) 2026 jhaizhou. Licensed under the MIT notice reproduced above.
+Local adaptations add typed checked adapters, borrowed-memory validation,
+recording snapshots, per-queue replay state and strict unsupported paths.
+D2R shader/hash-specific rendering policies, no-op sample locations, and
+skipped-draw culling are excluded.

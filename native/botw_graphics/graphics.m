@@ -9,6 +9,7 @@
 #include "graphics.h"
 #include "queue_arena.h"
 #include "command_memory.h"
+#include "vendor/d2r-state/states.h"
 #include "nvn_protos.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -159,11 +160,14 @@
 @property(strong) BWProgram *program;
 @property(strong) NSDictionary *viewport, *scissor;
 @property(strong) NSData *attributes, *streams, *depthState;
+@property(strong) NSData *colorState,*channelState,*polygonState,*multisampleState,*blendColor;
+@property(strong) NSMutableDictionary<NSNumber *,NSData *> *blendStates;
+@property(strong) NSDictionary *depthRange,*polygonOffset;
 @property(strong) BWDescriptors *texturePool, *samplerPool;
 @property(strong) NSMutableDictionary *uniforms, *storage, *textures, *vertices;
 @end
 @implementation BWReplay
-- (instancetype)init { if((self=[super init])){_uniforms=[NSMutableDictionary new];_storage=[NSMutableDictionary new];_textures=[NSMutableDictionary new];_vertices=[NSMutableDictionary new];}return self;}
+- (instancetype)init { if((self=[super init])){_uniforms=[NSMutableDictionary new];_storage=[NSMutableDictionary new];_textures=[NSMutableDictionary new];_vertices=[NSMutableDictionary new];_blendStates=[NSMutableDictionary new];}return self;}
 @end
 @interface BWPipeline : NSObject
 @property(strong) id<MTLRenderPipelineState> state;
@@ -191,7 +195,8 @@ static uintptr_t platformDisplay,platformLayer,platformSequence;
 static NSMutableDictionary<NSNumber *, id> *objects;
 static NSMutableDictionary<NSNumber *, NSValue *> *objectSpans;
 static NSMutableDictionary<NSNumber *, NSArray *> *handles;
-static NSMutableDictionary<NSString *, BWPipeline *> *pipelines;
+static NSMutableDictionary<NSArray *,BWPipeline *> *pipelines;
+static NSMutableDictionary<NSNumber *,id<MTLDepthStencilState>> *depthStates;
 static dispatch_group_t allGPU;
 static NSMutableArray<BWPool *> *pools;
 static NSMutableArray<BWShader *> *shaders;
@@ -376,7 +381,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     gpu=MTLCreateSystemDefaultDevice(); if(!gpu)return report("No Metal device");
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
-    objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];
+    objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];depthStates=[NSMutableDictionary new];
     pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
@@ -385,7 +390,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
 static void shutdownGraphicsImpl(void) {
     BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
-    objects=nil;objectSpans=nil;handles=nil;pipelines=nil;pools=nil;shaders=nil;presentPipeline=nil;
+    objects=nil;objectSpans=nil;handles=nil;pipelines=nil;depthStates=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
     displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);
 }
@@ -720,7 +725,7 @@ NVN(nvnCommandBufferSetScissor,void,NVNcommandBuffer *c,int x,int y,int w,int h)
 typedef struct { NVNdevice *device; int min,mag,wrap[3],compareMode,compareFunc; float lodMin,lodMax,aniso; } SamplerBuilder;
 typedef struct { uint32_t format:8,stream:4,offset:20; } VertexAttribute;
 typedef struct { uint32_t stride,divisor; } VertexStream;
-typedef struct { uint8_t test,write,function,stencil; uint32_t reserved; } DepthState;
+typedef ds_st DepthState;
 _Static_assert(sizeof(SamplerBuilder)<=sizeof(NVNsamplerBuilder),"sampler builder ABI");
 _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute ABI");
 _Static_assert(sizeof(VertexStream)==sizeof(NVNvertexStreamState),"stream ABI");
@@ -758,14 +763,10 @@ NVN(nvnVertexAttribStateSetStreamIndex,void,NVNvertexAttribState *s,int stream){
 NVN(nvnVertexStreamStateSetDefaults,void,NVNvertexStreamState *s){memset(s,0,sizeof *s);}
 NVN(nvnVertexStreamStateSetStride,void,NVNvertexStreamState *s,ptrdiff_t stride){if(stride<0||stride>2048)fatal("vertex stride exceeds Metal limit");((VertexStream*)s)->stride=stride;}
 NVN(nvnVertexStreamStateSetDivisor,void,NVNvertexStreamState *s,int divisor){if(divisor<0)fatal("negative vertex instance divisor");((VertexStream*)s)->divisor=divisor;}
-NVN(nvnDepthStencilStateSetDefaults,void,NVNdepthStencilState *raw){*(DepthState*)raw=(DepthState){0,1,NVN_DEPTH_FUNC_LESS,0,0};}
-NVN(nvnDepthStencilStateSetDepthTestEnable,void,NVNdepthStencilState *s,uint32_t e){((DepthState*)s)->test=(e&255)!=0;}
-NVN(nvnDepthStencilStateSetDepthWriteEnable,void,NVNdepthStencilState *s,uint32_t e){((DepthState*)s)->write=(e&255)!=0;}
-NVN(nvnDepthStencilStateSetDepthFunc,void,NVNdepthStencilState *s,NVNdepthFunc f){if(f<1||f>8)fatal("depth compare function");((DepthState*)s)->function=f;}
-NVN(nvnDepthStencilStateSetStencilTestEnable,void,NVNdepthStencilState *s,uint32_t e){if(e&255)fatal("stencil test not yet implemented");((DepthState*)s)->stencil=0;}
+#include "render_state.inc"
 NVN(nvnCommandBufferBindVertexAttribState,void,NVNcommandBuffer *c,int n,const NVNvertexAttribState *s){if(n<0||n>16||(!s&&n))fatal("vertex attribute count");record(c,@{@"op":@"attributes",@"data":[NSData dataWithBytes:s length:n*sizeof *s]});}
 NVN(nvnCommandBufferBindVertexStreamState,void,NVNcommandBuffer *c,int n,const NVNvertexStreamState *s){if(n<0||n>15||(!s&&n))fatal("vertex stream count");record(c,@{@"op":@"streams",@"data":[NSData dataWithBytes:s length:n*sizeof *s]});}
-NVN(nvnCommandBufferBindDepthStencilState,void,NVNcommandBuffer *c,const NVNdepthStencilState *s){if(!s)fatal("null depth state");record(c,@{@"op":@"depthState",@"data":[NSData dataWithBytes:s length:sizeof *s]});}
+NVN(nvnCommandBufferBindDepthStencilState,void,NVNcommandBuffer *c,const NVNdepthStencilState *s){stateMemory(s,sizeof *s,NO);record(c,@{@"op":@"depthState",@"data":[NSData dataWithBytes:s length:sizeof *s]});}
 NVN(nvnCommandBufferBindVertexBuffer,void,NVNcommandBuffer *c,int slot,NVNbufferAddress address,size_t size){if(slot<0||slot>=15)fatal("vertex buffer slot");record(c,@{@"op":@"vertex",@"slot":@(slot),@"address":@(address),@"size":@(size)});}
 NVN(nvnCommandBufferBindUniformBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if(stage<0||stage>5||slot<0||slot>=128||size>65536)fatal("uniform buffer stage/slot/size");record(c,@{@"op":@"uniform",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
 NVN(nvnCommandBufferBindStorageBuffer,void,NVNcommandBuffer *c,NVNshaderStage stage,int slot,NVNbufferAddress address,size_t size){if((stage!=NVN_SHADER_STAGE_VERTEX&&stage!=NVN_SHADER_STAGE_FRAGMENT)||slot<0||slot>=16)fatal("storage buffer stage/slot");record(c,@{@"op":@"storage",@"stage":@(stage),@"slot":@(slot),@"address":@(address),@"size":@(size)});}
@@ -776,14 +777,15 @@ NVN(nvnCommandBufferSetSamplerPool,void,NVNcommandBuffer *c,const NVNsamplerPool
 NVN(nvnCommandBufferClearDepthStencil,void,NVNcommandBuffer *c,float depth,uint32_t clearDepth,int stencil,int mask){(void)stencil;if(mask||(clearDepth&255)>1)fatal("stencil clear is not implemented");if(clearDepth&255)record(c,@{@"op":@"depthClear",@"depth":@(depth)});}
 static NSString *resourceKey(NSNumber *stage,NSNumber *slot){return [NSString stringWithFormat:@"%@:%@",stage,slot];}
 static MTLVertexFormat vertexFormat(unsigned f){switch(f){case NVN_FORMAT_R32F:return MTLVertexFormatFloat;case NVN_FORMAT_RG32F:return MTLVertexFormatFloat2;case NVN_FORMAT_RGB32F:return MTLVertexFormatFloat3;case NVN_FORMAT_RGBA32F:return MTLVertexFormatFloat4;case NVN_FORMAT_R16F:return MTLVertexFormatHalf;case NVN_FORMAT_RG16F:return MTLVertexFormatHalf2;case NVN_FORMAT_RGBA16F:return MTLVertexFormatHalf4;case NVN_FORMAT_RGBA8:return MTLVertexFormatUChar4Normalized;case NVN_FORMAT_RGBA8SN:return MTLVertexFormatChar4Normalized;default:fatal("vertex format requires additional conversion");}}
-static BWPipeline *pipeline(BWReplay *state){
+static BWPipeline *pipeline(BWReplay *state,BWRenderStates render){
     BWProgram *p=state.program;BWTexture *target=state.target;
     id<MTLFunction> vertex=p.functions[@(NVN_SHADER_STAGE_VERTEX)],fragment=p.functions[@(NVN_SHADER_STAGE_FRAGMENT)];
     if(!vertex||!fragment)fatal("draw without exact translated vertex/fragment shaders");
-    NSString *key=[NSString stringWithFormat:@"%p:%p:%lu:%lu:%@:%@",vertex,fragment,(unsigned long)target.texture.pixelFormat,(unsigned long)state.depth.texture.pixelFormat,state.attributes?:@"",state.streams?:@""];
+    NSArray *key=@[[NSValue valueWithPointer:(__bridge const void*)vertex],[NSValue valueWithPointer:(__bridge const void*)fragment],@(target.texture.pixelFormat),@(state.depth.texture.pixelFormat),state.attributes?:[NSData data],state.streams?:[NSData data],[NSData dataWithBytes:&render length:sizeof render]];
     BWPipeline *result=pipelines[key];if(result)return result;
     MTLRenderPipelineDescriptor *desc=[MTLRenderPipelineDescriptor new];desc.vertexFunction=vertex;desc.fragmentFunction=fragment;desc.colorAttachments[0].pixelFormat=target.texture.pixelFormat;
     if(state.depth)desc.depthAttachmentPixelFormat=state.depth.texture.pixelFormat;
+    applyRenderPipeline(desc,render);
     if(state.attributes.length){MTLVertexDescriptor *vd=[MTLVertexDescriptor vertexDescriptor];const VertexAttribute *a=state.attributes.bytes;const VertexStream *v=state.streams.bytes;size_t n=state.attributes.length/sizeof *a,nv=state.streams.length/sizeof *v;
         for(size_t i=0;i<n;i++){if(!a[i].format)continue;if(a[i].stream>=nv)fatal("vertex stream layout is unbound");unsigned metal=16+a[i].stream;vd.attributes[i].format=vertexFormat(a[i].format);vd.attributes[i].offset=a[i].offset;vd.attributes[i].bufferIndex=metal;vd.layouts[metal].stride=v[a[i].stream].stride;vd.layouts[metal].stepFunction=v[a[i].stream].divisor?MTLVertexStepFunctionPerInstance:MTLVertexStepFunctionPerVertex;vd.layouts[metal].stepRate=v[a[i].stream].divisor?:1;}
         desc.vertexDescriptor=vd;
@@ -860,6 +862,8 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
     for(NSDictionary *c in commands){NSString *op=c[@"op"];
             if([op isEqual:@"target"]){state.target=objects[c[@"id"]];state.depth=objects[c[@"depth"]];if(![state.target isKindOfClass:[BWTexture class]] || state.target.depth || (state.depth&&!state.depth.depth))fatal("stale/incompatible render targets");continue;}
             if([op isEqual:@"program"]){state.program=objects[c[@"id"]];if(![state.program isKindOfClass:[BWProgram class]])fatal("stale program");continue;}
+            if([op isEqual:@"renderState"]){replayRenderState(state,c);continue;}
+            if([op isEqual:@"depthRange"]){state.depthRange=c;continue;}if([op isEqual:@"polygonOffset"]){state.polygonOffset=c;continue;}
             if([op isEqual:@"viewport"]){state.viewport=c;continue;}if([op isEqual:@"scissor"]){state.scissor=c;continue;}
             if([op isEqual:@"attributes"]){state.attributes=c[@"data"];continue;}if([op isEqual:@"streams"]){state.streams=c[@"data"];continue;}if([op isEqual:@"depthState"]){state.depthState=c[@"data"];continue;}
             if([op isEqual:@"texturePool"]){state.texturePool=c[@"pool"];continue;}if([op isEqual:@"samplerPool"]){state.samplerPool=c[@"pool"];continue;}
@@ -874,16 +878,19 @@ NVN(nvnQueueSubmitCommands,void,NVNqueue *raw,int count,const NVNcommandHandle *
             if(!clear&&!depthClear){if(![op isEqual:@"draw"]||!state.program)fatal("unsupported replay operation / missing program");validateDrawProfiles(state,c);}
             if(!clear)uploadTexture(target,cb);if(state.depth&&!depthClear)uploadTexture(state.depth,cb);
             if(!clear&&!depthClear)prepareResources(state,cb);
+            BWRenderStates render={0};BWPipeline *ps=nil;if(!clear&&!depthClear){render=renderStates(state);ps=pipeline(state,render);}
             MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];pass.colorAttachments[0].texture=target.texture;pass.colorAttachments[0].storeAction=MTLStoreActionStore;pass.colorAttachments[0].loadAction=clear?MTLLoadActionClear:MTLLoadActionLoad;
             if(state.depth){pass.depthAttachment.texture=state.depth.texture;pass.depthAttachment.loadAction=depthClear?MTLLoadActionClear:MTLLoadActionLoad;pass.depthAttachment.storeAction=MTLStoreActionStore;if(depthClear)pass.depthAttachment.clearDepth=[c[@"depth"] doubleValue];}
             else if(depthClear)fatal("depth clear without depth attachment");
             if((clear||depthClear)&&scissor&&([scissor[@"x"] intValue]!=0||[scissor[@"y"] intValue]!=0||[scissor[@"w"] intValue]!=target.width||[scissor[@"h"] intValue]!=target.height))fatal("scissored clear is not yet implemented");
             if(clear){float color[4];[c[@"color"] getBytes:color length:16];pass.colorAttachments[0].clearColor=MTLClearColorMake(color[0],color[1],color[2],color[3]);}
             id<MTLRenderCommandEncoder> encoder=[cb renderCommandEncoderWithDescriptor:pass];if(!encoder)fatal("Metal render pass creation");
-            if(!clear&&!depthClear){BWPipeline *ps=pipeline(state);[encoder setRenderPipelineState:ps.state];applyResources(state,ps,encoder,c);
-                if(state.depthState.length){DepthState d;[state.depthState getBytes:&d length:sizeof d];if(d.stencil||((d.test||d.write)&&!state.depth))fatal("unsupported depth/stencil state");MTLDepthStencilDescriptor *dd=[MTLDepthStencilDescriptor new];dd.depthCompareFunction=d.test?(MTLCompareFunction)(d.function-1):MTLCompareFunctionAlways;dd.depthWriteEnabled=d.test&&d.write;id<MTLDepthStencilState> ds=[gpu newDepthStencilStateWithDescriptor:dd];[encoder setDepthStencilState:ds];}
-                if(viewport)[encoder setViewport:(MTLViewport){[viewport[@"x"] doubleValue],[viewport[@"y"] doubleValue],[viewport[@"w"] doubleValue],[viewport[@"h"] doubleValue],0,1}];
+            if(!clear&&!depthClear){[encoder setRenderPipelineState:ps.state];applyResources(state,ps,encoder,c);
+                applyRenderEncoder(state,encoder,render);
+                double near=state.depthRange?[state.depthRange[@"near"] doubleValue]:0,far=state.depthRange?[state.depthRange[@"far"] doubleValue]:1;
+                [encoder setViewport:(MTLViewport){viewport?[viewport[@"x"] doubleValue]:0,viewport?[viewport[@"y"] doubleValue]:0,viewport?[viewport[@"w"] doubleValue]:target.width,viewport?[viewport[@"h"] doubleValue]:target.height,near,far}];
                 if(scissor){NSUInteger x=[scissor[@"x"] unsignedIntegerValue],y=[scissor[@"y"] unsignedIntegerValue],w=[scissor[@"w"] unsignedIntegerValue],h=[scissor[@"h"] unsignedIntegerValue];if(x>(NSUInteger)target.width||y>(NSUInteger)target.height||w>(NSUInteger)target.width-x||h>(NSUInteger)target.height-y)fatal("scissor outside target");[encoder setScissorRect:(MTLScissorRect){x,y,w,h}];}
+                if(render.polygon.cull==NVN_FACE_FRONT_AND_BACK)[encoder setScissorRect:(MTLScissorRect){0,0,0,0}];
                 [encoder drawPrimitives:[c[@"primitive"] unsignedIntegerValue] vertexStart:[c[@"first"] unsignedIntegerValue] vertexCount:[c[@"count"] unsignedIntegerValue] instanceCount:[c[@"instances"] unsignedIntegerValue] baseInstance:[c[@"baseInstance"] unsignedIntegerValue]];target.drawEpoch=++serial;
             }else if(clear)target.drawEpoch=0;
             [encoder endEncoding];target.gpuWritten=YES;if(state.depth)state.depth.gpuWritten=YES;

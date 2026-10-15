@@ -384,6 +384,56 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(expected, result.stdout)
 
+    def compile_render_probe(self, source, cases):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); graphics = ROOT / 'native/botw_graphics'; exe = path / 'state'
+            harness = path / 'state.c'; harness.write_text(source)
+            build = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            for mode, expected, accepted in cases:
+                with self.subTest(mode=mode):
+                    run = subprocess.run([str(exe)] + ([mode] if mode else []), capture_output=True, text=True, timeout=30)
+                    if run.returncode == 77:
+                        self.skipTest('No Metal device')
+                    if accepted:
+                        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                        self.assertIn(expected, run.stdout)
+                    else:
+                        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+                        self.assertIn(expected, run.stderr)
+
+    def test_fixed_upstream_six_state_families_typed_bounds_rw_and_error_recovery(self):
+        self.run_graphics_probe('probe_render_states.c', 'FIXED_UPSTREAM_SIX_STATE_FAMILIES_TYPED_BOUNDS_RW_AND_UNLOCK_OK')
+
+    def test_upstream_states_blending_masks_snapshots_cache_and_unsupported_draw_semantics(self):
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', RENDER_STATE_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [(mode, 'UPSTREAM_STATE_BLEND_MASK_POLYGON_MS_DEPTH_GPU_OK', True)
+            for mode in ('', 'mask', 'disabled', 'both')] + [
+            ('stencil', 'stencil attachment/render semantics', False),
+            ('samples', 'multisample coverage/sample locations', False),
+            ('coverage', 'multisample coverage/sample locations', False),
+            ('locations', 'multisample coverage/sample locations', False),
+            ('point', 'polygon point rasterization', False)])
+
+    def test_front_and_back_cull_retains_real_vertex_storage_side_effects(self):
+        feature = ("API(nvnPolygonStateSetDefaults);API(nvnPolygonStateSetCullFace);API(nvnCommandBufferBindPolygonState);"
+                   "NVNpolygonState discard;nvnPolygonStateSetDefaults(&discard);nvnPolygonStateSetCullFace(&discard,NVN_FACE_FRONT_AND_BACK);") + STORAGE_FEATURE
+        feature = feature.replace('nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);',
+            'float greenDiscard[]={0,1,0,1};nvnCommandBufferClearColor(&cb,0,greenDiscard,15);nvnCommandBufferBindPolygonState(&cb,&discard);'
+            'nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);')
+        feature = feature.replace('CHECK(pixels[0]==255&&pixels[1]==0&&pixels[12]==0&&pixels[13]==255);',
+            'for(int p=0;p<16;p++)CHECK(pixels[p*4]==0&&pixels[p*4+1]==255&&pixels[p*4+2]==0&&pixels[p*4+3]==255);')
+        feature = feature.replace('GPU_STORAGE_INSTANCING_BASE_IDS_OK', 'CULL_BOTH_PRESERVES_REAL_VERTEX_STORAGE_WRITES_OK')
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', feature + '    nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [('', 'CULL_BOTH_PRESERVES_REAL_VERTEX_STORAGE_WRITES_OK', True)])
+
+    def test_upstream_depth_ranges_bias_masks_front_back_and_winding_reach_gpu_pixels(self):
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', DEPTH_RASTER_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
+        source = source.replace('return float4(p[v],0,1);', 'return float4(p[v],.25,1);')
+        self.compile_render_probe(source, [('', 'UPSTREAM_DEPTH_RANGE_BIAS_FACE_WINDING_REAL_PIXELS_OK', True)])
+
     def test_object_errors_include_abi_entry_type_raw_identity_and_release_locks(self):
         self.run_graphics_probe('probe_object_diagnostic.c', 'NVN_ENTRY_OBJECT_DIAGNOSTIC_AND_ERROR_ESCAPE_OK')
 
@@ -1548,8 +1598,6 @@ int main(void){
 """
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 ARRAY_FEATURE = r"""
@@ -1605,3 +1653,76 @@ ARRAY_FEATURE = r"""
 array_done:
     nvnMemoryPoolFinalize(&arrayPool);
 """
+
+
+RENDER_STATE_FEATURE = r"""
+
+    API(nvnBlendStateSetDefaults);API(nvnBlendStateSetBlendFunc);API(nvnBlendStateSetBlendEquation);API(nvnBlendStateSetBlendTarget);
+    API(nvnColorStateSetDefaults);API(nvnColorStateSetBlendEnable);API(nvnChannelMaskStateSetDefaults);API(nvnChannelMaskStateSetChannelMask);
+    API(nvnPolygonStateSetDefaults);API(nvnPolygonStateSetCullFace);API(nvnPolygonStateSetFrontFace);API(nvnPolygonStateSetPolygonMode);
+    API(nvnMultisampleStateSetDefaults);API(nvnMultisampleStateSetSamples);API(nvnMultisampleStateSetAlphaToCoverageEnable);API(nvnMultisampleStateSetSampleLocationsEnable);API(nvnDepthStencilStateSetDefaults);API(nvnDepthStencilStateSetStencilTestEnable);
+    API(nvnCommandBufferBindBlendState);API(nvnCommandBufferBindColorState);API(nvnCommandBufferBindChannelMaskState);API(nvnCommandBufferBindPolygonState);API(nvnCommandBufferBindMultisampleState);API(nvnCommandBufferBindDepthStencilState);API(nvnCommandBufferSetBlendColor);
+    NVNblendState bs;NVNcolorState cs;NVNchannelMaskState cm;NVNpolygonState poly;NVNmultisampleState ms;NVNdepthStencilState ds;
+    nvnBlendStateSetDefaults(&bs);nvnBlendStateSetBlendTarget(&bs,0);nvnBlendStateSetBlendFunc(&bs,NVN_BLEND_FUNC_CONSTANT_COLOR,NVN_BLEND_FUNC_ONE_MINUS_CONSTANT_COLOR,NVN_BLEND_FUNC_ONE,NVN_BLEND_FUNC_ZERO);nvnBlendStateSetBlendEquation(&bs,NVN_BLEND_EQUATION_ADD,NVN_BLEND_EQUATION_ADD);
+    nvnColorStateSetDefaults(&cs);nvnColorStateSetBlendEnable(&cs,0,argc>1&&!strcmp(argv[1],"disabled")?0x100:0x101);
+    nvnChannelMaskStateSetDefaults(&cm);if(argc>1&&!strcmp(argv[1],"mask"))nvnChannelMaskStateSetChannelMask(&cm,0,0,1,0,0);
+    nvnPolygonStateSetDefaults(&poly);nvnPolygonStateSetCullFace(&poly,argc>1&&!strcmp(argv[1],"both")?NVN_FACE_FRONT_AND_BACK:NVN_FACE_NONE);nvnPolygonStateSetFrontFace(&poly,NVN_FRONT_FACE_CCW);nvnPolygonStateSetPolygonMode(&poly,NVN_POLYGON_MODE_FILL);
+    nvnMultisampleStateSetDefaults(&ms);nvnMultisampleStateSetSamples(&ms,1);nvnDepthStencilStateSetDefaults(&ds);
+    if(argc>1&&!strcmp(argv[1],"stencil"))nvnDepthStencilStateSetStencilTestEnable(&ds,1);
+    if(argc>1&&!strcmp(argv[1],"samples"))nvnMultisampleStateSetSamples(&ms,2);
+    if(argc>1&&!strcmp(argv[1],"coverage"))nvnMultisampleStateSetAlphaToCoverageEnable(&ms,1);
+    if(argc>1&&!strcmp(argv[1],"locations"))nvnMultisampleStateSetSampleLocationsEnable(&ms,1);
+    if(argc>1&&!strcmp(argv[1],"point"))nvnPolygonStateSetPolygonMode(&poly,NVN_POLYGON_MODE_POINT);
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);float green[]={0,1,0,1};nvnCommandBufferClearColor(&cb,0,green,15);
+    nvnCommandBufferBindBlendState(&cb,&bs);nvnCommandBufferBindColorState(&cb,&cs);nvnCommandBufferBindChannelMaskState(&cb,&cm);nvnCommandBufferBindPolygonState(&cb,&poly);nvnCommandBufferBindMultisampleState(&cb,&ms);nvnCommandBufferBindDepthStencilState(&cb,&ds);
+    float blendColor[]={.25,.5,.75,.5};nvnCommandBufferSetBlendColor(&cb,blendColor);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);
+    /* Binding snapshots survive source object changes before submit. */
+    nvnColorStateSetBlendEnable(&cs,0,0);nvnChannelMaskStateSetDefaults(&cm);nvnPolygonStateSetCullFace(&poly,NVN_FACE_FRONT_AND_BACK);blendColor[0]=1;
+    handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    unsigned r=64,g=128;if(argc>1&&!strcmp(argv[1],"mask"))r=0;if(argc>1&&!strcmp(argv[1],"disabled")){r=255;g=0;}if(argc>1&&!strcmp(argv[1],"both")){r=0;g=255;}
+    for(int i=0;i<16;i++)CHECK(abs((int)pixels[i*4]-(int)r)<=1&&abs((int)pixels[i*4+1]-(int)g)<=1&&pixels[i*4+2]==0&&pixels[i*4+3]==255);
+    /* Reuse this program/target after changing only blend enable and mask;
+     * cached PSOs must incorporate the new state, while dynamic constants persist. */
+    nvnPolygonStateSetCullFace(&poly,NVN_FACE_NONE);nvnColorStateSetBlendEnable(&cs,0,0);nvnChannelMaskStateSetDefaults(&cm);
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferClearColor(&cb,0,green,15);
+    nvnCommandBufferBindColorState(&cb,&cs);nvnCommandBufferBindChannelMaskState(&cb,&cm);nvnCommandBufferBindPolygonState(&cb,&poly);
+    nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    for(int i=0;i<16;i++)CHECK(pixels[i*4]==255&&pixels[i*4+1]==0&&pixels[i*4+2]==0&&pixels[i*4+3]==255);
+    puts("UPSTREAM_STATE_BLEND_MASK_POLYGON_MS_DEPTH_GPU_OK");
+"""
+
+DEPTH_RASTER_FEATURE = r"""
+    API(nvnPolygonStateSetDefaults);API(nvnPolygonStateSetCullFace);API(nvnPolygonStateSetFrontFace);API(nvnPolygonStateSetPolygonMode);API(nvnPolygonStateSetPolygonOffsetEnables);API(nvnCommandBufferBindPolygonState);
+    API(nvnDepthStencilStateSetDefaults);API(nvnDepthStencilStateSetDepthTestEnable);API(nvnDepthStencilStateSetDepthWriteEnable);API(nvnDepthStencilStateSetDepthFunc);API(nvnCommandBufferBindDepthStencilState);API(nvnCommandBufferClearDepthStencil);
+    API(nvnCommandBufferSetDepthRange);API(nvnCommandBufferSetPolygonOffsetClamp);
+    NVNtexture z;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,8192);CHECK(nvnTextureInitialize(&z,&tb));
+    unsigned red[9]={0};
+    for(unsigned test=0;test<9;test++){
+      NVNpolygonState raster;nvnPolygonStateSetDefaults(&raster);nvnPolygonStateSetPolygonMode(&raster,NVN_POLYGON_MODE_FILL);
+      if(test>=5)nvnPolygonStateSetCullFace(&raster,(test&1)?NVN_FACE_FRONT:NVN_FACE_BACK);
+      if(test>=7)nvnPolygonStateSetFrontFace(&raster,NVN_FRONT_FACE_CW);
+      nvnPolygonStateSetPolygonOffsetEnables(&raster,test==3?NVN_POLYGON_OFFSET_ENABLE_FILL:test==4?NVN_POLYGON_OFFSET_ENABLE_LINE:0);
+      NVNdepthStencilState depth;nvnDepthStencilStateSetDefaults(&depth);nvnDepthStencilStateSetDepthTestEnable(&depth,1);nvnDepthStencilStateSetDepthWriteEnable(&depth,1);nvnDepthStencilStateSetDepthFunc(&depth,NVN_DEPTH_FUNC_LESS);
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,&z,NULL);
+      float green[]={0,1,0,1};nvnCommandBufferClearColor(&cb,0,green,15);nvnCommandBufferClearDepthStencil(&cb,.5,1,0,0);
+      nvnCommandBufferBindDepthStencilState(&cb,&depth);nvnCommandBufferBindPolygonState(&cb,&raster);
+      nvnCommandBufferSetDepthRange(&cb,test==1?.5:test==2?1:0,test==2?0:1);nvnCommandBufferSetPolygonOffsetClamp(&cb,0,100000000,.5);
+      nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);
+      handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+      for(unsigned p=0;p<16;p++){CHECK(pixels[p*4+2]==0&&pixels[p*4+3]==255);if(pixels[p*4]==255&&pixels[p*4+1]==0)red[test]++;else CHECK(pixels[p*4]==0&&pixels[p*4+1]==255);}
+      printf("raster_case=%u red=%u\n",test,red[test]);
+    }
+    CHECK(red[0]==16&&red[1]==0&&red[2]==0&&red[3]==0&&red[4]==16);
+    CHECK(red[5]+red[6]==16&&red[5]==red[8]&&red[6]==red[7]);
+    controls[0][8]=0x29;controls[1][8]=0x30;codes[0][8]=0x29;codes[1][8]=0x30;memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    const char *lineMSL="#include <metal_stdlib>\nusing namespace metal;vertex float4 lv(uint v [[vertex_id]]){float2 p[3]={float2(-.75,-.75),float2(.75,-.75),float2(-.75,.75)};return float4(p[v],0,1);}fragment float4 lf(){return float4(1,0,0,1);}";
+    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,lineMSL,"lv"));CHECK(botw_graphics_register_shader(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,lineMSL,"lf"));CHECK(nvnProgramSetShaders(&program,2,sd));
+    NVNpolygonState wire;nvnPolygonStateSetDefaults(&wire);nvnPolygonStateSetPolygonMode(&wire,NVN_POLYGON_MODE_LINE);
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);float wireGreen[]={0,1,0,1};nvnCommandBufferClearColor(&cb,0,wireGreen,15);nvnCommandBufferBindPolygonState(&cb,&wire);nvnCommandBufferSetDepthRange(&cb,0,1);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    unsigned linePixels=0;for(unsigned p=0;p<16;p++)if(pixels[p*4])linePixels++;CHECK(linePixels>0&&linePixels<16);
+    puts("UPSTREAM_DEPTH_RANGE_BIAS_FACE_WINDING_REAL_PIXELS_OK");
+"""
+
+
+if __name__ == '__main__':
+    unittest.main()
