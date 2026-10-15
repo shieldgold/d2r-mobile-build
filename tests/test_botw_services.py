@@ -468,6 +468,52 @@ class ServicesTests(unittest.TestCase):
         self.send(fsp, self.request(1, b'\0' * 8, pid=True))
         return fsp
 
+    def test_patch_storage_unknown_is_distinct_from_verified_not_installed(self):
+        fsp = self.filesystem()
+        _, error = self.send(fsp, self.request(203), good=False)
+        self.assertIn('installation state is unknown', error)
+        self.lib.botw_services_set_patch_absent.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_size_t]
+        for context, absent in ((None, 1), (self.ctx, 2), (self.ctx, -1)):
+            self.assertEqual(self.lib.botw_services_set_patch_absent(context, absent, self.error, 1024), -1)
+        self.assertEqual(self.lib.botw_services_set_patch_absent(self.ctx, 1, self.error, 1024), 0)
+        for _ in range(3):
+            raw, _ = self.send(fsp, self.request(203))
+            self.assertEqual(raw[16:20], b'SFCO')
+            self.assertEqual(struct.unpack_from('<I', raw, 24)[0], 0x7d402)
+            self.assertEqual(struct.unpack_from('<I', raw, 4)[0] >> 31, 0)
+        self.send(fsp, self.request(203, b'\1'), good=False)
+        self.send(fsp, self.request(203, pid=True), good=False)
+        _, error = self.send(fsp, self.request(204), good=False)
+        self.assertIn('unsupported', error)
+        self.assertEqual(self.lib.botw_services_set_patch_absent(self.ctx, 0, self.error, 1024), 0)
+        _, error = self.send(fsp, self.request(203), good=False)
+        self.assertIn('installation state is unknown', error)
+
+    def test_domain_missing_patch_returns_no_object_and_keeps_base_storage_readable(self):
+        image, _ = romfs_fixture()
+        self.attach_romfs(image)
+        fsp = self.filesystem()
+        self.lib.botw_services_set_patch_absent.argtypes = [C.c_void_p, C.c_int, C.c_char_p, C.c_size_t]
+        self.assertEqual(self.lib.botw_services_set_patch_absent(self.ctx, 1, self.error, 1024), 0)
+        raw, _ = self.send(fsp, self.request(0, kind=5))
+        data, _, _ = self.response(raw)
+        root, = struct.unpack_from('<I', data)
+        raw, _ = self.send(fsp, self.request(203, domain=root))
+        self.assertEqual(struct.unpack_from('<I', raw, 16)[0], 0)
+        self.assertEqual(raw[32:36], b'SFCO')
+        self.assertEqual(struct.unpack_from('<I', raw, 40)[0], 0x7d402)
+        self.assertEqual(struct.unpack_from('<I', raw, 4)[0] >> 31, 0)
+        raw, _ = self.send(fsp, self.request(200, domain=root))
+        data, handles, count = self.response(raw, domain=True)
+        self.assertEqual((handles, count), ([], 1))
+        storage, = struct.unpack_from('<I', data)
+        self.assertEqual(storage, root + 1)
+        output = C.create_string_buffer(80)
+        self.ranges.append((C.addressof(output), len(output), True))
+        self.send(fsp, self.request(0, struct.pack('<qQ', 0, len(output)), domain=storage,
+                                    receive=(C.addressof(output), len(output))))
+        self.assertEqual(bytes(output), image[:80])
+
     def test_fsp_raw_storage_reads_actual_romfs_in_chunks_larger_than_backend_limit(self):
         payload = bytes(range(256)) * (27 * 1024 * 1024 // 256)
         image, _ = romfs_fixture([('/Bootup.pack', payload)])

@@ -52,6 +52,13 @@ void botw_services_set_input(botw_services *services, botw_input *input, uint32_
  * order is services -> input/kernel; frontend callbacks must release input first. */
 int botw_services_refresh_input(botw_services *services, char *error, size_t error_capacity);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
+/* Publish verified absence of installed update/patch content for this process.
+ * Default/0 means unknown and fails diagnostically; 1 permits fsp command 203
+ * to return FS TargetNotFound, letting the guest use its base-content fallback.
+ * This does not infer absence from a missing backend or substitute base bytes
+ * for a patch. Installed patch storage needs a separate supported backend. */
+int botw_services_set_patch_absent(botw_services *services, int known_absent,
+    char *error, size_t error_capacity);
 /* Share the actual per-title/per-user host save mount. This borrowed instance
  * must outlive services; future save requests validate its immutable IDs. */
 void botw_services_set_savefs(botw_services *services, botw_savefs *savefs);

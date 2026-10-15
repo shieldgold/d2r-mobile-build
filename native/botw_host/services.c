@@ -73,6 +73,7 @@ struct botw_services {
     botw_input *input;
     botw_romfs *romfs;
     botw_savefs *savefs;
+    unsigned patch_known_absent;
     uint32_t input_shared_memory_handle;
     uint32_t hid_supported_styles, hid_npad_ids[10], hid_last_style[10];
     uint32_t hid_style_event_write[10], hid_style_event_read[10];
@@ -280,6 +281,11 @@ int botw_services_refresh_input(botw_services *s, char *error, size_t cap) {
 void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->romfs = romfs; pthread_mutex_unlock(&s->lock);
+}
+int botw_services_set_patch_absent(botw_services *s, int known_absent, char *error, size_t cap) {
+    if (!s || (known_absent != 0 && known_absent != 1))
+        return problem(error, cap, "patch installation state requires service context and canonical absence bool");
+    pthread_mutex_lock(&s->lock); s->patch_known_absent = (unsigned)known_absent; pthread_mutex_unlock(&s->lock); return 0;
 }
 void botw_services_set_savefs(botw_services *s, botw_savefs *savefs) {
     if (!s) return;
@@ -761,11 +767,13 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
     }
     return problem(error, cap, "unsupported IPC service=%s command=%u", kind_name(o->kind), r->command);
 }
+static int fs_result_response(uint8_t *ipc, size_t capacity, const Request *r, uint32_t result) {
+    response(ipc, capacity, r, NULL, 0, 0, 0);
+    store32(ipc + 16 + (r->domain ? 16 : 0) + 8, result); return 0;
+}
 static int fs_error_response(uint8_t *ipc, size_t capacity, const Request *r, const botw_romfs_error *backend, char *error, size_t cap) {
     if (backend->code == BOTW_ROMFS_ENOENT) {
-        response(ipc, capacity, r, NULL, 0, 0, 0);
-        store32(ipc + 16 + (r->domain ? 16 : 0) + 8, 0x202); /* FS PathNotFound */
-        return 0;
+        return fs_result_response(ipc, capacity, r, 0x202); /* FS PathNotFound */
     }
     return problem(error, cap, "RomFS backend error=%d: %s", backend->code, backend->message);
 }
@@ -777,6 +785,21 @@ static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ip
             o->initialized = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
         }
         if (!o->initialized || r->pid) return problem(error, cap, "fsp-srv requires initialized client and no unexpected PID");
+        if (r->command == 203) {
+            /* No CMIF input arguments. Nondomain HIPC can include up to 15
+             * alignment bytes after the header; domain requests carry a size. */
+            if ((r->domain && r->payload_size) || r->payload_size > 15)
+                return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess takes no input payload");
+            for (size_t i = 0; i < r->payload_size; i++)
+                if (r->payload[i]) return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess takes no input payload");
+            if (!s->patch_known_absent)
+                return problem(error, cap, "fsp-srv.OpenPatchDataStorageByCurrentProcess installation state is unknown; installed patch storage backend is not configured");
+            /* Public FS module=2, TargetNotFound description=1002:
+             * libvapours/results/fs_results.hpp. The actual base SDK accepts
+             * this missing-target result in its optional patch mount path. */
+            emit(s, "patch_data_storage installed=false result=0x7d402 reason=verified_no_installed_update");
+            return fs_result_response(ipc, capacity, r, 2u | (1002u << 9));
+        }
         if (r->command == 2 || r->command == 200) {
             if (!s->romfs) return problem(error, cap, "fsp-srv command=%u requires mounted host RomFS backend", r->command);
             Object *child = new_object(r->command == 2 ? OBJECT_ROMFS_FILESYSTEM : OBJECT_ROMFS_STORAGE);
