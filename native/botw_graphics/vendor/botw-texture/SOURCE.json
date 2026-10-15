@@ -1,0 +1,70 @@
+{
+  "repository": "https://github.com/TommyLau/botw-mobile",
+  "commit": "5f673ae2ea4f90ad46403aa6fbe13537fb557271",
+  "license": "MIT",
+  "files": {
+    "nvn_texwrite.c": {
+      "path": "dm/gfx/nvn/nvn_texwrite.c",
+      "sha256": "b7b7ada9d95e8c146f2c0bedd2c8815a6d5af762bc840dc4130f0e40804aa2c2"
+    },
+    "nvn_texwrite.h": {
+      "path": "dm/gfx/nvn/nvn_texwrite.h",
+      "sha256": "88303b341dc9f88ccca43b04b3c15552f4d7529930ba10857acd11c209bfe8c3"
+    },
+    "nvn_texown.c": {
+      "path": "dm/gfx/nvn/nvn_texown.c",
+      "sha256": "654b5794a9d778d6784389cbe1b14188755d731c65cf7ac7398d8e6afb1e7ab8"
+    },
+    "nvn_texown.h": {
+      "path": "dm/gfx/nvn/nvn_texown.h",
+      "sha256": "171a31d29a0d33e1993f1e813e5897e0d1a59a5c85f6c91400378a32cadb5648"
+    },
+    "nvn_texflush.c": {
+      "path": "dm/gfx/nvn/nvn_texflush.c",
+      "sha256": "cf2a5ad0ebfb67b5769666dff8d8327f59228d9084ab356378d3b88c695d388f"
+    },
+    "nvn_texflush.h": {
+      "path": "dm/gfx/nvn/nvn_texflush.h",
+      "sha256": "6129cee00316d867e3b62646977beec48a29ef4e7c24c106400fd09802cbf71a"
+    },
+    "nvn_dirty.c": {
+      "path": "dm/gfx/nvn/nvn_dirty.c",
+      "sha256": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75"
+    },
+    "nvn_dirty.h": {
+      "path": "dm/gfx/nvn/nvn_dirty.h",
+      "sha256": "d1b9aee7cff3bee7ff055b1aaaded0ff90f83d9412754c716e62fc0394c3c4b3"
+    },
+    "nvn_hmap.h": {
+      "path": "dm/gfx/nvn/nvn_hmap.h",
+      "sha256": "ae32d0081cf9313ca6511cdfd636e29e6acf60d2a3871f9f455a874ed2f52d7b"
+    },
+    "tests/t_texwrite_bounds.c": {
+      "path": "dm/gfx/tests/t_texwrite_bounds.c",
+      "sha256": "2c1893a2945c5f8bb5230cd5a6a365efbf81261cfc1baa79f9f340cf2375340d"
+    },
+    "tests/t_texown.c": {
+      "path": "dm/gfx/tests/t_texown.c",
+      "sha256": "ac3b8dcfa39c573d43cdb1b6497d5d76e4b3981ad56988d4f623fc7b9079e82f"
+    },
+    "tests/t_texflush_rules.c": {
+      "path": "dm/gfx/tests/t_texflush_rules.c",
+      "sha256": "7f2147d085a01225e8241616ea4752d5441ae873636fbecde432f2e9078a0b6d"
+    },
+    "tests/t_dirty_unambiguous.c": {
+      "path": "dm/gfx/tests/t_dirty_unambiguous.c",
+      "sha256": "9f5559b7e48a989a79ee4889adc5c6cd17314ac01c9604751685728c179a468c"
+    }
+  },
+  "adaptations": [
+    "Relative includes use the existing layout/deswizzle modules.",
+    "Dirty tracking registers one process-lifetime checked callback pair through the host-owned bridge.",
+    "Dirty page ownership and actual protection are checked before handling stale faults.",
+    "Dirty allocation, prepare and retirement failures are returned; no private crash handler is installed.",
+    "Single translation-unit modules.inc isolates private names without changing public entry points.",
+    "Checked ownership and certificate publication return allocation failures instead of abort; hash-table growth is transactional.",
+    "Quiescent reset APIs are restricted to whole-context teardown after all users and GPU work have drained.",
+    "Upstream synthetic tests adapt private host hooks to a test-only callback pair; original assertion bodies are retained.",
+    "Kernel permission queries for writable NONE pages own the canonical BUSY state, preventing a full protect/unprotect ABA race from rejecting legal writes."
+  ]
+}
