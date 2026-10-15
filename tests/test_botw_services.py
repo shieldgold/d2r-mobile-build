@@ -3,12 +3,20 @@ import ctypes as C
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 import struct
+import sys
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests'))
+from test_botw_romfs import fixture as romfs_fixture
+
+
+class RomfsError(C.Structure):
+    _fields_ = [('code', C.c_int), ('message', C.c_char * 192)]
+
 LOG = C.CFUNCTYPE(None, C.c_void_p, C.c_char_p)
 MEMORY = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint64, C.c_size_t, C.c_int)
 EVENT_CREATE = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.POINTER(C.c_uint32), C.POINTER(C.c_uint32), C.c_void_p, C.c_size_t)
@@ -35,7 +43,7 @@ class ServicesTests(unittest.TestCase):
         if not source.exists():
             raise AssertionError('Horizon services implementation is missing')
         subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra',
-                        '-Werror', '-shared', '-fPIC', str(source), '-o', str(cls.library)], check=True)
+                        '-Werror', '-shared', '-fPIC', str(source), str(ROOT / 'native/botw_resources/romfs.c'), '-o', str(cls.library)], check=True)
         cls.lib = C.CDLL(str(cls.library))
         cls.lib.botw_services_create.argtypes = [LOG, MEMORY, C.c_void_p]
         cls.lib.botw_services_create.restype = C.c_void_p
@@ -387,6 +395,72 @@ class ServicesTests(unittest.TestCase):
         data, _, _ = self.response(raw)
         self.assertEqual(data[0], 0)
 
+    def attach_romfs(self, image):
+        self.romfs_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.romfs_temp.cleanup)
+        path = Path(self.romfs_temp.name) / 'romfs.bin'
+        path.write_bytes(image)
+        self.lib.botw_romfs_open.argtypes = [C.c_char_p, C.POINTER(RomfsError)]
+        self.lib.botw_romfs_open.restype = C.c_void_p
+        self.lib.botw_romfs_close.argtypes = [C.c_void_p]
+        error = RomfsError()
+        mount = self.lib.botw_romfs_open(str(path).encode(), C.byref(error))
+        self.assertTrue(mount, error.message)
+        self.addCleanup(self.lib.botw_romfs_close, mount)
+        self.lib.botw_services_set_romfs.argtypes = [C.c_void_p, C.c_void_p]
+        self.lib.botw_services_set_romfs(self.ctx, mount)
+        return mount
+
+    def filesystem(self):
+        fsp = self.service(self.initialized_sm(), b'fsp-srv')
+        self.send(fsp, self.request(1, b'\0' * 8, pid=True))
+        return fsp
+
+    def test_fsp_raw_storage_reads_actual_romfs_in_chunks_larger_than_backend_limit(self):
+        payload = bytes(range(256)) * (27 * 1024 * 1024 // 256)
+        image, _ = romfs_fixture([('/Bootup.pack', payload)])
+        self.attach_romfs(image)
+        fsp = self.filesystem()
+        raw, _ = self.send(fsp, self.request(200))
+        _, handles, _ = self.response(raw)
+        storage = handles[0]
+        raw, _ = self.send(storage, self.request(4))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], len(image))
+        output = C.create_string_buffer(len(payload))
+        self.ranges.append((C.addressof(output), len(output), True))
+        self.send(storage, self.request(0, struct.pack('<qQ', 0x200, len(output)), receive=(C.addressof(output), len(output))))
+        self.assertEqual(bytes(output), payload)
+        self.send(storage, self.request(0, struct.pack('<qQ', -1, 1), receive=(C.addressof(output), 1)), good=False)
+        self.send(storage, self.request(0, struct.pack('<qQ', len(image) - 1, 2), receive=(C.addressof(output), 2)), good=False)
+        self.send(storage, self.request(1, struct.pack('<qQ', 0, 1), buffer=(C.addressof(output), 1)), good=False)
+
+    def test_fsp_file_path_and_read_only_handle_use_same_backend(self):
+        image, _ = romfs_fixture()
+        self.attach_romfs(image)
+        raw, _ = self.send(self.filesystem(), self.request(2))
+        _, handles, _ = self.response(raw)
+        fs = handles[0]
+        path = C.create_string_buffer(b'/System/Actor.byml')
+        self.ranges.append((C.addressof(path), len(path), False))
+        raw, _ = self.send(fs, self.request(7, static=(C.addressof(path), len(path))))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<I', data)[0], 1)
+        self.send(fs, self.request(8, struct.pack('<I', 3), static=(C.addressof(path), len(path))), good=False)
+        raw, _ = self.send(fs, self.request(8, struct.pack('<I', 1), static=(C.addressof(path), len(path))))
+        _, handles, _ = self.response(raw)
+        file = handles[0]
+        output = C.create_string_buffer(16)
+        self.ranges.append((C.addressof(output), len(output), True))
+        raw, _ = self.send(file, self.request(0, struct.pack('<IIqQ', 0, 0, 2, 16), receive=(C.addressof(output), 16)))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], 8)
+        self.assertEqual(bytes(output)[:8], b'tor data')
+        self.assertEqual(self.close(fs), 0)
+        raw, _ = self.send(file, self.request(4))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<Q', data)[0], 10)
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)
@@ -403,8 +477,8 @@ class ServicesTests(unittest.TestCase):
                                                        self.error, 1024), -1)
         self.assertEqual(handle.value, 0xdead)
         sm = self.initialized_sm()
-        _, error = self.send(sm, self.request(1, b'fsp-srv\0'), good=False)
-        self.assertIn('fsp-srv', error)
+        _, error = self.send(sm, self.request(1, b'unknown\0'), good=False)
+        self.assertIn('unknown', error)
 
     def test_initialize_requires_pid_and_repeated_initialization_rejected(self):
         sm = self.connect()

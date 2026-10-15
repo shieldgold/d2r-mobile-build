@@ -9,6 +9,7 @@
  * https://switchbrew.org/wiki/Log_services
  */
 #include "services.h"
+#include "../botw_resources/romfs.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -29,7 +30,8 @@
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
-    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER };
+    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER,
+    OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -41,6 +43,8 @@ typedef struct Object {
     unsigned refs, initialized;
     uint64_t pid;
     StorageBacking *storage;
+    botw_romfs *romfs;
+    char *file_path;
 } Object;
 typedef struct Session {
     unsigned refs, domain;
@@ -120,6 +124,10 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_STORAGE_ACCESSOR: return "am.IStorageAccessor";
         case OBJECT_AUDIO_CONTROLLER: return "am.IAudioController";
         case OBJECT_DISPLAY_CONTROLLER: return "am.IDisplayController";
+        case OBJECT_FSP: return "fsp-srv";
+        case OBJECT_ROMFS_STORAGE: return "fs.IStorage(RomFS)";
+        case OBJECT_ROMFS_FILESYSTEM: return "fs.IFileSystem(RomFS)";
+        case OBJECT_ROMFS_FILE: return "fs.IFile(RomFS)";
     }
     return "<invalid>";
 }
@@ -134,7 +142,7 @@ static void release_object(Object *o) {
         o->storage->owner->storage_bytes -= o->storage->size;
         free(o->storage->bytes); free(o->storage);
     }
-    free(o);
+    free(o->file_path); free(o);
 }
 static Session *new_session(Object *o) {
     Session *session = calloc(1, sizeof *session);
@@ -575,6 +583,93 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
     }
     return problem(error, cap, "unsupported IPC service=%s command=%u", kind_name(o->kind), r->command);
 }
+static int fs_error_response(uint8_t *ipc, size_t capacity, const Request *r, const botw_romfs_error *backend, char *error, size_t cap) {
+    if (backend->code == BOTW_ROMFS_ENOENT) {
+        response(ipc, capacity, r, NULL, 0, 0, 0);
+        store32(ipc + 16 + (r->domain ? 16 : 0) + 8, 0x202); /* FS PathNotFound */
+        return 0;
+    }
+    return problem(error, cap, "RomFS backend error=%d: %s", backend->code, backend->message);
+}
+static int fs_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (o->kind == OBJECT_FSP) {
+        if (r->input_count || r->output_count || r->copy_count) return problem(error, cap, "fsp-srv command=%u unexpected buffers/handles", r->command);
+        if (r->command == 1) {
+            if (!r->pid || r->payload_size < 8 || o->initialized) return problem(error, cap, "fsp-srv.Initialize requires PID descriptor and uninitialized session");
+            o->initialized = 1; response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
+        if (!o->initialized || r->pid) return problem(error, cap, "fsp-srv requires initialized client and no unexpected PID");
+        if (r->command == 2 || r->command == 200) {
+            if (!s->romfs) return problem(error, cap, "fsp-srv command=%u requires mounted host RomFS backend", r->command);
+            Object *child = new_object(r->command == 2 ? OBJECT_ROMFS_FILESYSTEM : OBJECT_ROMFS_STORAGE);
+            if (!child) return problem(error, cap, "allocate RomFS service object failed");
+            child->romfs = s->romfs;
+            return return_object(s, session, child, ipc, capacity, r, 0, error, cap);
+        }
+    } else if (o->kind == OBJECT_ROMFS_FILESYSTEM) {
+        if (r->pid || r->copy_count || r->output_count) return problem(error, cap, "RomFS filesystem unexpected PID/handle/output buffer");
+        if (r->command == 7 || r->command == 8) {
+            if (r->input_count != 1 || r->input_size > 0x301) return problem(error, cap, "RomFS path requires one input pointer of at most 0x301 bytes");
+            const char *path = (const char *)(uintptr_t)r->input_address;
+            const char *end = memchr(path, 0, r->input_size);
+            if (!end) return problem(error, cap, "RomFS path is not NUL terminated");
+            botw_romfs_entry entry; botw_romfs_error backend = {0};
+            if (botw_romfs_stat(o->romfs, path, &entry, &backend)) return fs_error_response(ipc, capacity, r, &backend, error, cap);
+            if (r->command == 7) {
+                uint32_t type = entry.is_directory ? 0 : 1;
+                response(ipc, capacity, r, &type, 4, 0, 0); return 0;
+            }
+            if (r->payload_size < 4 || load32(r->payload) != 1 || entry.is_directory)
+                return problem(error, cap, "RomFS.OpenFile supports existing regular files in read-only mode=1");
+            Object *file = new_object(OBJECT_ROMFS_FILE);
+            if (!file) return problem(error, cap, "allocate RomFS file object failed");
+            size_t length = (size_t)(end - path) + 1; file->file_path = malloc(length);
+            if (!file->file_path) { release_object(file); return problem(error, cap, "allocate RomFS file path failed"); }
+            memcpy(file->file_path, path, length); file->romfs = o->romfs;
+            return return_object(s, session, file, ipc, capacity, r, 0, error, cap);
+        }
+    } else if (o->kind == OBJECT_ROMFS_STORAGE || o->kind == OBJECT_ROMFS_FILE) {
+        if (r->pid || r->copy_count || r->input_count) return problem(error, cap, "read-only RomFS object does not accept PID/handles/input buffers");
+        uint64_t size = 0;
+        botw_romfs_error backend = {0};
+        if (o->kind == OBJECT_ROMFS_STORAGE) size = botw_romfs_image_size(o->romfs);
+        else {
+            botw_romfs_entry entry;
+            if (botw_romfs_stat(o->romfs, o->file_path, &entry, &backend)) return fs_error_response(ipc, capacity, r, &backend, error, cap);
+            size = entry.size;
+        }
+        if (r->command == 4) {
+            if (r->output_count) return problem(error, cap, "RomFS.GetSize does not accept output buffers");
+            response(ipc, capacity, r, &size, 8, 0, 0); return 0;
+        }
+        if (r->command == 0) {
+            unsigned file = o->kind == OBJECT_ROMFS_FILE;
+            size_t input_offset = file ? 8 : 0;
+            if (r->payload_size < input_offset + 16 || (file && (load32(r->payload) || load32(r->payload + 4))))
+                return problem(error, cap, "RomFS.Read requires offset/length and supported option=0");
+            uint64_t offset = load64(r->payload + input_offset), length = load64(r->payload + input_offset + 8);
+            if (offset > INT64_MAX || length > SIZE_MAX || (length && (r->output_count != 1 || length > r->output_size)) || (!length && r->output_count > 1))
+                return problem(error, cap, "RomFS.Read invalid offset/length/output descriptor offset=%llu length=%llu", (unsigned long long)offset, (unsigned long long)length);
+            if (!file && (offset > size || length > size - offset)) return problem(error, cap, "RomFS IStorage.Read exceeds image bounds");
+            uint64_t wanted = length;
+            if (file && (offset >= size || wanted > size - offset)) wanted = offset >= size ? 0 : size - offset;
+            size_t done = 0;
+            while ((uint64_t)done < wanted) {
+                size_t chunk = wanted - done > BUFFER_LIMIT ? BUFFER_LIMIT : (size_t)(wanted - done), actual = 0;
+                void *destination = (void *)(uintptr_t)(r->output_address + done);
+                int failed = file ? botw_romfs_pread(o->romfs, o->file_path, offset + done, destination, chunk, &actual, &backend) :
+                    botw_romfs_raw_pread(o->romfs, offset + done, destination, chunk, &actual, &backend);
+                if (failed) return fs_error_response(ipc, capacity, r, &backend, error, cap);
+                if (actual != chunk) return problem(error, cap, "RomFS immutable backend returned unexpected short read");
+                done += actual;
+            }
+            uint64_t actual = done;
+            response(ipc, capacity, r, file ? &actual : NULL, file ? 8 : 0, 0, 0);
+            emit(s, "romfs_read object=%s offset=%llu bytes=%zu", file ? o->file_path : "raw-image", (unsigned long long)offset, done); return 0;
+        }
+    }
+    return problem(error, cap, "unsupported read-only IPC service=%s command=%u", kind_name(o->kind), r->command);
+}
 static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
     if (!handle) return problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle_id);
@@ -601,7 +696,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
-    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
     if (o->kind == OBJECT_SM) {
@@ -617,10 +712,13 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             if (!memcmp(name, "lm\0\0\0\0\0\0", 8)) service_kind = OBJECT_LM;
             else if (!memcmp(name, "apm\0\0\0\0\0", 8)) service_kind = OBJECT_APM;
             else if (!memcmp(name, "appletOE", 8)) service_kind = OBJECT_APPLET_OE;
+            else if (!memcmp(name, "fsp-srv\0", 8)) service_kind = OBJECT_FSP;
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind >= OBJECT_FSP && o->kind <= OBJECT_ROMFS_FILE) {
+        return fs_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_DISPLAY_CONTROLLER) {
         return applet_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_APM) {
