@@ -14,6 +14,7 @@ FIXTURE = r'''
 #include "kernel.h"
 #include <assert.h>
 #include <pthread.h>
+#include <limits.h>
 #include <stdint.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -308,6 +309,41 @@ static int execute_thread(void *opaque, uint64_t entry, uint64_t argument,
 static uint32_t create_worker(uint64_t entry, uint64_t argument, uint64_t top) {
     uint64_t r[32] = {0, entry, argument, top, 44, (uint64_t)-2}; svc(0x08, r);
     assert(!r[0]); return (uint32_t)r[1];
+}
+static void header_stack_worker(uint64_t argument, uint32_t handle) {
+    (void)handle;
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    unsigned char local;
+    assert((uintptr_t)&local < callback_stack_top - page);
+#ifdef __APPLE__
+    assert((uintptr_t)pthread_get_stackaddr_np(pthread_self()) == callback_stack_top - page);
+    assert(pthread_get_stacksize_np(pthread_self()) == callback_stack_top - page - callback_stack_low);
+#endif
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(argument + i) == 0xa5);
+    uint64_t r[32] = {0}; svc(0xa, r); abort();
+}
+static void sdk_header_stack(void) {
+    const size_t unit = 0x200000, page = (size_t)sysconf(_SC_PAGESIZE);
+    size_t usable = ((size_t)PTHREAD_STACK_MIN + page - 1) & ~(page - 1), bytes = usable + page;
+    assert(!pthread_key_create(&test_tls, NULL));
+    assert(!botw_kernel_configure_memory(ctx, unit, unit, unit, unit, 0, error, sizeof error));
+    uint64_t heap = info(4), stack = info(14), r[32] = {0, unit}; svc(1, r); assert(!r[0]);
+    r[0] = stack; r[1] = heap; r[2] = usable; svc(4, r); assert(!r[0]);
+    r[1] = (uintptr_t)header_stack_worker; r[2] = 0; r[3] = stack + usable - 32; r[4] = 35; r[5] = (uint32_t)-2;
+    svc(8, r); assert(r[0] == BOTW_KERNEL_RESULT_INVALID_MEMORY_STATE);
+    r[0] = stack; r[1] = heap; r[2] = usable; svc(5, r); assert(!r[0]);
+    r[0] = stack; r[1] = heap; r[2] = bytes; svc(4, r); assert(!r[0]);
+    memset((void *)(uintptr_t)(stack + usable), 0xa5, page);
+    callback_stack_low = stack; callback_stack_top = stack + bytes;
+    /* SDK reserves entry/fenv at end-32. Only full pages below it are host stack. */
+    uint32_t worker = create_worker((uintptr_t)header_stack_worker, stack + usable, stack + bytes - 32);
+    r[0] = worker; svc(9, r); assert(!r[0]);
+    assert(!wait_one(worker, 1000000000));
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(stack + usable + i) == 0xa5);
+    assert(!botw_kernel_close_handle(ctx, worker, error, sizeof error));
+    r[0] = stack; r[1] = heap; r[2] = bytes; svc(5, r); assert(!r[0]);
+    for (size_t i = 0; i < page; i++) assert(*(unsigned char *)(uintptr_t)(heap + usable + i) == 0xa5);
+    assert(!botw_kernel_shutdown(ctx, error, sizeof error)); assert(!pthread_key_delete(test_tls));
 }
 static void threads(void) {
     const size_t unit = 0x200000;
@@ -1047,6 +1083,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "virtualaffinity")) virtual_core_affinity();
     else if (!strcmp(argv[1], "workeraffinity")) worker_virtual_affinity();
     else if (!strcmp(argv[1], "threads")) threads();
+    else if (!strcmp(argv[1], "sdkheader")) sdk_header_stack();
     else if (!strcmp(argv[1], "busy")) shutdown_busy();
     else if (!strcmp(argv[1], "shared")) shared_memory();
     else if (!strcmp(argv[1], "transfer")) transfer_memory();
@@ -1213,6 +1250,9 @@ class KernelTests(unittest.TestCase):
 
     def test_virtual_cpu_affinity_distinguishes_worker_current_and_owner_threads(self):
         self.check_case('workeraffinity')
+
+    def test_sdk_header_tail_is_outside_page_aligned_actual_pthread_stack(self):
+        self.check_case('sdkheader')
 
     def test_create_start_exit_uses_mapped_stack_and_thread_local_context(self):
         self.check_case('threads')

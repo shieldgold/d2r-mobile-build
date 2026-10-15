@@ -139,13 +139,17 @@ def _thread_stack_policy(report, originals, rewrites, address_bits):
         if adapted:
             raise ValueError('Thread stack adaptation requires an explicit thread stack policy')
         return None
-    from .thread_stack import POLICY
-    if (address_bits != 39 or policy != POLICY or
-            any(type(policy.get(key)) is not type(value) for key, value in POLICY.items()) or adapted != {'main'}):
+    from .thread_stack import POLICIES, policy_from_manifest
+    expected = next((item for item in POLICIES.values() if item == policy), None)
+    if (expected is None or address_bits != 39 or
+            any(type(policy.get(key)) is not type(value) for key, value in expected.items()) or adapted != {'main'}):
         raise ValueError('Unsupported or incomplete explicit thread stack policy')
     profile_path = Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json'
     verify_profile(list(originals.values()), json.loads(profile_path.read_text()))
-    return POLICY.copy()
+    if (rewrites['main'].get('thread_stack_adaptation') and
+            policy_from_manifest(rewrites['main']['thread_stack_adaptation']) != expected):
+        raise ValueError('Thread stack manifest differs from selected explicit policy')
+    return expected.copy()
 
 
 def _text(data, label):
@@ -355,8 +359,9 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         _audit_tables(files, image, layout, rewrites[name])
         address_image = image
         if name == 'main' and not thread_stack_policy:
-            from .thread_stack import SITE, REPLACEMENT
-            if image[SITE:SITE + 4] == REPLACEMENT:
+            from .thread_stack import SITE, REPLACEMENT, CAPACITY_SITE
+            if (image[SITE:SITE + 4] == REPLACEMENT or
+                    (len(image) > CAPACITY_SITE + 4 and int.from_bytes(image[CAPACITY_SITE:CAPACITY_SITE + 4], 'little') & 0xfc000000 == 0x14000000)):
                 raise ValueError('Loaded thread stack instruction requires its explicit policy')
         if thread_stack_policy and name == 'main':
             from .thread_stack import verify as verify_stack

@@ -1685,9 +1685,12 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             if (state.address_bits != 39 || !state.host39_transport_audited ||
                     find_raw_symbol("nninitStartup") != (uint64_t)stack_main->base + 0x7352f8 ||
                     find_raw_symbol("nnMain") != (uint64_t)stack_main->base + 0x735330)
-                fail("thread stack alignment requires the fixed base-v0 Host39 entry profile");
+                fail("thread stack policy requires the fixed base-v0 Host39 entry profile");
             state.thread_stack_policy_active = 1;
-            report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-thread-stack-alignment-v1 alignment=16384 sites=1 size_unchanged=true original_allocator=true");
+            if (stack_mode == 2)
+                report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-pthread-stack-v2 alignment=16384 capacity_round=16384 reserved_tail=16384 sdk_header=32 sites=2 original_allocator=true");
+            else
+                report("thread_stack_loaded_audited=true profile=botw-switch-base-v0-thread-stack-alignment-v1 alignment=16384 sites=1 size_unchanged=true original_allocator=true");
         }
         initialize_keys();
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");

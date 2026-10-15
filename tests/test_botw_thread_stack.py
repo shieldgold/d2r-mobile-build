@@ -20,8 +20,11 @@ from botw_native import heap_policy as hp
 
 
 def fixture():
-    original = bytearray(ts.SITE + 32)
+    original = bytearray(0xa1db20)
     original[ts.CONTEXT_OFFSET:ts.CONTEXT_OFFSET + len(ts.CONTEXT)] = ts.CONTEXT
+    original[ts.CAPACITY_CONTEXT_OFFSET:ts.CAPACITY_CONTEXT_OFFSET + len(ts.CAPACITY_CONTEXT)] = ts.CAPACITY_CONTEXT
+    for offset, data in ts.DATAFLOW_CONTEXTS:
+        original[offset:offset + len(data)] = data
     for site in hp.SITES:
         original[site['offset'] - 8:site['offset'] + 12] = bytes.fromhex(site['context'])
     image = bytes(original).ljust(0xa28000, b'\0')
@@ -31,6 +34,25 @@ def fixture():
 
 
 class ThreadStackTests(unittest.TestCase):
+    def test_native_capacity_policy_preserves_old_output_and_reverses_both_sites_and_thunk(self):
+        original, image, _ = fixture()
+        source = bytearray(original); source[ts.CAPACITY_CONTEXT_OFFSET:ts.CAPACITY_CONTEXT_OFFSET + len(ts.CAPACITY_CONTEXT)] = ts.CAPACITY_CONTEXT
+        original = bytes(source)
+        image = original + image[len(original):]
+        legacy, _ = ts.apply(original, image, generic_site_offsets=[])
+        final, manifest = ts.apply(original, image, generic_site_offsets=[], policy='host-pthread-stack-v2')
+        self.assertEqual(final[ts.SITE:ts.SITE + 4], ts.REPLACEMENT)
+        self.assertNotEqual(final[ts.CAPACITY_SITE:ts.CAPACITY_SITE + 4], ts.CAPACITY_ORIGINAL)
+        self.assertGreater(len(final), len(image))
+        self.assertEqual(ts.verify(final, manifest), image)
+        self.assertEqual(legacy[ts.CAPACITY_SITE:ts.CAPACITY_SITE + 4], ts.CAPACITY_ORIGINAL)
+        forged = ts._manifest(hashlib.sha256(original).hexdigest(), final, final, ts.POLICY)
+        with self.assertRaises(ValueError): ts.verify(final, forged)
+        for at in [ts.CAPACITY_SITE - 4, ts.CAPACITY_SITE, len(image), len(final) - 4]:
+            bad = bytearray(final); bad[at] ^= 1
+            with self.assertRaises(ValueError): ts.verify(bytes(bad), manifest)
+        with self.assertRaises(ValueError): ts.apply(original, image, generic_site_offsets=[ts.CAPACITY_SITE], policy='host-pthread-stack-v2')
+
     def test_single_instruction_transform_is_transactional_and_exactly_reversible(self):
         original, image, _ = fixture()
         patched, manifest = ts.apply(original, image, generic_site_offsets=[])
@@ -96,23 +118,26 @@ class ThreadStackTests(unittest.TestCase):
         from botw_native.__main__ import main
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / 'out'
-            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
-                main(['--exefs', folder, '--output', str(output), '--thread-stack-policy', 'host-page-alignment-v1'])
-            self.assertEqual(caught.exception.code, 2); self.assertFalse(output.exists())
+            for policy in ts.POLICIES:
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                    main(['--exefs', folder, '--output', str(output), '--thread-stack-policy', policy])
+                self.assertEqual(caught.exception.code, 2); self.assertFalse(output.exists())
 
     def test_framework_verifies_heap_stack_digest_order_and_rejects_dropped_or_forged_policy(self):
         import test_botw_guest_framework as baseline
         from botw_native.guest_framework import build_framework, HOST39_POLICY
         from botw_native.hipc_address import apply as address_apply
-        for heap_enabled in (False, True):
-            with self.subTest(heap=heap_enabled), tempfile.TemporaryDirectory() as folder:
+        for heap_enabled, native_enabled in [(False, False), (True, False), (False, True), (True, True)]:
+            policy_name = 'host-pthread-stack-v2' if native_enabled else 'host-page-alignment-v1'
+            policy = ts.POLICIES[policy_name]
+            with self.subTest(heap=heap_enabled, native=native_enabled), tempfile.TemporaryDirectory() as folder:
                 folder = Path(folder); report_path, rewrite = baseline.fixture(folder)
                 report = json.loads(report_path.read_text())
                 fingerprints = json.loads((ROOT / 'profiles/botw-switch-base-v0.json').read_text())['modules']
                 for record in report['modules']: record.update(fingerprints[record['name']])
                 for record in report['rewrites']: record['host_address_adaptation'] = {}
                 report['host_address_policy'] = HOST39_POLICY.copy()
-                report['guest_thread_stack_policy'] = ts.POLICY.copy()
+                report['guest_thread_stack_policy'] = policy.copy()
                 original, _, _ = fixture(); original = original.ljust(0xa24100, b'\0')
                 generic = bytearray(original.ljust(0xa30000, b'\0'))
                 struct.pack_into('<I', generic, 0, 0x14000000 | (0xa2c000 // 4))
@@ -137,13 +162,13 @@ class ThreadStackTests(unittest.TestCase):
                     image, hm = hp.apply(original, image, layout, generic_site_offsets=[0])
                     main.update(heap_adaptation=hm, host39_image_sha256=hm['input_image_sha256'])
                     report['guest_heap_policy'] = hp.POLICY.copy()
-                final, sm = ts.apply(original, image, generic_site_offsets=[0])
+                final, sm = ts.apply(original, image, generic_site_offsets=[0], policy=policy_name)
                 main.update(thread_stack_adaptation=sm, thread_stack_input_image_sha256=sm['input_image_sha256'],
                             image_sha256=hashlib.sha256(final).hexdigest())
                 (rewrite / 'main.patched.bin').write_bytes(final)
                 report_path.write_text(json.dumps(report))
                 good = build_framework(report_path, rewrite, folder / 'good', module_names=['main'])
-                self.assertEqual(good['guest_thread_stack_policy'], ts.POLICY)
+                self.assertEqual(good['guest_thread_stack_policy'], policy)
                 for mode in ('drop_policy', 'drop_all_metadata', 'wrong_input', 'wrong_order'):
                     bad = copy.deepcopy(report)
                     if mode == 'drop_policy': del bad['guest_thread_stack_policy']
@@ -181,9 +206,36 @@ class ThreadStackTests(unittest.TestCase):
             self.assertEqual(check(patched[:ts.SITE + 2]), -1)
             self.assertEqual(check(patched[:ts.SITE + 4]), -1)
             self.assertEqual(check(patched, 0x1000), -1)
+            native, _ = ts.apply(original, image.ljust(23280432, b'\0'), generic_site_offsets=[], policy='host-pthread-stack-v2')
+            self.assertEqual(check(native), 2)
+            # Removing metadata cannot hide the early branch or substitute only alignment.
+            for offset in [ts.CAPACITY_SITE - 4, ts.CAPACITY_SITE, ts.DATAFLOW_CONTEXTS[-1][0], len(native) - 8, len(native) - 4]:
+                bad = bytearray(native); bad[offset] ^= 1
+                self.assertEqual(check(bytes(bad)), -1)
+            self.assertEqual(check(native[:-4]), -1)
+            bad = bytearray(image.ljust(23280432, b'\0')); bad[ts.CAPACITY_SITE] ^= 1
+            self.assertEqual(check(bytes(bad)), -1)
+            bad = bytearray(native); bad[ts.SITE:ts.SITE + 4] = ts.ORIGINAL
+            self.assertEqual(check(bytes(bad)), -1)
             for offset in [ts.SITE - 4, ts.SITE + 4]:
                 bad = bytearray(patched); bad[offset] ^= 1
                 self.assertEqual(check(bytes(bad)), -1)
+
+    @unittest.skipUnless(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Actual A64 host pthread execution')
+    def test_actual_a64_checked_capacity_reaches_all_consumers_and_preserves_sdk_header(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            code = '\n'.join(f' .long {word[0]}' for word in struct.iter_unpack('<I', ts.CAPACITY_CODE))
+            assembly = CAPACITY_ASSEMBLY.replace('CAPACITY_CODE', code)
+            (folder / 'capacity.S').write_text(assembly)
+            (folder / 'capacity.c').write_text(CAPACITY_NATIVE_FIXTURE)
+            binary = folder / 'capacity'
+            subprocess.run(['clang', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
+                            '-I', str(ROOT / 'native/botw_host'), str(folder / 'capacity.c'),
+                            str(folder / 'capacity.S'), str(ROOT / 'native/botw_host/kernel.c'), '-o', str(binary)], check=True)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('actual_a64_capacity_header_pthread=true', result.stdout)
 
     @unittest.skipUnless(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Actual A64 host execution')
     def test_actual_a64_alignment_uses_original_allocator_and_real_kernel_move_round_trip(self):
@@ -269,6 +321,104 @@ int main(void){
  botw_kernel_destroy(k);puts("actual_a64=true size_heap_unchanged=true map_unmap_bytes_round_trip=true neighboring_protection_preserved=true");
 }
 '''
+
+
+CAPACITY_ASSEMBLY = r"""
+.text
+.p2align 2
+.globl _stack_capacity_capture
+_stack_capacity_capture:
+ stp x19,x20,[sp,#-48]!
+ stp x23,x24,[sp,#16]
+ stp x29,x30,[sp,#32]
+ mov x19,x1
+ mov w6,w0
+ mov x8,#0x1357
+ mov x9,#0x2468
+ mov x10,#0xa0000000
+ msr nzcv,x10
+ mov x20,sp
+ b 2f
+1:
+ str w24,[x19]
+ sxtw x23,w24
+ str x23,[x19,#8]
+ mov x4,x23
+ str x4,[x19,#16]
+ stp x8,x9,[x19,#24]
+ mrs x10,nzcv
+ str x10,[x19,#40]
+ mov x10,sp
+ sub x10,x10,x20
+ str x10,[x19,#48]
+ str x6,[x19,#56]
+ mov x0,x23
+ ldp x29,x30,[sp,#32]
+ ldp x23,x24,[sp,#16]
+ ldp x19,x20,[sp],#48
+ ret
+2:
+CAPACITY_CODE
+ b 1b
+"""
+CAPACITY_NATIVE_FIXTURE = r"""
+#include "kernel.h"
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+#include <pthread.h>
+#include <unistd.h>
+static botw_kernel *k;
+static char error[1024];
+static uint64_t low, end;
+extern uint64_t stack_capacity_capture(uint32_t size, uint64_t *consumers);
+static int executable(void *p, uint64_t a){(void)p;return a>=0x10000 && !(a&3);}
+static int memory(void*p,uint64_t a,size_t n,int w){(void)p;(void)w;return a>=0x10000 && n<=4096 && a<=UINT64_MAX-n;}
+static void svc(unsigned n,uint64_t*r){int rc=botw_kernel_dispatch(k,n,r,error,sizeof error);if(rc!=BOTW_KERNEL_HANDLED||r[0])fprintf(stderr,"svc%x rc%d result%llx: %s\n",n,rc,(unsigned long long)r[0],error);assert(rc==BOTW_KERNEL_HANDLED&&!r[0]);}
+static void sdk_thread_entry(uint64_t argument,uint32_t handle){
+ (void)handle;uint64_t header=*(uint64_t*)(uintptr_t)(end-32);assert(header==argument);
+ char local;assert((uintptr_t)&local>=low && (uintptr_t)&local<end-0x4000);
+ assert((uintptr_t)pthread_get_stackaddr_np(pthread_self())==end-0x4000);
+ assert(pthread_get_stacksize_np(pthread_self())==0x4000);
+ uint64_t r[32]={0};svc(0xa,r);assert(0);
+}
+static int execute(void*p,uint64_t entry,uint64_t arg,uint64_t top,uint32_t h,char*e,size_t c){
+ (void)p;(void)e;(void)c;assert(top==end-32);((void(*)(uint64_t,uint32_t))(uintptr_t)entry)(arg,h);return -1;
+}
+int main(void){
+ uint32_t requests[]={0,1,4095,4096,8192,16384,32768,524288,0x7fff8000,0x7fffc000,0x7fffffff,0x80000000,0xffffffff};
+ for(unsigned i=0;i<sizeof requests/sizeof *requests;i++){
+  uint32_t n=requests[i];uint64_t out[8]={0};
+  uint64_t expected=(uint64_t)(int64_t)(int32_t)n;
+  if(n && n<=0x7fff8000 && !(n&0xfff))expected=((n+UINT64_C(0x3fff))&~UINT64_C(0x3fff))+0x4000;
+  assert(stack_capacity_capture(n,out)==expected);
+  assert(out[0]==(uint32_t)expected && out[1]==expected && out[2]==expected);
+  assert(out[3]==0x1357 && out[4]==0x2468 && out[5]==0xa0000000 && !out[6] && out[7]==n);
+ }
+ assert(sysconf(_SC_PAGESIZE)==0x4000);
+ uint64_t out[8]={0}, capacity=stack_capacity_capture(0x4000,out);assert(capacity==0x8000);
+ botw_kernel_callbacks cb={.memory=memory,.executable=executable,.execute_thread=execute};k=botw_kernel_create(&cb,NULL);assert(k);
+ assert(!botw_kernel_configure_core_mask(k,7,error,sizeof error));
+ assert(!botw_kernel_configure_thread_priority_mask(k,UINT64_C(0x0ffffffff0000000),error,sizeof error));
+ assert(!botw_kernel_configure_memory(k,0x200000,0x200000,0x200000,0x200000,0,error,sizeof error));
+ uint64_t r[32]={0,0x200000};svc(1,r);uint64_t heap=r[1];
+ r[1]=14;r[2]=BOTW_KERNEL_CURRENT_PROCESS;svc(0x29,r);low=r[1];end=low+capacity;
+ memset((void*)(uintptr_t)heap,0x3e,capacity+0x4000);
+ r[0]=low;r[1]=heap;r[2]=capacity;svc(4,r);
+ unsigned char tail[0x4000];memset(tail,0xa5,sizeof tail);uint64_t arg=0x987654321;
+ memcpy(tail+sizeof tail-32,&arg,sizeof arg);memcpy((void*)(uintptr_t)(end-sizeof tail),tail,sizeof tail);
+ r[1]=(uintptr_t)sdk_thread_entry;r[2]=arg;r[3]=end-32;r[4]=35;r[5]=(uint32_t)-2;svc(8,r);uint32_t h=(uint32_t)r[1];
+ r[0]=h;svc(9,r);r[1]=(uintptr_t)&h;r[2]=1;r[3]=1000000000;svc(0x18,r);
+ assert(!memcmp((void*)(uintptr_t)(end-sizeof tail),tail,sizeof tail));
+ assert(!botw_kernel_close_handle(k,h,error,sizeof error));
+ r[0]=low;r[1]=heap;r[2]=capacity;svc(5,r);
+ assert(!memcmp((void*)(uintptr_t)(heap+capacity-sizeof tail),tail,sizeof tail));
+ for(unsigned i=0;i<0x4000;i++)assert(*(unsigned char*)(uintptr_t)(heap+capacity+i)==0x3e);
+ assert(!botw_kernel_shutdown(k,error,sizeof error));botw_kernel_destroy(k);
+ puts("actual_a64_capacity_header_pthread=true checked_size_consumers=true flags_scratch_preserved=true");
+}
+"""
 
 if __name__ == '__main__':
     unittest.main()

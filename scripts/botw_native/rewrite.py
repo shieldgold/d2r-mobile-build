@@ -152,7 +152,8 @@ def rewrite_module(tool, module, output, timeout=300, *, host39=False, heap_poli
             from .thread_stack import apply as apply_stack, verify as verify_stack
             stack_input_digest = hashlib.sha256(updated).hexdigest()
             updated, stack_adaptation = apply_stack(initialized_image(module.read_bytes(), module.name),
-                updated, generic_site_offsets=[int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()])
+                updated, generic_site_offsets=[int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()],
+                policy=thread_stack if isinstance(thread_stack, str) else 'host-page-alignment-v1')
             verify_stack(updated, stack_adaptation, expected_input_sha256=stack_input_digest)
         temporary = image.with_suffix('.host39.part')
         temporary.write_bytes(updated)

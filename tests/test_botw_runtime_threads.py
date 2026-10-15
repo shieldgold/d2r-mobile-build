@@ -56,13 +56,16 @@ int main(int argc, char **argv) {
         4 * unit, 0, error, sizeof error));
     uint64_t heap = region(4), stack = region(14), r[32] = {0, unit * 3}; svc(1, r);
     Evidence *evidence = (Evidence *)(uintptr_t)(heap + unit * 2);
-    uint32_t workers[2]; unsigned count = !strcmp(argv[2], "normal") ? 2 : 1;
+    int small_stack = !strcmp(argv[2], "normal-small");
+    size_t stack_bytes = small_stack ? 0x8000 : unit;
+    uint32_t workers[2]; unsigned count = !strncmp(argv[2], "normal", 6) ? 2 : 1;
     int focus_case = !strncmp(argv[2], "focus", 5);
     if (focus_case) assert(!services_focus(NULL, 0, 0, 0, 1, error, sizeof error));
     for (unsigned i = 0; i < count; i++) {
-        r[0] = stack + i * unit; r[1] = heap + i * unit; r[2] = unit; svc(4, r);
+        r[0] = stack + i * unit; r[1] = heap + i * unit; r[2] = stack_bytes; svc(4, r);
+        if (small_stack) memset((void *)(uintptr_t)(stack + i * unit + 0x4000), 0xa5, 0x4000);
         r[1] = (uintptr_t)state.modules[5].base + 0x200; r[2] = (uintptr_t)&evidence[i];
-        r[3] = stack + (i + 1) * unit; r[4] = 44; r[5] = (uint64_t)-2; svc(8, r);
+        r[3] = stack + i * unit + stack_bytes - (small_stack ? 32 : 0); r[4] = 44; r[5] = (uint64_t)-2; svc(8, r);
         workers[i] = (uint32_t)r[1]; r[0] = workers[i]; svc(9, r);
     }
     uint64_t deadline = host_now() + 2000000000;
@@ -73,7 +76,7 @@ int main(int argc, char **argv) {
             Evidence *e = &evidence[i]; assert(e->ready == 1);
             assert(e->tls && e->tlr && e->tls != (uintptr_t)state.tls && e->tlr != (uintptr_t)state.tlr);
             assert(e->gate == (uintptr_t)botw_gate && e->thread_object == e->tlr + 0x200);
-            assert(e->stack > stack + i * unit && e->stack < stack + (i + 1) * unit);
+            assert(e->stack > stack + i * unit && e->stack < stack + i * unit + stack_bytes - (small_stack ? 0x4000 : 0));
             assert(e->handle == workers[i] && e->tls_value == 0x31 && e->tlr_value == 0x42 && e->k18 == 0);
         }
         assert(evidence[0].tls != evidence[1].tls && evidence[0].tlr != evidence[1].tlr);
@@ -82,7 +85,11 @@ int main(int argc, char **argv) {
         for (unsigned i = 0; i < count; i++) __atomic_store_n(&evidence[i].release, 1, __ATOMIC_RELEASE);
         for (unsigned i = 0; i < count; i++) {
             uint64_t wait[32] = {0, (uintptr_t)&workers[i], 1, 1000000000}; svc(0x18, wait);
-            r[0] = stack + i * unit; r[1] = heap + i * unit; r[2] = unit; svc(5, r);
+            if (small_stack) for (size_t byte = 0; byte < 0x4000; byte++)
+                assert(*(unsigned char *)(uintptr_t)(stack + i * unit + 0x4000 + byte) == 0xa5);
+            r[0] = stack + i * unit; r[1] = heap + i * unit; r[2] = stack_bytes; svc(5, r);
+            if (small_stack) for (size_t byte = 0; byte < 0x4000; byte++)
+                assert(*(unsigned char *)(uintptr_t)(heap + i * unit + 0x4000 + byte) == 0xa5);
         }
         puts("runtime_child_context_isolated=true rewritten_exit_joined=true");
     } else if (focus_case) {
@@ -189,7 +196,7 @@ class RuntimeThreadTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.build.cleanup()
 
-    def run_guest(self, *, fault=False, focus=None):
+    def run_guest(self, *, fault=False, focus=None, small_stack=False):
         with tempfile.TemporaryDirectory(prefix='botw-synthetic-child-') as directory:
             root = Path(directory)
             for name in fixture.MODULES:
@@ -202,7 +209,7 @@ class RuntimeThreadTests(unittest.TestCase):
             if focus:
                 gates += '0x10060\tsvc\t11\t0x204\n' if focus == 'svc' else '0x10060\tcntpct\t0\t0x204\n'
             (root / 'botw/sdk.gates.tsv').write_text(gates)
-            mode = 'focus-stop' if focus == 'stop' else 'focus-resume' if focus else 'fault' if fault else 'normal'
+            mode = 'focus-stop' if focus == 'stop' else 'focus-resume' if focus else 'fault' if fault else 'normal-small' if small_stack else 'normal'
             return subprocess.run([str(self.exe), str(root), mode],
                                   capture_output=True, text=True, timeout=10)
 
@@ -210,6 +217,13 @@ class RuntimeThreadTests(unittest.TestCase):
         result = self.run_guest()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('runtime_child_context_isolated=true rewritten_exit_joined=true', result.stdout)
+
+    def test_actual_minimum_pthread_stack_keeps_sdk_tail_and_child_context_separate(self):
+        result = self.run_guest(small_stack=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('runtime_child_context_isolated=true rewritten_exit_joined=true', result.stdout)
+        self.assertIn('size=0x4000', result.stdout)
+        self.assertIn('reserved_tail=0x4000', result.stdout)
 
     def test_actual_child_fault_recovers_to_its_own_boundary(self):
         result = self.run_guest(fault=True)

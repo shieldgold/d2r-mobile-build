@@ -30,8 +30,8 @@ def main(argv=None):
     parser.add_argument('--host39', action='store_true', help='Apply the fixed base-v0 host address transport adaptation')
     parser.add_argument('--heap-policy', choices=('bounded-host-memory-v1',),
                         help='Explicit experimental base-v0 heap/root parameters within actual host memory')
-    parser.add_argument('--thread-stack-policy', choices=('host-page-alignment-v1',),
-                        help='Fixed base-v0 source-stack allocator alignment for native 16 KiB pages')
+    parser.add_argument('--thread-stack-policy', choices=('host-page-alignment-v1', 'host-pthread-stack-v2'),
+                        help='Fixed base-v0 native stack alignment, optionally checked capacity plus SDK tail page')
     args = parser.parse_args(argv)
     if args.host39 and not args.rewrite:
         parser.error('--host39 requires --rewrite')
@@ -94,7 +94,7 @@ def main(argv=None):
             for module in modules:
                 print('Rewriting ' + module['name'], flush=True)
                 result = rewrite_module(tool, exefs / module['name'], output / 'rewrite', host39=args.host39,
-                                        heap_policy=bool(args.heap_policy), thread_stack=bool(args.thread_stack_policy))
+                                        heap_policy=bool(args.heap_policy), thread_stack=args.thread_stack_policy or False)
                 report['rewrites'].append(result)
                 print(module['name'] + ': ' + result['status'], flush=True)
                 write_report(output, report)
@@ -106,8 +106,8 @@ def main(argv=None):
                     from .heap_policy import POLICY
                     report['guest_heap_policy'] = POLICY.copy()
                 if args.thread_stack_policy:
-                    from .thread_stack import POLICY
-                    report['guest_thread_stack_policy'] = POLICY.copy()
+                    from .thread_stack import POLICIES
+                    report['guest_thread_stack_policy'] = POLICIES[args.thread_stack_policy].copy()
         write_report(output, report)
         print('Report: ' + str(output / 'report.json'), flush=True)
         return 1 if report['status'] == 'rewrite_failed' else 0

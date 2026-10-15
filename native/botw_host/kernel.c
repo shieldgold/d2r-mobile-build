@@ -1135,7 +1135,7 @@ static int create_thread(botw_kernel *k, uint64_t *regs, char *error, size_t cap
     for (unsigned i = 0; i < MAX_MAPS; i++) {
         Mapping *m = &k->mappings[i];
         if (m->size && stack_top > m->destination && stack_top <= m->destination + m->size &&
-            stack_top - m->destination >= (size_t)PTHREAD_STACK_MIN && !m->users) { mapping = m; break; }
+            ((stack_top - m->destination) & ~(uint64_t)(k->host_page - 1)) >= (size_t)PTHREAD_STACK_MIN && !m->users) { mapping = m; break; }
     }
     if (!mapping || k->stopping) {
         pthread_mutex_unlock(&k->lock); free(t);
@@ -1163,8 +1163,12 @@ static int start_thread(botw_kernel *k, uint64_t *regs, char *error, size_t capa
     }
     pthread_attr_t attr; int result = pthread_attr_init(&attr);
     if (result) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "init thread attributes: %s", strerror(result)); }
-    result = pthread_attr_setstack(&attr, (void *)(uintptr_t)t->mapping->destination,
-        (size_t)(t->stack_top - t->mapping->destination));
+    /* A Horizon SDK may reserve entry/fenv bytes at the end of its mapped
+     * stack. Darwin requires a page-aligned custom pthread range; round only
+     * DOWN inside this pinned mapping, leaving every header byte untouched.
+     * The explicit base-v0 capacity profile supplies a complete extra page. */
+    size_t host_size = (size_t)(t->stack_top - t->mapping->destination) & ~(k->host_page - 1);
+    result = pthread_attr_setstack(&attr, (void *)(uintptr_t)t->mapping->destination, host_size);
     if (!result) result = pthread_attr_setguardsize(&attr, 0);
 #ifdef __APPLE__
     /* Horizon priorities remain virtual scheduler metadata. Request the closest
@@ -1174,7 +1178,16 @@ static int start_thread(botw_kernel *k, uint64_t *regs, char *error, size_t capa
     if (!result) result = pthread_create(&t->host, &attr, thread_main, t);
     pthread_attr_destroy(&attr);
     if (result) { pthread_mutex_unlock(&k->lock); return diagnostic(error, capacity, "start guest pthread on mapped stack: %s", strerror(result)); }
-    t->started = 1; pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
+    t->started = 1;
+    if (k->callbacks.log) {
+        char message[320]; snprintf(message, sizeof message,
+            "guest_pthread_stack handle=0x%x base=0x%llx size=0x%zx sdk_top=0x%llx reserved_tail=0x%llx",
+            t->handle, (unsigned long long)t->mapping->destination, host_size,
+            (unsigned long long)t->stack_top,
+            (unsigned long long)(t->mapping->size - host_size));
+        k->callbacks.log(k->opaque, message);
+    }
+    pthread_mutex_unlock(&k->lock); regs[0] = 0; return BOTW_KERNEL_HANDLED;
 }
 int botw_kernel_dispatch(botw_kernel *k, unsigned number, uint64_t *regs, char *error, size_t capacity) {
     if (!k || !regs) return diagnostic(error, capacity, "kernel dispatch requires context and registers");

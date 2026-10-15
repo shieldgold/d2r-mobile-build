@@ -38,6 +38,9 @@ typedef struct {
      * thread's TSD/TLS/TLR, then enter guest code with x0=argument, x1=handle.
      * The callback must install pthread cleanup for its context allocations.
      * Guest code exits through SVC ExitThread. Returning is a host error. */
+    /* stack_top is the requested SDK top. The host pthread uses only whole
+     * pages below it, inside the pinned MapMemory range, preserving SDK tail
+     * headers. No bytes outside that owned mapping are borrowed. */
     int (*execute_thread)(void *opaque, uint64_t entry, uint64_t argument,
                           uint64_t stack_top, uint32_t handle,
                           char *error, size_t error_capacity);
