@@ -58,14 +58,21 @@ NVN(nvnTextureBuilderGetSwizzle,void,const NVNtextureBuilder *raw,NVNtextureSwiz
 NVN(nvnTextureBuilderSetPackagedTextureLayout,void,NVNtextureBuilder *raw,const NVNpackagedTextureLayout *layout){textureMemory(layout,4,NO);uint32_t bits;memcpy(&bits,layout,4);textureBuilderWrite(raw)->packaged=1|((bits&0xfff)<<4);}
 static int texturePackagedHeight(const TextureBuilder *b){return (b->packaged&1)?((b->packaged>>4)&15)+1:0;}
 static nvn_texdesc textureDescriptor(const TextureBuilder *b){return (nvn_texdesc){b->target,b->format,b->flags|((b->flags&0x40)?0x10:0),b->samples,b->width,b->height,b->depth,b->levels,b->stride,texturePackagedHeight(b)};}
+static int textureLinearLayout(const TextureBuilder *b,BWLinearLayout *layout){
+    uint32_t pixel;
+    if(b->target!=NVN_TEXTURE_TARGET_2D||b->depth!=1||b->levels!=1||b->samples<0||b->samples>1||b->width<1||b->height<1||!linearColorFormat(b->format,&pixel))return 0;
+    BWDevice *device=get(b->device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;
+    return bw_linear_layout(&policy,b->flags,b->width,b->height,b->stride,nvn_fmt_bpb(b->format,NULL,NULL),layout);
+}
 static size_t textureBytes(const TextureBuilder *b){
     BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
     if((b->target!=NVN_TEXTURE_TARGET_2D&&!array)||b->width<1||b->height<1||b->width>16384||b->height>16384||b->depth<1||b->depth>(array?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
     unsigned dimension=MAX(b->width,b->height),levels=1;while(dimension>1){dimension>>=1;levels++;}if((unsigned)b->levels>levels)return 0;
+    if(b->flags&(0x10|0x40)){BWLinearLayout layout;return textureLinearLayout(b,&layout)?layout.size:0;}
     nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;
 }
 NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return b.width>0&&bytes?(size_t)b.width*bytes:0;}return textureBytes(&b);}
-NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&0x40)return 128;if(b.flags&0x10)return 32;if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
+NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureViewSetDefaults,void,NVNtextureView *raw){memset(textureViewWrite(raw),0,sizeof(TextureView));}
 NVN(nvnTextureViewSetLevels,void,NVNtextureView *raw,int base,int count){TextureView *v=textureViewWrite(raw);v->flags|=1;v->baseLevel=base;v->numLevels=count;}
 NVN(nvnTextureViewSetLayers,void,NVNtextureView *raw,int base,int count){TextureView *v=textureViewWrite(raw);v->flags|=2;v->minLayer=base;v->numLayers=count;}
@@ -83,24 +90,37 @@ NVN(nvnTextureViewGetSwizzle,NVNboolean,const NVNtextureView *raw,NVNtextureSwiz
 NVN(nvnTextureViewCompare,NVNboolean,const NVNtextureView *a,const NVNtextureView *b){TextureView x=textureView(a),y=textureView(b);if((x.flags&63)!=(y.flags&63))return 0;if((x.flags&1)&&(x.baseLevel!=y.baseLevel||x.numLevels!=y.numLevels))return 0;if((x.flags&2)&&(x.minLayer!=y.minLayer||x.numLayers!=y.numLayers))return 0;if((x.flags&4)&&x.format!=y.format)return 0;if((x.flags&8)&&memcmp(x.swizzle,y.swizzle,sizeof x.swizzle))return 0;if((x.flags&16)&&x.depthMode!=y.depthMode)return 0;return !(x.flags&32)||x.target==y.target;}
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
     TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;BWDevice *device=get(b->device,[BWDevice class]);
-    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/GL/packaged data");
+    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
     if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");
     for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return report("Texture component conversion is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return report("texture device/pool mismatch");
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return report("Texture storage bounds");
+    BOOL linear=!!(b->flags&(0x10|0x40));BWLinearLayout linearLayout={0};
+    if(linear){
+        if(!pool.coherent)return report("linear textures require coherent no-copy pool storage");
+        if(!textureLinearLayout(b,&linearLayout)||(size_t)b->offset%linearLayout.alignment)return report("Invalid linear texture stride/offset/alignment");
+        NSUInteger alignment=[gpu minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)format];
+        if(!alignment||linearLayout.stride%alignment||(pool.bufferOffset+(size_t)b->offset)%alignment)return report("Invalid linear texture Metal backing alignment");
+        nvn_texown_hit hit;if(nvn_texown_find((char*)pool.memory+b->offset,size,&hit))return report("linear storage authority belongs to live/retired private texture");
+    }
+    for(id object in objects.allValues)if([object isKindOfClass:[BWTexture class]]){
+        BWTexture *other=object;
+        if((linear||!other.blockLinear)&&other.pool.live&&other.pool.generation==other.poolGeneration&&memoryOverlap((char*)pool.memory+b->offset,size,(char*)other.pool.memory+other.offset,other.layout.size))return report("linear texture storage overlaps another live texture base");
+    }
     if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))return report("texture object memory is not writable");texturePrepareWrite(raw,sizeof *raw);validateObjectStorage(raw,sizeof *raw);
     for(NSValue *v in objectSpans.allValues){NSRange r=v.rangeValue;if(memoryOverlap(raw,sizeof *raw,(void*)r.location,r.length))return report("texture object overlaps live NVN object");}
     BWTexture *t=[BWTexture new];t.metadata=*b;t.descriptor=textureDescriptor(b);nvn_texlayout layout;nvn_texdesc td=t.descriptor;nvn_tex_layout(&td,&layout);t.layout=layout;
+    if(linear){td.stride=(uint32_t)linearLayout.stride;t.descriptor=td;layout.size=layout.layer_size=linearLayout.size;layout.align=(uint32_t)linearLayout.alignment;t.layout=layout;}
     t.blockLinear=!(td.flags&0x10);t.depth=b->format>=NVN_FORMAT_DEPTH16&&b->format<=NVN_FORMAT_DEPTH32F_STENCIL8;
     if(t.depth&&b->format!=NVN_FORMAT_DEPTH16&&b->format!=NVN_FORMAT_DEPTH32F)return report("Combined depth/stencil storage not implemented");
     if(t.depth&&b->target==NVN_TEXTURE_TARGET_2D_ARRAY)return report("Array depth texture semantics are not yet validated");
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)format width:b->width height:b->height mipmapped:b->levels>1];desc.mipmapLevelCount=b->levels;
     if(b->target==NVN_TEXTURE_TARGET_2D_ARRAY){desc.textureType=MTLTextureType2DArray;desc.arrayLength=b->depth;}
-    desc.storageMode=t.blockLinear?MTLStorageModePrivate:MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;if(!(b->format>=0x79&&b->format<=0x94))desc.usage|=MTLTextureUsageRenderTarget;
-    if(!t.blockLinear){int bw,bh,bpb=nvn_fmt_bpb(b->format,&bw,&bh);NSUInteger alignment=[gpu minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)format];if(b->levels!=1||bw!=1||bh!=1||!bpb||b->stride<(uint64_t)b->width*bpb||b->stride%alignment||(pool.bufferOffset+b->offset)%alignment)return report("Invalid linear texture stride/levels/alignment");t.texture=[pool.buffer newTextureWithDescriptor:desc offset:pool.bufferOffset+b->offset bytesPerRow:b->stride];}
+    desc.storageMode=t.blockLinear?MTLStorageModePrivate:pool.buffer.storageMode;desc.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;if((t.blockLinear&&!(b->format>=0x79&&b->format<=0x94))||(b->flags&0x40))desc.usage|=MTLTextureUsageRenderTarget;
+    if(!t.blockLinear)t.texture=[pool.buffer newTextureWithDescriptor:desc offset:pool.bufferOffset+b->offset bytesPerRow:linearLayout.stride];
     else t.texture=[gpu newTextureWithDescriptor:desc];
-    if(!t.texture)return report("Metal texture creation failed");t.pool=pool;t.device=device;t.poolGeneration=pool.generation;t.rawPool=b->pool;t.offset=b->offset;t.stride=b->stride;t.width=b->width;t.height=b->height;t.format=b->format;put(raw,t);t.identity=((BWObject*)raw)->serial;return 1;
+    if(!t.texture)return report("Metal texture creation failed");t.pool=pool;t.device=device;t.poolGeneration=pool.generation;t.rawPool=b->pool;t.offset=b->offset;t.stride=linear?linearLayout.stride:b->stride;t.width=b->width;t.height=b->height;t.format=b->format;put(raw,t);t.identity=((BWObject*)raw)->serial;return 1;
 }
 static char texturePendingKey;
 static NSMutableDictionary *texturePendingRecord(BWTexture *t,id<MTLCommandBuffer> cb,BOOL create){
@@ -111,7 +131,7 @@ static void textureAuthority(BWTexture *t,id<MTLCommandBuffer> cb){
     const void *storage=(char*)t.pool.memory+t.offset;nvn_texown_hit hit;
     if(nvn_texown_find(storage,t.layout.size,&hit)&&(hit.retired||hit.serial!=t.identity))fatal("texture storage authority belongs to another live/retired Metal resource");
     NSDictionary *records=objc_getAssociatedObject(cb,&texturePendingKey);
-    for(NSDictionary *record in records.allValues)if([record[@"gpu"] boolValue]){BWTexture *other=record[@"texture"];if(other!=t&&other.blockLinear&&memoryOverlap(storage,t.layout.size,(char*)other.pool.memory+other.offset,other.layout.size))fatal("texture storage authority conflicts with pending GPU writes");}
+    for(NSDictionary *record in records.allValues)if([record[@"gpu"] boolValue]){BWTexture *other=record[@"texture"];if(other!=t&&(t.blockLinear||other.blockLinear)&&memoryOverlap(storage,t.layout.size,(char*)other.pool.memory+other.offset,other.layout.size))fatal("texture storage authority conflicts with pending GPU writes");}
 }
 static char textureBufferWritesKey;
 static void textureBufferCopy(id<MTLCommandBuffer> cb,const void *source,const void *destination,size_t bytes){
@@ -135,8 +155,8 @@ static void texturePublishCommitted(id<MTLCommandBuffer> cb){
     objc_setAssociatedObject(cb,&texturePendingKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 static void uploadTexture(BWTexture *input,id<MTLCommandBuffer> cb){
-    textureLive(input);BWTexture *t=input.base?:input;if(!t.blockLinear)return;
-    const void *poolStorage=(char*)t.pool.memory+t.offset;textureAuthority(t,cb);
+    textureLive(input);BWTexture *t=input.base?:input;textureAuthority(t,cb);if(!t.blockLinear)return;
+    const void *poolStorage=(char*)t.pool.memory+t.offset;
     NSArray *bufferWrites=objc_getAssociatedObject(cb,&textureBufferWritesKey);for(NSValue *value in bufferWrites){NSRange r=value.rangeValue;if(memoryOverlap(poolStorage,t.layout.size,(const void*)r.location,r.length))fatal("private texture import aliases pending buffer writes");}
     NSMutableData *snapshot=[NSMutableData dataWithLength:t.layout.size];if(!snapshot)fatal("texture pool snapshot allocation failed");vm_size_t got=0;
     if((memoryAccessValidator&&!memoryAccessValidator(poolStorage,t.layout.size,0))||vm_read_overwrite(mach_task_self(),(vm_address_t)poolStorage,t.layout.size,(vm_address_t)snapshot.mutableBytes,&got)!=KERN_SUCCESS||got!=t.layout.size)fatal("texture pool storage is not readable");
@@ -178,6 +198,7 @@ NVN(nvnTextureCompare,NVNboolean,const NVNtexture *a,const NVNtexture *b){BWText
  * capture copy all guest view bytes, so later guest mutations cannot retarget it. */
 static BWTexture *textureSelected(BWTexture *base,TextureView v,BOOL attachment){
     textureLive(base);unsigned level=(v.flags&1)?v.baseLevel:0,levels=(v.flags&1)?v.numLevels:0;
+    if(attachment&&!base.blockLinear&&!(base.metadata.flags&0x40))fatal("linear render target requires LINEAR_RENDER_TARGET flag");
     unsigned layer=(v.flags&2)?v.minLayer:0,layers=(v.flags&2)?v.numLayers:0;
     if(level>=base.descriptor.levels||layer>=base.layout.layers)fatal("texture view level/layer bounds");
     if(!levels)levels=base.descriptor.levels-level;if(!layers)layers=base.layout.layers-layer;
@@ -261,13 +282,13 @@ NVN(nvnTextureWriteTexelsStrided,void,const NVNtexture *t,const NVNtextureView *
 NVN(nvnTextureReadTexels,void,const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r,void *dst){textureCPURead(t,v,r,dst,0,0);}
 NVN(nvnTextureReadTexelsStrided,void,const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r,void *dst,ptrdiff_t row,ptrdiff_t image){textureCPURead(t,v,r,dst,row,image);}
 
-static void textureGPUWrite(BWTexture *input,id<MTLCommandBuffer> cb){BWTexture *t=input.base?:input;textureLive(t);if(t.blockLinear)textureAuthority(t,cb);texturePendingRecord(t,cb,YES)[@"gpu"]=@YES;}
+static void textureGPUWrite(BWTexture *input,id<MTLCommandBuffer> cb){BWTexture *t=input.base?:input;textureLive(t);textureAuthority(t,cb);texturePendingRecord(t,cb,YES)[@"gpu"]=@YES;}
 static void textureFlush(const NVNtexture *raw,const NVNtextureView *view){
     BWTexture *t=textureObject(raw);if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS)return;
     TextureView v={0};if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_CACHED)v=textureView(view);
     uint32_t first,count;const char *why=NULL;nvn_texdesc d=t.descriptor;int status=nvn_texflush_layers(&d,!!(v.flags&2),v.minLayer,v.numLayers,&first,&count,&why);if(status<0)fatal(why);if(status==NVN_TEXFLUSH_EMPTY)return;
     const uint8_t *storage=(uint8_t*)t.pool.memory+t.offset;textureDrain();
-    if(!t.blockLinear){if(memoryAccessValidator&&!memoryAccessValidator(storage,t.layout.size,0))fatal("texture flush source is not readable");if(!t.pool.coherent)textureReadBytes(storage,(char*)t.pool.buffer.contents+t.pool.bufferOffset+t.offset,t.layout.size,"texture flush source copy failed");return;}
+    if(!t.blockLinear){if(memoryAccessValidator&&!memoryAccessValidator(storage,t.layout.size,0))fatal("texture flush source is not readable");textureVMAccess(storage,t.layout.size,NO);if(!t.pool.coherent)textureReadBytes(storage,(char*)t.pool.buffer.contents+t.pool.bufferOffset+t.offset,t.layout.size,"texture flush source copy failed");return;}
     if(t.gpuWritten){int state=nvn_texflush_verify(t.identity,storage,t.layout.layer_size,t.layout.layers,first,count);if(state!=NVN_TEXFLUSH_CLEAN)fatal(state==NVN_TEXFLUSH_CHANGED?"texture flush CPU storage changed outside host writes":"texture flush lacks complete write tracking");return;}
     /* No private GPU writes exist: a real upload can reconcile current CPU
      * bytes even without a fault bridge. Never certify a skipped host copy. */
@@ -295,24 +316,55 @@ static void textureInvalidate(const NVNtexture *raw,const NVNtextureView *view){
 NVN(nvnTextureFlushTexels,void,const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r){(void)r;textureFlush(t,v);}
 NVN(nvnTextureInvalidateTexels,void,const NVNtexture *t,const NVNtextureView *v,const NVNcopyRegion *r){(void)r;textureInvalidate(t,v);}
 static void validateTextureDescriptorPool(BWDescriptors *p,BWDevice *device){if(!p||!p.pool.live||objects[@(p.pool.generation)]!=p.pool)fatal("stale texture descriptor pool");if(p.pool.device!=device)fatal("texture descriptor pool device mismatch");}
+static BOOL textureStorageOverlap(BWTexture *left,BWTexture *right){
+    if(!left||!right)return NO;BWTexture *a=left.base?:left,*b=right.base?:right;
+    return memoryOverlap((char*)a.pool.memory+a.offset,a.layout.size,(char*)b.pool.memory+b.offset,b.layout.size);
+}
+static BOOL linearTextureBufferOverlap(BWTexture *input,NSDictionary *binding){
+    BWTexture *t=input.base?:input;if(!t||t.blockLinear||!binding)return NO;
+    return memoryOverlap((char*)t.pool.memory+t.offset,t.layout.size,(const void*)(uintptr_t)[binding[@"address"] unsignedLongLongValue],[binding[@"size"] unsignedLongLongValue]);
+}
 static void validateTextureSubmission(BWQueue *queue,NSArray<NSArray *> *groups){
     BWTexture *target=queue.replay.target,*depth=queue.replay.depth;BWDescriptors *texturePool=queue.replay.texturePool,*samplerPool=queue.replay.samplerPool;BWProgram *program=queue.replay.program;NSMutableDictionary *textures=[queue.replay.textures mutableCopy];
+    NSMutableDictionary *storage=[queue.replay.storage mutableCopy],*uniforms=[queue.replay.uniforms mutableCopy],*vertices=[queue.replay.vertices mutableCopy];
+    NSData *attributes=queue.replay.attributes;
     for(NSArray *commands in groups)for(NSDictionary *c in commands){NSString *op=c[@"op"];
         if([op isEqual:@"target"]){target=c[@"selected"];depth=c[@"depthSelected"];}
         else if([op isEqual:@"texturePool"])texturePool=c[@"pool"];
         else if([op isEqual:@"samplerPool"])samplerPool=c[@"pool"];
         else if([op isEqual:@"program"])program=objects[c[@"id"]];
         else if([op isEqual:@"texture"])textures[resourceKey(c[@"stage"],c[@"slot"])]=c[@"handle"];
+        else if([op isEqual:@"storage"])storage[resourceKey(c[@"stage"],c[@"slot"])]=c;
+        else if([op isEqual:@"uniform"])uniforms[resourceKey(c[@"stage"],c[@"slot"])]=c;
+        else if([op isEqual:@"vertex"])vertices[c[@"slot"]]=c;
+        else if([op isEqual:@"attributes"])attributes=c[@"data"];
         else if([op isEqual:@"clear"]||[op isEqual:@"depthClear"]||([op isEqual:@"draw"]&&[c[@"count"] unsignedLongLongValue]&&[c[@"instances"] unsignedLongLongValue])){
             if(target){textureLive(target);if(target.device!=queue.device)fatal("texture render target device mismatch");}if(depth){textureLive(depth);if(depth.device!=queue.device)fatal("texture depth target device mismatch");}
             if(![op isEqual:@"draw"])continue;
+            NSMutableArray<BWTexture *> *sampled=[NSMutableArray new];NSMutableArray<NSDictionary *> *buffers=[NSMutableArray new],*writable=[NSMutableArray new];
+            const VertexAttribute *active=attributes.bytes;
+            for(size_t i=0;i<attributes.length/sizeof *active;i++)if(active[i].format){NSDictionary *binding=vertices[@(active[i].stream)];if(binding)[buffers addObject:binding];}
             for(NSNumber *stage in program.stageShaders){BWShader *shader=program.stageShaders[stage];const botw_graphics_shader_binding *bindings=shader.bindings.bytes;
                 for(size_t i=0;i<shader.bindings.length/sizeof *bindings;i++){if(bindings[i].kind!=BOTW_GRAPHICS_TEXTURE&&bindings[i].kind!=BOTW_GRAPHICS_SAMPLER)continue;
                     NSNumber *h=textures[resourceKey(stage,@(bindings[i].nvn_slot))];if(!h)fatal("unbound texture descriptor");
                     BWDescriptors *p=bindings[i].kind==BOTW_GRAPHICS_TEXTURE?texturePool:samplerPool;validateTextureDescriptorPool(p,queue.device);
-                    if(bindings[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=p.entries[@(textureDescriptorIndex(h.unsignedLongLongValue))];if(!t)fatal("unbound texture descriptor");textureLive(t);if(t.device!=queue.device)fatal("texture descriptor device mismatch");}
+                    if(bindings[i].kind==BOTW_GRAPHICS_TEXTURE){BWTexture *t=p.entries[@(textureDescriptorIndex(h.unsignedLongLongValue))];if(!t)fatal("unbound texture descriptor");textureLive(t);if(t.device!=queue.device)fatal("texture descriptor device mismatch");[sampled addObject:t];}
+                }
+                for(size_t i=0;i<shader.bindings.length/sizeof *bindings;i++){
+                    BOOL writes=bindings[i].kind==BOTW_GRAPHICS_STORAGE,isUniform=bindings[i].kind==BOTW_GRAPHICS_UNIFORM;
+                    if(!writes&&!isUniform)continue;NSDictionary *binding=(writes?storage:uniforms)[resourceKey(stage,@(bindings[i].nvn_slot))];
+                    if(binding){[buffers addObject:binding];if(writes)[writable addObject:binding];}
                 }
             }
+            /* Buffer-backed textures are coherent between encoders, not
+             * within one render pass. Validate the entire submission before
+             * a preceding counter segment can publish any GPU operation. */
+            for(BWTexture *t in sampled){BWTexture *base=t.base?:t;
+                if((!base.blockLinear||!(target.base?:target).blockLinear)&&textureStorageOverlap(t,target))fatal("linear render pass feedback aliases sampled texture and color attachment");
+                if((!base.blockLinear||!(depth.base?:depth).blockLinear)&&textureStorageOverlap(t,depth))fatal("linear render pass feedback aliases sampled texture and depth attachment");
+                for(NSDictionary *binding in writable)if(linearTextureBufferOverlap(t,binding))fatal("linear render pass feedback aliases sampled texture and storage buffer");
+            }
+            for(NSDictionary *binding in buffers)if(linearTextureBufferOverlap(target,binding)||linearTextureBufferOverlap(depth,binding))fatal("linear render pass feedback aliases attachment and shader/vertex buffer");
         }
     }
 }

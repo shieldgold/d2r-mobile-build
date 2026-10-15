@@ -35,3 +35,17 @@ GPU 私有的最新内容建立 `texown` claim。别名纹理、buffer 地址以
 `tests/test_botw_texture_modules.py` 保留上游 5,438 项算法检查，并在 ASan/UBSan 下验证 checked run callback、分配失败、真实 fault、共享页、并发、retirement、无桥、权限查询失败和 prepare/protect ABA。既有 60 项图形回归另行运行。原版本地纯 ABI oracle 有 640 断言；它不包含一般 driver 布局的证明。
 
 这些是兼容层与合成 GPU 回归，不能替代原游戏首帧、输入、存档重开或 iOS 真机验收。
+
+## Linear 存储与真实设备对齐
+
+`linear_texture.h` 统一维护两项 stride capability、Builder StorageAlignment、默认 stride、容量规划与 Initialize 的契约。初始化设备时，仅对本桥已经准入的 43 个精确映射、恒等分量、非压缩 color 格式调用 Metal 的 `minimumLinearTextureAlignmentForPixelFormat:`；depth、stencil 和 compressed 格式不会进入这个 API。每项结果必须非零、为 2 的幂且能放入 NVN 的 `int`。经此验证，最大值就是这些对齐的最小公倍数；普通 linear 和 linear RT 的最终对齐分别至少保留 guest 的 32/128 字节约束。空格式集合或异常结果只使相关 linear 路径明确不可用。linear RT 还要求 Metal Apple GPU family，其他设备功能继续初始化。
+
+`nvnDeviceGetInteger` 的 `0x38/0x39` 与有效 stride、存储容量和 offset 检查使用同一份设备策略。stride 为 0 时按该策略计算有效行距；Builder、Texture 的元数据 getter 继续返回原始字段，实际 Metal 存储与 CPU region 操作使用已解析的行距。普通 linear 只具有采样用途，作为 attachment 需要 `LINEAR_RENDER_TARGET`。此路径仅支持 2D、一个 mip、一个 sample、depth 和 arrayLength 均为 1 的普通 color 纹理；非法组合先受控拒绝，再调用 Metal。实际 buffer 的 offset/stride 仍逐格式验证 Metal 对齐，storageMode 与 buffer 保持相同。
+
+本阶段 linear 只接受与 guest 内存共享同一存储的 coherent no-copy pool。需要复制到单独 Metal buffer 的 CPU_CACHED pool 明确拒绝，避免 GPU 写入后从陈旧 CPU 字节导入别名纹理。普通 coherent pool 的 CPU 写、GPU 清屏、实际采样、读回及 padding 保留均由真实 GPU 探针验证。只读和不可访问内存回归继续使用 coherent fixture；分离 pool 的拒绝另有测试。
+
+同一 pool 可容纳多个不重叠纹理。不同 base 只要一方为 linear，其完整存储 span 重叠就拒绝 Initialize；已存在的 private GPU ownership 和 retired claim 也不能通过 linear 绕过。合法 view 继续持有同一 base。整批提交在编码、GPU counter 发布之前检查单 render pass 中的反馈：linear attachment 与采样、uniform/storage/vertex buffer 的重叠，以及采样 linear 与 storage buffer 的重叠均明确拒绝。命令队列原有同步合同继续适用。
+
+设备日志记录实际 Metal 来源、格式集合范围、最大格式对齐、最终两项 stride 对齐、Apple RT 能力和 coherent-only 范围。Mac 的结果只证明当台 Mac；A14 需要读取该手机实际启动日志和运行结果。本地合成测试的查询、真实 clear/draw/CPU 读写、padding 和整批拒绝证据不表示原游戏可玩。
+
+此策略依据 [Apple linear alignment API](https://developer.apple.com/documentation/metal/mtldevice/minimumlineartexturealignment(for:))、[buffer-backed texture 契约](https://developer.apple.com/documentation/metal/mtlbuffer/maketexture(descriptor:offset:bytesperrow:))。固定上游的 Tegra 32/128 表用于保留 guest 最低约束；它不替代当前 Metal 设备测量。

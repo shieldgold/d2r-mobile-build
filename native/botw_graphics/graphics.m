@@ -13,6 +13,7 @@
 #include "vendor/d2r-state/states.h"
 #include "nvn_protos.h"
 #include "texture_abi.h"
+#include "linear_texture.h"
 #include "vendor/botw-buffer/buffer.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -36,6 +37,7 @@
 @property(strong) id<MTLCounterSet> timestampSet;
 @property BOOL timestampStages;
 @property unsigned timestampReports;
+@property BWLinearPolicy linearPolicy;
 @end
 @implementation BWDevice
 @end
@@ -226,6 +228,8 @@ typedef struct { uint64_t serial; } BWObject;
 typedef struct { NVNdevice *device; void *memory; size_t size; int flags; } PoolBuilder;
 typedef struct { NVNdevice *device; int flags; } DeviceBuilder;
 typedef struct { NVNdevice *device; int flags; size_t command, control, compute; void *memory; size_t memoryBytes; } QueueBuilder;
+typedef struct { uint32_t format:8,stream:4,offset:20; } VertexAttribute;
+typedef struct { uint32_t stride,divisor; } VertexStream;
 
 
 typedef struct { NVNdevice *device; void *native; NVNtexture *textures[4]; int count, interval; } WindowBuilder;
@@ -257,6 +261,7 @@ static void texturePrepareWrite(void *dst,size_t bytes);
 static void textureWriteBytes(void *destination,const void *source,size_t bytes,const char *reason);
 static void textureReadBytes(const void *source,void *destination,size_t bytes,const char *reason);
 static void counterConfigureDevice(BWDevice *device);
+static void linearConfigureDevice(BWDevice *device);
 static void validateCounterAddress(BWAddressRecord *record,BWDevice *device);
 static _Thread_local char lastError[1024];
 static _Thread_local const char *currentEntry;
@@ -578,7 +583,23 @@ static int readTextureImpl(const NVNtexture *raw,unsigned level,unsigned layer,v
     static ret h_##name(__VA_ARGS__)
 NVN(nvnDeviceBuilderSetDefaults,void,NVNdeviceBuilder *b){memset(b,0,sizeof *b);}
 NVN(nvnDeviceBuilderSetFlags,void,NVNdeviceBuilder *b,int flags){((DeviceBuilder*)b)->flags=flags;}
-NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;counterConfigureDevice(device);put(d,device);return 1;}
+/* Only ordinary, exact, identity-component formats admitted by the current
+ * texture backend are valid arguments to Metal's linear alignment query. */
+static BOOL linearColorFormat(int format,uint32_t *pixel){
+    if(format>=NVN_FORMAT_STENCIL8&&format<=NVN_FORMAT_DEPTH32F_STENCIL8)return NO;
+    int bw,bh;uint8_t swizzle[4];
+    if(!nvn_fmt_bpb(format,&bw,&bh)||bw!=1||bh!=1||nvn_fmt_to_mtl(format,pixel,swizzle)!=1)return NO;
+    for(unsigned i=0;i<4;i++)if(swizzle[i]!=i+NVN_SWZ_R)return NO;
+    return YES;
+}
+static void linearConfigureDevice(BWDevice *device){
+    size_t alignments[0x9c],count=0;
+    for(int format=1;format<=0x9c;format++){uint32_t pixel;if(linearColorFormat(format,&pixel))alignments[count++]=[gpu minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)pixel];}
+    BWLinearPolicy policy;bw_linear_policy_make(alignments,count,[gpu supportsFamily:MTLGPUFamilyApple1],&policy);device.linearPolicy=policy;
+    fprintf(stderr,"[botw graphics] linear_storage_policy=%s source=Metal.minimumLinearTextureAlignmentForPixelFormat scope=exact_identity_ordinary_color formats=%zu host_format_max=%zu texture_stride_alignment=%zu render_stride_alignment=%zu apple_render_target=%s pool_scope=coherent_only\n",
+            policy.valid?"available":"unavailable",policy.formatCount,policy.formatMax,policy.textureAlignment,policy.renderAlignment,policy.renderSupported?"supported":"unsupported");
+}
+NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;counterConfigureDevice(device);linearConfigureDevice(device);put(d,device);return 1;}
 NVN(nvnDeviceFinalize,void,NVNdevice *d){get(d,[BWDevice class]);removeObject(d);}
 NVN(nvnDeviceSetWindowOriginMode,void,NVNdevice *raw,NVNwindowOriginMode mode){
     BWDevice *device=get(raw,[BWDevice class]);
@@ -589,11 +610,15 @@ NVN(nvnDeviceSetWindowOriginMode,void,NVNdevice *raw,NVNwindowOriginMode mode){
 }
 NVN(nvnDeviceGetProcAddress,PFNNVNGENERICFUNCPTRPROC,const NVNdevice *d,const char *name){if(d)get(d,[BWDevice class]);return (PFNNVNGENERICFUNCPTRPROC)botw_nvn_bootstrap_loader(name);}
 NVN(nvnDeviceGetInteger,void,const NVNdevice *d,NVNdeviceInfo query,int *value){
-    get(d,[BWDevice class]);if(!value)fatal("nvnDeviceGetInteger null output");
+    BWDevice *device=get(d,[BWDevice class]);if(!value)fatal("nvnDeviceGetInteger null output");
     switch(query){case NVN_DEVICE_INFO_API_MAJOR_VERSION:*value=52;break;
     case NVN_DEVICE_INFO_API_MINOR_VERSION:*value=32;break;
     case NVN_DEVICE_INFO_MEMORY_POOL_PAGE_SIZE:*value=4096;break;
     case NVN_DEVICE_INFO_COUNTER_ALIGNMENT:*value=16;break;
+    case NVN_DEVICE_INFO_LINEAR_TEXTURE_STRIDE_ALIGNMENT:
+    case NVN_DEVICE_INFO_LINEAR_RENDER_TARGET_STRIDE_ALIGNMENT:{
+        BWLinearPolicy policy=device.linearPolicy;size_t alignment=bw_linear_alignment(&policy,query==NVN_DEVICE_INFO_LINEAR_TEXTURE_STRIDE_ALIGNMENT?0x10:0x40);
+        if(!alignment)fatal("linear texture/linear render target policy is unavailable on this Metal device");*value=(int)alignment;break;}
     case NVN_DEVICE_INFO_COMMAND_BUFFER_COMMAND_ALIGNMENT:*value=BW_COMMAND_MEMORY_ALIGNMENT;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_CONTROL_ALIGNMENT:*value=BW_CONTROL_MEMORY_ALIGNMENT;break;
     case NVN_DEVICE_INFO_COMMAND_BUFFER_MIN_COMMAND_SIZE:*value=BW_MIN_COMMAND_MEMORY;break;
@@ -760,8 +785,6 @@ NVN(nvnCommandBufferDrawArraysInstanced,void,NVNcommandBuffer *c,NVNdrawPrimitiv
 NVN(nvnCommandBufferSetViewport,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetViewport bounds");record(c,@{@"op":@"viewport",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
 NVN(nvnCommandBufferSetScissor,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetScissor bounds");record(c,@{@"op":@"scissor",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
 typedef struct { NVNdevice *device; int min,mag,wrap[3],compareMode,compareFunc; float lodMin,lodMax,aniso; } SamplerBuilder;
-typedef struct { uint32_t format:8,stream:4,offset:20; } VertexAttribute;
-typedef struct { uint32_t stride,divisor; } VertexStream;
 typedef ds_st DepthState;
 _Static_assert(sizeof(SamplerBuilder)<=sizeof(NVNsamplerBuilder),"sampler builder ABI");
 _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute ABI");
