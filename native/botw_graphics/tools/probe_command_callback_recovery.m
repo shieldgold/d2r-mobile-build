@@ -20,7 +20,7 @@ static NVNmemoryPool pool;static int mode,grants;
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK:%s at %d error=%s\n",#x,__LINE__,botw_graphics_last_error());exit(1);}}while(0)
 static void error(const char *s){fprintf(stderr,"EXPECTED:%s\n",s);if(escape)siglongjmp(*escape,1);abort();}
 static int inside(const void *p,size_t n,const void *b,size_t bytes){uintptr_t a=(uintptr_t)p,x=(uintptr_t)b;return a>=x&&a-x<=bytes&&n<=bytes-(a-x);}
-static int access_memory(const void *p,size_t n,int write){return write?(inside(p,n,memory,65536)||inside(p,n,controls,sizeof controls)||inside(p,n,arena,arenaBytes)):p!=NULL;}
+static int access_memory(const void *p,size_t n,int write){return write?(inside(p,n,&pool,sizeof pool)||inside(p,n,memory,65536)||inside(p,n,controls,sizeof controls)||inside(p,n,arena,arenaBytes)):p!=NULL;}
 static void refill(NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t n,void *data){(void)n;(void)data;
  if(mode==4){NVNqueueBuilder b;nvnQueueBuilderSetDefaults(&b);nvnQueueBuilderSetDevice(&b,deviceRef);nvnQueueBuilderSetQueueMemory(&b,arena,arenaBytes);(void)nvnQueueInitialize((NVNqueue*)c,&b);CHECK(0);}
  if(mode==1){nvnCommandBufferAddCommandMemory(c,&pool,-1,512);CHECK(0);}

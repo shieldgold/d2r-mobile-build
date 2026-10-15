@@ -167,3 +167,4 @@ NVN_VOID(nvnCommandBufferBindColorState,(NVNcommandBuffer *c,const NVNcolorState
 NVN_VOID(nvnCommandBufferBindChannelMaskState,(NVNcommandBuffer *c,const NVNchannelMaskState *s),(c,s))
 NVN_VOID(nvnCommandBufferBindMultisampleState,(NVNcommandBuffer *c,const NVNmultisampleState *s),(c,s))
 NVN_VOID(nvnCommandBufferBindPolygonState,(NVNcommandBuffer *c,const NVNpolygonState *s),(c,s))
+NVN_VOID(nvnCommandBufferSetShaderScratchMemory,(NVNcommandBuffer *raw,const NVNmemoryPool *memory,ptrdiff_t offset,size_t bytes),(raw,memory,offset,bytes))

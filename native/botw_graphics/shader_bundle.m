@@ -5,6 +5,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #include "graphics.h"
 #include "shader_bundle.h"
+#include "shader_scratch_proof.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -59,7 +60,7 @@ static NSData *verifiedAsset(int directory,id spec,size_t limit,size_t *total,ch
     if(![sha256(data) isEqual:spec[@"sha256"]]){bundleError(error,capacity,"Asset SHA256 mismatch: %s",[spec[@"path"] UTF8String]);return nil;}return data;
 }
 @interface BWBundleShader : NSObject
-@property(strong) NSData *control,*code,*bindings;
+@property(strong) NSData *control,*code,*bindings,*spirv;
 @property(strong) NSString *source,*entry,*identity,*reason;
 @property NVNshaderStage stage;
 @property BOOL unsupported;
@@ -226,6 +227,12 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
         if(!uniformRanges(shader,entry[@"uniform_ranges"],error,capacity)){close(directory);return 0;}
         if(!sourceMetadata(shader,entry,error,capacity)){close(directory);return 0;}
         if(!finiteDrawProfile(shader,entry,device,error,capacity)){close(directory);return 0;}
+        if(entry[@"scratch"]){id proof=entry[@"scratch"];
+            if(![proof isKindOfClass:[NSDictionary class]]||![proof[@"backend"] isEqual:@"metal_thread_private"]||![proof[@"proof"] isEqual:@"zero_declared_no_private"]){close(directory);return bundleError(error,capacity,"Unknown shader scratch proof policy");}
+            for(NSString *field in @[@"sph_low",@"sph_high",@"sph_crs",@"private_variables"]){uint64_t value;if(!integer(proof[field],0,&value)){close(directory);return bundleError(error,capacity,"Shader scratch proof fields differ from the zero-local profile");}}
+            shader.spirv=verifiedAsset(directory,proof[@"spirv"],16u<<20,&total,error,capacity);
+            if(!shader.spirv||!bwScratchProof(shader.code.bytes,shader.code.length,shader.stage,shader.spirv.bytes,shader.spirv.length,error,capacity)){close(directory);return 0;}
+        }
         NSError *metalError=nil;id<MTLLibrary> library=[device newLibraryWithSource:shader.source options:nil error:&metalError];id<MTLFunction> function=[library newFunctionWithName:shader.entry];
         if(!function||function.functionType!=(nvnStage==NVN_SHADER_STAGE_VERTEX?MTLFunctionTypeVertex:MTLFunctionTypeFragment)){close(directory);return bundleError(error,capacity,"Metal entry/stage preflight failed: %s",metalError.localizedDescription.UTF8String?:"entry missing");}
         [prepared addObject:shader];
@@ -240,13 +247,14 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
     }
     if(referenced.count!=prepared.count){close(directory);return bundleError(error,capacity,"Unreferenced shader stage record identity");}
     close(directory);
-    size_t registered=0;
+    size_t registered=0,scratchVerified=0;
     for(BWBundleShader *shader in prepared){
         if(shader.unsupported){fprintf(stderr,"[botw shaders] unsupported identity=%s reason=%s\n",shader.identity.UTF8String,shader.reason.UTF8String);continue;}
         botw_graphics_shader_draw_profile profile={shader.maxVertices,shader.maxInstances,shader.storageSlot,shader.storageMinimum.bytes};
         if(!botw_graphics_register_shader_with_profile(shader.control.bytes,shader.control.length,shader.code.bytes,shader.code.length,shader.stage,shader.source.UTF8String,shader.entry.UTF8String,shader.bindings.bytes,shader.bindings.length/sizeof(botw_graphics_shader_binding),shader.maxVertices?&profile:NULL))return bundleError(error,capacity,"Shader registration failed: %s",shader.identity.UTF8String);
-        registered++;
+        if(shader.spirv&&!botw_graphics_register_shader_scratch_proof(shader.control.bytes,shader.control.length,shader.code.bytes,shader.code.length,shader.stage,shader.spirv.bytes,shader.spirv.length))return bundleError(error,capacity,"Shader scratch registration failed: %s",shader.identity.UTF8String);
+        if(shader.spirv)scratchVerified++;registered++;
     }
     result->declared_entries=prepared.count;result->registered_entries=registered;result->unsupported_entries=unsupported;
-    fprintf(stderr,"[botw shaders] bundle registered=%zu unsupported=%zu unique=%zu\n",registered,unsupported,prepared.count);return 1;
+    fprintf(stderr,"[botw shaders] bundle registered=%zu unsupported=%zu unique=%zu scratch_verified=%zu\n",registered,unsupported,prepared.count,scratchVerified);return 1;
 }}

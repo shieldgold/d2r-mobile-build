@@ -368,6 +368,79 @@ class ShaderBundleTests(unittest.TestCase):
             module.shader_binding_map(msl, 'fragment', {'uniforms': [], 'samplers': []})
 
 
+def synthetic_scratch_spirv(stage='vertex', private=False):
+    def op(code, *args):
+        return [((len(args)+1) << 16) | code, *args]
+    words = [0x07230203, 0x10300, 0, 16, 0]
+    words += op(17, 1) + op(14, 0, 1) + op(15, 0 if stage == 'vertex' else 4, 3, 0x6e69616d, 0)
+    words += op(19, 1) + op(33, 2, 1)
+    if private:
+        words += op(59, 8, 9, 6)
+    words += op(54, 1, 3, 0, 2) + op(248, 4) + op(253) + op(56)
+    return struct.pack('<' + 'I'*len(words), *words)
+
+
+def synthetic_scratch_bundle(folder):
+    from scripts.botw_native import shaders
+    path=Path(folder);data=bytearray(synthetic_bnsh())
+    struct.pack_into('<I', data, 0x330, 1 << 10);struct.pack_into('<I', data, 0x430, 5 << 10)
+    inputs=path/'inputs';converted=path/'converted';proofs=path/'proofs';converted.mkdir();proofs.mkdir()
+    records=shaders.extract_shader_inputs(bytes(data), inputs)
+    for record in records:
+        stage=record['stage'];key=record['code_sha256']
+        source='#include <metal_stdlib>\nusing namespace metal;'+stage+' float4 main0(){return float4(1);}'
+        (converted/(key+'.metal')).write_text(source);(proofs/(key+'.spv')).write_bytes(synthetic_scratch_spirv(stage))
+    bundle=path/'bundle';result=shaders.stage_shader_bundle(inputs, converted, bundle, scratch_spirv=proofs)
+    return bundle, result
+
+
+class ShaderScratchProofTests(unittest.TestCase):
+    def test_python_proof_rejects_fallback_stage_unknown_and_malformed_modules(self):
+        from scripts.botw_native.shaders import shader_scratch_proof
+        code = bytearray(0x80);struct.pack_into('<I', code, 0x30, 1 << 10)
+        spv = synthetic_scratch_spirv()
+        facts = shader_scratch_proof(code, spv, 'vertex')
+        self.assertEqual((facts['backend'], facts['sph_low'], facts['private_variables']), ('metal_thread_private', 0, 0))
+        for payload, reason in ((spv[:20], 'incomplete'), (spv[:-1], 'bounds'), (spv[:-4], 'incomplete'),
+                                (synthetic_scratch_spirv('fragment'), 'stage'),
+                                (synthetic_scratch_spirv(private=True), 'fallback')):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
+                shader_scratch_proof(code, payload, 'vertex')
+        struct.pack_into('<I', code, 0x34, 64)
+        with self.assertRaisesRegex(ValueError, 'range/initialization'):
+            shader_scratch_proof(code, synthetic_scratch_spirv(private=True), 'vertex')
+
+    def test_stager_pairs_exact_code_with_explicit_bounded_spirv_assets(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            bundle,result=synthetic_scratch_bundle(folder)
+            self.assertEqual((result['ready'],result['unsupported']), (2,0))
+            manifest=json.loads((bundle/'manifest.json').read_text())
+            for entry in manifest['entries']:
+                self.assertEqual((entry['scratch']['sph_low'],entry['scratch']['private_variables']), (0,0))
+                self.assertTrue((bundle/entry['scratch']['spirv']['path']).is_file())
+
+    def test_c_proof_checks_actual_asset_bounds_and_silent_fallback(self):
+        code = bytearray(0x80);struct.pack_into('<I', code, 0x30, 1 << 10)
+        def array(name, data):
+            return 'unsigned char '+name+'[]={'+','.join(map(str, data))+'};\n'
+        source = '#include "shader_scratch_proof.h"\n#include <stdio.h>\nint main(void){char e[256];\n'
+        source += array('code', code) + array('spv', synthetic_scratch_spirv()) + array('fallback', synthetic_scratch_spirv(private=True))
+        source += 'if(!bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,sizeof spv,e,sizeof e))return 1;\n'
+        source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,fallback,sizeof fallback,e,sizeof e)||!strstr(e,"fallback"))return 2;\n'
+        source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,20,e,sizeof e))return 3;\n'
+        source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_FRAGMENT,spv,sizeof spv,e,sizeof e))return 4;\n'
+        source += 'if(bwScratchProof(code,sizeof code,NVN_SHADER_STAGE_VERTEX,spv,sizeof spv-4,e,sizeof e))return 5;\n'
+        source += 'puts("BOUNDED_C_SCRATCH_PROOF_OK");return 0;}\n'
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder);(path/'proof.c').write_text(source)
+            build=subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT/'native/botw_graphics'), str(path/'proof.c'), '-o', str(path/'proof')], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            run=subprocess.run([str(path/'proof')], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+            self.assertIn('BOUNDED_C_SCRATCH_PROOF_OK', run.stdout)
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
     def run_graphics_probe(self, name, expected):
@@ -384,12 +457,12 @@ class MetalBridgeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(expected, result.stdout)
 
-    def compile_render_probe(self, source, cases):
+    def compile_render_probe(self, source, cases, extra_sources=()):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder); graphics = ROOT / 'native/botw_graphics'; exe = path / 'state'
             harness = path / 'state.c'; harness.write_text(source)
             build = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
-                '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), '-framework', 'Foundation',
+                '-I', str(graphics), str(graphics / 'graphics.m'), str(harness), *[str(graphics/name) for name in extra_sources], '-framework', 'Foundation',
                 '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             for mode, expected, accepted in cases:
@@ -433,6 +506,28 @@ class MetalBridgeTests(unittest.TestCase):
         source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', DEPTH_RASTER_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
         source = source.replace('return float4(p[v],0,1);', 'return float4(p[v],.25,1);')
         self.compile_render_probe(source, [('', 'UPSTREAM_DEPTH_RANGE_BIAS_FACE_WINDING_REAL_PIXELS_OK', True)])
+
+    def test_metal_owned_scratch_zero_pool_typed_record_range_device_and_stale_generations(self):
+        self.run_graphics_probe('probe_shader_scratch.c', 'METAL_OWNED_SCRATCH_ZERO_POOL_RECORD_RANGE_DEVICE_AND_GENERATION_OK')
+
+    def test_proven_zero_scratch_draws_two_queues_and_rejects_unproved_or_stale_shaders(self):
+        source=METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', SCRATCH_GPU_FEATURE+'    nvnMemoryPoolFinalize(&pool);')
+        self.compile_render_probe(source, [('', 'PROVEN_SHADER_SCRATCH_ZERO_POOL_TWO_QUEUES_GPU_PIXELS_OK', True),
+            ('large-private', 'PROVEN_SHADER_SCRATCH_ZERO_POOL_TWO_QUEUES_GPU_PIXELS_OK', True),
+            ('null-scratch', 'PROVEN_SHADER_SCRATCH_ZERO_POOL_TWO_QUEUES_GPU_PIXELS_OK', True),
+            ('unproved', 'shader lacks independently validated Metal-private scratch lowering proof', False),
+            ('stale-scratch', 'stale scratch pool generation', False)])
+
+    def test_bundle_loader_recomputes_scratch_proof_and_rejects_hidden_private_fallback(self):
+        import json,hashlib,shutil
+        with tempfile.TemporaryDirectory() as folder:
+            bundle,_=synthetic_scratch_bundle(folder);bad=Path(folder)/'bad';shutil.copytree(bundle,bad)
+            manifest=json.loads((bad/'manifest.json').read_text());entry=manifest['entries'][0]
+            payload=synthetic_scratch_spirv(entry['stage'],private=True);asset=entry['scratch']['spirv']
+            (bad/asset['path']).write_bytes(payload);asset.update(bytes=len(payload),sha256=hashlib.sha256(payload).hexdigest())
+            (bad/'manifest.json').write_text(json.dumps(manifest))
+            self.compile_render_probe(BUNDLE_SMOKE, [(str(bundle),'REGISTERED=2 UNSUPPORTED=0',True),
+                (str(bad),'implicit 128-byte local-memory fallback',False)], extra_sources=('shader_bundle.m',))
 
     def test_object_errors_include_abi_entry_type_raw_identity_and_release_locks(self):
         self.run_graphics_probe('probe_object_diagnostic.c', 'NVN_ENTRY_OBJECT_DIAGNOSTIC_AND_ERROR_ESCAPE_OK')
@@ -1723,6 +1818,30 @@ DEPTH_RASTER_FEATURE = r"""
     puts("UPSTREAM_DEPTH_RANGE_BIAS_FACE_WINDING_REAL_PIXELS_OK");
 """
 
+
+SCRATCH_GPU_FEATURE = r"""
+
+    API(nvnMemoryPoolBuilderSetFlags);API(nvnCommandBufferSetShaderScratchMemory);
+    controls[0][8]=0x61;controls[1][8]=0x62;codes[0][8]=0x61;codes[1][8]=0x62;
+    *(uint32_t*)(codes[0]+0x30)=1u<<10;*(uint32_t*)(codes[1]+0x30)=5u<<10;
+    memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    char scratchMSL[2048];snprintf(scratchMSL,sizeof scratchMSL,
+      "#include <metal_stdlib>\nusing namespace metal;\n#define N %u\n"
+      "vertex float4 vs(uint v [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[v],0,1);}"
+      "fragment float4 fs(float4 p [[position]]){thread volatile uint a[N];uint seed=uint(p.x)+4u*uint(p.y);for(uint i=0;i<N;i++)a[i]=seed^(17u*i);uint actual=0,expected=0;for(uint i=0;i<N;i++){actual+=a[(i+(seed&(N-1)))&(N-1)];expected+=seed^(17u*i);}return actual==expected?float4(1,0,0,1):float4(0,0,1,1);}",argc>1&&!strcmp(argv[1],"large-private")?1024u:64u);
+    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,scratchMSL,"vs"));CHECK(botw_graphics_register_shader(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,scratchMSL,"fs"));CHECK(nvnProgramSetShaders(&program,2,sd));
+static const unsigned char vertexProof[]={3,2,35,7,0,3,1,0,0,0,0,0,16,0,0,0,0,0,0,0,17,0,2,0,1,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,15,0,5,0,0,0,0,0,3,0,0,0,109,97,105,110,0,0,0,0,19,0,2,0,1,0,0,0,33,0,3,0,2,0,0,0,1,0,0,0,54,0,5,0,1,0,0,0,3,0,0,0,0,0,0,0,2,0,0,0,248,0,2,0,4,0,0,0,253,0,1,0,56,0,1,0};
+static const unsigned char fragmentProof[]={3,2,35,7,0,3,1,0,0,0,0,0,16,0,0,0,0,0,0,0,17,0,2,0,1,0,0,0,14,0,3,0,0,0,0,0,1,0,0,0,15,0,5,0,4,0,0,0,3,0,0,0,109,97,105,110,0,0,0,0,19,0,2,0,1,0,0,0,33,0,3,0,2,0,0,0,1,0,0,0,54,0,5,0,1,0,0,0,3,0,0,0,0,0,0,0,2,0,0,0,248,0,2,0,4,0,0,0,253,0,1,0,56,0,1,0};
+
+    if(!(argc>1&&!strcmp(argv[1],"unproved"))){CHECK(botw_graphics_register_shader_scratch_proof(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,vertexProof,sizeof vertexProof));CHECK(botw_graphics_register_shader_scratch_proof(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,fragmentProof,sizeof fragmentProof));}
+    NVNmemoryPoolBuilder scratchBuilder;NVNmemoryPool scratchPool;nvnMemoryPoolBuilderSetDefaults(&scratchBuilder);nvnMemoryPoolBuilderSetDevice(&scratchBuilder,&device);nvnMemoryPoolBuilderSetFlags(&scratchBuilder,0x21);nvnMemoryPoolBuilderSetStorage(&scratchBuilder,NULL,0);CHECK(nvnMemoryPoolInitialize(&scratchPool,&scratchBuilder));
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);float scratchGreen[]={0,1,0,1};nvnCommandBufferClearColor(&cb,0,scratchGreen,15);nvnCommandBufferSetShaderScratchMemory(&cb,argc>1&&!strcmp(argv[1],"null-scratch")?NULL:&scratchPool,0,0);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);
+    if(argc>1&&!strcmp(argv[1],"stale-scratch")){nvnMemoryPoolFinalize(&scratchPool);CHECK(nvnMemoryPoolInitialize(&scratchPool,&scratchBuilder));}
+    NVNqueueBuilder secondBuilder;NVNqueue secondQueue;nvnQueueBuilderSetDefaults(&secondBuilder);nvnQueueBuilderSetDevice(&secondBuilder,&device);CHECK(nvnQueueInitialize(&secondQueue,&secondBuilder));
+    nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueSubmitCommands(&secondQueue,1,&handle);nvnMemoryPoolFinalize(&scratchPool);nvnQueueFinish(&queue);nvnQueueFinish(&secondQueue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    for(unsigned i=0;i<16;i++)CHECK(pixels[i*4]==255&&pixels[i*4+1]==0&&pixels[i*4+2]==0&&pixels[i*4+3]==255);
+    puts("PROVEN_SHADER_SCRATCH_ZERO_POOL_TWO_QUEUES_GPU_PIXELS_OK");
+"""
 
 if __name__ == '__main__':
     unittest.main()

@@ -75,7 +75,7 @@ static BWCommandMemory *requireRecordingMemory(NVNcommandBuffer *raw,BWCommands 
     if(!span||span.used>span.size||bytes>span.size-span.used||reserve>span.size-span.used-bytes)fatal("memory callback did not provide enough CPU recording memory");
     recordingMemoryAccess(span);return span;
 }
-NVN(nvnCommandBufferInitialize,NVNboolean,NVNcommandBuffer *raw,NVNdevice *device){get(device,[BWDevice class]);put(raw,[BWCommands new]);return 1;}
+NVN(nvnCommandBufferInitialize,NVNboolean,NVNcommandBuffer *raw,NVNdevice *device){BWCommands *cmd=[BWCommands new];cmd.device=get(device,[BWDevice class]);put(raw,cmd);return 1;}
 NVN(nvnCommandBufferFinalize,void,NVNcommandBuffer *raw){BWCommands *cmd=commandState(raw,NO);if(cmd.recording)fatal("finalize recording command buffer");removeObject(raw);}
 NVN(nvnCommandBufferSetMemoryCallback,void,NVNcommandBuffer *raw,PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC callback){commandState(raw,NO).callback=callback;}
 NVN(nvnCommandBufferSetMemoryCallbackData,void,NVNcommandBuffer *raw,void *data){commandState(raw,NO).callbackData=data;}
@@ -83,7 +83,7 @@ NVN(nvnCommandBufferGetMemoryCallback,PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC,cons
 NVN(nvnCommandBufferGetMemoryCallbackData,void*,const NVNcommandBuffer *raw){return commandState(raw,YES).callbackData;}
 NVN(nvnCommandBufferAddCommandMemory,void,NVNcommandBuffer *raw,const NVNmemoryPool *memory,ptrdiff_t offset,size_t bytes){
     BWCommands *cmd=commandState(raw,YES);BWPool *pool=get(memory,[BWPool class]);
-    if(offset<0||!range((size_t)offset,bytes,pool.size))fatal("CPU command memory pool bounds");
+    if(offset<0||!pool.buffer||!range((size_t)offset,bytes,pool.size))fatal("CPU command memory pool bounds");
     BWCommandMemory *span=[BWCommandMemory new];span.memory=(char*)pool.memory+offset;span.size=bytes;span.pool=pool;adoptRecordingSpan(cmd,span,NO);cmd.externalMemory=YES;
 }
 NVN(nvnCommandBufferAddControlMemory,void,NVNcommandBuffer *raw,void *memory,size_t bytes){

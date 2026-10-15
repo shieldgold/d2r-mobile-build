@@ -813,7 +813,63 @@ def shader_binding_map(msl, stage, reflection, storage_descriptors=()):
     return {'entry': entry[2], 'bindings': result, 'texture_types': types, 'vertex_inputs': inputs}
 
 
-def stage_shader_bundle(inputs, converted, destination):
+def shader_scratch_proof(code, spirv, stage):
+    """Admit the initial graphics-only, zero-declared/no-Private profile."""
+    if stage not in ('vertex', 'fragment') or len(code) < 0x80:
+        raise ValueError('Scratch proof requires bounded graphics NVN SPH')
+    word0, low, high, crs = struct.unpack_from('<4I', code, 0x30)
+    if (word0 >> 10) & 15 != (1 if stage == 'vertex' else 5):
+        raise ValueError('Scratch proof NVN SPH stage mismatch')
+    low, high, crs = low & 0xffffff, high & 0xffffff, crs & 0xffffff
+    if len(spirv) < 20 or len(spirv) > 16 << 20 or len(spirv) % 4:
+        raise ValueError('Scratch proof SPIR-V bounds')
+    words = struct.unpack('<' + 'I' * (len(spirv) // 4), spirv)
+    if words[0] != 0x07230203 or words[1] != 0x10300 or not 0 < words[3] <= 1048576 or words[4]:
+        raise ValueError('Scratch proof requires SPIR-V 1.3')
+    pos, entries, memory, shader, functions, private = 5, [], 0, 0, [], 0
+    in_function, previous, starts, ends = False, 0, 0, 0
+    while pos < len(words):
+        count, op = words[pos] >> 16, words[pos] & 65535
+        if not count or count > len(words)-pos or op > 400:
+            raise ValueError('Scratch proof malformed or unsupported SPIR-V instruction')
+        args = words[pos+1:pos+count]
+        if op == 14:
+            if args != (0, 1):
+                raise ValueError('Scratch proof requires Logical GLSL450 memory model')
+            memory += 1
+        if op == 17 and args == (1,):
+            shader += 1
+        if op == 15:
+            if count < 4 or args[0] != (0 if stage == 'vertex' else 4) or not 0 < args[1] < words[3] or b'\0' not in spirv[(pos+3)*4:(pos+count)*4]:
+                raise ValueError('Scratch proof SPIR-V entry/stage mismatch')
+            entries.append(args[1])
+        if op == 54:
+            if count != 5 or in_function:
+                raise ValueError('Scratch proof malformed function')
+            functions.append(args[1]);in_function = True;starts += 1
+        if op == 56:
+            if count != 1 or not in_function or not 249 <= previous <= 255:
+                raise ValueError('Scratch proof incomplete function')
+            in_function = False;ends += 1
+        if op == 59:
+            if count < 4:
+                raise ValueError('Scratch proof malformed variable')
+            if args[2] == 6:
+                private += 1
+            if args[2] == 4 or args[2] > 12:
+                raise ValueError('Scratch proof unsupported graphics storage class')
+        previous = op;pos += count
+    if len(entries) != 1 or memory != 1 or not shader or functions.count(entries[0]) != 1 or in_function or starts != ends:
+        raise ValueError('Scratch proof incomplete graphics module')
+    if low+high+crs//32 == 0 and private:
+        raise ValueError('Scratch proof rejects zero-declared Private storage; implicit 128-byte local-memory fallback is not admitted')
+    if low or high or crs or private:
+        raise ValueError('Scratch proof nonzero local-memory range/initialization is unverified')
+    return {'backend': 'metal_thread_private', 'proof': 'zero_declared_no_private',
+            'sph_low': low, 'sph_high': high, 'sph_crs': crs, 'private_variables': private}
+
+
+def stage_shader_bundle(inputs, converted, destination, scratch_spirv=None):
     """Prepare a private local bundle; unknown resources remain unsupported."""
     inputs, converted, destination = Path(inputs), Path(converted), Path(destination)
     records = json.loads((inputs / 'inputs.json').read_text())['records']
@@ -869,7 +925,14 @@ def stage_shader_bundle(inputs, converted, destination):
             entry['msl'].update(bytes=len(files[msl_name]), sha256=hashlib.sha256(files[msl_name]).hexdigest())
             entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {}),
                           'constant_specializations': constants, 'uniform_ranges': uniform_ranges})
-        except ValueError as exc:
+            if scratch_spirv is not None:
+                spv = (Path(scratch_spirv) / (code_hash + '.spv')).read_bytes()
+                proof = shader_scratch_proof(files[code_hash + '.nvn'], spv, stage)
+                name = hashlib.sha256(spv).hexdigest() + '.spv'
+                files[name] = spv
+                proof['spirv'] = {'path': name, 'bytes': len(spv), 'sha256': hashlib.sha256(spv).hexdigest()}
+                entry['scratch'] = proof
+        except (ValueError, OSError) as exc:
             entry.update({'status': 'unsupported', 'reason': str(exc)})
         indices[identity] = len(entries)
         entries.append(entry)
@@ -899,6 +962,7 @@ def main(argv=None):
                         help='Compile under explicit BNSH slot-based 2D requirements; runtime must check descriptors')
     parser.add_argument('--bundle-inputs', type=Path, help='Existing local extraction directory for private bundling')
     parser.add_argument('--bundle-compiled', type=Path, help='Existing local converted MSL directory for private bundling')
+    parser.add_argument('--scratch-proof-directory', type=Path, help='Exact code-SHA keyed SPIR-V 1.3 graphics local-memory proofs')
     parser.add_argument('--bundle-dir', type=Path, help='Fresh ignored directory for the private runtime bundle')
     args = parser.parse_args(argv)
     bundle_args = (args.bundle_inputs, args.bundle_compiled, args.bundle_dir)
@@ -906,8 +970,10 @@ def main(argv=None):
         if not all(bundle_args) or any((args.image, args.report, args.extract_dir, args.compiler,
                                        args.compile_dir, args.require_runtime_2d_textures)):
             parser.error('Bundling requires exactly --bundle-inputs, --bundle-compiled and --bundle-dir')
-        print(json.dumps(stage_shader_bundle(*bundle_args), sort_keys=True))
+        print(json.dumps(stage_shader_bundle(*bundle_args, scratch_spirv=args.scratch_proof_directory), sort_keys=True))
         return 0
+    if args.scratch_proof_directory:
+        parser.error('--scratch-proof-directory requires bundling')
     if not args.image or not args.report:
         parser.error('--image and --report are required for inspection/extraction')
     if bool(args.compiler) != bool(args.compile_dir) or (args.compiler and not args.extract_dir):

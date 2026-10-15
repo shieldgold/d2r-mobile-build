@@ -25,7 +25,7 @@ static void error(const char *s){fprintf(stderr,"ERROR:%s\n",s);siglongjmp(jump,
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK:%s error=%s\n",#x,botw_graphics_last_error());exit(1);}}while(0)
 #define FAILS(op,message) do{if(!sigsetjmp(jump,1)){op;CHECK(0);}CHECK(strstr(botw_graphics_last_error(),message));}while(0)
 static int contains(const void *p,size_t n,const void *base,size_t bytes){uintptr_t a=(uintptr_t)p,b=(uintptr_t)base;return a>=b&&a-b<=bytes&&n<=bytes-(a-b);}
-static int access_memory(const void *p,size_t n,int write){if(!write)return p!=NULL;return !denied&&(contains(p,n,memory,65536)||contains(p,n,controls,sizeof controls)||(reviewArena&&contains(p,n,reviewArena,reviewArenaBytes))||contains(p,n,extra,extraBytes));}
+static int access_memory(const void *p,size_t n,int write){if(!write)return p!=NULL;return !denied&&(contains(p,n,&pool,sizeof pool)||contains(p,n,memory,65536)||contains(p,n,controls,sizeof controls)||(reviewArena&&contains(p,n,reviewArena,reviewArenaBytes))||contains(p,n,extra,extraBytes));}
 static void refill(NVNcommandBuffer *c,NVNcommandBufferMemoryEvent event,size_t minimum,void *data){
  CHECK(data==&events);CHECK(event==0||event==1);CHECK(minimum==(event?256u:512u));events[event]++;
  if(mode==1)return;
