@@ -18,6 +18,7 @@ HOST = r'''
 #include <string.h>
 #include <unistd.h>
 static unsigned ticks;
+static unsigned input_ticks;
 static void diagnose_window(const char *phase) {
     assert(NSThread.isMainThread);
     NSApplication *app = NSApplication.sharedApplication;
@@ -48,6 +49,11 @@ int botw_host_set_graphics_layer(void *layer) {
     return 0;
 }
 void botw_host_refresh_input(void) {}
+void botw_host_sample_input(void) {
+    assert(NSThread.isMainThread);
+    ++input_ticks;
+    assert(input_ticks == ticks);
+}
 void botw_host_set_applet_state(int foreground, int focused) { (void)foreground; (void)focused; }
 void botw_host_display_tick(double target) {
     assert(NSThread.isMainThread && target > 0);
@@ -57,6 +63,7 @@ void botw_host_display_tick(double target) {
         fprintf(stdout, "synthetic_first_display_target=%.9f\n", target); fflush(stdout);
     }
     if (ticks == 2 && getenv("BOTW_MAC_TEST_CLOSE")) {
+        assert(input_ticks == ticks - 1); /* This callback's input phase follows VI. */
         assert(NSApplication.sharedApplication.windows.count == 1);
         fprintf(stdout, "synthetic_host_real_display_ticks=%u\n", ticks); fflush(stdout);
         [NSApplication.sharedApplication.windows.firstObject performClose:nil];

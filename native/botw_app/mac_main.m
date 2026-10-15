@@ -109,6 +109,7 @@ static void *run_guest(void *unused) {
         fflush(stdout);
     }
     botw_host_display_tick(sender.targetTimestamp);
+    botw_host_sample_input();
     botw_host_refresh_input();
 }
 - (BOOL)windowShouldClose:(NSWindow *)sender { (void)sender; exit_process(0); }

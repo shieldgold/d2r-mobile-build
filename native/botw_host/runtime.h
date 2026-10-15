@@ -59,6 +59,10 @@ void botw_host_set_applet_state(int foreground, int focused);
 void botw_host_set_audio_session_active(int active);
 /* Call after frontend sampling to publish controller style notifications. */
 void botw_host_refresh_input(void);
+/* macOS's actual display callback is its sole periodic input producer. iOS
+ * already samples in its overlay and must not call this as well. Sampling is
+ * disabled before teardown and while the host is not foreground and focused. */
+void botw_host_sample_input(void);
 #ifdef __cplusplus
 }
 #endif

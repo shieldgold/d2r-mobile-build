@@ -175,6 +175,7 @@ static struct {
     botw_audio *audio;
 #endif
     int input_owned;
+    int input_sampling_live; /* Protected by lifecycle_lock, including teardown. */
     uint32_t input_shared_handle;
     uint64_t resource_user_id;
     int graphics_started;
@@ -1078,6 +1079,9 @@ static void configure_resource_backends(const char *documents) {
     if (botw_input_bind_shared_memory(state.input, shared, BOTW_HID_SHARED_MEMORY_SIZE)) fail("bind HID shared memory");
     botw_input_sample(state.input, botw_input_monotonic_ticks());
     botw_services_set_input(state.services, state.input, state.input_shared_handle);
+    pthread_mutex_lock(&lifecycle_lock);
+    state.input_sampling_live = 1;
+    pthread_mutex_unlock(&lifecycle_lock);
     if (!documents || !*documents) fail("missing application documents directory");
     char path[4096]; int length = snprintf(path, sizeof path, "%s/botw-romfs.bin", documents);
     if (length < 0 || (size_t)length >= sizeof path) fail("RomFS image path exceeds limit");
@@ -1162,6 +1166,12 @@ void botw_host_refresh_input(void) {
         char error[512];
         if (botw_services_refresh_input(state.services, error, sizeof error)) report("input_notification_error=%s", error);
     }
+    pthread_mutex_unlock(&lifecycle_lock);
+}
+void botw_host_sample_input(void) {
+    pthread_mutex_lock(&lifecycle_lock);
+    if (state.input_sampling_live && host_foreground && host_focused)
+        botw_input_sample(state.input, botw_input_monotonic_ticks());
     pthread_mutex_unlock(&lifecycle_lock);
 }
 static int graphics_memory(const void *address, size_t length) { return services_memory(NULL, (uint64_t)address, length, 0); }
@@ -1568,6 +1578,7 @@ static int cleanup(void) {
     char error[512];
     pthread_mutex_lock(&lifecycle_lock);
     state.vi_display_live = 0;
+    state.input_sampling_live = 0;
     pthread_mutex_unlock(&lifecycle_lock);
     pthread_mutex_lock(&focus_lock); focus_stopping = 1;
     pthread_cond_broadcast(&focus_changed); pthread_mutex_unlock(&focus_lock);
