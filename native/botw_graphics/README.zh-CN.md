@@ -86,6 +86,8 @@ python3 -m scripts.botw_native.shaders \
 
 `BOTW_GRAPHICS_STORAGE_ADDRESS_LOW` 可将已核实的单个 c0 地址低位读取映射为一个 32-bit Metal 常量，值直接来自当前 NVN storage 绑定的客体地址，完整范围仍须落在已登记内存池。人工 GPU 夹具将该低位参与写回并与真实客体地址逐字核对，区别于 Metal GPU 地址或默认值；无绑定和大于 32-bit 的声明明确失败。字体动态访问未完成验证前，私有包 loader 仍拒绝登记相关程序。
 
+`build_dynamic_c1_probe` 可从 MSL 取出动态 c1 索引的单赋值依赖闭包，仅接受相对 VertexID 和原始 c1 的固定字；属性、uniform、SSBO 输入、未知语法及多次赋值均拒绝。它生成的私有 compute shader 由独立 `tools/probe_msl_indices.m` 在真实 Metal 上穷举 1–64 个输入。两个字体 VS 已各测试 64 个相对顶点：连续安全前缀均为 16，下一项读 index64 超出真实 64-word c1；顶点0–3的三个索引分别为 `[0,16,20]`、`[4,24,28]`、`[8,32,36]`、`[12,40,44]`。这是明确输入范围下的离线条件证据，尚不包含 SSBO 范围证明，也不会自动登记字体程序。
+
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
 ```c

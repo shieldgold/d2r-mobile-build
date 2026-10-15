@@ -125,6 +125,27 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_dynamic_c1_probe_closes_dependencies_and_rejects_other_inputs(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'build_dynamic_c1_probe'), 'Finite c1 proof generation is missing')
+        control, code = bytearray(0x708), bytearray(0x180)
+        struct.pack_into('<II', control, 0x700, 0x80, 0x180)
+        struct.pack_into('<f', code, 0x88, 1.0)
+        source = ('struct U{uint data[64];};struct F{float data[64];}; vertex float4 main0('
+                  'uint gl_VertexIndex [[vertex_id]],uint gl_BaseVertex [[base_vertex]],'
+                  'constant U& c1 [[buffer(1)]],constant F& c1_1 [[buffer(2)]]) {'
+                  'uint _1=gl_VertexIndex-gl_BaseVertex;uint _2=_1*4u;uint _3=_1+uint(c1_1.data[2u]);'
+                  'return float4(c1.data[_2]+c1.data[_3]);}')
+        probe = module.build_dynamic_c1_probe(source, control, code, 4)
+        self.assertEqual(probe['expressions'], ['_2', '_3'])
+        self.assertIn('as_type<float>(0x3f800000u)', probe['msl'])
+        self.assertNotIn('gl_BaseVertex', probe['msl'])
+        self.assertEqual(probe['relative_vertex_count'], 4)
+        with self.assertRaisesRegex(ValueError, 'external|input'):
+            module.build_dynamic_c1_probe(source.replace('_1*4u', 'in.in_attr0.x'), control, code, 4)
+        with self.assertRaisesRegex(ValueError, 'ambiguous|assignment'):
+            module.build_dynamic_c1_probe(source.replace('return float4', '_2=0u;return float4'), control, code, 4)
+
     def test_storage_audit_requires_compiler_descriptor_and_bnsh_slot(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'audit_storage_resources'), 'Storage descriptor audit is missing')
@@ -219,6 +240,31 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_dynamic_c1_index_probe_executes_exact_finite_vertex_inputs(self):
+        import json
+        tool = ROOT / 'native/botw_graphics/tools/probe_msl_indices.m'
+        self.assertTrue(tool.exists(), 'Offline Metal index runner is missing')
+        module = BnshTests().parser()
+        control, code = bytearray(0x708), bytearray(0x180)
+        struct.pack_into('<II', control, 0x700, 0x80, 0x180); struct.pack_into('<f', code, 0x88, 1.0)
+        source = ('struct U{uint data[64];};struct F{float data[64];}; vertex float4 main0('
+                  'uint gl_VertexIndex [[vertex_id]],uint gl_BaseVertex [[base_vertex]],'
+                  'constant U& c1 [[buffer(1)]],constant F& c1_1 [[buffer(2)]]) {'
+                  'uint _1=gl_VertexIndex-gl_BaseVertex;uint _2=_1*4u;uint _3=_1+uint(c1_1.data[2u]);'
+                  'return float4(c1.data[_2]+c1.data[_3]);}')
+        probe = module.build_dynamic_c1_probe(source, control, code, 4)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); msl = path / 'probe.metal'; msl.write_text(probe['msl'])
+            exe = path / 'probe'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                str(tool), '-framework', 'Foundation', '-framework', 'Metal', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe), str(msl), '4', '2'], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['indices'], [[0, 1], [4, 2], [8, 3], [12, 4]])
+
     def test_storage_buffer_and_instanced_draw_use_real_bindings_and_ids(self):
         implemented = (ROOT / 'native/botw_graphics/implemented.inc').read_text()
         self.assertIn('NVN_BIND(nvnCommandBufferBindStorageBuffer)', implemented)

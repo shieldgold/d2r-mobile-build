@@ -311,6 +311,78 @@ def audit_storage_resources(msl, stage, reflection, descriptors):
             'access_bounds_validated': False}
 
 
+def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
+    """Build an offline Metal probe for a finite, closed c1-index input set.
+
+    Only single-assignment scalar expressions depending on relative VertexID
+    and fixed original c1 words are accepted. This does not authorize a shader
+    or prove its storage accesses; the runtime must enforce the input profile.
+    """
+    if type(relative_vertex_count) is not int or not 1 <= relative_vertex_count <= 64:
+        raise ValueError('Invalid finite vertex input range')
+    if len(control) < 0x708:
+        raise ValueError('Missing original c1 bounds')
+    start, end = struct.unpack_from('<II', control, 0x700)
+    if start < 0x80 or start % 4 or end != len(code) or end < start or (end-start) % 4 or end-start > 65536:
+        raise ValueError('Invalid original c1 bounds')
+    kinds = {}
+    for block, variable in re.findall(r'constant\s+(\w+)\s*&\s*(c1(?:_\d+)?)\s+\[\[buffer\(\d+\)\]\]', msl):
+        layout = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*(uint|float)\s+data\[\d+\];\s*\};', msl)
+        if not layout:
+            raise ValueError('Unknown c1 probe layout')
+        kinds[variable] = layout[1]
+    expressions = list(dict.fromkeys(index for variable, index in re.findall(r'\b(c1(?:_\d+)?)\.data\[([^\]]+)\]', msl)
+                                     if variable in kinds and not re.fullmatch(r'\d+u?', index)))
+    if not expressions or len(expressions) > 64:
+        raise ValueError('No bounded dynamic c1 expression set')
+    completed, visiting, statements = set(), set(), []
+    allowed = {'uint', 'int', 'float', 'as_type', 'extract_bits', 'abs', 'fast', 'clamp', 'trunc',
+               'isnan', 'botw_relative_vertex'}
+
+    def expression(value):
+        def constant(match):
+            variable, index = match[1], int(match[2])
+            if variable not in kinds or index * 4 + 4 > end-start:
+                raise ValueError('Probe c1 constant exceeds original bounds')
+            bits, = struct.unpack_from('<I', code, start+index*4)
+            literal = f'0x{bits:08x}u'
+            return 'as_type<float>(' + literal + ')' if kinds[variable] == 'float' else literal
+        value = re.sub(r'\b(c1(?:_\d+)?)\.data\[(\d+)u?\]', constant, value)
+        value = re.sub(r'\bgl_VertexIndex\s*-\s*gl_BaseVertex\b', 'botw_relative_vertex', value)
+        if not re.fullmatch(r'[\w\s.+*/%<>=!&|^~?:(),-]+', value) or any(x in value for x in ('//', '/*', '*/')):
+            raise ValueError('Unknown external input or probe expression grammar')
+        for identifier in re.findall(r'\b[A-Za-z_]\w*\b', value):
+            if re.fullmatch(r'_\d+', identifier):
+                variable(identifier)
+            elif identifier not in allowed:
+                raise ValueError('Unresolved external probe input: ' + identifier)
+        return value
+
+    def variable(name):
+        if name in completed:
+            return
+        if name in visiting:
+            raise ValueError('Cyclic probe assignment')
+        assignments = re.findall(r'\b' + re.escape(name) + r'\s*=(?!=)', msl)
+        definitions = re.findall(r'\b(uint|int|float)\s+' + re.escape(name) + r'\s*=\s*([^;]+);', msl)
+        if len(assignments) != 1 or len(definitions) != 1:
+            raise ValueError('Ambiguous scalar probe assignment: ' + name)
+        visiting.add(name)
+        kind, value = definitions[0]
+        value = expression(value)
+        statements.append(f'    {kind} {name} = {value};\n')
+        visiting.remove(name); completed.add(name)
+
+    targets = [expression(value) for value in expressions]
+    output = '#include <metal_stdlib>\nusing namespace metal;\n'
+    output += 'kernel void botw_index_probe(device uint *out [[buffer(0)]],uint botw_relative_vertex [[thread_position_in_grid]]) {\n'
+    output += f'    if (botw_relative_vertex >= {relative_vertex_count}u) return;\n' + ''.join(statements)
+    output += ''.join(f'    out[botw_relative_vertex*{len(targets)}u+{i}u] = uint({value});\n'
+                      for i, value in enumerate(targets)) + '}\n'
+    return {'msl': output, 'expressions': expressions, 'relative_vertex_count': relative_vertex_count,
+            'c1_words': (end-start)//4, 'conditional_probe_only': True}
+
+
 def specialize_static_c1(msl, control, code):
     """Fold only provably static c1 reads from the original NVN constant region.
 
