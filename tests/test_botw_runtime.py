@@ -184,7 +184,7 @@ class NativeRuntimeTests(unittest.TestCase):
         sources = [ROOT / 'native/botw_host' / f for f in ('runtime.c', 'entry.S', 'cli.c', 'services.c', 'kernel.c', 'hipc_address.c', 'address_space.c')]
         sources += [ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c',
                     ROOT / 'native/botw_resources/savefs.c', ROOT / 'native/botw_resources/local_user.c']
-        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
+        built = subprocess.run(['xcrun', 'clang', '-framework', 'Security', '-std=c11', '-Wall', '-Wextra', '-Werror',
                                 '-O1', '-g', *(str(s) for s in sources), '-o', str(cls.exe)],
                                text=True, capture_output=True)
         assert built.returncode == 0, built.stderr
@@ -366,7 +366,7 @@ int main(void) {
     return 0;
 }
 ''')
-        built = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
+        built = subprocess.run(['xcrun', 'clang', '-framework', 'Security', '-std=c11', '-Wall', '-Wextra', '-Werror',
                                 str(source), str(ROOT / 'native/botw_host/entry.S'),
                                 str(ROOT / 'native/botw_host/services.c'), str(ROOT / 'native/botw_host/kernel.c'),
                                 str(ROOT / 'native/botw_host/hipc_address.c'),

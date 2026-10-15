@@ -180,7 +180,7 @@ class RuntimeThreadTests(unittest.TestCase):
         sources = [driver, *(ROOT / 'native/botw_host' / name for name in ('entry.S', 'services.c', 'kernel.c', 'hipc_address.c', 'address_space.c')),
                    ROOT / 'native/botw_resources/savefs.c', ROOT / 'native/botw_resources/local_user.c',
                    ROOT / 'native/botw_input/input.c', ROOT / 'native/botw_resources/romfs.c']
-        result = subprocess.run(['xcrun', 'clang', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
+        result = subprocess.run(['xcrun', 'clang', '-framework', 'Security', '-std=c11', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
                                  *(str(source) for source in sources), '-o', str(cls.exe)],
                                 capture_output=True, text=True)
         assert result.returncode == 0, result.stderr

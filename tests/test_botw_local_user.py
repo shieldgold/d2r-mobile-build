@@ -3,6 +3,7 @@ import ctypes as C
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import os
+import platform
 from pathlib import Path
 import shutil
 import stat
@@ -48,6 +49,8 @@ class LocalUserTests(unittest.TestCase):
         cls.cli = directory / 'user'
         flags = [shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                  '-Wconversion', '-Wshadow', '-pedantic', '-I', str(cls.source.parent)]
+        if platform.system() == 'Darwin':
+            flags += ['-framework', 'Security']
         subprocess.run(flags + ['-shared', '-fPIC', str(cls.source), '-o', str(cls.library)], check=True)
         subprocess.run(flags + [str(cls.cli_source), str(cls.source), '-o', str(cls.cli)], check=True)
         cls.flags = flags
@@ -246,11 +249,18 @@ class LocalUserTests(unittest.TestCase):
         for name, body in [('failed', 'errno=EIO; return -1;'),
                            ('zero', 'memset(buffer,0,length); return 0;')]:
             shim = Path(self.build.name) / f'entropy-{name}.c'
-            shim.write_text('#include <errno.h>\n#include <stddef.h>\n#include <string.h>\n'
-                            'int fixture_getentropy(void *buffer,size_t length) { '
-                            '(void)buffer; (void)length; ' + body + ' }\n')
+            if platform.system() == 'Darwin':
+                shim.write_text('#include <errno.h>\n#include <string.h>\n#include <Security/SecRandom.h>\n'
+                                'int fixture_entropy(SecRandomRef random,size_t length,void *buffer) { '
+                                '(void)random; (void)buffer; (void)length; ' + body + ' }\n')
+                replacement = '-DSecRandomCopyBytes=fixture_entropy'
+            else:
+                shim.write_text('#include <errno.h>\n#include <stddef.h>\n#include <string.h>\n'
+                                'int fixture_entropy(void *buffer,size_t length) { '
+                                '(void)buffer; (void)length; ' + body + ' }\n')
+                replacement = '-Dgetentropy=fixture_entropy'
             binary = Path(self.build.name) / f'user-entropy-{name}'
-            subprocess.run(self.flags + ['-Dgetentropy=fixture_getentropy', str(self.cli_source),
+            subprocess.run(self.flags + [replacement, str(self.cli_source),
                                         str(self.source), str(shim), '-o', str(binary)], check=True)
             result = subprocess.run([str(binary), str(self.documents)], capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 1)

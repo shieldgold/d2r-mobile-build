@@ -9,7 +9,11 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <Security/SecRandom.h>
+#else
 #include <sys/random.h>
+#endif
 #include <unistd.h>
 #ifdef __linux__
 #include <sys/syscall.h>
@@ -101,9 +105,13 @@ static int read_identity(int fd, botw_local_user *user) {
     memcpy(user->uid, bytes + 8, 16); format_hex(user->uid, user->uid_hex); return 0;
 }
 static int entropy(uint8_t *bytes) {
+#ifdef __APPLE__
+    return SecRandomCopyBytes(kSecRandomDefault, 16, bytes) == 0 ? 0 : EIO;
+#else
     int result;
     do { result = getentropy(bytes, 16); } while (result && errno == EINTR);
     return result ? (errno ? errno : EIO) : 0;
+#endif
 }
 static int write_all(int fd, const uint8_t *bytes, size_t length) {
     size_t done = 0;
