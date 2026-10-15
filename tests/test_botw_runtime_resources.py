@@ -12,24 +12,21 @@ DRIVER = r'''
 #include "RUNTIME_SOURCE"
 #include <assert.h>
 
-static uint8_t users[128], ipc[256];
+enum { USER_BYTES = 128, IPC_BYTES = 256 };
+static uint8_t *users, *ipc;
 static void observe(const char *message) { puts(message); }
-static int output_memory(void *opaque, uint64_t address, size_t length, int writable) {
-    (void)opaque;
-    uintptr_t start = (uintptr_t)users;
-    if (writable && address >= start && address - start <= sizeof users &&
-            length <= sizeof users - (size_t)(address - start)) return 1;
-    start = (uintptr_t)ipc;
-    return writable && address >= start && address - start <= sizeof ipc &&
-        length <= sizeof ipc - (size_t)(address - start);
-}
 static uint32_t read32(const void *address) { uint32_t n; memcpy(&n, address, 4); return n; }
 static void write32(void *address, uint32_t n) { memcpy(address, &n, 4); }
 static uint32_t command(uint32_t handle, unsigned type, uint32_t id, int pid,
                     uint32_t domain, int enumerate, const void *payload, size_t payload_size) {
-    memset(ipc, 0, sizeof ipc);
+    memset(ipc, 0, IPC_BYTES);
     size_t raw = 8;
     if (pid) { write32(ipc + 8, 1); raw += 12; }
+    size_t body_size = (domain ? 16 : 0) + 16 + payload_size;
+    size_t table_offset = (16 + body_size + 1) & ~(size_t)1;
+    size_t raw_size = (table_offset + (enumerate ? 2 : 0) + 3) & ~(size_t)3;
+    size_t raw_end = raw + raw_size;
+    assert(raw_end + (enumerate ? 8 : 0) <= IPC_BYTES);
     size_t at = (raw + 15) & ~(size_t)15;
     if (domain) {
         ipc[at] = 1; ipc[at + 2] = (uint8_t)(16 + payload_size);
@@ -38,34 +35,63 @@ static uint32_t command(uint32_t handle, unsigned type, uint32_t id, int pid,
     memcpy(ipc + at, "SFCI", 4); write32(ipc + at + 8, id);
     at += 16;
     if (payload_size) memcpy(ipc + at, payload, payload_size);
-    at += payload_size;
     write32(ipc, type);
-    write32(ipc + 4, (uint32_t)((at - raw) / 4) |
+    write32(ipc + 4, (uint32_t)(raw_size / 4) |
         (pid ? UINT32_C(0x80000000) : 0) | (enumerate ? 3u << 10 : 0));
     if (enumerate) {
+        /* Variable OutPointer sizes follow the full raw alignment budget,
+         * outside the domain's semantic data_size. */
+        uint16_t size = USER_BYTES;
+        memcpy(ipc + raw + table_offset, &size, sizeof size);
         uintptr_t address = (uintptr_t)users;
         assert(address < (UINT64_C(1) << 48));
-        write32(ipc + at, (uint32_t)address);
-        write32(ipc + at + 4, (uint32_t)(address >> 32) | (uint32_t)sizeof users << 16);
+        write32(ipc + raw_end, (uint32_t)address);
+        write32(ipc + raw_end + 4, (uint32_t)(address >> 32) | USER_BYTES << 16);
     }
     char error[512] = {0};
-    int result = botw_services_send(state.services, handle, ipc, sizeof ipc, error, sizeof error);
+    int result = botw_services_send(state.services, handle, ipc, IPC_BYTES, error, sizeof error);
     if (result) fprintf(stderr, "%s\n", error);
     assert(!result);
-    assert(!memcmp(ipc + 16 + (domain ? 16 : 0), "SFCO", 4));
-    assert(!read32(ipc + 24 + (domain ? 16 : 0)));
-    if (type == 5) assert(read32(ipc + 32) == 1);
-    if (read32(ipc + 4) >> 31) {
-        assert(read32(ipc + 8) == 1u << 5);
-        return read32(ipc + 12);
+
+    uint32_t header = read32(ipc + 4), moved = 0;
+    at = 8;
+    if (header >> 31) {
+        assert(read32(ipc + at) == 1u << 5);
+        moved = read32(ipc + at + 4); at += 8;
     }
-    return 0;
+    unsigned pointers = (read32(ipc) >> 16) & 15;
+    assert(pointers == (unsigned)enumerate);
+    if (pointers) {
+        uint32_t descriptor = read32(ipc + at);
+        uint64_t address = read32(ipc + at + 4) |
+            (uint64_t)((descriptor >> 12) & 15) << 32 |
+            (uint64_t)((descriptor >> 6) & 63) << 36;
+        assert(!(descriptor & 63) && descriptor >> 16 == USER_BYTES);
+        assert(address == (uintptr_t)users); at += 8;
+    }
+    raw_end = at + (header & 1023) * 4;
+    at = (at + 15) & ~(size_t)15;
+    if (domain) { assert(!read32(ipc + at)); at += 16; }
+    assert(at + 16 <= raw_end && raw_end <= IPC_BYTES);
+    assert(!memcmp(ipc + at, "SFCO", 4) && !read32(ipc + at + 8));
+    if (type == 5) assert(read32(ipc + at + 16) == 1);
+    return moved;
 }
 int main(int argc, char **argv) {
     assert(argc == 3);
     state.owner = pthread_self(); state.event = observe;
     state.kernel = botw_kernel_create(NULL, NULL); assert(state.kernel);
-    state.services = botw_services_create(services_log, output_memory, NULL); assert(state.services);
+    /* The production copy callbacks independently validate guest ownership.
+     * Use actual kernel-owned memory for both IPC and its C output. */
+    char memory_error[512]; const size_t heap_size = 0x200000;
+    assert(!botw_kernel_configure_memory(state.kernel, heap_size, heap_size,
+        heap_size, heap_size, 0, memory_error, sizeof memory_error));
+    uint64_t registers[32] = {0, heap_size};
+    assert(botw_kernel_dispatch(state.kernel, 1, registers, memory_error,
+        sizeof memory_error) == BOTW_KERNEL_HANDLED && !registers[0]);
+    users = (uint8_t *)(uintptr_t)registers[1]; ipc = users + 0x1000;
+    state.services = botw_services_create(services_log, services_memory, NULL); assert(state.services);
+    botw_services_set_memory_write_preparer(state.services, services_prepare_write, NULL);
     if (sigsetjmp(state.recovery, 1)) {
         assert(!strcmp(argv[2], "corrupt"));
         assert(!cleanup()); return 0;
@@ -89,10 +115,10 @@ int main(int argc, char **argv) {
         assert(account);
         command(account, 5, 0, 0, 0, 0, NULL, 0); /* Real session-to-domain conversion. */
         command(account, 4, 100, 1, 1, 0, &zero, sizeof zero);
-        memset(users, 0xa5, sizeof users);
+        memset(users, 0xa5, USER_BYTES);
         command(account, 4, 2, 0, 1, 1, NULL, 0);
         assert(!memcmp(users, state.local_user.uid, 16));
-        for (size_t i = 16; i < sizeof users; i++) assert(!users[i]);
+        for (size_t i = 16; i < USER_BYTES; i++) assert(!users[i]);
         assert(botw_services_set_preselected_local_user(state.services, state.local_user.uid,
             error, sizeof error)); /* The runtime already armed it exactly once. */
         assert(!botw_services_close(state.services, account, error, sizeof error));
