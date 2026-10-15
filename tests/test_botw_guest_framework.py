@@ -98,8 +98,30 @@ class GuestFrameworkTests(unittest.TestCase):
         change(data)
         self.report.write_text(json.dumps(data))
 
+    def test_host39_rejects_partial_mislabeled_and_unknown_target_evidence(self):
+        baseline = json.loads(self.report.read_text())
+        cases = [
+            ({'schema': 1, 'profile': 'botw-switch-base-v0-host39',
+              'target_address_bits': 39, 'game_playable': False}, False),
+            ({'schema': 1, 'profile': 'other', 'target_address_bits': 39, 'game_playable': False}, False),
+            ({'schema': True, 'profile': 'botw-switch-base-v0-host39',
+              'target_address_bits': 39, 'game_playable': False}, False),
+            (None, True),
+        ]
+        for policy, adaptation in cases:
+            changed = copy.deepcopy(baseline)
+            if policy is not None:
+                changed['host_address_policy'] = policy
+            if adaptation:
+                changed['rewrites'][0]['host_address_adaptation'] = {}
+            self.report.write_text(json.dumps(changed))
+            with self.subTest(policy=policy), self.assertRaisesRegex(ValueError, 'address|Host39|Address'):
+                build_framework(self.report, self.rewrite, self.output)
+            self.assertFalse(self.output.exists())
+
     def test_framework_reconstructs_all_seven_images_via_loader_section_names(self):
         result = build_framework(self.report, self.rewrite, self.output)
+        self.assertEqual(result['guest_address_bits'], 36)
         binary = (self.output / 'Guest.framework/Guest').read_bytes()
         header, segments, commands = macho(binary)
         self.assertEqual(header[:4], (0xfeedfacf, 0x0100000c, 0, 6))

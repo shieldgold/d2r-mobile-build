@@ -90,7 +90,7 @@ def validate_structure(directory, name):
             'semantic_equivalence_verified': False}
 
 
-def rewrite_module(tool, module, output, timeout=300):
+def rewrite_module(tool, module, output, timeout=300, *, host39=False):
     tool, module, output = verified_tool(tool), Path(module), Path(output)
     output.mkdir(parents=True, exist_ok=True)
     log = output / f'{module.name}.rewrite.log'
@@ -110,11 +110,28 @@ def rewrite_module(tool, module, output, timeout=300):
     if result.returncode:
         return {'name': module.name, 'status': 'failed', 'reason': f'rewriter exit {result.returncode}', 'log': log.name}
     counts = check_generic_outputs(output, module.name)
-    structure = validate_structure(output, module.name)
     image = output / f'{module.name}.patched.bin'
     sites = output / f'{module.name}.sites.tsv'
-    return {'name': module.name, 'status': 'rewritten', 'log': log.name, 'generic_tables': counts,
+    adaptation = None
+    generic_digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    if host39:
+        from .hipc_address import apply, verify
+        from .nso import initialized_image
+        generic_bytes = image.read_bytes()
+        generic_digest = hashlib.sha256(generic_bytes).hexdigest()
+        updated, adaptation = apply(module.name, initialized_image(module.read_bytes(), module.name),
+            generic_bytes, {'generic_site_offsets': [int(row.split('\t')[0], 0) for row in sites.read_text().splitlines()]})
+        verify(updated, adaptation, expected_input_sha256=generic_digest)
+        temporary = image.with_suffix('.host39.part')
+        temporary.write_bytes(updated)
+        temporary.replace(image)
+    structure = validate_structure(output, module.name)
+    result = {'name': module.name, 'status': 'rewritten', 'log': log.name, 'generic_tables': counts,
             'structure': structure,
             'image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
             'rewrite_site_count': len(sites.read_text().splitlines()),
             'semantic_equivalence_verified': False}
+    if adaptation is not None:
+        result['generic_image_sha256'] = generic_digest
+        result['host_address_adaptation'] = adaptation
+    return result

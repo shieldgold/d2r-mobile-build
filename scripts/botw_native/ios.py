@@ -220,6 +220,9 @@ def assemble_app(shell_ipa, guest_dir, report_path, rewrite_dir, output_app, *, 
         app.mkdir()
         for name, data in shell.items():
             (app / name).write_bytes(data)
+        info = plistlib.loads((app / 'Info.plist').read_bytes())
+        info['BOTWGuestAddressBits'] = expected['guest_address_bits']
+        (app / 'Info.plist').write_bytes(plistlib.dumps(info, sort_keys=True))
         (app / 'BOTWNative').chmod(0o755)
         (app / 'Frameworks').mkdir()
         (regenerated / 'Guest.framework').rename(app / 'Frameworks/Guest.framework')

@@ -123,6 +123,14 @@ static void *runGuest(void *unused) {
     close(descriptor);
     setvbuf(stdout, NULL, _IOLBF, 0); setvbuf(stderr, NULL, _IOLBF, 0);
     hostEvent("\n=== BOTW native bootstrap ===");
+    id configuredBits = [NSBundle.mainBundle objectForInfoDictionaryKey:@"BOTWGuestAddressBits"];
+    if (configuredBits && ![configuredBits isKindOfClass:NSNumber.class]) {
+        hostEvent("error=invalid packaged guest address policy"); return;
+    }
+    unsigned addressBits = configuredBits ? [configuredBits unsignedIntValue] : 36;
+    if (botw_host_set_address_space(addressBits)) {
+        hostEvent("error=invalid packaged guest address policy"); return;
+    }
     if (!frontendInput || !((CAMetalLayer *)self.metalView.layer).device ||
         botw_host_set_input(frontendInput) || botw_host_set_graphics_layer((__bridge void *)self.metalView.layer)) {
         hostEvent("error=unable to configure Metal/input frontend"); return;

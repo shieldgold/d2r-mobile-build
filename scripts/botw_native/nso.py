@@ -3,6 +3,27 @@ import hashlib
 import struct
 
 
+def initialized_image(data, name):
+    """Return verified initialized segments at their original virtual offsets.
+
+    BSS is deliberately omitted: the offline instruction transforms may read
+    original code/data, while runtime BSS is represented by the rewrite layout.
+    """
+    metadata = inspect_nso(data, name)
+    segments = metadata['segments']
+    image = bytearray(max(s['address'] + s['bytes'] for s in segments))
+    flags = struct.unpack_from('<I', data, 0xc)[0]
+    for index, segment in enumerate(segments):
+        offset = struct.unpack_from('<I', data, 0x10 + index * 16)[0]
+        raw = data[offset:offset + segment['stored_bytes']]
+        if flags & (1 << index):
+            import lz4.block
+            raw = lz4.block.decompress(raw, uncompressed_size=segment['bytes'])
+        address = segment['address']
+        image[address:address + len(raw)] = raw
+    return bytes(image)
+
+
 def inspect_nso(data, name):
     if len(data) < 0x100 or data[:4] != b'NSO0':
         raise ValueError('Invalid or truncated NSO: ' + name)

@@ -73,6 +73,7 @@ class IOSAssemblyTests(unittest.TestCase):
         result = self.assemble()
         self.assertEqual(result, self.app)
         self.assertEqual((result / 'BOTWNative').read_bytes(), self.executable)
+        self.assertEqual(plistlib.loads((result / 'Info.plist').read_bytes())['BOTWGuestAddressBits'], 36)
         self.assertEqual((result / 'BOTWNative').stat().st_mode & 0o777, 0o755)
         self.assertEqual((result / 'Frameworks/Guest.framework/Guest').read_bytes(),
                          (self.guest / 'Guest.framework/Guest').read_bytes())

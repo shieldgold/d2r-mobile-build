@@ -83,6 +83,18 @@ class NativePreflightTests(unittest.TestCase):
     def need(self, fn):
         self.assertIsNotNone(fn, 'BOTW native preflight implementation is missing')
 
+    def test_initialized_image_preserves_segment_offsets_and_rejects_hash_changes(self):
+        from botw_native.nso import initialized_image
+        data = nso()
+        image = initialized_image(data, 'synthetic')
+        self.assertEqual(len(image), 0x500)
+        for fileoff, memoff, size in ((0x100, 0, 0x100), (0x200, 0x100, 0x200), (0x400, 0x400, 0x100)):
+            self.assertEqual(image[memoff:memoff + size], data[fileoff:fileoff + size])
+        self.assertEqual(image[0x300:0x400], bytes(0x100))
+        damaged = bytearray(data); damaged[0x140] ^= 1
+        with self.assertRaisesRegex(ValueError, 'SHA256'):
+            initialized_image(damaged, 'synthetic')
+
     def test_pfs0_offsets_include_embedded_header(self):
         self.need(read_pfs0)
         data = b'padding' + pfs0([('main', b'NSO0test'), ('sdk', b'data')])

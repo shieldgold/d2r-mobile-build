@@ -7,6 +7,8 @@
 #include "runtime.h"
 #include "services.h"
 #include "kernel.h"
+#include "hipc_address.h"
+#include "address_space.h"
 #include "../botw_input/input.h"
 #include "../botw_resources/romfs.h"
 #include <TargetConditionals.h>
@@ -37,6 +39,7 @@
 /* Headless tests have no Metal dependency. Production builds must link the
  * actual backend; an absent symbol is a link failure rather than a stub. */
 #if defined(BOTW_WITH_GRAPHICS)
+#include "../botw_graphics/shader_bundle.h"
 extern int botw_graphics_init(void *, void (*)(const char *), int (*)(const void *, size_t));
 extern void botw_graphics_shutdown(void);
 extern void *botw_nvn_bootstrap_loader(const char *);
@@ -81,6 +84,7 @@ static pthread_cond_t focus_changed = PTHREAD_COND_INITIALIZER;
 static int focus_suspended, focus_stopping;
 static void *configured_graphics_layer;
 static botw_input *configured_input;
+static unsigned configured_address_bits = 36;
 static int host_foreground = 1, host_focused = 1;
 static uint32_t run_sequence;
 /* Kernel condition waiters must register here before waiting. The current host
@@ -117,17 +121,22 @@ static struct {
     pthread_t owner;
     volatile sig_atomic_t active, fault_signal, guest_executing;
     volatile uintptr_t fault_pc;
+    volatile uintptr_t fault_address, fault_registers[29];
     stack_t previous_stack;
     void *signal_stack;
     unsigned signal_count;
     int alternate_stack_installed;
     int guest_started;
+    unsigned address_bits;
+    botw_address_space_policy allocator_policy[2];
+    const char *current_entry;
     struct sigaction previous[4];
 } state;
 typedef struct {
     sigjmp_buf recovery;
     volatile sig_atomic_t active, fault_signal;
     volatile uintptr_t fault_pc;
+    volatile uintptr_t fault_address, fault_registers[29];
     void *tls, *tlr, *signal_stack, *autorelease_pool;
     stack_t previous_stack;
     int alternate_stack_installed;
@@ -303,9 +312,7 @@ static uint64_t defined_value(Module *m, const Sym *s) {
     if (s->section == 0xfff1) return s->value; /* ELF SHN_ABS. */
     require_range(m, s->value, s->size, "defined symbol"); return (uint64_t)m->base + s->value;
 }
-static uint64_t find_symbol(const char *name) {
-    if (!strcmp(name, "nvnBootstrapLoader") && graphics_backend_loader)
-        return (uint64_t)graphics_backend_loader;
+static uint64_t find_raw_symbol(const char *name) {
     for (unsigned j = 0; j < MODULE_COUNT; j++) {
         Module *m = &state.modules[j];
         for (unsigned i = 1; i < m->sym_count; i++) {
@@ -314,6 +321,67 @@ static uint64_t find_symbol(const char *name) {
         }
     }
     return 0;
+}
+static int services_memory(void *opaque, uint64_t address, size_t length, int writable);
+static const char *const allocator_constructor = "_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm";
+static const char *const allocator_constructor_alias = "_ZN2nn2os6detail21AddressSpaceAllocatorC2Emmm";
+static const char *const allocator_allocate = "_ZN2nn2os6detail21AddressSpaceAllocator13AllocateSpaceEmm";
+static uint64_t original_sdk_symbol(const char *name, uint64_t offset, size_t bytes) {
+    Module *sdk = &state.modules[MODULE_COUNT - 1];
+    require_range(sdk, offset, bytes, "host39 SDK target");
+    uint64_t address = (uint64_t)sdk->base + offset;
+    if (strcmp(sdk->name, "sdk") || find_raw_symbol(name) != address)
+        fail("host39 SDK symbol does not match audited target: %s", name);
+    return address;
+}
+static uint64_t allocator_kernel_info(unsigned id) {
+    uint64_t regs[31] = {0, id, BOTW_KERNEL_CURRENT_PROCESS, 0}; char error[512];
+    if (!state.kernel || botw_kernel_dispatch(state.kernel, 0x29, regs, error, sizeof error) != BOTW_KERNEL_HANDLED || regs[0])
+        fail("host39 allocator cannot query actual kernel region: info=%u", id);
+    return regs[1];
+}
+static void host_allocator_constructor(void *object, uint64_t begin, uint64_t end, uint64_t guard) {
+    uint64_t singleton = original_sdk_symbol("_ZN2nn2os6detail26g_OsResourceManagerStorageE", 0x6cac28, 0x3a8);
+    uint64_t original = original_sdk_symbol(allocator_constructor, 0x8a308, 0x4c);
+    botw_address_space_region alias = {allocator_kernel_info(2), allocator_kernel_info(3)};
+    botw_address_space_region stack = {allocator_kernel_info(14), allocator_kernel_info(15)};
+    botw_address_space_policy policy; char error[512];
+    if (state.address_bits != 39) fail("host39 allocator requires the explicit 39-bit policy");
+    if (botw_address_space_adapt_constructor((uint64_t)object, singleton,
+            begin, end, guard, &alias, &stack, botw_kernel_address_space_limit(state.kernel),
+            (size_t)getpagesize(), &policy, error, sizeof error)) fail("host39 allocator constructor: %s", error);
+    if (!services_memory(NULL, (uint64_t)object, 0x28, 1)) fail("host39 allocator object is not writable guest memory");
+    ((void (*)(void *, uint64_t, uint64_t, uint64_t))original)(object, policy.begin, policy.end, policy.guard);
+    state.allocator_policy[policy.kind - 1] = policy;
+    report("guest_allocator_region=%s base=0x%llx bytes=%llu guard=%llu",
+        policy.kind == BOTW_ADDRESS_SPACE_ALIAS ? "alias" : "stack",
+        (unsigned long long)policy.region.base, (unsigned long long)policy.region.size, (unsigned long long)policy.guard);
+}
+static uint64_t host_allocator_allocate(void *object, uint64_t bytes, uint64_t alignment) {
+    const botw_address_space_policy *policy = NULL;
+    for (unsigned i = 0; i < 2; i++)
+        if (state.allocator_policy[i].kind && state.allocator_policy[i].object == (uint64_t)object) policy = &state.allocator_policy[i];
+    if (!policy || state.address_bits != 39) fail("host39 allocation from an unaudited allocator object");
+    uint64_t normalized; char error[512];
+    if (botw_address_space_normalize_alignment(alignment, policy->host_page, &normalized, error, sizeof error))
+        fail("host39 allocator alignment: %s", error);
+    uint64_t original = original_sdk_symbol(allocator_allocate, 0x8a3b4, 0xfc);
+    uint64_t address = ((uint64_t (*)(void *, uint64_t, uint64_t))original)(object, bytes, normalized);
+    if (address && botw_address_space_validate_allocation(policy, address, bytes, normalized, error, sizeof error))
+        fail("host39 allocator result: %s", error);
+    return address;
+}
+static uint64_t find_symbol(const char *name) {
+    if (!strcmp(name, "nvnBootstrapLoader") && graphics_backend_loader)
+        return (uint64_t)graphics_backend_loader;
+    if (state.address_bits == 39) {
+        if (!strcmp(name, allocator_constructor) || !strcmp(name, allocator_constructor_alias))
+            return (uint64_t)host_allocator_constructor;
+        if (!strcmp(name, allocator_allocate)) return (uint64_t)host_allocator_allocate;
+        uintptr_t bridge = botw_hipc_address_resolve(name);
+        if (bridge) return bridge;
+    }
+    return find_raw_symbol(name);
 }
 static uint64_t unsupported_stub(const char *name) {
     for (unsigned i = 0; i < state.stub_count; i++) if (!strcmp(state.stubs[i], name)) return (uint64_t)botw_unimplemented_stubs + i * 8;
@@ -427,13 +495,16 @@ static void configure_kernel_memory(void) {
 #endif
     /* Include already mapped modules while respecting the host's live limit.
      * Virtual capacities do not grant committed physical memory. */
-    size_t budget = 3072u * mib;
+    size_t budget = 4096u * mib;
     if (available < budget && image < budget - available) budget = available + image;
     if (budget < image) fail("host memory budget below loaded guest image");
     char error[512];
-    if (botw_kernel_configure_memory(state.kernel, 3072u * mib, 256u * mib,
+    if (botw_kernel_configure_address_space(state.kernel, state.address_bits, error, sizeof error))
+        fail("configure guest address policy: %s", error);
+    if (botw_kernel_configure_memory(state.kernel, 4096u * mib, 256u * mib,
             512u * mib, budget, image, error, sizeof error)) fail("configure guest memory: %s", error);
-    report("guest_memory_budget=%zu image_bytes=%zu host_available=%zu", budget, image, available);
+    report("guest_address_bits=%u guest_memory_budget=%zu image_bytes=%zu host_available=%zu",
+        state.address_bits, budget, image, available);
 }
 static void child_cleanup(void *opaque) {
     ChildContext *context = opaque;
@@ -442,6 +513,20 @@ static void child_cleanup(void *opaque) {
     if (context->previous_stack.ss_flags & SS_DISABLE) context->previous_stack.ss_size = MINSIGSTKSZ;
     if (!context->alternate_stack_installed || !sigaltstack(&context->previous_stack, NULL)) free(context->signal_stack);
     free(context->tls); free(context->tlr); context->active = 0; child_context = NULL; free(context);
+}
+static void describe_fault(char *output, size_t capacity, const char *scope, int number,
+                            uintptr_t pc, uintptr_t address, const volatile uintptr_t *regs) {
+    const char *module = "outside"; uint64_t offset = pc;
+    for (unsigned i = 0; i < MODULE_COUNT; i++) {
+        uintptr_t base = (uintptr_t)state.modules[i].base;
+        if (base && pc >= base && pc - base < state.modules[i].size) { module = state.modules[i].name; offset = pc - base; break; }
+    }
+    snprintf(output, capacity,
+        "guest %sCPU fault signal=%d pc=0x%llx module=%s offset=0x%llx address=0x%llx x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x8=0x%llx x19=0x%llx x20=0x%llx x28=0x%llx",
+        scope, number, (unsigned long long)pc, module, (unsigned long long)offset, (unsigned long long)address,
+        (unsigned long long)regs[0], (unsigned long long)regs[1], (unsigned long long)regs[2],
+        (unsigned long long)regs[3], (unsigned long long)regs[8], (unsigned long long)regs[19],
+        (unsigned long long)regs[20], (unsigned long long)regs[28]);
 }
 static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64_t stack_top,
                           uint32_t handle, char *error, size_t error_capacity) {
@@ -467,7 +552,8 @@ static int execute_child(void *opaque, uint64_t entry, uint64_t argument, uint64
         ((void (*)(uint64_t, uint64_t))entry)(argument, handle);
         snprintf(context->error, sizeof context->error, "guest thread returned without ExitThread handle=0x%x", handle);
     } else if (context->fault_signal) {
-        snprintf(context->error, sizeof context->error, "guest child CPU fault signal=%d pc=0x%llx", context->fault_signal, (unsigned long long)context->fault_pc);
+        describe_fault(context->error, sizeof context->error, "child ", context->fault_signal,
+            context->fault_pc, context->fault_address, context->fault_registers);
     }
     snprintf(error, error_capacity, "%s", context->error);
     pthread_cleanup_pop(1);
@@ -514,6 +600,14 @@ static void configure_resource_backends(const char *documents) {
     if (botw_romfs_pread(state.romfs, "/System/Version.txt", 0, version, sizeof version - 1, &actual, &fs_error))
         fail("read game resource version: %s", fs_error.message);
     report("romfs_available=true bytes=%llu version=%s", (unsigned long long)botw_romfs_image_size(state.romfs), version);
+    /* The fixed base-v0 profile's verified main.npdm ACI0 program id. Only the
+     * base RomFS is mounted: downloaded DLC packages are not installed content.
+     * NACP add-on base metadata has not been extracted, so it stays unknown. */
+    if (botw_services_set_addon_content(state.services, UINT64_C(0x01007ef00011e000), 0,
+            NULL, 0, error, sizeof error)) fail("configure installed add-on content: %s", error);
+    if (botw_services_set_parental_policy(state.services,
+            "local-offline-container:no-nintendo-account-policy", 0, 0, 0, error, sizeof error))
+        fail("configure local guest policy: %s", error);
 }
 int botw_host_set_graphics_layer(void *layer) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
@@ -522,6 +616,11 @@ int botw_host_set_graphics_layer(void *layer) {
 int botw_host_set_input(botw_input *input) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     configured_input = input; pthread_mutex_unlock(&run_lock); return 0;
+}
+int botw_host_set_address_space(unsigned bits) {
+    if (bits != 36 && bits != 39) return 1;
+    if (pthread_mutex_trylock(&run_lock)) return 2;
+    configured_address_bits = bits; pthread_mutex_unlock(&run_lock); return 0;
 }
 void botw_host_refresh_input(void) {
     pthread_mutex_lock(&lifecycle_lock);
@@ -587,11 +686,21 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
         if (g->kind) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); regs[g->arg] = (uint64_t)ts.tv_sec * 19200000ull + (uint64_t)ts.tv_nsec * 12 / 625; return; }
         if (state.kernel && g->arg != 0x06 && g->arg != 0x16 &&
             !(g->arg == 0x29 && regs[1] == 11)) {
+            uint64_t heap_request = g->arg == 1 ? regs[1] : 0;
             int main_priority = g->arg == 0x0c && ((uint32_t)regs[1] == 0x1001 ||
                 ((uint32_t)regs[1] == 0xffff8000 && pthread_equal(pthread_self(), state.owner)));
             char error[512]; int handled = botw_kernel_dispatch(state.kernel, (unsigned)g->arg, regs, error, sizeof error);
             if (handled == BOTW_KERNEL_ERROR) fail("kernel: %s", error);
             if (handled == BOTW_KERNEL_HANDLED) {
+                if (g->arg == 1) report("heap_request=%llu result=0x%llx heap_base=0x%llx",
+                    (unsigned long long)heap_request, (unsigned long long)regs[0], (unsigned long long)regs[1]);
+                /* The audited base-v0 startup ignores allocation errors before
+                 * consuming its output pointer. Stop this known initial-heap
+                 * failure here; ordinary guest resizing keeps Horizon results. */
+                if (g->arg == 1 && regs[0] && pthread_equal(pthread_self(), state.owner) &&
+                        state.current_entry && !strcmp(state.current_entry, "nninitStartup"))
+                    fail("initial game heap allocation failed: requested=%llu result=0x%llx",
+                        (unsigned long long)heap_request, (unsigned long long)regs[0]);
                 if (main_priority && !regs[0]) report("main_thread_priority=%llu", (unsigned long long)regs[1]);
                 return;
             }
@@ -619,7 +728,8 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
         }
         if (g->arg == 0x06) {
             if (!services_memory(NULL, regs[0], 40, 1)) fail("QueryMemory output is not guest writable memory");
-            uint64_t address = regs[2], lower = 0, upper = BOTW_ADDRESS_SPACE_SIZE;
+            uint64_t address = regs[2], lower = 0;
+            uint64_t upper = state.kernel ? botw_kernel_address_space_limit(state.kernel) : BOTW_ADDRESS_SPACE_SIZE;
             uint64_t top = (uint64_t)pthread_get_stackaddr_np(pthread_self());
             size_t stack_size = pthread_get_stacksize_np(pthread_self());
             struct { uint64_t base, size; uint32_t type, attr, permission, ipc, device, padding; } info = {0};
@@ -767,10 +877,14 @@ static uint64_t need_entry(const char *name) {
     require_executable(p, name); report("entry_resolved=%s", name); return p;
 }
 static void call_entry(const char *name, int two_args) {
-    uint64_t p = need_entry(name); report("entry_called=%s", name); state.guest_started = 1; state.guest_executing = 1;
+    uint64_t p = need_entry(name); report("entry_called=%s tls=0x%llx tlr=0x%llx", name,
+        (unsigned long long)pthread_getspecific(state.keys[1]), (unsigned long long)pthread_getspecific(state.keys[2]));
+    state.guest_started = 1; state.guest_executing = 1;
+    state.current_entry = name;
     if (two_args) ((void (*)(uint64_t, uint64_t))p)(0x1001, 0);
     else ((void (*)(void))p)();
     state.guest_executing = 0;
+    state.current_entry = NULL;
     report("entry_returned=%s guest_execution_tested=true", name);
 }
 static void signal_handler(int number, siginfo_t *info, void *context) {
@@ -785,10 +899,15 @@ static void signal_handler(int number, siginfo_t *info, void *context) {
     }
     if (current_is_owner && state.active && state.guest_executing && guest_pc) {
         state.fault_signal = number; state.fault_pc = pc;
+        state.fault_address = (uintptr_t)info->si_addr;
+        for (unsigned i = 0; i < 29; i++) state.fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
         state.guest_executing = 0; siglongjmp(state.recovery, 1);
     }
     if (child_context && child_context->active && guest_pc) {
-        child_context->fault_signal = number; child_context->fault_pc = pc; siglongjmp(child_context->recovery, 1);
+        child_context->fault_signal = number; child_context->fault_pc = pc;
+        child_context->fault_address = (uintptr_t)info->si_addr;
+        for (unsigned i = 0; i < 29; i++) child_context->fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
+        siglongjmp(child_context->recovery, 1);
     }
     /* Do not relabel bugs in the loader, host callbacks, or unrelated app threads
        as guest CPU faults. Preserve the process's previous signal disposition. */
@@ -850,12 +969,16 @@ static int cleanup(void) {
 int botw_host_run_mode(const char *root, const char *documents, botw_host_event event, enum botw_host_mode mode) {
     if (pthread_mutex_trylock(&run_lock)) return 2;
     memset(&state, 0, sizeof state); state.event = event; state.owner = pthread_self();
+    state.address_bits = configured_address_bits;
     pthread_mutex_lock(&focus_lock); focus_suspended = 0; focus_stopping = 0;
     pthread_mutex_unlock(&focus_lock);
     int result = 0;
     if (sigsetjmp(state.recovery, 1)) {
         result = 1;
-        if (state.fault_signal) report("error=guest CPU fault signal=%d pc=0x%llx", state.fault_signal, (unsigned long long)state.fault_pc);
+        if (state.fault_signal) {
+            char fault[512]; describe_fault(fault, sizeof fault, "", state.fault_signal,
+                state.fault_pc, state.fault_address, state.fault_registers); report("error=%s", fault);
+        }
         report("host_stage=stopped guest_execution_started=%s phone_ready=false nnMain_completed=false", state.guest_started ? "true" : "false");
     } else {
         install_signal_boundary(); state.active = 1;
@@ -872,7 +995,15 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
 #else
             map_module(m, root);
 #endif
-            parse_dynamic(m); register_gates(m, root); report("module_mapped=%s bytes=%zu symbols=%llu", m->name, m->size, (unsigned long long)m->sym_count);
+            parse_dynamic(m); register_gates(m, root); report("module_mapped=%s bytes=%zu symbols=%llu base=0x%llx", m->name, m->size, (unsigned long long)m->sym_count, (unsigned long long)m->base);
+        }
+        if (state.address_bits == 39) {
+            for (unsigned i = 0; i < MODULE_COUNT; i++) {
+                Module *m = &state.modules[i]; char error[512];
+                if (botw_hipc_address_audit_image(m->name, m->base, m->size, m->text_end,
+                        m->patch_off, error, sizeof error)) fail("host39 transport audit: %s", error);
+            }
+            report("host39_loaded_transport_audited=true inline_sites=36 host_helpers=5");
         }
         initialize_keys();
         host_pool_push = (void *(*)(void))dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush");
@@ -881,6 +1012,11 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             .executable = executable_address, .execute_thread = execute_child};
         state.kernel = botw_kernel_create(&kernel_callbacks, NULL);
         if (!state.kernel) fail("allocate Horizon kernel context");
+        /* Fixed base-v0 NPDM KAC KernelFlags 0x020073b7 allows priorities
+         * 28 through 59. Host QoS remains a separate measured host policy. */
+        char priority_error[512];
+        if (botw_kernel_configure_thread_priority_mask(state.kernel, UINT64_C(0x0ffffffff0000000),
+                priority_error, sizeof priority_error)) fail("configure guest priorities: %s", priority_error);
         configure_kernel_memory();
         pthread_mutex_lock(&lifecycle_lock);
         state.services = botw_services_create(services_log, services_memory, NULL);
@@ -905,6 +1041,17 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
             if (graphics_backend_init) {
                 if (!graphics_backend_init(configured_graphics_layer, graphics_error, graphics_memory)) fail("initialize Metal graphics backend");
                 state.graphics_started = 1;
+#if defined(BOTW_WITH_GRAPHICS)
+                char path[4096]; int length = snprintf(path, sizeof path, "%s/botw-shaders", documents);
+                if (length < 0 || (size_t)length >= sizeof path) fail("shader bundle path exceeds limit");
+                if (!access(path, F_OK)) {
+                    botw_graphics_shader_bundle_result shaders; char error[512];
+                    if (!botw_graphics_load_shader_bundle(path, &shaders, error, sizeof error)) fail("load private shader bundle: %s", error);
+                    report("shader_bundle_entries=%zu registered=%zu unsupported=%zu gameplay_verified=false",
+                        shaders.declared_entries, shaders.registered_entries, shaders.unsupported_entries);
+                } else if (errno == ENOENT) report("shader_bundle_available=false; unmatched shader identities will fail");
+                else fail("read private shader bundle: %s", strerror(errno));
+#endif
             }
             call_entry("_init_libc0", 0); call_entry("nnosInitialize", 1); call_entry("_init_libc1", 0);
             call_entry("nndiagStartup", 0); call_entry("nninitInitializeSdkModule", 0); call_entry("nninitStartup", 0); call_entry("_init_libc2", 0);

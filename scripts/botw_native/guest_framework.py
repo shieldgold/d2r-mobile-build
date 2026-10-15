@@ -18,7 +18,7 @@ import struct
 import sys
 import tempfile
 
-from .rewrite import UPSTREAM_COMMIT
+from .rewrite import UPSTREAM_COMMIT, verify_profile
 
 PAGE = 0x4000
 MODULE_NAMES = ('main', 'rtld', 'sdk', 'subsdk0', 'subsdk1', 'subsdk2', 'subsdk3')
@@ -27,6 +27,8 @@ KEYS = ('K18', 'KTLS', 'KTLR', 'KGATE', 'KRES0', 'KRES1', 'KASPECT', 'KASPECTUI'
 MAX_IMAGE_BYTES = 512 * 1024**2
 MAX_TOTAL_BYTES = 2 * 1024**3
 MAX_METADATA_BYTES = 16 * 1024**2
+HOST39_POLICY = {'schema': 1, 'profile': 'botw-switch-base-v0-host39', 'target_address_bits': 39,
+                 'game_playable': False}
 
 
 def _digest(data):
@@ -94,6 +96,23 @@ def _module_records(report):
         if rewrite.get('generic_tables') != {'cuts': 0, 'obs': 0, 'params': 0}:
             raise ValueError('Report includes non-generic rewrite tables: ' + name)
     return records
+
+
+def _address_policy(report, originals, rewrites):
+    policy = report.get('host_address_policy')
+    adapted = [name for name, item in rewrites.items() if 'host_address_adaptation' in item]
+    if policy is None:
+        if adapted:
+            raise ValueError('Address adaptation requires an explicit host address policy')
+        return 36
+    if policy != HOST39_POLICY or any(type(policy.get(key)) is not type(value)
+                                     for key, value in HOST39_POLICY.items()):
+        raise ValueError('Unsupported host address policy')
+    if set(adapted) != set(MODULE_NAMES):
+        raise ValueError('Host39 requires adaptation evidence for all seven modules')
+    profile_path = Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json'
+    verify_profile(list(originals.values()), json.loads(profile_path.read_text()))
+    return 39
 
 
 def _text(data, label):
@@ -282,6 +301,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
     report_bytes = _read_file(report_path, MAX_METADATA_BYTES)
     report = json.loads(_text(report_bytes, 'report'), object_pairs_hook=_unique_object)
     originals, rewrites = _module_records(report)
+    address_bits = _address_policy(report, originals, rewrites)
     names = list(MODULE_NAMES if module_names is None else module_names)
     if not names or len(set(names)) != len(names) or any(name not in MODULE_NAMES for name in names):
         raise ValueError('Select unique known BOTW module names')
@@ -298,6 +318,15 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         files.update({kind: _read_file(rewrite_dir / f'{name}.{kind}.tsv', MAX_METADATA_BYTES) for kind in TABLE_KINDS})
         layout = _layout(files['fixups'], originals[name], len(image))
         _audit_tables(files, image, layout, rewrites[name])
+        if address_bits == 39:
+            from .hipc_address import verify
+            adaptation = rewrites[name]['host_address_adaptation']
+            if not isinstance(adaptation, dict) or adaptation.get('module') != name:
+                raise ValueError('Host39 module adaptation identity mismatch: ' + name)
+            generic_digest = rewrites[name].get('generic_image_sha256')
+            if not isinstance(generic_digest, str) or not re.fullmatch('[0-9a-f]{64}', generic_digest):
+                raise ValueError('Host39 requires the original generic rewrite digest: ' + name)
+            verify(image, adaptation, expected_input_sha256=generic_digest)
         for kind, data in files.items():
             extension = kind if kind == 'patched.bin' else kind + '.tsv'
             sources.append({'path': f'rewrite/{name}.{extension}', 'bytes': len(data), 'sha256': _digest(data)})
@@ -310,6 +339,7 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
                           'CFBundleSupportedPlatforms': ['iPhoneOS']}, sort_keys=True)
     sources.sort(key=lambda entry: entry['path'])
     result = {'schema': 1, 'status': 'framework_packaged', 'unsigned': True, 'phone_ready': False,
+              'guest_address_bits': address_bits,
               'guest_execution_tested': False, 'graphics_implemented': False,
               'host_service_overrides_audited': False, 'semantic_equivalence_verified': False,
               'loader_contract': 'DM_SHELL/getsectiondata', 'upstream_commit': UPSTREAM_COMMIT,
