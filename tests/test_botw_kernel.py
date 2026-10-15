@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = r'''
+#define _DEFAULT_SOURCE 1
 #define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "kernel.h"
@@ -914,6 +915,18 @@ class KernelTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin', 'Apple QoS opt-out behavior')
     def test_host_qos_rejection_preserves_previously_accepted_guest_priority(self):
         self.check_case('priorityhostfailure')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Apple public Mach VM interface')
+    def test_apple_backend_does_not_require_iphone_unsupported_mach_vm_header(self):
+        with tempfile.TemporaryDirectory(prefix='botw-public-mach-') as temporary:
+            include = Path(temporary)
+            (include / 'mach').mkdir()
+            (include / 'mach/mach_vm.h').write_text('#error mach_vm.h unsupported on iPhoneOS\n')
+            compiled = subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall',
+                                       '-Wextra', '-Werror', '-fsyntax-only', '-pthread',
+                                       '-I', str(include), str(ROOT / 'native/botw_host/kernel.c')],
+                                      capture_output=True, text=True)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
 
 
 if __name__ == '__main__':

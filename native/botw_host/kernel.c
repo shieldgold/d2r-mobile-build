@@ -18,7 +18,8 @@
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+_Static_assert(sizeof(vm_address_t) == sizeof(uint64_t) && sizeof(vm_size_t) == sizeof(size_t),
+    "guest mappings require the 64-bit public Mach VM ABI");
 #endif
 
 #define MAX_HANDLES 2048
@@ -659,9 +660,9 @@ static int move_owned_pages(botw_kernel *k, uint64_t destination, uint64_t sourc
                             size_t size, char *error, size_t capacity) {
 #ifdef __APPLE__
     (void)k;
-    mach_vm_address_t target = destination; vm_prot_t current = 0, maximum = 0;
-    kern_return_t result = mach_vm_remap(mach_task_self(), &target, size, 0,
-        VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), source, FALSE,
+    vm_address_t target = (vm_address_t)destination; vm_prot_t current = 0, maximum = 0;
+    kern_return_t result = vm_remap(mach_task_self(), &target, (vm_size_t)size, 0,
+        VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), (vm_address_t)source, FALSE,
         &current, &maximum, VM_INHERIT_COPY);
     if (result != KERN_SUCCESS || target != destination ||
         (current & (VM_PROT_READ | VM_PROT_WRITE)) != (VM_PROT_READ | VM_PROT_WRITE))
