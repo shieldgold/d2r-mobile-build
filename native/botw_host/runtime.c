@@ -160,6 +160,18 @@ typedef struct {
     char error[512];
 } ChildContext;
 static _Thread_local ChildContext *child_context;
+/* A synchronous guest callback must return through its C caller before a
+ * graphics failure can unwind the outer run. These thread-local boundaries
+ * contain no Objective-C ownership and nest without replacing worker state. */
+typedef struct CallbackContext {
+    sigjmp_buf recovery;
+    volatile sig_atomic_t active, fault_signal;
+    volatile uintptr_t fault_pc, fault_address, fault_registers[29];
+    char error[1536];
+    struct CallbackContext *previous;
+    sig_atomic_t previous_guest_executing;
+} CallbackContext;
+static _Thread_local CallbackContext *callback_context;
 extern void botw_gate(void);
 extern unsigned char botw_unimplemented_stubs[];
 static const int caught_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
@@ -173,6 +185,10 @@ __attribute__((noreturn, format(printf, 1, 2)))
 static void fail(const char *format, ...) {
     char message[1536]; va_list ap; va_start(ap, format);
     vsnprintf(message, sizeof message, format, ap); va_end(ap);
+    if (callback_context && callback_context->active) {
+        snprintf(callback_context->error, sizeof callback_context->error, "%s", message);
+        siglongjmp(callback_context->recovery, 1);
+    }
     report("error=%s", message);
     if (child_context && child_context->active) {
         snprintf(child_context->error, sizeof child_context->error, "%s", message);
@@ -922,6 +938,8 @@ void botw_gate_dispatch(uint64_t ret, uint64_t *regs) {
     if (wait_for_focus()) fail("guest execution stopped at focus boundary");
     for (unsigned i = 0; i < state.gate_count; i++) {
         Gate *g = &state.gates[i]; if (g->ret != ret) continue;
+        if (callback_context && callback_context->active && !g->kind && g->arg == 0xa)
+            fail("SVC ExitThread cannot terminate a synchronous graphics callback caller");
         if (g->kind) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); regs[g->arg] = (uint64_t)ts.tv_sec * 19200000ull + (uint64_t)ts.tv_nsec * 12 / 625; return; }
         if (state.kernel && g->arg != 0x06 && g->arg != 0x16 &&
             !(g->arg == 0x29 && regs[1] == 11)) {
@@ -1094,6 +1112,42 @@ static void require_executable(uint64_t pointer, const char *entry) {
     }
     fail("guest entry %s does not point to signed code", entry);
 }
+#if defined(BOTW_WITH_GRAPHICS)
+static int graphics_invoke_memory_callback(PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC function,
+        NVNcommandBuffer *command, NVNcommandBufferMemoryEvent event, size_t minimum,
+        void *userdata, char *error, size_t capacity) {
+    int owner = pthread_equal(pthread_self(), state.owner);
+    if (!(owner && state.active && state.guest_executing) && !(child_context && child_context->active)) {
+        if (error && capacity) snprintf(error, capacity, "graphics callback requires an active guest thread");
+        return 0;
+    }
+    /* Heap storage avoids indeterminate automatic values after siglongjmp. */
+    CallbackContext *context = calloc(1, sizeof *context);
+    if (!context) {
+        if (error && capacity) snprintf(error, capacity, "allocate graphics callback recovery boundary");
+        return 0;
+    }
+    context->previous = callback_context;
+    if (owner) context->previous_guest_executing = state.guest_executing;
+    callback_context = context;
+    int accepted = 0;
+    if (!sigsetjmp(context->recovery, 1)) {
+        context->active = 1;
+        require_executable((uint64_t)(uintptr_t)function, "NVN command-memory callback");
+        function(command, event, minimum, userdata);
+        accepted = 1;
+    } else if (context->fault_signal) {
+        describe_fault(context->error, sizeof context->error, "graphics callback ",
+            context->fault_signal, context->fault_pc, context->fault_address, context->fault_registers);
+    }
+    context->active = 0;
+    callback_context = context->previous;
+    if (owner) state.guest_executing = context->previous_guest_executing;
+    if (error && capacity) snprintf(error, capacity, "%s", accepted ? "" : context->error);
+    free(context);
+    return accepted;
+}
+#endif
 static void run_module_constructors(void) {
     /* The fixed BOTW rtld builds its module list by inserting the ascending
        Horizon NSO sequence at the head (+0x51c..0x53c). InitModules (+0x748)
@@ -1130,11 +1184,21 @@ static void signal_handler(int number, siginfo_t *info, void *context) {
     (void)info;
     ucontext_t *uc = context;
     uintptr_t pc = (uintptr_t)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
-    int guest_pc = pc == 0; /* A guest indirect branch to NULL also needs recovery. */
+    /* A callback PC=0 cannot distinguish guest BLR NULL from a host helper's
+     * tail call to NULL, even with a guest LR. Preserve the prior disposition
+     * for that ambiguous fault; do not fall into the outer run's recovery.
+     * The established primary-entry corrupt-stack boundary stays unchanged. */
+    int guest_pc = pc == 0 && !(callback_context && callback_context->active);
     int current_is_owner = pthread_equal(pthread_self(), state.owner);
     for (unsigned i = 0; (current_is_owner || child_context) && i < MODULE_COUNT; i++) {
         uintptr_t base = (uintptr_t)state.modules[i].base;
         if (base && pc >= base && pc - base < state.modules[i].size) guest_pc = 1;
+    }
+    if (callback_context && callback_context->active && guest_pc) {
+        callback_context->fault_signal = number; callback_context->fault_pc = pc;
+        callback_context->fault_address = (uintptr_t)info->si_addr;
+        for (unsigned i = 0; i < 29; i++) callback_context->fault_registers[i] = uc->uc_mcontext->__ss.__x[i];
+        siglongjmp(callback_context->recovery, 1);
     }
     if (current_is_owner && state.active && state.guest_executing && guest_pc) {
         state.fault_signal = number; state.fault_pc = pc;
@@ -1301,6 +1365,7 @@ int botw_host_run_mode(const char *root, const char *documents, botw_host_event 
                 state.graphics_started = 1;
 #if defined(BOTW_WITH_GRAPHICS)
                 botw_graphics_set_memory_access_validator(graphics_memory_access);
+                botw_graphics_set_command_memory_invoker(graphics_invoke_memory_callback);
                 /* Preserve the first actual presented draw for device review.
                  * The frontend disables capture after saving that frame. */
                 botw_graphics_set_capture_enabled(1);

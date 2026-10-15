@@ -56,6 +56,7 @@ void botw_graphics_shutdown(void) {
 #if defined(BOTW_WITH_GRAPHICS)
 const char *botw_graphics_last_error(void) { return fake_backend_error; }
 void botw_graphics_set_memory_access_validator(int (*access)(const void *, size_t, int)) { registered_access = access; }
+void botw_graphics_set_command_memory_invoker(botw_graphics_command_memory_invoker invoke) { (void)invoke; }
 int botw_graphics_platform_initialize(void) { if (fake_vi_ready) return 0; fake_vi_ready = 1; return 1; }
 int botw_graphics_platform_open_default_display(uintptr_t *out) {
     if (!fake_vi_ready || fake_display_live) return 0; *out = fake_display; fake_display_live = 1; return 1;
