@@ -27,7 +27,7 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据安装、普通启动 `7017c59`。原 SDK 取得原始逻辑堆和根堆，进入十三个工作线程；日志显示改为有界批次更新后，此次已受控停在 `nvnMemoryPoolInitialize` 的 physical pool，返回宿主且同一应用进程仍存活。此前 `aa0210a` 的单进程内存终止在本次观察区间没有重现，尚未测得整次运行峰值。完整资源与原身份保留；尚无游戏画面、操作或游戏存档验收。下列记录保留历次真机证据，不能用旧机或 Mac 结果替代当前手机验证。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据安装、普通启动 `e47312f`。原 SDK 取得原始逻辑堆和根堆，进入十三个工作线程，随后受控停在 `nvnMemoryPoolInitialize` 的 NoCopy backing 准入；具体拒绝分支仍需手机诊断版确认。完整日志有 `host_return=1`，同一 PID 在启动约 135 秒后的系统进程查询中仍存活；这只是本次观察区间，尚未测得整次运行峰值。完整资源与原身份保留；尚无游戏画面、操作、音频、游戏存档或重开验收。下列记录保留历次真机证据，不能用旧机或 Mac 结果替代当前手机验证。
 
 较早完成的真机测试为 iPhone 15 Pro / iOS 27.2，宿主源码提交 `3d1622c`：
 
@@ -96,6 +96,12 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 该版已在当前 iPhone 12 成功安装并普通启动，原堆、根堆与十三个工作线程均验证通过。此次继续读取相同最大 143,743,378 字节的 RomFS 请求，旧空指针未重现，随后受控停在 **`nvnMemoryPoolInitialize flags=0x189`、125,829,120 字节、非空 backing**；手机实际 `max_buffer_bytes=2,147,483,648`，不是大小超限。完整日志有 `host_return=1`，系统进程列表仍有同 PID。本次观察区间没有重现此前的 jetsam，不能据此宣称整次峰值已测量、唯一根因已证明或更远阶段内存安全。启动、数据保留、固定来源和延迟进程收据位于本地 `outputs/botw-ios-7017c59-iphone12/`；下一步继续完整 physical/virtual pool 与 GPU 消费、别名和释放合同。
 
 本次更新继续保留完整 14,420,017,152 字节 RomFS，取回的原 UID 逐字节一致，目录与 UID 权限分别为 `0700`、`0600`。37 份着色器已装载，手机 manifest 摘要与本地 direct-v2 一致。实际游戏画面、操作、音频、游戏保存与重开仍未通过。后续按完整模块审计和复用推进，具体范围见[上游复用矩阵](BOTW_UPSTREAM_REUSE.zh-CN.md)。
+
+`e47312f` 接入完整上游 vpool interval/lease 的薄适配、coherent physical/virtual pool、当前映射下的 GPU 消费、代码与 descriptor 写入冲突预检，以及全部借用资源实际析构后才允许释放 backing 的 checked shutdown。固定源码完成 **782 项回归，781 通过、1 项硬件条件跳过**；[iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38821411620) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38821411667) 均成功。跨物理映射碎片的 GPU 消费、未知 raw kind、私有纹理权威写回仍未开放；旧 copied-private texture 导入的缓存限制另见 `native/botw_graphics/MEMORY_POOLS.md`，不能将 coherent 路径的合成 GPU 结果推广到该分支。
+
+该版已在当前手机保留数据更新并普通启动，实际 PID **1018**，相对安装前完整 boot.log 恰好新增一次 bootstrap。SDK 堆 **3,261,071,360** 字节、根堆 **3,227,516,928** 字节，进入十三个工作线程并继续读取最大 **143,743,378** 字节的 RomFS 请求，随后在 NoCopy backing 校验受控返回。手机此次通用错误不能独立证明 pool kind 或具体 VM 分支；完整动态报告在 `outputs/botw-ios-e47312f-iphone12/`。RomFS 大小及修改时间、UID 字节与权限、shader manifest 均保留。旧 screenshotr 服务不可用，未取得可作为验收的屏幕截图；日志也没有原游戏绘制呈现证据，全部可玩验收保持 false。
+
+仅增加有限标量诊断的 `6b085f0` 已在普通 Mac 运行：实际 `flags=0x189`、120 MiB physical pool 的 rounded NoCopy 跨度为 **125,845,504** 字节，logical/read-write 校验允许，但首个 RW VM leaf 只剩 **60,850,176** 字节，明确在 `vm_span` 拒绝。它不是手机诊断结果，也未证明后续 leaf 的覆盖或权限。Apple 的 [NoCopy 合同](https://developer.apple.com/documentation/metal/mtldevice/makebuffer%28bytesnocopy%3Alength%3Aoptions%3Adeallocator%3A%29?language=objc) 要求已有分配位于单个 VM region，因此没有启用“只检查多段 RW 就直接包装为单一 Metal buffer”的方案。底层分配与符合该合同的分段 backing 仍在评估，未宣称已修复此停止点。
 
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
