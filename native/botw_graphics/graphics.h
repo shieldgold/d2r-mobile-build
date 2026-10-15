@@ -1,0 +1,35 @@
+/* Native NVN -> Metal bridge. No game assets, bytecode, or shader output. */
+#ifndef BOTW_GRAPHICS_H
+#define BOTW_GRAPHICS_H
+#include <stddef.h>
+#include <stdint.h>
+#include "nvn.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* Configure before guest entry, on a single owning guest graphics thread.
+ * layer is a CAMetalLayer (NULL permits offscreen tests). The bridge retains it.
+ * validator must confirm every control-section span before it can be hashed.
+ * error is diagnostic only: unsupported void-returning NVN calls then abort;
+ * boolean-returning operations fail with 0. Never reports a no-op as success. */
+typedef void (*botw_graphics_error)(const char *message);
+typedef int (*botw_graphics_memory_range)(const void *address, size_t bytes);
+int botw_graphics_init(void *layer, botw_graphics_error error,
+                       botw_graphics_memory_range validator);
+void botw_graphics_shutdown(void);
+void *botw_nvn_bootstrap_loader(const char *name);
+const char *botw_graphics_last_error(void);
+/* Register locally translated, independently validated MSL for an exact input.
+ * NVN data includes its 0x30-byte prefix. No guessed/dummy shader fallback.
+ * Returns 0 on invalid identity, stage, Metal compiler failure, or entry point.
+ * Binding/vertex-layout validation remains the offline translator's job. */
+int botw_graphics_register_shader(const void *control, size_t control_bytes,
+                                  const void *code, size_t code_bytes,
+                                  NVNshaderStage stage, const char *msl,
+                                  const char *entry);
+/* Wait for GPU completion and read a supported linear 2D color texture. */
+int botw_graphics_read_texture(const NVNtexture *texture, void *pixels, size_t bytes);
+#ifdef __cplusplus
+}
+#endif
+#endif

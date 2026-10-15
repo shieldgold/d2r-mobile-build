@@ -1,0 +1,49 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 434c53e..c3cef9a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8 +8,3 @@ members = [
+-]
+\ No newline at end of file
++]
++[patch.crates-io]
++spirv_cross = { path = "../spirv-cross-rust-0.23.1" }
+diff --git a/bridge/build.rs b/bridge/build.rs
+index 5d5e83e..8c65140 100644
+--- a/bridge/build.rs
++++ b/bridge/build.rs
+@@ -34 +34 @@ fn main() {
+-        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
++        ; // this is needed to make MinGW build succeed
+diff --git a/cli/Cargo.toml b/cli/Cargo.toml
+index 398b489..20f801f 100644
+--- a/cli/Cargo.toml
++++ b/cli/Cargo.toml
+@@ -10 +10 @@ shader-compiler-bridge = { path = "../bridge" }
+-spirv_cross = { version = "0.23.1", features = ["glsl"] }
++spirv_cross = { version = "0.23.1", features = ["glsl", "msl"] }
+diff --git a/cli/src/main.rs b/cli/src/main.rs
+index fa0b749..5a652ef 100644
+--- a/cli/src/main.rs
++++ b/cli/src/main.rs
+@@ -76 +76,9 @@ fn main() {
+-    std::fs::write(args.output, glsl).unwrap();
++    std::fs::write(&args.output, glsl).unwrap();
++    std::fs::write(args.output.with_extension("spv"), spirv.as_byte_slice()).unwrap();
++    let mut metal = spirv_cross::spirv::Ast::<spirv_cross::msl::Target>::parse(&module).unwrap();
++    let mut msl_options = spirv_cross::msl::CompilerOptions::default();
++    msl_options.platform = spirv_cross::msl::Platform::iOS;
++    msl_options.version = spirv_cross::msl::Version::V2_3;
++    metal.set_compiler_options(&msl_options).unwrap();
++    let msl = metal.compile().unwrap();
++    std::fs::write(args.output.with_extension("metal"), msl).unwrap();
+diff --git a/sys/build.rs b/sys/build.rs
+index 1f57add..3671361 100644
+--- a/sys/build.rs
++++ b/sys/build.rs
+@@ -45 +45 @@ fn build_sirit() {
+-        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
++        ; // this is needed to make MinGW build succeed
+@@ -75 +75 @@ fn build_shader_compiler() {
+-        .flag("-mno-ms-bitfields"); // this is needed to make MinGW build succeed
++        ; // this is needed to make MinGW build succeed

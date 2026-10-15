@@ -1,0 +1,10 @@
+--- a/src/wrapper.cpp
++++ b/src/wrapper.cpp
+@@ -153,6 +153,7 @@
+                 auto msl_options = compiler_msl->get_msl_options();
+                 msl_options.platform = static_cast<spirv_cross::CompilerMSL::Options::Platform>(options->platform);
+                 msl_options.msl_version = options->version;
++                msl_options.ios_support_base_vertex_instance = true; // Target: Apple A9+ (BOTW host requires A17).
+                 msl_options.swizzle_buffer_index = options->swizzle_buffer_index;
+                 msl_options.indirect_params_buffer_index = options->indirect_params_buffer_index;
+                 msl_options.shader_output_buffer_index = options->shader_output_buffer_index;

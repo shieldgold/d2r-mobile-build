@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "shader_compiler_repository": "https://github.com/DCNick3/shader-compiler-rs",
+  "shader_compiler_commit": "f9f0fbc998279a663d0bc98937a0bde880efc8db",
+  "spirv_cross_crate_version": "0.23.1",
+  "spirv_cross_crate_sha256": "60647fadbf83c4a72f0d7ea67a7ca3a81835cf442b8deae5c134c3e0055b2e14",
+  "target_msl": "iOS 2.3, Apple A9+ base vertex/instance",
+  "local_tool_only": true,
+  "shader_resource_environment_validated": false,
+  "cargo_lock_sha256": "276ab87f53810d75452adfc76a75fa0a2335376a520ded5b0f2c600d643cd6d1"
+}
