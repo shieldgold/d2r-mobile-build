@@ -345,6 +345,26 @@ class ServicesTests(unittest.TestCase):
         _, error = self.send(creator, self.request(0, struct.pack('<II', 0x11, 0)), good=False)
         self.assertIn('applet_id=0x11', error)
 
+    def test_applet_audio_volume_state_is_readable_by_guest_and_host_mixer(self):
+        self.applet_kernel()
+        self.applet_state()
+        audio = self.proxy_child(self.applet_proxy(), 3)
+        for command in (1, 2):
+            raw, _ = self.send(audio, self.request(command))
+            data, _, _ = self.response(raw)
+            self.assertEqual(struct.unpack_from('<f', data)[0], 1.0)
+        self.send(audio, self.request(0, struct.pack('<ff', 0.25, 0.5)))
+        self.send(audio, self.request(4, struct.pack('<f', 0.75)))
+        self.send(audio, self.request(0, struct.pack('<ff', float('nan'), 0.5)), good=False)
+        self.send(audio, self.request(4, struct.pack('<f', 2.0)), good=False)
+        raw, _ = self.send(audio, self.request(1))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<f', data)[0], 0.25)
+        self.lib.botw_services_get_audio_gain.argtypes = [C.c_void_p, C.POINTER(C.c_float), C.POINTER(C.c_float), C.POINTER(C.c_float)]
+        main, library, transparent = C.c_float(), C.c_float(), C.c_float()
+        self.lib.botw_services_get_audio_gain(self.ctx, C.byref(main), C.byref(library), C.byref(transparent))
+        self.assertEqual((main.value, library.value, transparent.value), (0.25, 0.5, 0.75))
+
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
         self.send(sm, self.request(1, b'lm\0\0\0\0\0\0'), good=False)

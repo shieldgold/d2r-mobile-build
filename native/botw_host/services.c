@@ -9,6 +9,7 @@
  * https://switchbrew.org/wiki/Log_services
  */
 #include "services.h"
+#include <math.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -27,7 +28,7 @@
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
     OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
-    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR };
+    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -62,6 +63,7 @@ struct botw_services {
     botw_romfs *romfs;
     uint32_t input_shared_memory_handle;
     size_t storage_bytes;
+    float audio_main_gain, audio_library_gain, audio_transparent_rate;
     unsigned applet_ready, applet_foreground, applet_focus, applet_operation;
     unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance;
     uint64_t applet_resource_user_id;
@@ -114,6 +116,7 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_LIBRARY_APPLET_CREATOR: return "am.ILibraryAppletCreator";
         case OBJECT_APPLET_STORAGE: return "am.IStorage";
         case OBJECT_STORAGE_ACCESSOR: return "am.IStorageAccessor";
+        case OBJECT_AUDIO_CONTROLLER: return "am.IAudioController";
     }
     return "<invalid>";
 }
@@ -165,7 +168,7 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     if (!memory) return NULL;
     botw_services *s = calloc(1, sizeof *s);
     if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
-    if (s) { s->next_handle = 0x10000; s->log_destination = 0xffff; s->log = log; s->memory = memory; s->opaque = opaque; }
+    if (s) { s->next_handle = 0x10000; s->log_destination = 0xffff; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
@@ -184,6 +187,14 @@ void botw_services_set_input(botw_services *s, botw_input *input, uint32_t share
 void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
     if (!s) return;
     pthread_mutex_lock(&s->lock); s->romfs = romfs; pthread_mutex_unlock(&s->lock);
+}
+void botw_services_get_audio_gain(botw_services *s, float *main_applet, float *library_applet, float *transparent_rate) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock);
+    if (main_applet) *main_applet = s->audio_main_gain;
+    if (library_applet) *library_applet = s->audio_library_gain;
+    if (transparent_rate) *transparent_rate = s->audio_transparent_rate;
+    pthread_mutex_unlock(&s->lock);
 }
 static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
     if (!user_id || (foreground != 0 && foreground != 1) || (focused != 0 && focused != 1) || (!foreground && focused) || operation > 1)
@@ -436,11 +447,29 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             case 2: child = OBJECT_WINDOW_CONTROLLER; break;
             case 20: child = OBJECT_APPLICATION_FUNCTIONS; break;
             case 11: child = OBJECT_LIBRARY_APPLET_CREATOR; break;
+            case 3: child = OBJECT_AUDIO_CONTROLLER; break;
             default: return problem(error, cap, "unsupported ApplicationProxy interface command=%u", r->command);
         }
         Object *object = new_object(child);
         if (!object) return problem(error, cap, "allocate %s failed", kind_name(child));
         return return_object(s, session, object, ipc, capacity, r, 0, error, cap);
+    }
+    if (o->kind == OBJECT_AUDIO_CONTROLLER) {
+        if (r->command == 1 || r->command == 2) {
+            float gain = r->command == 1 ? s->audio_main_gain : s->audio_library_gain;
+            response(ipc, capacity, r, &gain, 4, 0, 0); return 0;
+        }
+        if (r->command == 0 || r->command == 4) {
+            float values[2] = {0}; size_t size = r->command == 0 ? 8 : 4;
+            if (r->payload_size < size) return problem(error, cap, "IAudioController command=%u truncated gain input", r->command);
+            memcpy(values, r->payload, size);
+            if (!isfinite(values[0]) || values[0] < 0 || values[0] > 1 || (r->command == 0 && (!isfinite(values[1]) || values[1] < 0 || values[1] > 1)))
+                return problem(error, cap, "IAudioController gains must be finite within [0,1]");
+            if (r->command == 0) { s->audio_main_gain = values[0]; s->audio_library_gain = values[1]; }
+            else s->audio_transparent_rate = values[0];
+            emit(s, "applet_audio main_gain=%g library_gain=%g transparent_rate=%g", (double)s->audio_main_gain, (double)s->audio_library_gain, (double)s->audio_transparent_rate);
+            response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
     }
     if (o->kind == OBJECT_LIBRARY_APPLET_CREATOR) {
         if (r->command == 10) {
@@ -572,7 +601,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
-    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_STORAGE_ACCESSOR) {
+    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_AUDIO_CONTROLLER) {
         return applet_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_APM) {
         if (r.input_count || r.pid) return problem(error, cap, "apm manager command=%u unexpected buffers/PID", r.command);

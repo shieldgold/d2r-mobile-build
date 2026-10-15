@@ -40,6 +40,10 @@ typedef struct botw_romfs botw_romfs;
  * shared-memory handle; root retains the original handle until services stop. */
 void botw_services_set_input(botw_services *services, botw_input *input, uint32_t shared_memory_handle);
 void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
+/* Host audio mixer reads the same gain policy queried/set by IAudioController.
+ * Values are finite [0,1], initialized to unity. Each output is optional. */
+void botw_services_get_audio_gain(botw_services *services, float *main_applet,
+    float *library_applet, float *transparent_rate);
 /* Supply measured host state. Focus/foreground are booleans; operation_mode is
  * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
 int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,
