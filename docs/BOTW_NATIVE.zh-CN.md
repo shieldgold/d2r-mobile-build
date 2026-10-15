@@ -27,7 +27,7 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已安装、启动 `365f459`；完整资源与原身份保留，进入 `nnMain` 并成功启动三个游戏工作线程，已通过 HID 调试手柄初始化、Npad 标识列表及类型设置。当前停止在尚未接通的 `nvnCommandBufferReportCounter`，尚无游戏画面、操作或游戏存档验收。下列记录保留历次真机证据，不能用旧机结果替代当前手机验证。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已安装、启动 `957e4d2`；完整资源与原身份保留，进入 `nnMain` 并成功启动三个游戏工作线程。真机已越过 `nvnCommandBufferReportCounter` 的录制停止点，本次停止在 HID 体感命令 66 的报文验证，尚无游戏画面、操作或游戏存档验收。下列记录保留历次真机证据，不能用旧机或 Mac 结果替代当前手机验证。
 
 较早完成的真机测试为 iPhone 15 Pro / iOS 27.2，宿主源码提交 `3d1622c`：
 
@@ -62,6 +62,10 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 `6bd434a` 接入真实 DebugPad 未连接样本环与 Mac 显示节奏采样，固定快照 513 项回归通过，最初跳过的两项私有资源测试另在同一快照通过。[iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38788565257) 和 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38788565291) 均成功；新手机完成保留数据更新与启动。真机及普通 Mac 执行均越过命令 1，之后出现 Npad 命令 103，再由 Prepare Thread 终止。独立 Mac 调试捕获证明 `InitializeNpad` 已返回，首个失败来自 `SetSupportedNpadIdType` 构造命令 102：服务报告的 pointer buffer 容量为零，原 SDK 为 36 字节输入预留对齐后的 48 字节时返回 `0x11a0b`，未发送请求。真实调用帧的原始 Result 与该原字节路径一致；终端日志的 `0x2a2` 可能来自后续回溯中的第二次断言，不能当作 HID 服务结果。容量合同正在补齐。真机证据保留在 `outputs/botw-ios-6bd434a-iphone12/`，调试探针独立保留且不作为普通运行验收。
 
 `a252164` 补齐每个传输句柄独立的真实 `0x500` pointer arena、原 SDK 已证的 X/C 报文与账户输出合同；`c2aa57a` 将生产 IPC 复制接入公开 Mach VM 读写，并在业务副作用前完成整个输出范围的准备与真实可写性检查。`365f459` 修复旧资源测试夹具，使其使用真实内核堆和正确报文；固定快照 533 项回归通过，其中最初跳过的两项私有资源测试另在同一快照通过。该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38793963760) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38793963749) 均成功，新机完成保留数据更新与启动。真机日志已观察到 HID 命令 102、100 及第三个游戏线程，越过旧的 `0x11a0b` 请求构造失败，随后停止在 `nvnCommandBufferReportCounter`。实际 SDK 堆 **1,904,214,016** 字节、根堆 **1,870,659,584** 字节；三个工作线程真实栈为 16KB、64KB、16KB，各保留完整 16KB SDK 尾页。证据位于 `outputs/botw-ios-365f459-iphone12/`。普通 Mac 原程序也到达同一停止点，实际执行二进制为 `c2aa57a`；它与 `365f459` 的整个 native 源码树相同，来源等同性单独记录，不能冒称运行过另一个二进制。
+
+`9ffc84b` 接入真实 GPU 时间戳查询、计数录制和提交完成后的报告发布；录制时不提前写结果，提交时先检查整个批次的目标范围，再按实际 GPU 边界采样、校准并发布完整报告。`957e4d2` 保留 v2 栈合同，仅将已核验的 Volante 子堆从 16KB 扩至 64KB，保留原分配器和父堆；Python 打包器与 C 加载器共同审计三个固定站点。普通 Mac 原游戏已越过原栈分配失败，启动第四线程、读取语言资源，随后停止在应用语言查询命令 21。该结果不能代替手机证据。
+
+固定 `957e4d2` 快照的 557 项测试中，554 项通过、3 项条件跳过；其中两项私有资源检查已在同一快照补跑通过，另一项物理缺采样能力测试不适用于本机 M3。该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38799268201) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38799268204) 均成功。iPhone 12 已完成保留数据更新、普通启动并实际审计 v3 映像；SDK 堆 **1,906,311,168** 字节、根堆 **1,872,756,736** 字节。A14 真机报告 timestamp counter 和 stage boundary sampling 可用，已越过旧的 ReportCounter 录制停止点，但尚未观察到原游戏 GPU 报告实际发布。此次三个工作线程后先停在 `hid` 命令 66：当前通用处理器未按此命令的结构读取 ARUID。完整日志、资源与身份保留核验在 `outputs/botw-ios-957e4d2-iphone12/`；第四线程、应用语言及后续路径仍需各自在真机验证。
 
 本次更新继续保留完整 14,420,017,152 字节 RomFS，取回的原 UID 逐字节一致，目录与 UID 权限分别为 `0700`、`0600`。37 份着色器已装载，手机 manifest 摘要与本地 direct-v2 一致。实际游戏画面、操作、音频、游戏保存与重开仍未通过。后续按完整模块审计和复用推进，具体范围见[上游复用矩阵](BOTW_UPSTREAM_REUSE.zh-CN.md)。
 
