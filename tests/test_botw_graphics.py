@@ -32,6 +32,19 @@ def synthetic_bnsh():
     return bytes(data)
 
 
+def synthetic_storage_index_shader():
+    control, code = bytearray(0x708), bytearray(0x180)
+    struct.pack_into('<II', control, 0x700, 0x80, 0x180)
+    source = ('struct C{uint data[16384];};struct S{uint _m0[1];};struct V{uint4 _m0[1];}; '
+              'vertex float4 main0(uint gl_InstanceIndex [[instance_id]],uint gl_BaseInstance [[base_instance]],'
+              'constant C& c0 [[buffer(0)]],device S& ssbo0 [[buffer(4)]],device V& ssbo0_1 [[buffer(6)]]) {'
+              'uint _10=gl_InstanceIndex-gl_BaseInstance;uint _11=_10*64u;'
+              'uint _12=uint(max(int((_11+c0.data[68u])-(c0.data[68u]&4294967295u)),int(0u)))>>2u;'
+              'return float4(ssbo0._m0[_12]+ssbo0_1._m0[uint(max(int(((_11+48u)+c0.data[68u])-(c0.data[68u]&4294967295u)),int(0u)))>>4u].x);}')
+    return source, control, code, {'storage': [{'slot': 0, 'name': 'characters'}]}, [
+        {'descriptor_index': 0, 'cbuf_index': 0, 'cbuf_offset': 0x110, 'count': 1, 'is_written': False}]
+
+
 class BnshTests(unittest.TestCase):
     def parser(self):
         spec = importlib.util.find_spec('scripts.botw_native.shaders')
@@ -125,6 +138,18 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_storage_index_probe_closes_instance_dependencies_after_address_proof(self):
+        module = BnshTests().parser()
+        source, control, code, reflection, descriptors = synthetic_storage_index_shader()
+        probe = module.build_storage_index_probe(source, control, code, 'vertex', reflection, descriptors, 4)
+        self.assertEqual(probe['relative_instance_count'], 4)
+        self.assertEqual([x['stride'] for x in probe['accesses']], [4, 16])
+        self.assertTrue(probe['guest_base_cancellation_proven'])
+        self.assertNotIn('c0.data', probe['msl'])
+        self.assertNotIn('gl_InstanceIndex', probe['msl'])
+        with self.assertRaisesRegex(ValueError, 'external'):
+            module.build_storage_index_probe(source.replace('gl_InstanceIndex-gl_BaseInstance', 'in.in_attr0.x'),
+                                            control, code, 'vertex', reflection, descriptors, 4)
     def test_storage_address_cancellation_requires_exact_unsigned_identity(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'cancel_u32_storage_bases'), 'Storage address cancellation proof is missing')
@@ -132,6 +157,9 @@ class ShaderBundleTests(unittest.TestCase):
         reduced = module.cancel_u32_storage_bases(expression, {'base'}, {'_20'})
         self.assertNotIn('base', reduced)
         self.assertIn('_20+16u', reduced)
+        carried = module.cancel_u32_storage_bases(expression.replace('((_20+16u)+base)', '(((_20+16u)+base)+12u)'), {'base'}, {'_20'})
+        self.assertNotIn('base', carried)
+        self.assertIn('12u', carried)
         with self.assertRaisesRegex(ValueError, 'unsigned'):
             module.cancel_u32_storage_bases(expression, {'base'}, set())
         mismatched = module.cancel_u32_storage_bases(expression.replace('base &', 'other &'), {'base'}, {'_20'})
@@ -276,6 +304,12 @@ class MetalBridgeTests(unittest.TestCase):
                 self.skipTest('No Metal device')
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['indices'], [[0, 1], [4, 2], [8, 3], [12, 4]])
+            source, control, code, reflection, descriptors = synthetic_storage_index_shader()
+            storage = module.build_storage_index_probe(source, control, code, 'vertex', reflection, descriptors, 4)
+            msl.write_text(storage['msl'])
+            result = subprocess.run([str(exe), str(msl), '4', str(len(storage['expressions']))], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['indices'], [[0, 3], [16, 7], [32, 11], [48, 15]])
 
     def test_storage_buffer_and_instanced_draw_use_real_bindings_and_ids(self):
         implemented = (ROOT / 'native/botw_graphics/implemented.inc').read_text()

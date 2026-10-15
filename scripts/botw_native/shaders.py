@@ -368,6 +368,14 @@ def cancel_u32_storage_bases(value, bases, unsigned_variables):
             base = outer(subtract[1]);add = split(outer(subtract[0]), '+')
             if add:
                 term = add[0] if outer(add[1]) == base else add[1] if outer(add[0]) == base else None
+                if term is None:
+                    def addends(item):
+                        pair = split(outer(item), '+')
+                        return addends(pair[0]) + addends(pair[1]) if pair else [outer(item)]
+                    terms = addends(subtract[0])
+                    if terms.count(base) == 1:
+                        terms.remove(base)
+                        term = '+'.join('(' + item + ')' for item in terms)
                 if term is not None:
                     if not unsigned(term):
                         raise ValueError('Storage address cancellation requires an unsigned term')
@@ -383,6 +391,10 @@ def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
     and fixed original c1 words are accepted. This does not authorize a shader
     or prove its storage accesses; the runtime must enforce the input profile.
     """
+    return _build_closed_index_probe(msl, control, code, relative_vertex_count, None, 'vertex')
+
+
+def _build_closed_index_probe(msl, control, code, relative_vertex_count, target_expressions, relative_input):
     if type(relative_vertex_count) is not int or not 1 <= relative_vertex_count <= 64:
         raise ValueError('Invalid finite vertex input range')
     if len(control) < 0x708:
@@ -397,11 +409,11 @@ def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
             raise ValueError('Unknown c1 probe layout')
         kinds[variable] = layout[1]
     expressions = list(dict.fromkeys(index for variable, index in re.findall(r'\b(c1(?:_\d+)?)\.data\[([^\]]+)\]', msl)
-                                     if variable in kinds and not re.fullmatch(r'\d+u?', index)))
+                                     if variable in kinds and not re.fullmatch(r'\d+u?', index))) if target_expressions is None else list(dict.fromkeys(target_expressions))
     if not expressions or len(expressions) > 64:
         raise ValueError('No bounded dynamic c1 expression set')
     completed, visiting, statements = set(), set(), []
-    allowed = {'uint', 'int', 'float', 'as_type', 'extract_bits', 'abs', 'fast', 'clamp', 'trunc',
+    allowed = {'uint', 'int', 'float', 'as_type', 'extract_bits', 'abs', 'fast', 'clamp', 'trunc', 'max', 'min',
                'isnan', 'botw_relative_vertex'}
 
     def expression(value):
@@ -413,7 +425,8 @@ def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
             literal = f'0x{bits:08x}u'
             return 'as_type<float>(' + literal + ')' if kinds[variable] == 'float' else literal
         value = re.sub(r'\b(c1(?:_\d+)?)\.data\[(\d+)u?\]', constant, value)
-        value = re.sub(r'\bgl_VertexIndex\s*-\s*gl_BaseVertex\b', 'botw_relative_vertex', value)
+        basis = 'gl_VertexIndex\\s*-\\s*gl_BaseVertex' if relative_input == 'vertex' else 'gl_InstanceIndex\\s*-\\s*gl_BaseInstance'
+        value = re.sub(r'\b' + basis + r'\b', 'botw_relative_vertex', value)
         if not re.fullmatch(r'[\w\s.+*/%<>=!&|^~?:(),-]+', value) or any(x in value for x in ('//', '/*', '*/')):
             raise ValueError('Unknown external input or probe expression grammar')
         for identifier in re.findall(r'\b[A-Za-z_]\w*\b', value):
@@ -445,7 +458,60 @@ def build_dynamic_c1_probe(msl, control, code, relative_vertex_count):
     output += ''.join(f'    out[botw_relative_vertex*{len(targets)}u+{i}u] = uint({value});\n'
                       for i, value in enumerate(targets)) + '}\n'
     return {'msl': output, 'expressions': expressions, 'relative_vertex_count': relative_vertex_count,
-            'c1_words': (end-start)//4, 'conditional_probe_only': True}
+            'c1_words': (end-start)//4, 'relative_input': relative_input, 'conditional_probe_only': True}
+
+
+def build_storage_index_probe(msl, control, code, stage, reflection, descriptors, relative_instance_count):
+    """Probe finite storage indices after an exact uint32 address cancellation.
+
+    Storage descriptor aliases and BNSH slots must already agree. A reachable
+    attribute, uniform, memory value, vertex ID, or uncanceled guest base fails.
+    """
+    audit = audit_storage_resources(msl, stage, reflection, descriptors)
+    reads = audit['driver_reads'];symbols = {}
+    for row in reads:
+        if row['field'] != 'address_low':
+            raise ValueError('Storage probe requires a proven unsigned address-low field')
+        symbols[row['offset']] = 'botw_storage_base_' + str(row['nvn_slot'])
+    for symbol in symbols.values():
+        if re.search(r'\b' + symbol + r'\b', msl):
+            raise ValueError('Storage probe symbol collides with input')
+    for block in re.findall(r'constant\s+(\w+)\s*&\s*c0(?:_\d+)?\s+\[\[buffer\(\d+\)\]\]', msl):
+        layout = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*uint\s+data\[(\d+)\];\s*\};', msl)
+        if not layout or any(row['offset']//4 >= int(layout[1]) for row in reads):
+            raise ValueError('Storage address-low source is not uint32')
+    source = re.sub(r'\bc0(?:_\d+)?\.data\[(\d+)u?\]',
+                    lambda match: symbols[int(match[1])*4], msl)
+    unsigned = set(re.findall(r'\buint\s+(_\d+)\b', source))
+    bases = set(symbols.values())
+
+    def normalize(value):
+        return cancel_u32_storage_bases(value, bases, unsigned) if any(x in value for x in bases) else value
+    source = re.sub(r'\b(uint|int|float)\s+(_\d+)\s*=\s*([^;]+);',
+                    lambda match: match[1] + ' ' + match[2] + '=' + normalize(match[3]) + ';', source)
+    aliases = {variable: int(metal) for variable, metal in re.findall(
+        r'device\s+(?:const\s+)?\w+\s*&\s*(ssbo\d+(?:_\d+)?)\s+\[\[buffer\((\d+)\)\]\]', source)}
+    bindings = {row['metal_slot']: row for row in audit['bindings']}
+    expressions, accesses = [], []
+    for access in re.finditer(r'\b(ssbo\d+(?:_\d+)?)\._m0\[', source):
+        start, end, level = access.end(), access.end(), 1
+        while end < len(source) and level:
+            level += (source[end] == '[') - (source[end] == ']');end += 1
+        if level:
+            raise ValueError('Unbalanced storage access index')
+        value = normalize(source[start:end-1])
+        if value not in expressions:
+            expressions.append(value)
+        row = bindings[aliases[access[1]]]
+        accesses.append({'expression_index': expressions.index(value), 'nvn_slot': row['nvn_slot'],
+                         'stride': row['stride'], 'metal_slot': row['metal_slot']})
+    if not accesses:
+        raise ValueError('Storage probe has no accesses')
+    result = _build_closed_index_probe(source, control, code, relative_instance_count, expressions, 'instance')
+    result['relative_instance_count'] = result.pop('relative_vertex_count')
+    result['accesses'] = accesses
+    result['guest_base_cancellation_proven'] = True
+    return result
 
 
 def specialize_static_c1(msl, control, code):

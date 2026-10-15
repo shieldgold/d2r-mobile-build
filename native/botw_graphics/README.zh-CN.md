@@ -88,6 +88,8 @@ python3 -m scripts.botw_native.shaders \
 
 `build_dynamic_c1_probe` 可从 MSL 取出动态 c1 索引的单赋值依赖闭包，仅接受相对 VertexID 和原始 c1 的固定字；属性、uniform、SSBO 输入、未知语法及多次赋值均拒绝。它生成的私有 compute shader 由独立 `tools/probe_msl_indices.m` 在真实 Metal 上穷举 1–64 个输入。两个字体 VS 已各测试 64 个相对顶点：连续安全前缀均为 16，下一项读 index64 超出真实 64-word c1；顶点0–3的三个索引分别为 `[0,16,20]`、`[4,24,28]`、`[8,32,36]`、`[12,40,44]`。这是明确输入范围下的离线条件证据，尚不包含 SSBO 范围证明，也不会自动登记字体程序。
 
+`build_storage_index_probe` 验证同一 uint32 基址的加减抵消，再提取只依赖相对 InstanceID 的 SSBO 访问闭包；它不会用零地址替代真实驱动数据。两个字体程序各穷举实例0–63后，完整读取范围分别为普通字体 `64*N` bytes 和扩展字体 `96*N` bytes，包含 uint/uint2/uint4 别名的完整读宽。独立像素测试已验证非零 baseInstance 的实际 Metal 编号语义。上述证据均保存在本地 ignored 输出，仍须把顶点/实例范围和实际 NVN slot0 长度约束接入绘制前校验后才能登记字体程序。
+
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
 ```c
