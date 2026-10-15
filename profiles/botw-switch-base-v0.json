@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "title_id": "01007ef00011e000",
+  "package_version": 0,
+  "revision": "switch-base-v0",
+  "modules": {
+    "main": {
+      "sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "build_id": "2094f152836683a3632c6153fd84ab8000000000000000000000000000000000"
+    },
+    "rtld": {
+      "sha256": "2bf1918e54e3d6378f150e45a264c151558198703a778408db5ac26263a3a362",
+      "build_id": "db4b66dbf275a8261e2d51375f20c47d9a729537000000000000000000000000"
+    },
+    "sdk": {
+      "sha256": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31",
+      "build_id": "99d55fb2a2ce9e14bd5d56428ec0397be46e48eb000000000000000000000000"
+    },
+    "subsdk0": {
+      "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000"
+    },
+    "subsdk1": {
+      "sha256": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+      "build_id": "fc3d9aae8b6769e2d69961c005e239f536805f19000000000000000000000000"
+    },
+    "subsdk2": {
+      "sha256": "e56eec1a58d1fa53779469e6eea36a795c0deac90bbf25b54b97c44ed195bd65",
+      "build_id": "2ba5fcc00ba28cdda26c792e934949cbb5cbc513000000000000000000000000"
+    },
+    "subsdk3": {
+      "sha256": "2f344d84badf826937317e033b47f32bb2e1e8b7856553ce7356616268b5e238",
+      "build_id": "aa72f973a902c24747af4522ee67ea9a7994c3fb000000000000000000000000"
+    }
+  },
+  "note": "Local code experiment only; update 1.9.0 and DLC are not applied."
+}

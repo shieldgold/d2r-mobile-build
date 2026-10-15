@@ -6,6 +6,8 @@
 
 Build unsigned IPAs and the required game data with GitHub Actions, using the **NO_XCODE** approach from [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile). Download a build from Releases or run your own build below.
 
+The separate Breath of the Wild native-port experiment is documented in [BOTW preparation and rewrite verification](docs/BOTW_NATIVE.zh-CN.md). It currently provides preparation tools, not a playable IPA.
+
 ## Download and install
 
 Open the **[latest Release](https://github.com/jiayx/d2r-mobile-build/releases/latest)**. Download an IPA from **Assets**, then use the links in the release notes to download the required game data:

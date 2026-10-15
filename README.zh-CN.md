@@ -6,6 +6,8 @@
 
 基于 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) 的 **NO_XCODE** 方案，使用 GitHub Actions 构建未签名 IPA 和配套 Data 资源。可以从 Releases 下载，也可以按下方步骤自行构建。
 
+《旷野之息》的独立原生移植实验见 [BOTW 本地程序准备与改写验证](docs/BOTW_NATIVE.zh-CN.md)。目前只完成前期验证，尚无可玩的 IPA。
+
 ## 下载与安装
 
 进入 **[最新 Release](https://github.com/jiayx/d2r-mobile-build/releases/latest)**：IPA 从 **Assets 附件**下载，Data 从 Release 正文的**配套 Data**中直接点击下载链接。

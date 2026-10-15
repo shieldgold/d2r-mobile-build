@@ -1,0 +1,92 @@
+"""Prepare and audit a fixed BOTW module set; this does not build a playable IPA."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+
+from .archive import extract_exefs
+from .nso import inspect_nso
+from .rewrite import UPSTREAM_COMMIT, TOOL_SHA256, fetch_tool, rewrite_module, verify_profile
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def write_report(output, report):
+    temporary = output / 'report.json.part'
+    temporary.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
+    temporary.replace(output / 'report.json')
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--package', type=Path, help='Solid NCZ-compressed local base NSZ')
+    source.add_argument('--exefs', type=Path, help='Already extracted, local ExeFS directory')
+    parser.add_argument('--profile', type=Path, default=ROOT / 'profiles/botw-switch-base-v0.json')
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--rewrite', action='store_true', help='Run the pinned offline source rewriter')
+    args = parser.parse_args(argv)
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    report = {'schema': 1, 'status': 'started', 'phone_ready': False, 'guest_execution_tested': False,
+              'host_service_overrides_audited': False, 'graphics_implemented': False,
+              'semantic_equivalence_verified': False, 'modules': [], 'rewrites': []}
+    write_report(output, report)
+    try:
+        profile = json.loads(args.profile.read_text())
+        report['profile'] = {k: v for k, v in profile.items() if k != 'modules'}
+        if args.package:
+            package = args.package.resolve()
+            stat = package.stat()
+            identity = {'path': str(package), 'bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+            exefs = output / 'ExeFS'
+            extraction_record = output / 'extraction-report.json'
+            if exefs.exists():
+                if not extraction_record.exists() or json.loads(extraction_record.read_text()).get('source') != identity:
+                    raise ValueError('Existing ExeFS has different provenance; select a fresh output directory or --exefs')
+            else:
+                print('Extracting ExeFS; preserving the source package', flush=True)
+                extraction = extract_exefs(package, exefs)
+                extraction['source'] = identity
+                extraction_record.write_text(json.dumps(extraction, indent=2) + '\n')
+        else:
+            exefs = args.exefs.resolve()
+        modules = [inspect_nso(p.read_bytes(), p.name) for p in sorted(exefs.iterdir())
+                   if p.is_file() and re.fullmatch(r'main|rtld|sdk|subsdk\d+', p.name)]
+        verify_profile(modules, profile)
+        report['modules'] = modules
+        all_exports = {symbol for module in modules for symbol in module['exports']}
+        all_imports = {symbol for module in modules for symbol in module['imports']}
+        report['unresolved_imports'] = sorted(all_imports - all_exports)
+        report['status'] = 'audited'
+        for module in modules:
+            print(f"Audited {module['name']}: {len(module['imports'])} imports, {len(module['exports'])} exports", flush=True)
+        write_report(output, report)
+        if args.rewrite:
+            tool = fetch_tool(ROOT / '.tools/botw-native')
+            report['rewriter'] = {'upstream_commit': UPSTREAM_COMMIT, 'sha256': TOOL_SHA256,
+                                  'ruleset': 'native', 'private_gates': False,
+                                  'local_extension_sha256': {
+                                      name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+                                      for name in ('branch_tables.py', 'rewriter_driver.py')}}
+            for module in modules:
+                print('Rewriting ' + module['name'], flush=True)
+                result = rewrite_module(tool, exefs / module['name'], output / 'rewrite')
+                report['rewrites'].append(result)
+                print(module['name'] + ': ' + result['status'], flush=True)
+                write_report(output, report)
+            report['status'] = 'rewrite_failed' if any(r['status'] == 'failed' for r in report['rewrites']) else 'rewritten'
+        write_report(output, report)
+        print('Report: ' + str(output / 'report.json'), flush=True)
+        return 1 if report['status'] == 'rewrite_failed' else 0
+    except (ValueError, OSError, KeyError) as exc:
+        report.update(status='failed', error=str(exc))
+        write_report(output, report)
+        print('Preflight failed: ' + str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
