@@ -107,6 +107,33 @@ static BOOL constantSpecializations(BWBundleShader *shader,id list,char *error,s
     }
     return YES;
 }
+static BOOL uniformRanges(BWBundleShader *shader,id list,char *error,size_t capacity){
+    if(!list)return YES;
+    if(![list isKindOfClass:[NSArray class]]||[list count]>16)return bundleError(error,capacity,"Invalid uniform range list");
+    NSMutableSet *seen=[NSMutableSet new];
+    for(id row in list){uint64_t nvn,metal,bytes;
+        if(![row isKindOfClass:[NSDictionary class]]||!integer(row[@"nvn_slot"],13,&nvn)||!integer(row[@"metal_slot"],15,&metal)||!integer(row[@"bytes"],65536,&bytes)||!bytes||bytes%4||[seen containsObject:@(metal)])return bundleError(error,capacity,"Invalid uniform range slot/bytes");[seen addObject:@(metal)];
+        NSString *pattern=[NSString stringWithFormat:@"constant\\s+(\\w+)\\s*&\\s*(c%llu(?:_\\d+)?)\\s+\\[\\[buffer\\(%llu\\)\\]\\]",(unsigned long long)nvn+3,(unsigned long long)metal];
+        NSArray *parameters=matches(pattern,shader.source);
+        if(parameters.count!=1)return bundleError(error,capacity,"Missing uniform range source parameter");
+        NSString *block=part(shader.source,parameters[0],1),*variable=part(shader.source,parameters[0],2);
+        NSString *layout=[NSString stringWithFormat:@"\\bstruct\\s+%@\\s*\\{\\s*(uint[234]?|float[234]?)\\s+data\\[(\\d+)\\];\\s*\\};",[NSRegularExpression escapedPatternForString:block]];
+        NSArray *layouts=matches(layout,shader.source);
+        if(layouts.count!=1)return bundleError(error,capacity,"MSL uniform array extent mismatch");
+        NSString *scalar=part(shader.source,layouts[0],1);unichar last=[scalar characterAtIndex:scalar.length-1];unsigned stride=last=='2'?8:(last=='3'||last=='4')?16:4;
+        unsigned long long elements=strtoull(part(shader.source,layouts[0],2).UTF8String,NULL,10);
+        if(!elements||elements>65536/stride||elements*stride!=bytes)return bundleError(error,capacity,"MSL uniform array extent mismatch");
+        NSString *escaped=[NSRegularExpression escapedPatternForString:variable];NSArray *reads=matches([NSString stringWithFormat:@"\\b%@\\.data\\[([^\\]]+)\\]",escaped],shader.source);
+        BOOL fixed=reads.count>0;uint64_t highest=0;
+        for(NSTextCheckingResult *read in reads){NSString *index=part(shader.source,read,1);if(matches(@"^\\d+u?$",index).count!=1){fixed=NO;continue;}
+            unsigned long long offset=strtoull(index.UTF8String,NULL,10);if(offset>=elements)return bundleError(error,capacity,"MSL uniform index exceeds declared bounds");highest=MAX(highest,(uint64_t)offset);
+        }
+        if(matches([NSString stringWithFormat:@"\\b%@\\b",escaped],shader.source).count!=reads.count+1)fixed=NO;
+        if([row[@"proof"] isEqual:@"fixed_indices"]){if(!fixed||(highest+1)*stride!=bytes)return bundleError(error,capacity,"MSL fixed uniform range proof mismatch");}
+        else if(![row[@"proof"] isEqual:@"declared_dynamic"]||fixed)return bundleError(error,capacity,"MSL dynamic uniform range proof mismatch");
+    }
+    return YES;
+}
 /* The bundle accepts the fixed offline compiler's explicit resource grammar.
  * Re-derive NVN slots from the actual compiled source, rather than trusting a
  * manifest to remap one reflected slot onto another. Unknown grammar fails. */
@@ -186,6 +213,7 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
         if(!shader.bindings){close(directory);return 0;}
         if(!shader.source||strlen(shader.source.UTF8String)!=source.length){close(directory);return bundleError(error,capacity,"Invalid UTF-8/NUL shader source");}
         if(!constantSpecializations(shader,entry[@"constant_specializations"],error,capacity)){close(directory);return 0;}
+        if(!uniformRanges(shader,entry[@"uniform_ranges"],error,capacity)){close(directory);return 0;}
         if(!sourceMetadata(shader,entry,error,capacity)){close(directory);return 0;}
         NSError *metalError=nil;id<MTLLibrary> library=[device newLibraryWithSource:shader.source options:nil error:&metalError];id<MTLFunction> function=[library newFunctionWithName:shader.entry];
         if(!function||function.functionType!=(nvnStage==NVN_SHADER_STAGE_VERTEX?MTLFunctionTypeVertex:MTLFunctionTypeFragment)){close(directory);return bundleError(error,capacity,"Metal entry/stage preflight failed: %s",metalError.localizedDescription.UTF8String?:"entry missing");}

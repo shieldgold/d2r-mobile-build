@@ -301,6 +301,50 @@ def specialize_static_c1(msl, control, code):
                          for (offset, bits, kind), count in sorted(uses.items())]
 
 
+def bound_static_uniforms(msl):
+    """Give fixed-index resources their exact scalar-array footprint.
+
+    SPIRV-Cross can alias one original 64 KiB block as several scalar types.
+    Clone each resource's type before narrowing, so a dynamic alias retains its
+    full declaration and the runtime still requires that complete range.
+    """
+    transformed, ranges, blocks = msl, [], []
+    for declaration in re.finditer(r'constant\s+(\w+)\s*&\s*(c(\d+)(?:_\d+)?)\s+\[\[buffer\((\d+)\)\]\]', msl):
+        block, variable, bank, metal = declaration[1], declaration[2], int(declaration[3]), int(declaration[4])
+        if not 3 <= bank <= 16:
+            continue
+        layout = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*(uint[234]?|float[234]?)\s+data\[(\d+)\];\s*\};', msl)
+        if not layout:
+            continue
+        declared = int(layout[2])
+        lanes = int(layout[1][-1]) if layout[1][-1].isdigit() else 1
+        stride = (4 if lanes == 3 else lanes) * 4
+        if not 1 <= declared <= 65536 // stride:
+            raise ValueError('Uniform declaration exceeds supported bounds')
+        indices = re.findall(r'\b' + re.escape(variable) + r'\.data\[([^\]]+)\]', msl)
+        static = all(re.fullmatch(r'\d+u?', value) for value in indices)
+        static &= len(re.findall(r'\b' + re.escape(variable) + r'\b', msl)) == len(indices) + 1
+        fixed = [int(value.rstrip('u')) for value in indices if re.fullmatch(r'\d+u?', value)]
+        if any(value >= declared for value in fixed):
+            raise ValueError('Static uniform read exceeds original declaration bounds')
+        required = max(fixed) + 1 if static and fixed else declared
+        proof = 'fixed_indices' if static and fixed else 'declared_dynamic'
+        if proof == 'fixed_indices':
+            name = 'botw_ubo_' + str(metal)
+            if re.search(r'\b' + name + r'\b', msl):
+                raise ValueError('Generated uniform type collides with input source')
+            blocks.append(f'struct {name} {{{layout[1]} data[{required}];}};\n')
+            replacement = declaration[0].replace(block, name, 1)
+            transformed = transformed.replace(declaration[0], replacement, 1)
+        ranges.append({'metal_slot': metal, 'nvn_slot': bank - 3, 'bytes': required * stride, 'proof': proof})
+    entry = re.search(r'\b(?:vertex|fragment)\s+\w+\s+\w+\s*\(', transformed)
+    if blocks and not entry:
+        raise ValueError('Missing entry for bounded uniform declarations')
+    if blocks:
+        transformed = transformed[:entry.start()] + ''.join(blocks) + transformed[entry.start():]
+    return transformed, ranges
+
+
 def shader_binding_map(msl, stage, reflection):
     """Match this compiler's named resources to explicit BNSH NVN slots.
 
@@ -381,6 +425,7 @@ def stage_shader_bundle(inputs, converted, destination):
         try:
             msl, constants = specialize_static_c1(files[code_hash + '.metal'].decode('utf-8'),
                                                   files[control_hash + '.control'], files[code_hash + '.nvn'])
+            msl, uniform_ranges = bound_static_uniforms(msl)
             maps = [shader_binding_map(msl, stage,
                                        candidate.get('reflection', {})) for candidate in rows]
             if any(mapping != maps[0] for mapping in maps):
@@ -389,7 +434,7 @@ def stage_shader_bundle(inputs, converted, destination):
             entry['msl'].update(bytes=len(files[code_hash + '.metal']),
                                 sha256=hashlib.sha256(files[code_hash + '.metal']).hexdigest())
             entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {}),
-                          'constant_specializations': constants})
+                          'constant_specializations': constants, 'uniform_ranges': uniform_ranges})
         except ValueError as exc:
             entry.update({'status': 'unsupported', 'reason': str(exc)})
         indices[identity] = len(entries)

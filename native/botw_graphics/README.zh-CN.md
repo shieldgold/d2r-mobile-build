@@ -71,12 +71,14 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 python3 -m scripts.botw_native.shaders \
   --bundle-inputs outputs/botw-shader-inputs-reflection \
   --bundle-compiled outputs/botw-shader-strict-runtime-2d-final \
-  --bundle-dir outputs/botw-private-shader-bundle-c1
+  --bundle-dir outputs/botw-private-shader-bundle-ranges-v2
 ```
 
 包内保留每个原始 control/code/stage 的完整 SHA256 身份、68 个阶段引用、实际 BNSH 资源反射、明确的 NVN→Metal 槽映射、MSL 入口与纹理/顶点约束。NVN uniform slot r 对应 Maxwell c[3+r]，纹理 slot r 对应真实反射已确认的 c0[0x20+8r]；无法据此核实的项带 `unsupported` 及原因，保留身份供诊断。登记数只表明这些 shader 可以准确匹配及绑定；数组纹理、其他 NVN 命令和游戏实际呈现仍有各自的运行时检查。
 
 固定上游 `dm/gfx/tools/dmsh_build.py` 记录 control+0x700/+0x704 为原始 code 内的 c1 起止偏移。本地 37 项全部核实该边界，8 项含真实 256-byte c1，其余为空。打包器只对固定且有界的 uint/float 数据读取作特化，MSL 通过 `as_type<float>(0x原始位模式u)` 精确保留浮点输入；不创建补零的常量缓冲。清单记录 bank、偏移、位模式、标量类型和出现次数，loader 对原始 control/code 和实际 MSL 表达式重新核验。6 个片元程序共 14 处固定读取已因此接通；2 个字体顶点程序的动态索引及 c0/SSBO 仍明确拒绝。
+
+转换器原本将 uniform 数组统一声明为 64 KiB。打包器对完全固定的索引逐资源复制类型并缩小数组，67 个绑定别名的准确范围为 4–560 bytes；实际 GPU 测试已验证缩小后的 16-byte 绑定。5 个含动态 uint2 索引的顶点绑定继续要求声明的完整 64 KiB，清单标记 `declared_dynamic`，不猜测游戏属性或 uniform 值。loader 重新核验数组元素步长、读索引和范围证明，实际绘制还按 Metal 反射验证 NVN 绑定长度。
 
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 

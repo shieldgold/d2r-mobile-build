@@ -125,6 +125,22 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_uniform_array_bounds_are_narrowed_only_for_fixed_reads(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'bound_static_uniforms'), 'Uniform footprint analysis is missing')
+        source = ('struct C {float data[16384];}; fragment float4 fs('
+                  'constant C& c3 [[buffer(0)]], constant C& c3_1 [[buffer(1)]]) '
+                  '{uint i=0; return float4(c3.data[2u], c3_1.data[i],0,1);}')
+        transformed, ranges = module.bound_static_uniforms(source)
+        self.assertIn('float data[3];', transformed)
+        self.assertIn('constant C& c3_1 [[buffer(1)]]', transformed)
+        self.assertEqual(ranges, [{'metal_slot': 0, 'nvn_slot': 0, 'bytes': 12, 'proof': 'fixed_indices'},
+                                  {'metal_slot': 1, 'nvn_slot': 0, 'bytes': 65536, 'proof': 'declared_dynamic'}])
+        _, vector_ranges = module.bound_static_uniforms(source.replace('float data[16384]', 'uint2 data[8192]'))
+        self.assertEqual([x['bytes'] for x in vector_ranges], [24, 65536])
+        with self.assertRaisesRegex(ValueError, 'bounds'):
+            module.bound_static_uniforms(source.replace('c3.data[2u]', 'c3.data[16384u]'))
+
     def test_static_c1_specialization_uses_original_bits_and_rejects_unknown_indices(self):
         module = BnshTests().parser()
         self.assertTrue(hasattr(module, 'specialize_static_c1'), 'Exact c1 specialization is missing')
@@ -287,7 +303,16 @@ class MetalBridgeTests(unittest.TestCase):
             path = Path(folder)
             source = ROOT / 'native/botw_graphics/graphics.m'
             harness = path / 'resources.c'
-            harness.write_text(RESOURCE_SMOKE)
+            fragment = ('struct C {float data[16384];}; fragment float4 rf(O v [[stage_in]],'
+                        'constant C& c3 [[buffer(1)]],texture2d<float> t [[texture(3)]],sampler s [[sampler(0)]]) '
+                        '{return t.sample(s,float2(.75,.75))*float4(c3.data[0u],c3.data[1u],c3.data[2u],c3.data[3u]);}')
+            narrowed, ranges = BnshTests().parser().bound_static_uniforms(fragment)
+            self.assertEqual(ranges[0]['bytes'], 16)
+            original = ('fragment float4 rf(O v [[stage_in]],constant float4& c [[buffer(1)]],'
+                        'texture2d<float> t [[texture(3)]],sampler s [[sampler(0)]]) '
+                        '{return t.sample(s,float2(.75,.75))*c;}')
+            self.assertIn(original, RESOURCE_SMOKE)
+            harness.write_text(RESOURCE_SMOKE.replace(original, narrowed.replace('\n', '\\n')))
             exe = path / 'resources'
             result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks',
                 '-Werror', '-Wno-deprecated-declarations', '-I', str(source.parent),
@@ -323,7 +348,7 @@ class MetalBridgeTests(unittest.TestCase):
                                          'samplers': [{'name': 'fixtureTexture', 'slot': 1}]}
                 msl = ('#include <metal_stdlib>\nusing namespace metal; vertex float4 main0(uint i [[vertex_id]]) {return float4(0,0,0,1);}'
                        if row['stage'] == 'vertex' else
-                       '#include <metal_stdlib>\nusing namespace metal; struct Block {float4 tint;}; fragment float4 main0(constant Block& c3 [[buffer(2)]], texture2d<float> fs_tex0_28 [[texture(3)]], sampler fs_tex0_28Smplr [[sampler(0)]]) {return c3.tint*fs_tex0_28.sample(fs_tex0_28Smplr,float2(0));}')
+                       '#include <metal_stdlib>\nusing namespace metal; struct Block {float data[16384];}; fragment float4 main0(constant Block& c3 [[buffer(2)]], texture2d<float> fs_tex0_28 [[texture(3)]], sampler fs_tex0_28Smplr [[sampler(0)]]) {return float4(c3.data[0u],c3.data[1u],c3.data[2u],c3.data[3u])*fs_tex0_28.sample(fs_tex0_28Smplr,float2(0));}')
                 (converted / (row['code_sha256'] + '.metal')).write_text(msl)
             description = json.loads((inputs / 'inputs.json').read_text())
             description['records'] = rows
@@ -349,6 +374,7 @@ class MetalBridgeTests(unittest.TestCase):
             for field, invalid, expected in (
                     ('texture_types', [{'nvn_slot': 0, 'metal_slot': 0, 'type': 'cube'}], 'texture'),
                     ('vertex_inputs', [0], 'vertex'),
+                    ('uniform_ranges', [{'metal_slot': 2, 'nvn_slot': 0, 'bytes': 4, 'proof': 'fixed_indices'}], 'uniform'),
                     ('constant_specializations', [{'bank': 1, 'offset': 0, 'bits': '3e800000', 'type': 'float', 'count': 1}], 'c1')):
                 saved = entry.get(field); entry[field] = invalid
                 (bundle / 'manifest.json').write_text(json.dumps(manifest))
