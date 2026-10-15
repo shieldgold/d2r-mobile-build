@@ -40,6 +40,8 @@
 
 纹理支持线性 RGBA8/BGRA8 的 buffer-backed 路径，以及 Tegra 块线性二维纹理和二维颜色数组的逐 layer/mip 解排布、GPU 上传与采样；布局代码复用固定上游，保留 deko3d 原 zlib 许可。精确格式映射支持的颜色格式可用于采样，ASTC 走原生压缩采样；BC 解码、非恒等分量 swizzle、立方体和多采样仍明确拒绝。Depth16/Depth32F 支持真实深度清除、比较和写入。uniform、纹理/采样器描述符池、显式资源槽、常见顶点格式/流步长已接通；storage buffer 支持逐个/成组绑定及显式 Metal 槽，真实 GPU 已验证同一 NVN 槽的 float4/uint4 别名读取和另一槽的写回。设备窗口原点仅接受 UpperLeft=1，与 Metal 的上左渲染目标、viewport 和 scissor 坐标对应；非对称三角形及顶部裁剪的实际像素已验证，其他原点模式明确拒绝。DrawArrays/DrawArraysInstanced 支持 triangle list 和 triangle strip；非零 first/baseInstance 下的相对顶点/实例编号、完整四角像素与 SSBO 写回已通过真实 GPU 验证。实例属性 divisor>1 仍明确拒绝。模板、多颜色附件、混合、索引绘制、计算与嵌套命令尚待补齐。部分 scissor 的清除会明确失败，避免错误清空整个目标。
 
+TextureBuilderSetDefaults 与原 BOTW SDK 一样保留 +0 的 device；真实 main 先 SetDevice 再 SetDefaults，人工 GPU 夹具已按该顺序验证颜色目标、块线性采样和深度目标，避免清空 device 导致后续初始化失败。
+
 数组层数来自真实 NVN depth，Metal 使用 2DArray；两层三 mip 的人工 RGBA8/R8 夹具已验证全部像素、显式 LOD 采样及客体内存修改后的重新上传。`botw_graphics_read_texture_subresource` 可等待 GPU 后读取明确的 RGBA8/BGRA8 层和级别。纹理绑定同时核验维数与 float/half/int/uint 标量类型，错误标量格式拒绝。线性数组、数组深度纹理、数组渲染/显示目标及 texture view 尚待验证，不默认为层0。
 
 每个 NVN Queue 持有独立的真实 MTLCommandQueue，提交与呈现按该队列排序；QueueBuilder flags 仅接受 NONE=0 与 NO_FRAGMENT_INTERLOCK=1，复制到队列实际策略。当前不支持 fragment interlock，canonical MSL 的 raster-order-group 声明明确拒绝；NO_ZCULL 及其他未验证 flag 拒绝。人工 GPU 测试在 flags1 下验证真实拷贝、围栏和绘制；宿主读回先等待所有 NVN producer queue 的实际完成，避免 transfer queue 提前拷贝。没有 QueueFinish 的清屏/绘制读回曾真实复现抢先读取，现已纳入回归。

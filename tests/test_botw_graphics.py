@@ -497,6 +497,26 @@ class MetalBridgeTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected, result.stderr)
 
+    def test_texture_defaults_preserve_device_set_first_through_gpu_sampling_and_depth(self):
+        smoke = RESOURCE_SMOKE.replace(
+            'nvnTextureBuilderSetDefaults(&tb); nvnTextureBuilderSetDevice(&tb,&device);',
+            'nvnTextureBuilderSetDevice(&tb,&device); nvnTextureBuilderSetDefaults(&tb);').replace(
+            'nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);',
+            'nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetDefaults(&tb);')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder); source = ROOT / 'native/botw_graphics/graphics.m'
+            harness = path / 'texture-defaults.c'; harness.write_text(smoke); exe = path / 'texture-defaults'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', result.stdout)
+            self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+
     def test_upper_left_window_origin_matches_ndc_viewport_and_scissor_pixels(self):
         smoke = METAL_SMOKE.replace('API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize);',
             'API(nvnDeviceBuilderSetDefaults); API(nvnDeviceInitialize); API(nvnDeviceSetWindowOriginMode); API(nvnCommandBufferSetViewport);')

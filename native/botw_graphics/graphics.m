@@ -588,7 +588,11 @@ NVN(nvnSyncWait,NVNsyncWaitResult,const NVNsync *raw,uint64_t timeout){BWSync *s
     int64_t ns=timeout>INT64_MAX?INT64_MAX:(int64_t)timeout;
     if(dispatch_group_wait(completion.group,dispatch_time(DISPATCH_TIME_NOW,ns)))return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
     return s.buffer.status==MTLCommandBufferStatusCompleted?NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED:NVN_SYNC_WAIT_RESULT_FAILED;}
-NVN(nvnTextureBuilderSetDefaults,void,NVNtextureBuilder *raw){memset(raw,0,sizeof *raw);TextureBuilder *b=(TextureBuilder*)raw;b->depth=1;b->levels=1;b->samples=1;b->target=NVN_TEXTURE_TARGET_2D;}
+NVN(nvnTextureBuilderSetDefaults,void,NVNtextureBuilder *raw){
+    /* BOTW's original default implementation writes from +8, preserving the
+     * device at +0. main sets that device before resetting each texture. */
+    memset((char*)raw+sizeof(NVNdevice*),0,sizeof *raw-sizeof(NVNdevice*));
+    TextureBuilder *b=(TextureBuilder*)raw;b->depth=1;b->levels=1;b->samples=1;b->target=NVN_TEXTURE_TARGET_2D;}
 NVN(nvnTextureBuilderSetDevice,void,NVNtextureBuilder *b,NVNdevice *d){((TextureBuilder*)b)->device=d;}
 NVN(nvnTextureBuilderSetFlags,void,NVNtextureBuilder *b,int f){((TextureBuilder*)b)->flags=f;}
 NVN(nvnTextureBuilderSetTarget,void,NVNtextureBuilder *b,NVNtextureTarget t){((TextureBuilder*)b)->target=t;}
