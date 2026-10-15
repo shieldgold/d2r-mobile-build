@@ -72,11 +72,31 @@ static size_t textureBytes(const TextureBuilder *b){
     nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;
 }
 NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return b.width>0&&bytes?(size_t)b.width*bytes:0;}return textureBytes(&b);}
-/* Base-v0 returns 0x100 | rawKind. BUFFER and flags&0x50 take the
- * device-independent rawKind=0 branch, even before storage is assigned.
- * This is metadata, not permission to create a Metal texture or GPU mapping. */
+/* Original base-v0 0x34-byte format records: +0x30 is nonzero and +0xe/+0xf
+ * depth/stencil bytes are zero for exactly these 113 declared color formats.
+ * This is independent of Metal's narrower format/creation capability. */
+static BOOL textureOrdinaryStorageFormat(uint32_t format){
+    return (format>=NVN_FORMAT_R8&&format<=NVN_FORMAT_RG32I)||(format>=NVN_FORMAT_RGB32F&&format<=NVN_FORMAT_RGBA32I)||
+        (format>=NVN_FORMAT_RGBX8_SRGB&&format<=NVN_FORMAT_BPTC_UFLOAT)||(format>=NVN_FORMAT_RGBX8&&format<=NVN_FORMAT_BGRA8_SRGB);
+}
+static void textureStorageDevice(const NVNdevice *raw){
+    /* Establish exact live-object provenance before reading a guest header. */
+    BWDevice *provider=nil;
+    for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;id object=objects[key];
+        if(span.location==(uintptr_t)raw&&[object isKindOfClass:[BWDevice class]]){provider=object;break;}}
+    if(!provider)fatal("object lifetime/type expected=BWDevice storage-class provider is not registered");
+    textureMemory(raw,sizeof(uint64_t),NO);
+    if(get(raw,[BWDevice class])!=provider)fatal("object lifetime/type expected=BWDevice storage-class provider identity mismatch");
+}
+/* Base-v0 returns 0x100 | rawKind. BUFFER and flags&0x50 take rawKind=0
+ * before accessing the device. Otherwise GK100/GM200 share ChooseKind+0x68:
+ * uncompressed color is the pure 0x316c0 leaf returning 0xfe. The caller
+ * still requires a live device provider; no pool or Metal creation is needed. */
 static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
     if(b->target==NVN_TEXTURE_TARGET_BUFFER||(b->flags&0x50))return 0x100;
+    if(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&textureOrdinaryStorageFormat(b->format)){
+        textureStorageDevice(b->device);return 0x1fe;
+    }
     char detail[256];snprintf(detail,sizeof detail,"texture storage class requires unimplemented native ChooseKind target=%u flags=0x%x format=0x%x samples=%d source=base-v0-storage-metadata",b->target,b->flags,b->format,b->samples);fatal(detail);
 }
 NVN(nvnTextureBuilderGetStorageClass,NVNstorageClass,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);return textureMetadataStorageClass(&b);}
