@@ -1,0 +1,107 @@
+"""Generic macOS frontend checks with a synthetic host, without game resources."""
+from pathlib import Path
+import os
+import platform
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+HOST = r'''
+#import <AppKit/AppKit.h>
+#import <QuartzCore/CAMetalLayer.h>
+#include "runtime.h"
+#include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+static unsigned ticks;
+int botw_host_set_address_space(unsigned bits) {
+    assert(bits == 39);
+    return getenv("BOTW_MAC_TEST_CONFIG_FAIL") ? 1 : 0;
+}
+int botw_host_set_graphics_layer(void *layer) {
+    assert([(__bridge id)layer isKindOfClass:CAMetalLayer.class]); return 0;
+}
+void botw_host_refresh_input(void) {}
+void botw_host_set_applet_state(int foreground, int focused) { (void)foreground; (void)focused; }
+void botw_host_display_tick(double target) {
+    assert(NSThread.isMainThread && target > 0);
+    if (++ticks == 2 && getenv("BOTW_MAC_TEST_CLOSE")) {
+        assert(NSApplication.sharedApplication.windows.count == 1);
+        fprintf(stdout, "synthetic_host_real_display_ticks=%u\n", ticks); fflush(stdout);
+        [NSApplication.sharedApplication.windows.firstObject performClose:nil];
+    }
+}
+int botw_host_run_mode(const char *root, const char *documents, botw_host_event event, enum botw_host_mode mode) {
+    assert(!NSThread.isMainThread && root[0] == '/' && !strcmp(root, documents));
+    assert(mode == BOTW_HOST_BOOT_GAME && pthread_get_stacksize_np(pthread_self()) >= 64u*1024u*1024u);
+    event("synthetic_host_entered=true");
+    if (getenv("BOTW_MAC_TEST_CLOSE")) for (;;) pause();
+    return 1;
+}
+'''
+
+
+@unittest.skipUnless(platform.system() == 'Darwin', 'AppKit requires macOS')
+class MacFrontendTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.build = tempfile.TemporaryDirectory(prefix='botw-mac-frontend-')
+        folder = Path(cls.build.name)
+        stub = folder / 'host.m'; stub.write_text(HOST)
+        cls.binary = folder / 'botw-mac'
+        command = ['xcrun', 'clang', '-std=c11', '-mmacosx-version-min=14.0', '-fobjc-arc', '-fblocks',
+                   '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_host'),
+                   str(ROOT / 'native/botw_app/mac_main.m'), str(stub), '-framework', 'AppKit',
+                   '-framework', 'QuartzCore', '-framework', 'Metal', '-o', str(cls.binary)]
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode:
+            cls.build.cleanup()
+            raise AssertionError(result.stderr)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.build.cleanup()
+
+    def run_frontend(self, *arguments, **env):
+        environment = dict(os.environ)
+        environment.pop('BOTW_MAC_TEST_CLOSE', None)
+        environment.pop('BOTW_MAC_TEST_CONFIG_FAIL', None)
+        environment.update(env)
+        return subprocess.run([str(self.binary), *arguments], capture_output=True, text=True,
+                              timeout=15, env=environment)
+
+    def test_usage_and_invalid_paths_exit_before_appkit_or_guest(self):
+        help_result = self.run_frontend('--help')
+        self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn('ROOT', help_result.stdout)
+        for arguments, code in [((), 64), (('--unknown',), 64),
+                                (('/nonexistent-botw-mac-fixture',), 66), ((str(self.binary),), 66)]:
+            with self.subTest(arguments=arguments):
+                result = self.run_frontend(*arguments)
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                self.assertNotIn('synthetic_host_entered', result.stdout)
+
+    def test_address_policy_failure_stops_before_creating_a_window(self):
+        result = self.run_frontend(self.build.name, BOTW_MAC_TEST_CONFIG_FAIL='1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('address_space_configuration_failed', result.stderr)
+        self.assertNotIn('synthetic_host_entered', result.stdout)
+
+    @unittest.skipUnless(os.environ.get('BOTW_RUN_WINDOW_TESTS') == '1', 'requires an active WindowServer session')
+    def test_startup_failure_and_window_close_exit_without_destroying_live_guest(self):
+        failure = self.run_frontend(self.build.name)
+        self.assertEqual(failure.returncode, 1, failure.stdout + failure.stderr)
+        self.assertIn('synthetic_host_entered=true', failure.stdout)
+        self.assertIn('mac_host_return=1', failure.stdout)
+        closed = self.run_frontend(self.build.name, BOTW_MAC_TEST_CLOSE='1')
+        self.assertEqual(closed.returncode, 0, closed.stdout + closed.stderr)
+        self.assertIn('synthetic_host_real_display_ticks=2', closed.stdout)
+        self.assertIn('mac_process_exit=0 guest_resources_released=false', closed.stdout)
+
+
+if __name__ == '__main__':
+    unittest.main()
