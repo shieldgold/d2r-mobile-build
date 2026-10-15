@@ -249,6 +249,58 @@ def compile_shader_inputs(records, inputs, destination, compiler, *, require_run
     return results
 
 
+def specialize_static_c1(msl, control, code):
+    """Fold only provably static c1 reads from the original NVN constant region.
+
+    The fixed MIT upstream dm/gfx/tools/dmsh_build.py documents control+0x700
+    as c1's byte offset in the original NVN code blob, +0x704 as its end.
+    No unbound bytes are supplied: dynamic/unrecognized reads fail closed.
+    """
+    declarations = list(re.finditer(r'constant\s+(\w+)\s*&\s*(c1(?:_\d+)?)\s+\[\[buffer\(\d+\)\]\]', msl))
+    if not declarations:
+        return msl, []
+    if len(control) < 0x708:
+        raise ValueError('Missing original c1 control bounds')
+    start, end = struct.unpack_from('<II', control, 0x700)
+    if start < 0x80 or start % 4 or end != len(code) or end < start or end - start > 65536:
+        raise ValueError('Invalid original c1 code bounds')
+    transformed, uses = msl, {}
+    for declaration in declarations:
+        block, variable = declaration[1], declaration[2]
+        scalar = re.search(r'\bstruct\s+' + re.escape(block) + r'\s*\{\s*(uint|float)\s+data\[\d+\];\s*\};', msl)
+        if not scalar:
+            raise ValueError('Unknown c1 constant block layout')
+        reads = list(re.finditer(r'\b' + re.escape(variable) + r'\.data\[(\d+)u?\]', msl))
+        # One variable occurrence is the declaration; every other occurrence
+        # must be a fixed, in-range data read. No pointer/address escapes.
+        if len(re.findall(r'\b' + re.escape(variable) + r'\b', msl)) != len(reads) + 1:
+            raise ValueError('Unresolved dynamic c1 index or variable use')
+        for read in reads:
+            offset = int(read[1]) * 4
+            if offset + 4 > end - start:
+                raise ValueError('Static c1 read exceeds original bounds')
+            bits, = struct.unpack_from('<I', code, start + offset)
+            kind = scalar[1]
+            literal = f'0x{bits:08x}u'
+            if kind == 'float':
+                literal = 'as_type<float>(' + literal + ')'
+            transformed = transformed.replace(read[0], literal)
+            key = (offset, bits, kind)
+            uses[key] = uses.get(key, 0) + 1
+        # Remove exactly this resource parameter while preserving either the
+        # preceding or following parameter separator of a valid signature.
+        parameter = re.escape(declaration[0])
+        transformed, removed = re.subn(parameter + r'\s*,\s*', '', transformed, count=1)
+        if not removed:
+            transformed, removed = re.subn(r',\s*' + parameter, '', transformed, count=1)
+        if not removed:
+            transformed, removed = re.subn(parameter, '', transformed, count=1)
+        if removed != 1:
+            raise ValueError('Cannot remove specialized c1 parameter')
+    return transformed, [{'bank': 1, 'offset': offset, 'bits': f'{bits:08x}', 'type': kind, 'count': count}
+                         for (offset, bits, kind), count in sorted(uses.items())]
+
+
 def shader_binding_map(msl, stage, reflection):
     """Match this compiler's named resources to explicit BNSH NVN slots.
 
@@ -327,11 +379,17 @@ def stage_shader_bundle(inputs, converted, destination):
             files[filename] = payload
             entry[kind] = {'path': filename, 'bytes': len(payload), 'sha256': digest}
         try:
-            maps = [shader_binding_map(files[code_hash + '.metal'].decode('utf-8'), stage,
+            msl, constants = specialize_static_c1(files[code_hash + '.metal'].decode('utf-8'),
+                                                  files[control_hash + '.control'], files[code_hash + '.nvn'])
+            maps = [shader_binding_map(msl, stage,
                                        candidate.get('reflection', {})) for candidate in rows]
             if any(mapping != maps[0] for mapping in maps):
                 raise ValueError('Conflicting BNSH resource reflection for one exact identity')
-            entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {})})
+            files[code_hash + '.metal'] = msl.encode('utf-8')
+            entry['msl'].update(bytes=len(files[code_hash + '.metal']),
+                                sha256=hashlib.sha256(files[code_hash + '.metal']).hexdigest())
+            entry.update({'status': 'ready', **maps[0], 'reflection': row.get('reflection', {}),
+                          'constant_specializations': constants})
         except ValueError as exc:
             entry.update({'status': 'unsupported', 'reason': str(exc)})
         indices[identity] = len(entries)

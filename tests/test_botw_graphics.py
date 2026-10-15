@@ -125,6 +125,26 @@ class BnshTests(unittest.TestCase):
 
 
 class ShaderBundleTests(unittest.TestCase):
+    def test_static_c1_specialization_uses_original_bits_and_rejects_unknown_indices(self):
+        module = BnshTests().parser()
+        self.assertTrue(hasattr(module, 'specialize_static_c1'), 'Exact c1 specialization is missing')
+        control, code = bytearray(0x708), bytearray(0x100)
+        struct.pack_into('<II', control, 0x700, 0x80, 0x100)
+        struct.pack_into('<I', code, 0x80, 0x3e800000)  # Exactly 0.25f.
+        source = ('struct C {float data[16384];}; fragment float4 fs(constant C& c1 [[buffer(0)]]) '
+                  '{return float4(c1.data[0u],0,0,1);}')
+        transformed, uses = module.specialize_static_c1(source, control, code)
+        self.assertNotIn('[[buffer', transformed)
+        self.assertIn('as_type<float>(0x3e800000u)', transformed)
+        self.assertEqual(uses, [{'bank': 1, 'offset': 0, 'bits': '3e800000', 'type': 'float', 'count': 1}])
+        with self.assertRaisesRegex(ValueError, 'dynamic|index'):
+            module.specialize_static_c1(source.replace('[0u]', '[i]'), control, code)
+        with self.assertRaisesRegex(ValueError, 'bounds'):
+            module.specialize_static_c1(source.replace('[0u]', '[64u]'), control, code)
+        struct.pack_into('<I', control, 0x704, 0x101)
+        with self.assertRaisesRegex(ValueError, 'bounds'):
+            module.specialize_static_c1(source, control, code)
+
     def test_stager_cli_preserves_exact_stage_identities_and_counts(self):
         import json
         module = BnshTests().parser()
@@ -163,6 +183,76 @@ class ShaderBundleTests(unittest.TestCase):
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
+    def test_static_c1_bundle_loader_matches_original_bits(self):
+        import hashlib
+        import json
+        module = BnshTests().parser()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            inputs, converted, bundle = path / 'inputs', path / 'converted', path / 'bundle'
+            inputs.mkdir(); converted.mkdir()
+            control, code = bytearray(0x708), bytearray(0x100)
+            struct.pack_into('<I', control, 0, 0x98761234)
+            struct.pack_into('<II', control, 0x700, 0x80, 0x100)
+            struct.pack_into('<I', code, 0, 0x12345678)
+            struct.pack_into('<I', code, 0x80, 0x3e800000)
+            ctl_hash, code_hash = hashlib.sha256(control).hexdigest(), hashlib.sha256(code).hexdigest()
+            (inputs / (ctl_hash + '.control')).write_bytes(control)
+            (inputs / (code_hash + '.nvn')).write_bytes(code)
+            (inputs / 'inputs.json').write_text(json.dumps({'records': [{'control_sha256': ctl_hash,
+                'code_sha256': code_hash, 'stage': 'fragment', 'container': 'fixture', 'variation': 0}]}))
+            (converted / (code_hash + '.metal')).write_text('#include <metal_stdlib>\nusing namespace metal; '
+                'struct C {float data[16384];}; fragment float4 fs(constant C& c1 [[buffer(0)]]) '
+                '{return float4(c1.data[0u],0,0,1);}')
+            self.assertEqual(module.stage_shader_bundle(inputs, converted, bundle)['ready'], 1)
+            harness = path / 'bundle.c'; harness.write_text(BUNDLE_SMOKE)
+            source = ROOT / 'native/botw_graphics'
+            exe = path / 'bundle-test'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source), str(source / 'graphics.m'), str(source / 'shader_bundle.m'), str(harness),
+                '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(exe)],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('REGISTERED=1 UNSUPPORTED=0 TOTAL=1', result.stdout)
+            manifest = json.loads((bundle / 'manifest.json').read_text())
+            item = manifest['entries'][0]['constant_specializations'][0]
+            for key, value, expected in (('bits', '3e800001', 'bits mismatch'), ('count', 2, 'expression/count')):
+                saved = item[key]; item[key] = value
+                (bundle / 'manifest.json').write_text(json.dumps(manifest))
+                result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                item[key] = saved
+
+    def test_original_static_c1_constant_reaches_gpu_pixels(self):
+        module = BnshTests().parser()
+        control, code = bytearray(0x708), bytearray(0x100)
+        struct.pack_into('<II', control, 0x700, 0x80, 0x100)
+        struct.pack_into('<I', code, 0x80, 0x3e800000)
+        fragment = ('struct C {float data[16384];}; fragment float4 fs(constant C& c1 [[buffer(0)]]) '
+                    '{return float4(c1.data[0u],0,0,1);}')
+        specialized, _ = module.specialize_static_c1(fragment, control, code)
+        smoke = METAL_SMOKE.replace('fragment float4 fs() { return float4(1,0,0,1); }', specialized)
+        smoke = smoke.replace('pixels[0]==255 && pixels[1]==0', 'pixels[0]>=63 && pixels[0]<=64 && pixels[1]==0')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            harness = path / 'constant.c'; harness.write_text(smoke)
+            source = ROOT / 'native/botw_graphics/graphics.m'
+            exe = path / 'constant'
+            result = subprocess.run(['/usr/bin/xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(source.parent), str(source), str(harness), '-framework', 'Foundation', '-framework', 'Metal',
+                '-framework', 'QuartzCore', '-o', str(exe)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(exe)], capture_output=True, text=True)
+            if result.returncode == 77:
+                self.skipTest('No Metal device')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('GPU_COPY_CLEAR_DRAW_OK', result.stdout)
+
     def test_real_gpu_copy_clear_and_pipeline_and_strict_unsupported_api(self):
         source = ROOT / 'native/botw_graphics/graphics.m'
         self.assertTrue(source.exists(), 'Native Metal bridge is missing')
@@ -258,13 +348,17 @@ class MetalBridgeTests(unittest.TestCase):
             entry = manifest['entries'][0]
             for field, invalid, expected in (
                     ('texture_types', [{'nvn_slot': 0, 'metal_slot': 0, 'type': 'cube'}], 'texture'),
-                    ('vertex_inputs', [0], 'vertex')):
-                saved = entry[field]; entry[field] = invalid
+                    ('vertex_inputs', [0], 'vertex'),
+                    ('constant_specializations', [{'bank': 1, 'offset': 0, 'bits': '3e800000', 'type': 'float', 'count': 1}], 'c1')):
+                saved = entry.get(field); entry[field] = invalid
                 (bundle / 'manifest.json').write_text(json.dumps(manifest))
                 result = subprocess.run([str(exe), str(bundle)], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0, field)
                 self.assertIn(expected, result.stderr)
-                entry[field] = saved
+                if saved is None:
+                    entry.pop(field)
+                else:
+                    entry[field] = saved
             fragment = next(x for x in manifest['entries'] if x['stage'] == 'fragment')
             fragment['reflection']['uniforms'].append({'name': 'misleadingSlot', 'slot': 1})
             fragment['bindings'][0]['nvn_slot'] = 1

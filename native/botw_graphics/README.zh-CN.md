@@ -61,7 +61,7 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 
 新版工具对未知常量数据或纹理类型明确失败。默认无上下文时实测只转换 13/37。可额外使用 `--require-runtime-2d-textures`，按反射 sampler 槽建立明确的二维纹理约束；编译器直接消费类型约束，不伪造常量缓冲数值或句柄。该路径实际转换 37/37 并全部通过 Metal 源码编译，常量值查询为 0，类型约束解析为 46 次。转换报告保存每个 shader 的查询次数、参数与应用约束。运行时必须通过 Metal 反射检查实际 NVN 纹理类型，若不满足则拒绝绘制；约束不等于已经观察过游戏实际描述符。
 
-转换报告保留 `nvn_bindings_validated=false`，表示仅完成翻译。后续打包器分别核验资源槽及顶点反射；c0/c1 私有常量、驱动常量和 storage buffer 仍拒绝登记。语法编译成功不能当作正确游戏画面。
+转换报告保留 `nvn_bindings_validated=false`，表示仅完成翻译。后续打包器分别核验资源槽、静态 c1 常量及顶点反射；未知驱动常量、动态 c1 索引和 storage buffer 仍拒绝登记。语法编译成功不能当作正确游戏画面。
 
 ## 私有运行时包
 
@@ -71,10 +71,12 @@ outputs/validate_msl outputs/shaders/converted > outputs/shaders/metal-validatio
 python3 -m scripts.botw_native.shaders \
   --bundle-inputs outputs/botw-shader-inputs-reflection \
   --bundle-compiled outputs/botw-shader-strict-runtime-2d-final \
-  --bundle-dir outputs/botw-private-shader-bundle
+  --bundle-dir outputs/botw-private-shader-bundle-c1
 ```
 
-包内保留每个原始 control/code/stage 的完整 SHA256 身份、68 个阶段引用、实际 BNSH 资源反射、明确的 NVN→Metal 槽映射、MSL 入口与纹理/顶点约束。NVN uniform slot r 对应 Maxwell c[3+r]，纹理 slot r 对应真实反射已确认的 c0[0x20+8r]；无法据此核实的项带 `unsupported` 及原因，保留身份供诊断。当前真实样本有 37 个独立身份，其中 29 项具备明确映射，8 项含未知私有资源。登记数只表明这些 shader 可以准确匹配及绑定；数组纹理、其他 NVN 命令和游戏实际呈现仍有各自的运行时检查。
+包内保留每个原始 control/code/stage 的完整 SHA256 身份、68 个阶段引用、实际 BNSH 资源反射、明确的 NVN→Metal 槽映射、MSL 入口与纹理/顶点约束。NVN uniform slot r 对应 Maxwell c[3+r]，纹理 slot r 对应真实反射已确认的 c0[0x20+8r]；无法据此核实的项带 `unsupported` 及原因，保留身份供诊断。登记数只表明这些 shader 可以准确匹配及绑定；数组纹理、其他 NVN 命令和游戏实际呈现仍有各自的运行时检查。
+
+固定上游 `dm/gfx/tools/dmsh_build.py` 记录 control+0x700/+0x704 为原始 code 内的 c1 起止偏移。本地 37 项全部核实该边界，8 项含真实 256-byte c1，其余为空。打包器只对固定且有界的 uint/float 数据读取作特化，MSL 通过 `as_type<float>(0x原始位模式u)` 精确保留浮点输入；不创建补零的常量缓冲。清单记录 bank、偏移、位模式、标量类型和出现次数，loader 对原始 control/code 和实际 MSL 表达式重新核验。6 个片元程序共 14 处固定读取已因此接通；2 个字体顶点程序的动态索引及 c0/SSBO 仍明确拒绝。
 
 宿主在 `botw_graphics_init` 后、客体所有者线程调用：
 
@@ -86,12 +88,12 @@ int ok = botw_graphics_load_shader_bundle(directory, &result, error, sizeof erro
 
 `directory` 在手机为用户私有 `Documents/botw-shaders`。loader 只读有界相对文件名，拒绝 symlink 和路径穿越，核验文件长度/摘要、NVN 原始头、入口阶段及全部阶段引用。所有 ready 项先完成 Metal 编译预检，逐项从实际 MSL 声明反推资源槽，再与清单和 BNSH 反射交叉核对。成功后 `declared_entries` 是 unique 身份总数，`registered_entries` 是已登记数量，`unsupported_entries` 是仅诊断数量；每个未支持项都在 stderr 记录完整身份和原因。遇到未知 shader 的 `ProgramSetShaders` 仍明确失败。
 
-本机严格编译并实际 Metal 加载该私有包的结果为 `REGISTERED=29 UNSUPPORTED=8 TOTAL=37`。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
+本机严格编译并实际 Metal 加载该私有包的结果为 `REGISTERED=35 UNSUPPORTED=2 TOTAL=37`。这些文件包含游戏原始区间和派生 MSL，仅保存在用户本地 ignored outputs，不能随源码提交或上传云端。
 
 ## 验证
 
 `python3 -m unittest discover -s tests -p test_botw_graphics.py -v`
 
-测试夹具全部人工生成，包含 BNSH 恶意边界、局部提取、真实 Metal 拷贝/清屏/绘制/围栏，以及手工 GOB 地址的彩色采样、顶点流、显式 uniform/texture/sampler 映射、深度遮挡和过短绑定范围拒绝。游戏输入、派生 shader、密钥和本地报告都不进入 Git。
+测试夹具全部人工生成，包含 BNSH 恶意边界、局部提取、真实 Metal 拷贝/清屏/绘制/围栏，以及手工 GOB 地址的彩色采样、顶点流、显式 uniform/texture/sampler 映射、深度遮挡和过短绑定范围拒绝。静态 c1 测试覆盖原始 0.25 常量的实际 GPU 像素、动态/越界索引拒绝，以及 loader 对位模式与次数篡改的拒绝。游戏输入、派生 shader、密钥和本地报告都不进入 Git。
 
 上游通用 ABI、对象边界和 Metal 内存/完成时序可复用；D2R 的 `shader_map.py` 依赖 Switch/PC D2R 对应包的 DXBC 顺序映射，`nvn_mtl.m` 含大量 D2R 专用着色器和 UI 特例，因此这里没有复制其游戏身份表或游戏特例。参考固定上游 [e2a0c9a](https://github.com/jhaizhou-ops/d2r-mobile/tree/e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8/dm/gfx) 与 [BNSH 格式来源](https://github.com/maierfelix/bnsh-decoder/blob/master/BNSH.ksy)。

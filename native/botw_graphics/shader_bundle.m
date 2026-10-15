@@ -87,6 +87,26 @@ static NSArray<NSTextCheckingResult*> *matches(NSString *pattern,NSString *sourc
     return [expression matchesInString:source options:0 range:NSMakeRange(0,source.length)];
 }
 static NSString *part(NSString *source,NSTextCheckingResult *match,NSUInteger index){return [source substringWithRange:[match rangeAtIndex:index]];}
+static BOOL constantSpecializations(BWBundleShader *shader,id list,char *error,size_t capacity){
+    if(!list)return YES; /* Older schema-1 bundles did not specialize c1. */
+    if(![list isKindOfClass:[NSArray class]]||[list count]>16384)return bundleError(error,capacity,"Invalid c1 specialization list");
+    if(![list count])return YES;
+    if(shader.control.length<0x708)return bundleError(error,capacity,"Missing original c1 control bounds");
+    uint32_t start,end;memcpy(&start,(const char*)shader.control.bytes+0x700,4);memcpy(&end,(const char*)shader.control.bytes+0x704,4);
+    if(start<0x80||start%4||end!=shader.code.length||end<start||end-start>65536)return bundleError(error,capacity,"Invalid original c1 code bounds");
+    NSMutableSet *seen=[NSMutableSet new];
+    for(id row in list){uint64_t bank,offset,count;
+        if(![row isKindOfClass:[NSDictionary class]]||!integer(row[@"bank"],1,&bank)||bank!=1||!integer(row[@"offset"],65532,&offset)||offset%4||offset+4>end-start||!integer(row[@"count"],65536,&count)||!count)return bundleError(error,capacity,"Invalid c1 specialization offset/count");
+        NSString *kind=row[@"type"],*bits=row[@"bits"];
+        if((![kind isEqual:@"float"]&&![kind isEqual:@"uint"])||![bits isKindOfClass:[NSString class]]||matches(@"^[0-9a-f]{8}$",bits).count!=1)return bundleError(error,capacity,"Invalid c1 specialization type/bits");
+        uint32_t original;memcpy(&original,(const char*)shader.code.bytes+start+offset,4);NSString *expected=[NSString stringWithFormat:@"%08x",original];
+        NSString *key=[NSString stringWithFormat:@"%llu:%@",(unsigned long long)offset,kind];
+        if(![expected isEqual:bits]||[seen containsObject:key])return bundleError(error,capacity,"Original c1 bits mismatch or duplicate specialization");[seen addObject:key];
+        NSString *literal=[NSString stringWithFormat:@"0x%@u",bits];if([kind isEqual:@"float"])literal=[NSString stringWithFormat:@"as_type<float>(%@)",literal];
+        if(matches([NSRegularExpression escapedPatternForString:literal],shader.source).count<count)return bundleError(error,capacity,"MSL c1 specialization expression/count mismatch");
+    }
+    return YES;
+}
 /* The bundle accepts the fixed offline compiler's explicit resource grammar.
  * Re-derive NVN slots from the actual compiled source, rather than trusting a
  * manifest to remap one reflected slot onto another. Unknown grammar fails. */
@@ -165,6 +185,7 @@ int botw_graphics_load_shader_bundle(const char *path,botw_graphics_shader_bundl
         shader.entry=entry[@"entry"];shader.bindings=bindings(entry[@"bindings"],entry[@"reflection"],error,capacity);shader.source=[[NSString alloc] initWithData:source encoding:NSUTF8StringEncoding];
         if(!shader.bindings){close(directory);return 0;}
         if(!shader.source||strlen(shader.source.UTF8String)!=source.length){close(directory);return bundleError(error,capacity,"Invalid UTF-8/NUL shader source");}
+        if(!constantSpecializations(shader,entry[@"constant_specializations"],error,capacity)){close(directory);return 0;}
         if(!sourceMetadata(shader,entry,error,capacity)){close(directory);return 0;}
         NSError *metalError=nil;id<MTLLibrary> library=[device newLibraryWithSource:shader.source options:nil error:&metalError];id<MTLFunction> function=[library newFunctionWithName:shader.entry];
         if(!function||function.functionType!=(nvnStage==NVN_SHADER_STAGE_VERTEX?MTLFunctionTypeVertex:MTLFunctionTypeFragment)){close(directory);return bundleError(error,capacity,"Metal entry/stage preflight failed: %s",metalError.localizedDescription.UTF8String?:"entry missing");}
