@@ -1431,10 +1431,30 @@ static int hid_request(botw_services *s, Session *session, Object *o, uint8_t *i
         response(ipc, capacity, r, NULL, 0, handle, 0); store32(ipc + 8, 1u << 1); return 0;
     }
     if (o->kind != OBJECT_HID) return problem(error, cap, "unsupported hid applet resource command=%u", r->command);
-    size_t user_offset = (r->command == 100 || r->command == 106 || r->command == 107 || r->command == 109) ? 8 : 0;
+    size_t user_offset = (r->command == 66 || r->command == 67 || r->command == 100 || r->command == 106 || r->command == 107 || r->command == 109) ? 8 : 0;
     if (!r->pid || r->payload_size < user_offset + 8 || load64(r->payload + user_offset) != s->applet_resource_user_id)
         return problem(error, cap, "hid command=%u requires PID and matching applet resource user ID", r->command);
     if (r->input_count && r->command != 102) return problem(error, cap, "unexpected hid input buffer command=%u", r->command);
+    if (r->command == 66 || r->command == 67) {
+        const char *method = r->command == 66 ? "hid.StartSixAxisSensor" : "hid.StopSixAxisSensor";
+        if (r->buffer_descriptor_count)
+            return problem(error, cap, "%s does not accept buffer descriptors", method);
+        /* Fixed SDK and libnx: u32 handle, u32 reserved=0, u64 ARUID.
+         * PID-only CMIF alignment leaves four unspecified framing bytes;
+         * domain data_size already excludes them. Neither is extra input. */
+        if (r->domain ? r->payload_size != 16 : (r->payload_size != 16 && r->payload_size != 20))
+            return problem(error, cap, "%s requires exactly 16 semantic input bytes", method);
+        if (load32(r->payload + 4)) return problem(error, cap, "%s requires reserved=0", method);
+        uint32_t handle = load32(r->payload);
+        int failed;
+        if (r->command == 66) {
+            uint64_t ticks = botw_input_monotonic_ticks();
+            if (!ticks) return problem(error, cap, "%s requires measured host monotonic time", method);
+            failed = botw_input_start_six_axis(s->input, handle, ticks);
+        } else failed = botw_input_stop_six_axis(s->input, handle);
+        if (failed) return problem(error, cap, "%s rejected invalid or unsupported standard Npad sensor handle=0x%08x", method, handle);
+        response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
     if (r->command == 0) {
         Object *resource = new_object(OBJECT_HID_APPLET_RESOURCE);
         if (!resource) return problem(error, cap, "allocate hid.IAppletResource failed");
