@@ -19,16 +19,26 @@
 #define DOMAIN_LIMIT 64u
 #define IPC_LIMIT 0x100u
 #define LOG_LIMIT (1024u * 1024u)
+#define BUFFER_LIMIT (16u * 1024u * 1024u)
+#define STORAGE_TOTAL_LIMIT (64u * 1024u * 1024u)
 #define SFCI 0x49434653u
 #define SFCO 0x4f434653u
 
 enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SESSION,
     OBJECT_APPLET_OE, OBJECT_APPLET_PROXY, OBJECT_COMMON_STATE,
-    OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS };
+    OBJECT_SELF_CONTROLLER, OBJECT_WINDOW_CONTROLLER, OBJECT_APPLICATION_FUNCTIONS,
+    OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR };
+typedef struct StorageBacking {
+    botw_services *owner;
+    unsigned refs;
+    size_t size;
+    uint8_t *bytes;
+} StorageBacking;
 typedef struct Object {
     enum ObjectKind kind;
     unsigned refs, initialized;
     uint64_t pid;
+    StorageBacking *storage;
 } Object;
 typedef struct Session {
     unsigned refs, domain;
@@ -48,6 +58,10 @@ struct botw_services {
     botw_services_performance_fn performance_handler;
     void *performance_opaque;
     botw_services_kernel_api kernel;
+    botw_input *input;
+    botw_romfs *romfs;
+    uint32_t input_shared_memory_handle;
+    size_t storage_bytes;
     unsigned applet_ready, applet_foreground, applet_focus, applet_operation;
     unsigned applet_foreground_rights, applet_running, applet_notify_operation, applet_notify_performance;
     uint64_t applet_resource_user_id;
@@ -67,7 +81,9 @@ typedef struct {
     size_t payload_size;
     uint64_t input_address;
     size_t input_size;
-    unsigned input_count;
+    unsigned input_count, output_count;
+    uint64_t output_address;
+    size_t output_size;
 } Request;
 
 static uint32_t load32(const void *p) { uint32_t n; memcpy(&n, p, 4); return n; }
@@ -95,6 +111,9 @@ static const char *kind_name(enum ObjectKind kind) {
         case OBJECT_SELF_CONTROLLER: return "am.ISelfController";
         case OBJECT_WINDOW_CONTROLLER: return "am.IWindowController";
         case OBJECT_APPLICATION_FUNCTIONS: return "am.IApplicationFunctions";
+        case OBJECT_LIBRARY_APPLET_CREATOR: return "am.ILibraryAppletCreator";
+        case OBJECT_APPLET_STORAGE: return "am.IStorage";
+        case OBJECT_STORAGE_ACCESSOR: return "am.IStorageAccessor";
     }
     return "<invalid>";
 }
@@ -103,7 +122,14 @@ static Object *new_object(enum ObjectKind kind) {
     if (o) { o->kind = kind; o->refs = 1; }
     return o;
 }
-static void release_object(Object *o) { if (o && !--o->refs) free(o); }
+static void release_object(Object *o) {
+    if (!o || --o->refs) return;
+    if (o->storage && !--o->storage->refs) {
+        o->storage->owner->storage_bytes -= o->storage->size;
+        free(o->storage->bytes); free(o->storage);
+    }
+    free(o);
+}
 static Session *new_session(Object *o) {
     Session *session = calloc(1, sizeof *session);
     if (session) { session->refs = 1; session->root = o; }
@@ -150,6 +176,14 @@ void botw_services_set_kernel_api(botw_services *s, const botw_services_kernel_a
     pthread_mutex_lock(&s->lock);
     if (!s->applet_event_write && !s->applet_event_read) s->kernel = api ? *api : (botw_services_kernel_api){0};
     pthread_mutex_unlock(&s->lock);
+}
+void botw_services_set_input(botw_services *s, botw_input *input, uint32_t shared_memory_handle) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock); s->input = input; s->input_shared_memory_handle = shared_memory_handle; pthread_mutex_unlock(&s->lock);
+}
+void botw_services_set_romfs(botw_services *s, botw_romfs *romfs) {
+    if (!s) return;
+    pthread_mutex_lock(&s->lock); s->romfs = romfs; pthread_mutex_unlock(&s->lock);
 }
 static int set_applet_state(botw_services *s, uint64_t user_id, int foreground, int focused, uint32_t operation, char *error, size_t cap) {
     if (!user_id || (foreground != 0 && foreground != 1) || (focused != 0 && focused != 1) || (!foreground && focused) || operation > 1)
@@ -200,11 +234,18 @@ static int services_close(botw_services *s, uint32_t id, char *error, size_t cap
 static int checked_span(size_t offset, size_t length, size_t end) { return offset <= end && length <= end - offset; }
 static int input_descriptor(botw_services *s, Request *r, uint64_t address, uint64_t length, char *error, size_t cap) {
     if (!length && !address) return 0; /* inactive half of an auto-select buffer */
-    if (!length || length > LOG_LIMIT || address > UINT64_MAX - length ||
+    if (!length || length > SIZE_MAX || address > UINT64_MAX - length ||
         !s->memory(s->opaque, address, (size_t)length, 0))
         return problem(error, cap, "IPC input descriptor is not checked guest memory address=0x%llx bytes=%llu", (unsigned long long)address, (unsigned long long)length);
     if (++r->input_count > 1) return problem(error, cap, "IPC multiple nonempty input buffers are unsupported");
     r->input_address = address; r->input_size = (size_t)length; return 0;
+}
+static int output_descriptor(botw_services *s, Request *r, uint64_t address, uint64_t length, char *error, size_t cap) {
+    if (!length && !address) return 0;
+    if (!length || length > SIZE_MAX || address > UINT64_MAX - length || !s->memory(s->opaque, address, (size_t)length, 1))
+        return problem(error, cap, "IPC output descriptor is not checked guest writable memory address=0x%llx bytes=%llu", (unsigned long long)address, (unsigned long long)length);
+    if (++r->output_count > 1) return problem(error, cap, "IPC multiple nonempty output buffers are unsupported");
+    r->output_address = address; r->output_size = (size_t)length; return 0;
 }
 static int parse_request(botw_services *s, Session *session, const uint8_t *ipc, size_t capacity, Request *r, char *error, size_t cap) {
     uint32_t a = load32(ipc), b = load32(ipc + 4);
@@ -217,7 +258,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         return problem(error, cap, "unsupported HIPC type=%u", r->type);
     unsigned statics = (a >> 16) & 15, sends = (a >> 20) & 15;
     unsigned recvs = (a >> 24) & 15, exchanges = a >> 28, recv_mode = (b >> 10) & 15;
-    if (recvs || exchanges || recv_mode || (b & 0x7fffc000u))
+    if (exchanges || recv_mode == 1 || recv_mode == 2 || (b & 0x7fffc000u))
         return problem(error, cap, "unsupported HIPC receive/exchange descriptors or reserved header bits (word0=0x%x word1=0x%x)", a, b);
     size_t offset = 8;
     if (b >> 31) {
@@ -235,22 +276,30 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
             r->copy_handle = load32(ipc + offset); offset += 4;
         }
     }
-    if (!checked_span(offset, (size_t)statics * 8 + (size_t)sends * 12, capacity))
+    if (!checked_span(offset, (size_t)statics * 8 + (size_t)(sends + recvs) * 12, capacity))
         return problem(error, cap, "HIPC descriptor list exceeds IPC buffer");
     for (unsigned i = 0; i < statics; i++, offset += 8) {
         uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
         uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
         if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
     }
-    for (unsigned i = 0; i < sends; i++, offset += 12) {
+    for (unsigned i = 0; i < sends + recvs; i++, offset += 12) {
         uint32_t size = load32(ipc + offset), low = load32(ipc + offset + 4), high = load32(ipc + offset + 8);
         if ((high & 3) == 2) return problem(error, cap, "HIPC buffer has invalid memory mode=2");
         uint64_t address = low | (uint64_t)(high >> 28) << 32 | (uint64_t)((high >> 2) & 0x3fffff) << 36;
         uint64_t length = size | (uint64_t)((high >> 24) & 15) << 32;
-        if (input_descriptor(s, r, address, length, error, cap)) return -1;
+        if (i < sends ? input_descriptor(s, r, address, length, error, cap) : output_descriptor(s, r, address, length, error, cap)) return -1;
     }
     size_t raw_end = offset + (size_t)(b & 0x3ff) * 4;
     if (raw_end > capacity) return problem(error, cap, "HIPC raw data exceeds IPC buffer (end=%zu capacity=%zu)", raw_end, capacity);
+    unsigned recv_statics = recv_mode >= 3 ? recv_mode - 2 : 0;
+    if (!checked_span(raw_end, recv_statics * 8, capacity)) return problem(error, cap, "HIPC receive static list exceeds buffer");
+    for (unsigned i = 0; i < recv_statics; i++) {
+        const uint8_t *entry = ipc + raw_end + i * 8;
+        uint32_t high = load32(entry + 4);
+        uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
+        if (output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+    }
     offset = (offset + 15) & ~(size_t)15;
     if (session->domain && (r->type == 4 || r->type == 6)) {
         if (!checked_span(offset, 16, raw_end)) return problem(error, cap, "truncated CMIF domain header");
@@ -261,7 +310,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
             return problem(error, cap, "CMIF domain input objects/reserved fields unsupported");
         offset += 16;
         if (type == 2) {
-            if (data_size || r->input_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data");
+            if (data_size || r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF domain Close has unexpected data");
             r->domain_close = 1; return 0;
         }
         if (type != 1 || data_size < 16 || !checked_span(offset, data_size, raw_end))
@@ -296,7 +345,7 @@ static int return_object(botw_services *s, Session *session, Object *o, uint8_t 
     response(ipc, capacity, r, NULL, 0, handle, object_id); return 0;
 }
 static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
-    if (r->input_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
+    if (r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
     uint32_t handle = 0, object_id;
     switch (r->command) {
         case 0:
@@ -344,7 +393,7 @@ static void emit_text(botw_services *s, const uint8_t *text, size_t length, unsi
     chunk[used] = 0; emit(s, "guest_log severity=%u text=%s", severity, chunk);
 }
 static int logger_packet(botw_services *s, const Request *r, char *error, size_t cap) {
-    if (r->input_count != 1 || r->input_size < 24) return problem(error, cap, "ILogger.Log requires one checked buffer with 24-byte header");
+    if (r->input_count != 1 || r->input_size < 24 || r->input_size > LOG_LIMIT) return problem(error, cap, "ILogger.Log requires one checked buffer with 24-byte header");
     const uint8_t *packet = (const uint8_t *)(uintptr_t)r->input_address;
     uint32_t length = load32(packet + 20);
     if (length > r->input_size - 24 || (packet[16] & ~7u) || packet[17] || packet[18] > 4)
@@ -370,7 +419,7 @@ static int logger_packet(botw_services *s, const Request *r, char *error, size_t
 }
 static int applet_request(botw_services *s, Session *session, Object *o, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (!s->applet_ready) return problem(error, cap, "appletOE requires measured host lifecycle state");
-    if (r->input_count) return problem(error, cap, "unsupported applet input buffer service=%s command=%u", kind_name(o->kind), r->command);
+    if (r->input_count && o->kind != OBJECT_STORAGE_ACCESSOR) return problem(error, cap, "unsupported applet input buffer service=%s command=%u", kind_name(o->kind), r->command);
     if (o->kind == OBJECT_APPLET_OE && r->command == 0) {
         if (!r->pid || r->copy_count != 1 || r->payload_size < 8 || load64(r->payload) || !s->kernel.is_process_handle || !s->kernel.is_process_handle(s->kernel.opaque, r->copy_handle))
             return problem(error, cap, "appletOE.OpenApplicationProxy requires PID, reserved=0 and one current-process copy handle (got=0x%x)", r->copy_handle);
@@ -386,11 +435,51 @@ static int applet_request(botw_services *s, Session *session, Object *o, uint8_t
             case 1: child = OBJECT_SELF_CONTROLLER; break;
             case 2: child = OBJECT_WINDOW_CONTROLLER; break;
             case 20: child = OBJECT_APPLICATION_FUNCTIONS; break;
+            case 11: child = OBJECT_LIBRARY_APPLET_CREATOR; break;
             default: return problem(error, cap, "unsupported ApplicationProxy interface command=%u", r->command);
         }
         Object *object = new_object(child);
         if (!object) return problem(error, cap, "allocate %s failed", kind_name(child));
         return return_object(s, session, object, ipc, capacity, r, 0, error, cap);
+    }
+    if (o->kind == OBJECT_LIBRARY_APPLET_CREATOR) {
+        if (r->command == 10) {
+            if (r->payload_size < 8) return problem(error, cap, "CreateStorage requires signed size");
+            uint64_t size = load64(r->payload);
+            if (size > BUFFER_LIMIT || size > STORAGE_TOTAL_LIMIT - s->storage_bytes)
+                return problem(error, cap, "CreateStorage size=%llu exceeds per-object/aggregate limit", (unsigned long long)size);
+            StorageBacking *backing = calloc(1, sizeof *backing);
+            Object *storage = new_object(OBJECT_APPLET_STORAGE);
+            if (!backing || !storage) { free(backing); release_object(storage); return problem(error, cap, "allocate applet storage metadata failed"); }
+            backing->bytes = calloc(1, size ? (size_t)size : 1);
+            if (!backing->bytes) { free(backing); release_object(storage); return problem(error, cap, "allocate applet storage bytes failed"); }
+            backing->owner = s; backing->refs = 1; backing->size = (size_t)size;
+            s->storage_bytes += (size_t)size; storage->storage = backing;
+            return return_object(s, session, storage, ipc, capacity, r, 0, error, cap);
+        }
+        if (r->command == 0 && r->payload_size >= 8)
+            return problem(error, cap, "CreateLibraryApplet requires host UI adapter applet_id=0x%x mode=%u", load32(r->payload), load32(r->payload + 4));
+    } else if (o->kind == OBJECT_APPLET_STORAGE && r->command == 0) {
+        Object *accessor = new_object(OBJECT_STORAGE_ACCESSOR);
+        if (!accessor) return problem(error, cap, "allocate IStorageAccessor failed");
+        accessor->storage = o->storage; accessor->storage->refs++;
+        return return_object(s, session, accessor, ipc, capacity, r, 0, error, cap);
+    } else if (o->kind == OBJECT_STORAGE_ACCESSOR) {
+        if (r->command == 0) {
+            if (r->input_count || r->output_count) return problem(error, cap, "IStorageAccessor.GetSize does not accept buffers");
+            uint64_t size = o->storage->size; response(ipc, capacity, r, &size, 8, 0, 0); return 0;
+        }
+        if (r->command == 10 || r->command == 11) {
+            int write = r->command == 10;
+            if (r->payload_size < 8 || (write ? r->input_count != 1 || r->output_count : r->output_count != 1 || r->input_count))
+                return problem(error, cap, "IStorageAccessor.%s requires offset and one %s buffer", write ? "Write" : "Read", write ? "input" : "output");
+            uint64_t offset = load64(r->payload); size_t length = write ? r->input_size : r->output_size;
+            if (offset > o->storage->size || length > o->storage->size - offset)
+                return problem(error, cap, "IStorageAccessor range exceeds backing offset=%llu length=%zu size=%zu", (unsigned long long)offset, length, o->storage->size);
+            if (write) memcpy(o->storage->bytes + (size_t)offset, (const void *)(uintptr_t)r->input_address, length);
+            else memcpy((void *)(uintptr_t)r->output_address, o->storage->bytes + (size_t)offset, length);
+            response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+        }
     }
     if (o->kind == OBJECT_COMMON_STATE) {
         if (r->command == 0) {
@@ -463,6 +552,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
+    if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR) return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
     if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     emit(s, "ipc_request service=%s command=%u handle=0x%x domain=%u object=%u bytes=%zu", kind_name(o->kind), r.command, handle_id, r.domain, r.object_id, r.payload_size);
     if (o->kind == OBJECT_SM) {
@@ -482,7 +572,7 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
-    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_APPLICATION_FUNCTIONS) {
+    } else if (o->kind >= OBJECT_APPLET_OE && o->kind <= OBJECT_STORAGE_ACCESSOR) {
         return applet_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_APM) {
         if (r.input_count || r.pid) return problem(error, cap, "apm manager command=%u unexpected buffers/PID", r.command);

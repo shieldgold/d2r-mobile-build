@@ -34,6 +34,12 @@ typedef struct {
     int (*is_process_handle)(void *, uint32_t);
 } botw_services_kernel_api;
 void botw_services_set_kernel_api(botw_services *services, const botw_services_kernel_api *api);
+typedef struct botw_input botw_input;
+typedef struct botw_romfs botw_romfs;
+/* Borrowed backends must outlive services. Input is already bound to this kernel
+ * shared-memory handle; root retains the original handle until services stop. */
+void botw_services_set_input(botw_services *services, botw_input *input, uint32_t shared_memory_handle);
+void botw_services_set_romfs(botw_services *services, botw_romfs *romfs);
 /* Supply measured host state. Focus/foreground are booleans; operation_mode is
  * Handheld=0 or Console=1. resource_user_id must be nonzero and stable per run. */
 int botw_services_set_applet_state(botw_services *services, uint64_t resource_user_id,

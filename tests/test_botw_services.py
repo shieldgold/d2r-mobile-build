@@ -73,7 +73,7 @@ class ServicesTests(unittest.TestCase):
         return self.lib.botw_services_close(self.ctx, handle, self.error, 1024)
 
     @staticmethod
-    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=()):
+    def request(command, payload=b'', kind=4, pid=False, domain=0, static=None, buffer=None, copies=(), receive=None):
         descriptor = b''
         if static:
             address, size = static
@@ -81,6 +81,11 @@ class ServicesTests(unittest.TestCase):
                                       ((address >> 32) & 15) << 12, address & 0xffffffff)
         if buffer:
             address, size = buffer
+            descriptor += struct.pack('<III', size & 0xffffffff, address & 0xffffffff,
+                                      ((address >> 36) & 0x3fffff) << 2 |
+                                      ((size >> 32) & 15) << 24 | ((address >> 32) & 15) << 28)
+        if receive:
+            address, size = receive
             descriptor += struct.pack('<III', size & 0xffffffff, address & 0xffffffff,
                                       ((address >> 36) & 0x3fffff) << 2 |
                                       ((size >> 32) & 15) << 24 | ((address >> 32) & 15) << 28)
@@ -95,7 +100,7 @@ class ServicesTests(unittest.TestCase):
         if domain:
             body = struct.pack('<BBHIII', 1, 0, len(body), domain, 0, 0) + body
         words = (16 + len(body) + 3) // 4
-        header = struct.pack('<II', kind | bool(static) << 16 | bool(buffer) << 20,
+        header = struct.pack('<II', kind | bool(static) << 16 | bool(buffer) << 20 | bool(receive) << 24,
                              words | (bool(pid or copies) << 31))
         message = header + special + descriptor + b'\0' * (-start % 16) + body
         return message.ljust(start + words * 4, b'\0')
@@ -311,6 +316,34 @@ class ServicesTests(unittest.TestCase):
         data, _, _ = self.response(raw)
         self.assertEqual(struct.unpack_from('<I', data)[0], 15)
         self.assertFalse(event['signaled'])
+
+    def test_library_applet_storage_retains_checked_bytes_across_object_lifetimes(self):
+        self.applet_kernel()
+        self.applet_state()
+        creator = self.proxy_child(self.applet_proxy(), 11)
+        raw, _ = self.send(creator, self.request(10, struct.pack('<q', 16)))
+        _, handles, _ = self.response(raw)
+        storage = handles[0]
+        raw, _ = self.send(storage, self.request(0))
+        _, handles, _ = self.response(raw)
+        accessor = handles[0]
+        self.assertEqual(self.close(storage), 0)
+        raw, _ = self.send(accessor, self.request(0))
+        data, _, _ = self.response(raw)
+        self.assertEqual(struct.unpack_from('<q', data)[0], 16)
+        original, readback = C.create_string_buffer(b'hello applet'), C.create_string_buffer(16)
+        self.ranges += [(C.addressof(original), len(original), False),
+                        (C.addressof(readback), len(readback), True)]
+        self.send(accessor, self.request(10, struct.pack('<q', 3), buffer=(C.addressof(original), 12)))
+        self.send(accessor, self.request(11, struct.pack('<q', 0), receive=(C.addressof(readback), 16)))
+        self.assertEqual(bytes(readback), b'\0\0\0hello applet\0')
+        self.send(accessor, self.request(10, struct.pack('<q', -1), buffer=(C.addressof(original), 1)), good=False)
+        self.send(accessor, self.request(11, struct.pack('<q', 15), receive=(C.addressof(readback), 2)), good=False)
+        self.send(accessor, self.request(11, struct.pack('<q', 0), receive=(C.addressof(original), 4)), good=False)
+        self.send(creator, self.request(10, struct.pack('<q', -1)), good=False)
+        self.send(creator, self.request(10, struct.pack('<q', 17 * 1024 * 1024)), good=False)
+        _, error = self.send(creator, self.request(0, struct.pack('<II', 0x11, 0)), good=False)
+        self.assertIn('applet_id=0x11', error)
 
     def test_sm_requires_initialize_then_returns_real_lm_session(self):
         sm = self.connect()
