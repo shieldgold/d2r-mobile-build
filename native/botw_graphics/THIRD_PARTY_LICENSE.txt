@@ -222,3 +222,16 @@ scanner. Existing complete array/private-texture fixtures are extended to
 verify retained descriptor/recorded values and private authority after a POD
 field write retires a moved primary slot claim. No upstream algorithm or
 original executable instruction is copied into this bookkeeping helper.
+
+The Cube adapter reuses the same complete pinned MIT nvn_tex, nvn_deswizzle,
+nvn_texwrite and nvn_texflush modules and their six-layer/mip algorithms. The
+base-v0 static contract separately fixes target8 to six faces while preserving
+raw depth metadata. Both fixed upstream Metal modules create native Cube
+textures and upload face/mip slices; their nil-resource/zero-fill fallbacks are
+not imported. The bridge supplies a checked host region for the supported
+single-mip Cube NULL-region call, not a new layout or codec. Public round-trip
+fixtures retain an independent GOB oracle and padding canaries; resource tests
+adapt the existing synthetic array/mip fixture to six float3 directions and
+three mip levels. Apple MSL section6.13.6 and the official typeCube and texture
+view documentation establish native Cube and six-slice view constraints;
+synthetic GPU results do not prove original-game rendering or A14 acceptance.

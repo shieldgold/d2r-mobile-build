@@ -274,6 +274,12 @@ BufferBuilder后继实现使用统一 `metadata_write.inc`，仍复用完整vend
 
 后继TextureInitialize通用失败的三路径纯诊断保原错误前缀/条件/短路/textureBytes次数/FALSE/单回调，只追加同一次已验证Builder快照的形状、flags/format/samples/stride、pool是否非空、GL及packaged布尔/layout位值；不解引用pool/pkg指针，不增加成功日志或validator/VM查询。owner4CPU/11mode通过4.739秒、独立同组4.644秒，ASan/UBSan与ARC exceptions启用；真RED只计编译成功后的字段缺失失败，原validator2次误预期3次的夹具错误单独保留。freeze SHA256 `b9cbd0dbd392caa9d87a913b4249550fbe2f32172b34eec9afe92b054e936a15` 三SHA稳，生产单行逆剥精确恢复cae，独立上界407B小于runtime512，双CLOSED且native98/100不变；实际Init参数仍待固定普通运行确认，不把GetStorageSize零查询当Init因果。
 
+cae真机后续独立 `observation-3` 已取得完整host_return=1，13个guest线程，首个图形拒绝同样是TextureInitialize generic。采样前主动核实手机已解锁，PID1160仍在；累计boot47,232,060字节，保留45,054,162字节原前缀且只增加一次bootstrap，新段2,177,898字节SHA256 `77d3c837d1dd5cb5db77a71d7670457ca5d6e26dcaaedd91c9e7476f644fbbf6`。记录SHA256 `a86859fc3806f2d563a2279a972d3385a5cd171c4fafbdefd3ff46e195a83275`；此前两份非终态观察原样保留。无真实游戏帧，不能从进程存活推定继续运行游戏。
+
+纯诊断提交 `6d6caaa` 已推送，但其普通Mac运行只有前台灰窗、约单核100%及非终态日志，没有获得实际Init参数；root保存checkpoint后精确终止自己的测试进程释放GPU，不将该次agent stop记作guest完成。独立固定原SDK、33个counter gate和内核时钟均为19.2MHz，超时换算为纳秒，未见混频；所审锁路径未证实本次死锁，cae约39分钟间隔仍无已证原因。证据在 `outputs/botw-clock-contract-audit/6d6caaa/`。
+
+普通Cube8接入复用完整vendor布局、deswizzle、writer及flush，方形、精确颜色格式、flags0/samples0、无GL/packaged和普通池；rawDepth1..2048元数据保留，内部固定六面。4×4 RGBA8单mip为3072字节、对齐512；GPU真实MTLTypeCube/arrayLength1、六face×全合法mip上传，同维同格式完整六面View可选mip子链。CPU传输限明确单mip，NULL region用该mip宽高构造六面的宿主region后交完整planner；RT/window/virtual/CubeArray9及未证域仍拒。7路径freeze `6059d61d5901577ae3b574f8d4ccfef0d996cac372235b8154f180c794b1fa8a`，native98/100。owner相关CPU36/36通过7.256秒，独立CPU8/8通过5.711秒；真实旧生产RED后独立GPU2方法/7模式通过2.972秒，最终public/旧负域/2DArray独审3方法/15模式通过3.598秒。全部依赖与7SHA稳，实际MetalValidation启用，CPU ASan/UBSan启用，无GPU sanitizer；双CLOSED/GPU_RELEASED。这是已证查询与资源合同修复，未证明旧generic Init与Cube的因果或原游戏画面；新固定版本普通运行与真机验收仍需分别记录。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

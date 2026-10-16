@@ -183,6 +183,10 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 
 真实Metal Validation夹具验证已登记descriptor在迁移后仍正确采样两层三mip，源存储可被另一个sampler合法复用；exact目标替换后，替换前已录draw/旧descriptor仍读旧图案，独立backing的新descriptor读不同图案，Finalize旧alias后新descriptor仍正确。两份GPU清除的private纹理在替换后保持各自像素，旧/新backing的live与retired canonical buffer别名均拒绝。CPU夹具另核无新增validator/VM查询、双方epoch变化/目标冲突/abort/实际clone异常与nil不改registry、容量、错误线程和篡改令牌。它们只验证兼容层合同，原游戏下一停点须由固定版本普通运行确认。
 
+普通 Cube（target8）首域复用完整 vendor layout/deswizzle/writer/flush 模块：方形1..16384、合法完整mip链、flags0/raw samples0、无GL/packaged、普通池，以及原有精确Metal颜色格式。原rawDepth保持正值1..2048的元数据/GetDepth含义；布局内部固定6面，不用rawDepth乘面数。4×4 RGBA8单mip为3072字节、对齐512；16×16六面三mip为12288字节。GPU使用真实MTLTextureTypeCube、arrayLength1和逐face/mip上传，shader须反射为Cube，以float3方向采样。GPU view只允许同Cube/同格式、完整六面，可选合法mip子链；RT、window、虚拟池、跨维/格式重解释和CubeArray(target9)未开放，原target9与vendor的depth解释差异继续隔离。
+
+Cube CPU Read/Write显式region的z/depth选择面，view的minFace×完整faceStride+mipOffset给出原偏移；CPU transfer只处理单个明确mip（单mip对象可省view，多mip对象须SetLevels(level,1)），不把多mip view当成一次全链传输。Cube region=NULL在这个单mip域构造完整六面的宿主region后交同一完整planner；其它target的NULL行为不变。零extent仍先校验对象、view和坐标，再无payload返回；不借此绕过寿命/权限。Flush/Invalidate沿原层单位与全mip机制，并保padding；私有资源的live/retired authority、描述符见证及全提交预检未放宽。原生Cube非零packaged W/H/D有实际布局效应，本批明确拒绝声明layout，未导入上游nil资源补零或空extent变1的fallback。
+
 TextureInitialize 的通用布局失败保留原错误前缀、FALSE、短路顺序与单次回调，仅追加同一次 validated Builder snapshot 的形状、flags/format/samples/stride、pool是否非空、GL/packaged布尔及layout位值；不读取pool或packaged指针内容，不新增成功输出、validator/VM查询或支持域。它与先前GetStorageSize零查询是独立API事件，参数相同之前不推定因果。
 
 BufferBuilder/Buffer 的 overlap 拒绝前缀保留，并附已匹配宿主记录的 class、span/requested字节数、同base/完整span标志、BWTexture primary/移动epoch及有限相对offset。这些错误上下文不读取candidate header或oldraw，不新增诊断VM查询，也不证明旧对象已死亡。

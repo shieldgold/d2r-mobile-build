@@ -82,13 +82,15 @@ static int textureLinearLayout(const TextureBuilder *b,BWLinearLayout *layout){
 }
 static BOOL textureOneDimensionalTarget(unsigned target){return target==NVN_TEXTURE_TARGET_1D||target==NVN_TEXTURE_TARGET_1D_ARRAY;}
 static size_t textureBytes(const TextureBuilder *b){
-    BOOL oneD=textureOneDimensionalTarget(b->target),oneDArray=b->target==NVN_TEXTURE_TARGET_1D_ARRAY,threeD=b->target==NVN_TEXTURE_TARGET_3D;
+    BOOL oneD=textureOneDimensionalTarget(b->target),oneDArray=b->target==NVN_TEXTURE_TARGET_1D_ARRAY,threeD=b->target==NVN_TEXTURE_TARGET_3D,cube=b->target==NVN_TEXTURE_TARGET_CUBEMAP;
     if(oneD){if(b->glName)return 0;int bw,bh;int bytes=nvn_fmt_bpb(b->format,&bw,&bh);
         if(b->packagedData||(b->packaged&~0xf1u)||(b->packaged&&!(b->packaged&1))||b->flags||b->samples||b->height<1||b->height>(oneDArray?2048:1)||b->depth!=1||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
     if(threeD){if(b->glName)return 0;int bw,bh;int bytes=nvn_fmt_bpb(b->format,&bw,&bh);
         /* Original 3D packaged H/D can differ from this complete vendor
          * layout. Materialize only the ordinary, automatically tiled domain. */
         if(b->packagedData||b->packaged||b->flags||b->samples||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
+    if(cube){if(b->glName)return 0;int bw,bh;int bytes=nvn_fmt_bpb(b->format,&bw,&bh);
+        if(b->packagedData||b->packaged||b->flags||b->samples||b->width!=b->height||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
     unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
     if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)){
         if(b->glName)return 0; /* Preserve original GL-before-provider Size order. */
@@ -102,7 +104,7 @@ static size_t textureBytes(const TextureBuilder *b){
         if(!textureColorLayout(b))return 0;
     }
     BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
-    if((b->target!=NVN_TEXTURE_TARGET_2D&&!array&&!oneD&&!threeD)||b->width<1||b->height<1||b->width>(threeD?2048:16384)||b->height>(threeD?2048:16384)||b->depth<1||b->depth>((array||threeD)?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
+    if((b->target!=NVN_TEXTURE_TARGET_2D&&!array&&!oneD&&!threeD&&!cube)||b->width<1||b->height<1||b->width>(threeD?2048:16384)||b->height>(threeD?2048:16384)||b->depth<1||b->depth>((array||threeD||cube)?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
     unsigned dimension=oneD?b->width:MAX(b->width,b->height),levels=1;if(threeD)dimension=MAX(dimension,(unsigned)b->depth);while(dimension>1){dimension>>=1;levels++;}if((unsigned)b->levels>levels)return 0;
     if(b->flags&(0x10|0x40)){BWLinearLayout layout;return textureLinearLayout(b,&layout)?layout.size:0;}
     nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);
@@ -228,12 +230,13 @@ static void textureCheckStorageAlias(BWTexture *t,BWPoolRange *mapping){
 static id<MTLTexture> textureMakeBase(BWTexture *t,BWPoolRange *mapping){
     uint32_t format;uint8_t swizzle[4];if(nvn_fmt_to_mtl(t.format,&format,swizzle)!=1)fatal("texture format conversion changed");
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)format width:t.width height:t.height mipmapped:t.descriptor.levels>1];desc.mipmapLevelCount=t.descriptor.levels;
+    if(t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP){desc.textureType=MTLTextureTypeCube;desc.arrayLength=1;}
     if(t.metadata.target==NVN_TEXTURE_TARGET_3D){desc.textureType=MTLTextureType3D;desc.depth=t.metadata.depth;}
     if(t.metadata.target==NVN_TEXTURE_TARGET_1D)desc.textureType=MTLTextureType1D;
     if(t.metadata.target==NVN_TEXTURE_TARGET_1D_ARRAY){desc.textureType=MTLTextureType1DArray;desc.arrayLength=t.metadata.height;desc.height=1;}
     if(t.metadata.target==NVN_TEXTURE_TARGET_2D_ARRAY){desc.textureType=MTLTextureType2DArray;desc.arrayLength=t.metadata.depth;}
     desc.storageMode=t.blockLinear?MTLStorageModePrivate:mapping.buffer.storageMode;desc.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
-    if(t.metadata.target!=NVN_TEXTURE_TARGET_3D&&!textureOneDimensionalTarget(t.metadata.target)&&((t.blockLinear&&!(t.format>=0x79&&t.format<=0x94))||(t.metadata.flags&0x40)))desc.usage|=MTLTextureUsageRenderTarget;
+    if(t.metadata.target!=NVN_TEXTURE_TARGET_CUBEMAP&&t.metadata.target!=NVN_TEXTURE_TARGET_3D&&!textureOneDimensionalTarget(t.metadata.target)&&((t.blockLinear&&!(t.format>=0x79&&t.format<=0x94))||(t.metadata.flags&0x40)))desc.usage|=MTLTextureUsageRenderTarget;
     if(t.blockLinear)return [gpu newTextureWithDescriptor:desc];
     if(!mapping.physical.coherent)fatal("linear textures require coherent no-copy pool storage");
     NSUInteger alignment=[gpu minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)format];
@@ -291,6 +294,7 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return textureInitReturnedFalse(attempt,report("texture device/pool mismatch"));
     if(textureOneDimensionalTarget(b->target)){if(b->target==NVN_TEXTURE_TARGET_1D_ARRAY&&b->height!=1)return textureInitReturnedFalse(attempt,report("1D array Metal textures require one layer"));if(b->levels!=1)return textureInitReturnedFalse(attempt,report("1D Metal textures require one level"));if(pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("1D textures require ordinary pool storage"));}
     if(b->target==NVN_TEXTURE_TARGET_3D){if(b->depth!=1)return textureInitReturnedFalse(attempt,report("3D Metal textures require one depth slice"));if(b->levels!=1)return textureInitReturnedFalse(attempt,report("3D Metal textures require one level"));if(pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("3D textures require ordinary pool storage"));}
+    if(b->target==NVN_TEXTURE_TARGET_CUBEMAP&&pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("Cube textures require ordinary pool storage"));
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return textureInitReturnedFalse(attempt,report("Texture storage bounds"));
     unsigned depthKind=0;if((bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)||
         ((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_depth_storage_format(b->format)&&textureDepthSelected(b,&depthKind)))&&
@@ -416,7 +420,11 @@ static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView v,BOOL att
     if(!levels)levels=base.descriptor.levels-level;if(!layers)layers=base.layout.layers-layer;
     if(levels>base.descriptor.levels-level||layers>base.layout.layers-layer)fatal("texture view level/layer count bounds");
     int target=(v.flags&32)?v.target:base.metadata.target,format=(v.flags&4)?v.format:base.format;
-    BOOL oneD=textureOneDimensionalTarget(base.metadata.target),threeD=base.metadata.target==NVN_TEXTURE_TARGET_3D;
+    BOOL oneD=textureOneDimensionalTarget(base.metadata.target),threeD=base.metadata.target==NVN_TEXTURE_TARGET_3D,cube=base.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP;
+    if(cube&&attachment)fatal("Cube render attachments are not implemented");
+    if((cube||target==NVN_TEXTURE_TARGET_CUBEMAP)&&(uint32_t)target!=base.metadata.target)fatal("Cube texture views cannot change dimension");
+    if(cube&&format!=base.format)fatal("Cube texture view format reinterpretation is not implemented");
+    if(cube&&(layer||layers!=6))fatal("Cube texture view requires all six faces");
     if(threeD&&attachment)fatal("3D render attachments are not implemented");
     if((threeD||target==NVN_TEXTURE_TARGET_3D)&&(uint32_t)target!=base.metadata.target)fatal("3D texture views cannot change dimension");
     if(threeD&&format!=base.format)fatal("3D texture view format reinterpretation is not implemented");
@@ -425,8 +433,8 @@ static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView v,BOOL att
     if(oneD&&format!=base.format)fatal("1D texture view format reinterpretation is not implemented");
     uint32_t mode=(v.flags&16)?v.depthMode:base.metadata.depthMode;
     if(mode!=NVN_TEXTURE_DEPTH_STENCIL_MODE_DEPTH)fatal("texture view stencil aspect is not implemented");
-    MTLTextureType type=threeD?MTLTextureType3D:oneD?(target==NVN_TEXTURE_TARGET_1D_ARRAY?MTLTextureType1DArray:MTLTextureType1D):target==NVN_TEXTURE_TARGET_2D?MTLTextureType2D:MTLTextureType2DArray;
-    if(!oneD&&!threeD&&target!=NVN_TEXTURE_TARGET_2D&&target!=NVN_TEXTURE_TARGET_2D_ARRAY)fatal("texture view target is not implemented");
+    MTLTextureType type=cube?MTLTextureTypeCube:threeD?MTLTextureType3D:oneD?(target==NVN_TEXTURE_TARGET_1D_ARRAY?MTLTextureType1DArray:MTLTextureType1D):target==NVN_TEXTURE_TARGET_2D?MTLTextureType2D:MTLTextureType2DArray;
+    if(!oneD&&!threeD&&!cube&&target!=NVN_TEXTURE_TARGET_2D&&target!=NVN_TEXTURE_TARGET_2D_ARRAY)fatal("texture view target is not implemented");
     if(type==MTLTextureType2D&&layers!=1)fatal("2D texture view requires one layer");
     if(attachment){if(base.layout.layers>1&&!(v.flags&2))fatal("array render targets require explicit layer/view semantics");if(layers!=1)fatal("render target view requires one layer");levels=1;type=MTLTextureType2D;}
     uint32_t pixel;uint8_t conversion[4];if(nvn_fmt_to_mtl(format,&pixel,conversion)!=1)fatal("texture view format requires conversion");
@@ -458,7 +466,20 @@ static void texturePrepareWrite(void *dst,size_t bytes){if(memoryAccessValidator
 static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyRegion *raw,ptrdiff_t row,ptrdiff_t image){
     if((v.flags&32)&&(textureOneDimensionalTarget(t.metadata.target)||textureOneDimensionalTarget(v.target))&&v.target!=t.metadata.target)fatal("1D texture views cannot change dimension");
     if((v.flags&32)&&(t.metadata.target==NVN_TEXTURE_TARGET_3D||v.target==NVN_TEXTURE_TARGET_3D)&&v.target!=t.metadata.target)fatal("3D texture views cannot change dimension");
-    NVNcopyRegion region;textureReadBytes(raw,&region,sizeof region,"texture copy region is not readable");
+    BOOL cube=t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP;
+    if((v.flags&32)&&(cube||v.target==NVN_TEXTURE_TARGET_CUBEMAP)&&v.target!=t.metadata.target)fatal("Cube texture views cannot change dimension");
+    if(cube&&((v.flags&4)&&v.format!=(uint32_t)t.format))fatal("Cube CPU view format reinterpretation is not implemented");
+    unsigned cubeLevel=(v.flags&1)?v.baseLevel:0;
+    if(cube){if(cubeLevel>=t.descriptor.levels||((v.flags&1)?v.numLevels!=1:t.descriptor.levels!=1))fatal("Cube CPU transfer requires one explicit mip level");
+        if((v.flags&2)&&(v.minLayer>=6||v.numLayers>6-v.minLayer))fatal("Cube CPU view face bounds");}
+    NVNcopyRegion region;
+    if(cube&&!raw){
+        if((v.flags&2)&&(v.minLayer||(v.numLayers&&v.numLayers!=6)))fatal("Cube default region requires all six faces");
+        region=(NVNcopyRegion){0,0,0,MAX(1,t.width>>cubeLevel),MAX(1,t.height>>cubeLevel),6};
+    }else textureReadBytes(raw,&region,sizeof region,"texture copy region is not readable");
+    if(cube&&(region.xoffset<0||region.yoffset<0||region.zoffset<0||region.width<0||region.height<0||region.depth<0||row<0||image<0||
+        (uint64_t)region.xoffset+region.width>(unsigned)MAX(1,t.width>>cubeLevel)||(uint64_t)region.yoffset+region.height>(unsigned)MAX(1,t.height>>cubeLevel)||
+        (uint64_t)region.zoffset+region.depth>6-((v.flags&2)?v.minLayer:0)))fatal("Cube region exceeds the selected mip/face extent");
     /* Base-v0 uses z/depth, upstream 1.9 uses y/height for array layers.
      * Only their proven single-layer intersection is materialized here. */
     BOOL emptyArray=NO;if(t.metadata.target==NVN_TEXTURE_TARGET_1D_ARRAY){
@@ -554,7 +575,7 @@ static void textureInvalidate(const NVNtexture *raw,const NVNtextureView *view){
      * read never publishes a partially reconstructed texture. Padding survives. */
     NSMutableData *image=[NSMutableData dataWithLength:t.layout.size];if(!image)fatal("texture invalidate snapshot allocation failed");textureReadBytes(storage,image.mutableBytes,t.layout.size,"texture invalidate pool snapshot failed");
     for(unsigned level=0;level<d.levels;level++){
-        NVNcopyRegion r={0,0,0,MAX(1,t.width>>level),MAX(1,t.height>>level),(int)count};TextureView selected={0};selected.flags=3;selected.baseLevel=level;selected.minLayer=first;selected.numLayers=count;
+        NVNcopyRegion r={0,0,0,MAX(1,t.width>>level),MAX(1,t.height>>level),(int)count};TextureView selected={0};selected.flags=3;if(t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP)selected.numLevels=1;selected.baseLevel=level;selected.minLayer=first;selected.numLayers=count;
         nvn_texwrite_plan p=texturePlan(t,selected,&r,0,0);NSMutableData *linear=[NSMutableData dataWithLength:p.src_bytes];if(!linear)fatal("texture invalidate staging allocation failed");
         NVNtextureView native;memset(&native,0,sizeof native);memcpy(&native,&selected,sizeof selected);textureCPURead(raw,&native,&r,linear.mutableBytes,0,0);nvn_texwrite_apply(&d,&p,linear.bytes,image.mutableBytes);
     }
