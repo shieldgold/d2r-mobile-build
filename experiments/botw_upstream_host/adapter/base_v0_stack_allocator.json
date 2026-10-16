@@ -1,0 +1,131 @@
+{
+  "schema": "botw-base-v0-stack-allocator-contract-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "fixed_sdk": {
+    "path": "outputs/botw-native-base/ExeFS/sdk",
+    "sha256": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31",
+    "build_id": "99d55fb2a2ce9e14bd5d56428ec0397be46e48eb000000000000000000000000"
+  },
+  "bounded_static_spans": [
+    {
+      "offset": "0x8c628",
+      "bytes": 40,
+      "sha256": "69a815c2d36a74b53fc24fbbfb393f0c20f7ac1f878d5a5acc928bbe1636e4fc",
+      "meaning": "nnosInitialize both allocator constructors"
+    },
+    {
+      "offset": "0x8a308",
+      "bytes": 76,
+      "sha256": "4bf65a5c1b5ca447edcf2797129f7f8b5dbae283357e06776d4ae34924e7ee5b",
+      "meaning": "AddressSpaceAllocator constructor complete"
+    },
+    {
+      "offset": "0x880b4",
+      "bytes": 204,
+      "sha256": "916edfdf170193c7551133f12b6ca02b17df7f80cc81304beecfdbee879e06d5",
+      "meaning": "CreateAliasStackUnsafe complete"
+    },
+    {
+      "offset": "0x8a3b4",
+      "bytes": 252,
+      "sha256": "42605a186e5db5b72db55f0933ff330efa219f2126830467ccc29e6dcfe624f3",
+      "meaning": "AllocateSpace complete"
+    },
+    {
+      "offset": "0x8a4b0",
+      "bytes": 152,
+      "sha256": "2ae0b47d9f2fba9e8b62588069c11a65307e76aaf0d95e10c2bb2823d8f01d6f",
+      "meaning": "CheckGuardSpace complete"
+    },
+    {
+      "offset": "0x3487b4",
+      "bytes": 16,
+      "sha256": "d111edca70d2a1164ac7629de703a15ce4ed3f5775dee732a08b622972b1abf0",
+      "meaning": "constructor PLT"
+    },
+    {
+      "offset": "0x3435e4",
+      "bytes": 16,
+      "sha256": "4c0aef45fd49689e826b0cd43c7822b5e2f4da6eb901b835737dca5b984b4c04",
+      "meaning": "AllocateSpace PLT"
+    }
+  ],
+  "entry": {
+    "name": "_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm",
+    "why": "base-v0 SDK stack allocator uses the retained host stack region",
+    "titles": 4
+  },
+  "reference_contract": {
+    "owners": {
+      "sdk": {
+        "mask": 32,
+        "table": "JMPREL",
+        "type": 1026,
+        "slot": "0x6be540",
+        "symbol_index": 6149,
+        "addend": 0
+      }
+    },
+    "other_fixed_modules": [
+      "rtld",
+      "main",
+      "subsdk0",
+      "subsdk1",
+      "subsdk2",
+      "subsdk3"
+    ],
+    "other_module_definitions_or_references": false,
+    "C2_same_definition": true,
+    "C2_reference_count": 0
+  },
+  "fixed_constructor": {
+    "symbol": "_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm",
+    "offset": "0x8a308",
+    "bytes": 76,
+    "sha256": "4bf65a5c1b5ca447edcf2797129f7f8b5dbae283357e06776d4ae34924e7ee5b",
+    "return": "Original x0; adapter forwards original result without assuming self.",
+    "fields": {
+      "plus8": "start>>12",
+      "plus16": "(end>>12)+ceil(guard/4096)",
+      "plus24": "ceil(guard/4096)"
+    },
+    "object_mutation": "Only the original SDK constructor writes the opaque object."
+  },
+  "selection": {
+    "start": 134217728,
+    "end": 2147483648,
+    "guard": 16384,
+    "unknown_or_wide": "Forward unchanged, with zero host queries.",
+    "sdk": "Unique g_mod[5] named sdk after the strict sixmodule loader profile; resolve by module_sym, never guest_sym/force resolution."
+  },
+  "normal_region": {
+    "provider": "Original svc_dispatch GetInfo14/15 using two hostowned uint64_t[31] frames, each with current-process handle0xffff8001.",
+    "alignment": 4096,
+    "guard_rounded": 16384,
+    "validation": "base nonzero; base and size aligned4096; base+size nooverflow; size>2*guard+4096.",
+    "start": "regionBase",
+    "end": "regionBase+regionSize-roundedGuard",
+    "proof": "E=(end>>12)+G == regionEnd>>12. R=E-(ceil(size/4096)+2G)-S. For supported positiveR, original candidate query and both guards remain in the owned region. Strict minimum region leaves a positiveR for at least one page; the unchanged SDK algorithm still governs individual requests.",
+    "new_address_reservation": false,
+    "new_registry_or_allocator": false
+  },
+  "forwarding": {
+    "original_calls": 1,
+    "entry_errno": "Restored after query/resolution immediately before original call.",
+    "post_errno": "Original ctor errno is returned unchanged.",
+    "failure": "Missing unique sdk/original export, failed GetInfo, invalid host region fail closed with fixed host literals."
+  },
+  "expected_registry": {
+    "entries": 134,
+    "candidates": 132,
+    "active": 99,
+    "force_lookup_references": 140,
+    "canonical_metadata_sha256": "1e242f26e7dc19d575fafc09c41e5c045825b6c708c2a465d76f9abf19ca19eb"
+  },
+  "limits": [
+    "No Guest or GPU execution in the static proof or owned fixtures.",
+    "This is a fixed ABI repair, not a claim of the actual phase23 fatal PC or gameplay.",
+    "No PAGEZERO change, low fixed mmap, fabricated QueryMemory free range, or Guestframework rewrite."
+  ]
+}

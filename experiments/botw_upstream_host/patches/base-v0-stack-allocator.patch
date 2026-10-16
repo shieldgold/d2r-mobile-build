@@ -1,0 +1,70 @@
+--- a/dm/host/hle_os.c
++++ b/dm/host/hle_os.c
+@@ -1,7 +1,10 @@
+ // Host common miscellany: guest object side table, monotonic clock, C library imports that none of the modules define.
+ // (The former 136 HLE entries for nn::os/mem/lmem/C++ ABI have been deleted: the SDK brings its own nn::os, and at load time not one of these entries was resolved and used.)
+ #include <pthread.h>
++#define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
++#include "base_v0_stack_allocator.h"
++#include <errno.h>
+ #include <mach/mach_time.h>
+ #include <stdatomic.h>
+ 
+@@ -107,3 +110,56 @@
+     for (size_t i = 0; i < n; i += 8) { uint64_t v = dm_entropy64(); memcpy((uint8_t *)p + i, &v, n - i < 8 ? n - i : 8); }
+     return 0;
+ }
++
++/* BASE_V0_STACK_ALLOCATOR_BEGIN */
++uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr);
++
++/* GetInfo consumes only host-owned scalar slots here, never a guest frame. */
++static int botw_base_v0_stack_region(uint64_t *base, uint64_t *size) {
++    uint64_t query[31] = {0};
++    query[1] = 14;
++    query[2] = UINT64_C(0xffff8001);
++    (void)svc_dispatch(0x29, query, 0);
++    if (query[0]) return -1;
++    uint64_t address = query[1];
++    memset(query, 0, sizeof query);
++    query[1] = 15;
++    query[2] = UINT64_C(0xffff8001);
++    (void)svc_dispatch(0x29, query, 0);
++    if (query[0]) return -1;
++    uint64_t length = query[1];
++    const uint64_t guard = UINT64_C(0x4000), page = UINT64_C(0x1000);
++    if (!address || (address & (page - 1)) || (length & (page - 1)) ||
++        length <= 2 * guard + page || address > UINT64_MAX - length)
++        return -1;
++    *base = address;
++    *size = length;
++    return 0;
++}
++
++HLE_FORCE("_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm",
++          "base-v0 SDK stack allocator uses the retained host stack region", void *,
++          botw_base_v0_stack_allocator, void *self, uint64_t start, uint64_t end, uint64_t guard) {
++    int entry_errno = errno;
++    if (g_nmod != 6 || strcmp(g_mod[5].name, "sdk"))
++        die("base-v0 stack allocator SDK module unavailable");
++    for (int i = 0; i < 5; i++)
++        if (!strcmp(g_mod[i].name, "sdk"))
++            die("base-v0 stack allocator SDK module unavailable");
++    botw_base_v0_stack_constructor original = (botw_base_v0_stack_constructor)
++        module_sym(&g_mod[5], BOTW_BASE_V0_STACK_ALLOCATOR_SYMBOL);
++    if (!original || original == botw_base_v0_stack_allocator)
++        die("base-v0 stack allocator constructor unavailable");
++    if (start == UINT64_C(0x08000000) && end == UINT64_C(0x80000000) &&
++        guard == UINT64_C(0x4000)) {
++        uint64_t address, length;
++        if (botw_base_v0_stack_region(&address, &length))
++            die("base-v0 stack allocator stack region unavailable");
++        start = address;
++        /* The SDK adds guard pages to end before selecting its query span. */
++        end = address + length - guard;
++    }
++    errno = entry_errno;
++    return original(self, start, end, guard);
++}
++/* BASE_V0_STACK_ALLOCATOR_END */

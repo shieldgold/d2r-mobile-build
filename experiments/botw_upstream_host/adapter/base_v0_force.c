@@ -187,6 +187,7 @@ static const force_rule rules[] = {
     {"_ZN2nn3hid20ControllerSupportArg10SetDefaultEv", "BotW: SDK default arguments, verified at SDK+0x53e414", 4u, 1u, 0u},
     {"_ZN2nn3hid21ShowControllerSupportERKNS0_20ControllerSupportArgE", "BotW: controller applet answered by the host virtual controller", 4u, 1u, 1u},
     {"nntimeStartup", "BotW: retain the SDK counter callback with host time APIs", 4u, 1u, 0u},
+    {"_ZN2nn2os6detail21AddressSpaceAllocatorC1Emmm", "base-v0 SDK stack allocator uses the retained host stack region", 4u, 1u, 32u},
     {"nvnBootstrapLoader", "The whole NVN graphics interface is replaced by a host null device (later Metal); the SDK's NVN driver does not run", 2u, 0u, 0u},
 };
 enum { MODULE_COUNT = sizeof modules / sizeof *modules,
