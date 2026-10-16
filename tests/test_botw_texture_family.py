@@ -7,11 +7,15 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+# This list also generates the native fixture's IMAGE flag expression.
+VOLUME_FLAGS0_MODES = ('volume-read', 'volume-write-noimage')
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class TextureFamilyTests(unittest.TestCase):
     def test_volume_3d_public_xyz_transfer_cache_mips_padding_and_empty(self):
+        from botw_metal_counter_capability import require_apple7
+        require_apple7()
         with tempfile.TemporaryDirectory() as directory:
             graphics=ROOT/'native/botw_graphics';exe=Path(directory)/'volume-public'
             command=['xcrun','clang','-std=c11','-fobjc-arc','-fobjc-arc-exceptions','-fblocks',
@@ -34,6 +38,7 @@ class TextureFamilyTests(unittest.TestCase):
     def _volume_descriptor_probe(self, modes):
         """Exercise native volumes; the 32-cube importer uses an independent GOB oracle."""
         import test_botw_graphics as baseline
+        from botw_metal_counter_capability import require_apple7
         feature = r'''
     API(nvnTextureBuilderSetTarget);API(nvnTextureBuilderSetSize3D);API(nvnTextureBuilderSetLevels);
     API(nvnTextureBuilderGetStorageSize);API(nvnTextureBuilderSetPackagedTextureData);API(nvnTextureBuilderGetPackagedTextureData);
@@ -48,7 +53,7 @@ class TextureFamilyTests(unittest.TestCase):
     unsigned levels=npot?5:(!strcmp(mode,"volume-mips")||!strcmp(mode,"volume-view"))?6:1;
     int selected=!strcmp(mode,"volume-view"),virt=strstr(mode,"remap")||strstr(mode,"authority");
     int writeOnly=!strcmp(mode,"volume-write")||!strcmp(mode,"volume-write-noimage"),readWrite=!strcmp(mode,"volume-readwrite"),wrong=!strcmp(mode,"volume-wrong-type"),badView=!strcmp(mode,"volume-invalid-view");
-    int image=strcmp(mode,"volume-read")&&strcmp(mode,"volume-write-noimage");size_t backingBytes=1024*1024;
+    int image=__VOLUME_IMAGE_EXPRESSION__;size_t backingBytes=1024*1024;
     unsigned char *volumeMemory=mmap(NULL,backingBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
     unsigned char *secondMemory=virt?mmap(NULL,backingBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0):NULL;
     CHECK(volumeMemory!=MAP_FAILED&&(!virt||secondMemory!=MAP_FAILED));memset(volumeMemory,0xa5,backingBytes);if(virt)memset(secondMemory,0xa5,backingBytes);
@@ -169,6 +174,8 @@ static void volumeColor(unsigned char *out,unsigned x,unsigned y,unsigned z,unsi
  out[0]=(unsigned char)(17+(x*5+level*9+bias)%200);out[1]=(unsigned char)(19+(y*7+level*11+bias)%200);out[2]=(unsigned char)(23+(z*11+level*13+bias)%200);out[3]=255;
 }
 '''
+        feature = feature.replace('__VOLUME_IMAGE_EXPRESSION__',
+                                  '&&'.join(f'strcmp(mode,"{mode}")' for mode in VOLUME_FLAGS0_MODES))
         source = baseline.METAL_SMOKE.replace('#include <unistd.h>', '#include <unistd.h>\n'+helpers)
         source = source.replace('botw_graphics_init(NULL, NULL, valid)', 'botw_graphics_init(NULL, volumeError, valid)')
         source = source.replace('page*2', 'page*16').replace('nvnTextureBuilderSetSize2D(&tb,4,4);', 'nvnTextureBuilderSetSize2D(&tb,8,8);')
@@ -184,6 +191,8 @@ static void volumeColor(unsigned char *out,unsigned x,unsigned y,unsigned z,unsi
             self.assertEqual(build.returncode,0,build.stdout+build.stderr)
             for mode in modes:
                 with self.subTest(mode=mode):
+                    if mode not in VOLUME_FLAGS0_MODES:
+                        require_apple7()
                     run=subprocess.run([str(exe),mode],capture_output=True,text=True,timeout=30,env={**os.environ,'MTL_DEBUG_LAYER':'1'})
                     if run.returncode==77:self.skipTest('Metal unavailable')
                     self.assertEqual(run.returncode,0,run.stdout+run.stderr)
@@ -555,6 +564,118 @@ static void volumeColor(unsigned char *out,unsigned x,unsigned y,unsigned z,unsi
              ('tracking-clean','TEXTURE_TRACKED_GPU_COHERENCE_OK',True),
              ('tracking-restored','texture flush CPU storage changed',False),
              ('tracking-invalidate','TEXTURE_TRACKED_GPU_COHERENCE_OK',True)])
+
+
+
+
+
+class MetalCapabilityPrerequisiteTests(unittest.TestCase):
+    """Hardware predicates are public query results, never bridge error text."""
+    @staticmethod
+    def _capabilities(**changes):
+        result={'metal_device':True,'device':'arbitrary device name','api_available':True,
+                'timestamp_counter':True,'stage_boundary':True,'counter_sets':{},'apple7_family':True}
+        result.update(changes)
+        return result
+
+    def test_public_query_requires_a_boolean_apple7_result(self):
+        import json
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        for value in (False,True,0,1,None,'true','false','missing'):
+            with self.subTest(value=value):
+                payload=self._capabilities(apple7_family=value)
+                if value=='missing':payload.pop('apple7_family')
+                responses=[subprocess.CompletedProcess([],0,'',''),
+                           subprocess.CompletedProcess([],0,json.dumps(payload),'')]
+                capability.counter_capabilities.cache_clear()
+                with patch.object(capability.subprocess,'run',side_effect=responses):
+                    if type(value) is bool:
+                        self.assertIs(capability.counter_capabilities()['apple7_family'],value)
+                    else:
+                        with self.assertRaises(AssertionError):capability.counter_capabilities()
+        capability.counter_capabilities.cache_clear()
+
+    def test_capability_compile_run_and_json_errors_never_become_hardware_skips(self):
+        import json
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        cases=[([subprocess.CompletedProcess([],1,'','synthetic compiler failure')],AssertionError),
+               ([subprocess.CompletedProcess([],0,'',''),subprocess.CompletedProcess([],1,'','synthetic query failure')],AssertionError),
+               ([subprocess.CompletedProcess([],0,'',''),subprocess.CompletedProcess([],0,'not-json','')],json.JSONDecodeError)]
+        for responses,error in cases:
+            with self.subTest(error=error.__name__):
+                capability.counter_capabilities.cache_clear()
+                with patch.object(capability.subprocess,'run',side_effect=responses),self.assertRaises(error):
+                    capability.counter_capabilities()
+        capability.counter_capabilities.cache_clear()
+
+    def test_apple7_requirement_uses_capability_not_device_name(self):
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        require=getattr(capability,'require_apple7',None)
+        self.assertTrue(callable(require),'missing public Apple7 prerequisite helper')
+        for name,metal,apple7 in [('Apple M3 Max',True,False),('Apple Paravirtual device',True,True),
+                                 ('renamed device',True,False),('no device',False,False)]:
+            with self.subTest(name=name,metal=metal,apple7=apple7):
+                payload=self._capabilities(device=name,metal_device=metal,apple7_family=apple7)
+                with patch.object(capability,'counter_capabilities',return_value=payload):
+                    if metal and apple7:self.assertIs(require(),payload)
+                    else:
+                        with self.assertRaises(unittest.SkipTest):require()
+
+    def test_apple7_requirement_propagates_query_errors(self):
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        require=getattr(capability,'require_apple7',None)
+        self.assertTrue(callable(require),'missing public Apple7 prerequisite helper')
+        with patch.object(capability,'counter_capabilities',side_effect=AssertionError('query failed')):
+            with self.assertRaisesRegex(AssertionError,'query failed'):require()
+
+    def test_existing_counter_prerequisite_does_not_require_apple7(self):
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        payload=self._capabilities(apple7_family=False)
+        with patch.object(capability,'counter_capabilities',return_value=payload):
+            self.assertIs(capability.require_counter_sampling(),payload)
+        with patch.object(capability,'counter_capabilities',return_value=self._capabilities(timestamp_counter=False)):
+            with self.assertRaises(unittest.SkipTest):capability.require_counter_sampling()
+
+    def test_non_apple7_volume_keeps_flags0_cases_and_skips_only_image_subcases(self):
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        class Modes(TextureFamilyTests):
+            __unittest_skip__=False
+            def runTest(self):
+                self._volume_descriptor_probe(('volume-sample','volume-read','volume-write-noimage','volume-view'))
+        commands=[]
+        def fake_run(command,**kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command,0,'VOLUME_SYNTHETIC_EXECUTION_OK\n','Metal API Validation Enabled\n')
+        result=unittest.TestResult()
+        with patch.object(capability,'counter_capabilities',return_value=self._capabilities(apple7_family=False)), \
+                patch.object(subprocess,'run',side_effect=fake_run):
+            Modes().run(result)
+        self.assertFalse(result.failures+result.errors,str(result.failures+result.errors))
+        self.assertEqual([command[-1] for command in commands if str(command[0]).endswith('/volume')],
+                         ['volume-read','volume-write-noimage'])
+        self.assertEqual(len(result.skipped),2)
+        self.assertEqual(len([command for command in commands if command[0]=='xcrun']),1)
+
+    def test_public_image_volume_skips_before_compile_without_apple7(self):
+        from unittest.mock import patch
+        import botw_metal_counter_capability as capability
+        class Public(TextureFamilyTests):
+            __unittest_skip__=False
+        result=unittest.TestResult()
+        with patch.object(capability,'counter_capabilities',return_value=self._capabilities(apple7_family=False)), \
+                patch.object(subprocess,'run',return_value=subprocess.CompletedProcess([],0,
+                    'TEXTURE_VOLUME_PUBLIC_FULL_MIPS_PARTIAL_GOB_PADDING_CACHE_AND_EMPTY_OK\n',
+                    'Metal API Validation Enabled\n')) as run:
+            Public('test_volume_3d_public_xyz_transfer_cache_mips_padding_and_empty').run(result)
+        self.assertFalse(result.failures+result.errors,str(result.failures+result.errors))
+        self.assertEqual(len(result.skipped),1)
+        run.assert_not_called()
 
 
 if __name__ == '__main__':

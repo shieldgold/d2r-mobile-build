@@ -27,7 +27,7 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据更新、普通启动 Cube 适配版 `7ee9a1a`，PID1175。固定提交完整回归1004项中1003通过、1既有条件跳过，iOS/Linux精确head CI成功；后续独立observation-3已完整取得host_return=1及十三个游戏线程，停在32×32×32的3D纹理Initialize，flags0x4、format0x25、单mip/samples0、packaged data非NULL、未声明packaged layout。Mac普通运行随后也自然结束并取得相同首拒参数。原base-v0 normal初始化已静态核实不消费packagedData，完整3D上传、读写和缓存同步正在按该合同接入。UID、14,420,017,152字节RomFS大小及mtime、shader清单与权限已保留；尚不能游玩，仍需真实画面、操作、音频、游戏存档和重开验收。下列记录保留历次真机证据，不能用旧机或Mac结果替代当前手机验证。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据更新、普通启动 Cube 适配版 `7ee9a1a`，PID1175。固定提交完整回归1004项中1003通过、1既有条件跳过，iOS/Linux精确head CI成功；后续独立observation-3已完整取得host_return=1及十三个游戏线程，停在32×32×32的3D纹理Initialize，flags0x4、format0x25、单mip/samples0、packaged data非NULL、未声明packaged layout。Mac普通运行随后也自然结束并取得相同首拒参数。原base-v0 normal初始化已静态核实不消费packagedData，完整3D上传、读写和缓存同步已在 `a1c60fa` 实现并通过本机完整测试；云端虚拟GPU缺Apple7能力，正修正新增测试的硬件前提，再取得合格iOS工件更新手机。UID、14,420,017,152字节RomFS大小及mtime、shader清单与权限已保留；尚不能游玩，仍需真实画面、操作、音频、游戏存档和重开验收。下列记录保留历次真机证据，不能用旧机或Mac结果替代当前手机验证。
 
 此前 `c2b4db8` 取得原始逻辑堆和根堆，进入十三个工作线程，受控停在 `nvnMemoryPoolInitialize` 的 physical NoCopy backing 准入：120 MiB 请求向外取整为125,845,504字节，首个RW VM leaf只剩60,850,176字节，具体分支为 `vm_span`。该次完整日志有host_return=1，同一PID在启动约125.1秒后的系统进程查询中仍存活；这仅是该次观察区间，不是当前版本停止点、整次运行峰值或VM分裂来源证明。
 
@@ -300,6 +300,11 @@ Size/Init/planner及opaque先有4项真实CPU RED，正z查询另有63个独立�
 
 容量资格在MakeBase的MTL descriptor/factory前以及upload/Read/Write/Invalidate的大snapshot和目标准备前统一核验。自有CPU先证小cap仍调用工厂的真实RED，再证工厂调用0、无opaque读取；public Initialize的错误回调恢复后，raw/registry/serial保持且锁已解开，未观察到正常BOOL返回，不把该恢复写作FALSE。最终7路径freeze2 SHA `f8ab39dc06c796fa9f6552b291a693d44bd54fab010f418bd07482a9b905349a`，native来源仍98/100。相关测试与独审不替代固定全套、iOS工件或原游戏/真机画面；当前手机仍为7ee，新的完整候选按后续流水线验收。
 
+3D提交 `a1c60fa` 已推送，固定本机完整回归1034项中1033通过、1项条件跳过，279.060秒；648项tracked源码身份及前后快照稳定，manifest SHA `f9b115de0093c7e2fce7feb2515e97b84a6154a63759aef28fd95eb67eed7779`。Linux精确head CI成功；iOS运行38882420803的合成测试在Apple Paravirtual虚拟GPU上出现11个新增IMAGE用例失败：4个descriptor正例、3个virtual物化和4个public transfer模式，均缺生产要求的Apple7资格。此前公开probe只有counter字段，没有apple7字段；不能把旧JSON写成已查询Apple7=false。生产资格保持，修正测试以独立公开supportsFamily结果判定，并保留同一method内flags0只读模式及查询错误判失败。该失败候选未组装、签名或安装手机。
+
+同一a1普通Mac binary SHA `52a1dff6153da7da1097801e3747b6cdc85cc7f578d641698fdef726500d1634`，200份私有输入核验后普通启动PID73263，没有启用锁观察选项。检查点仍无host_return、下一fatal或真实画面，不能据此声称已越过3D初始化。为释放GPU完成测试修正，先核磁盘SHA、LC_UUID和进程start身份并保存有界正常日志，再SIGTERM自有运行；launcher完整exit0且进程消失，此为agent-stop，不是guest自然完成。checkpoint SHA `a63ab887c9aa46ebb5e0d788287d34a490371c40337e24148b22f767c3e6998c`，证据位于 `outputs/botw-host39-mac-a1c60fa/`；未调用普通终态记录器。
+
+
 后继宿主图形锁诊断默认关闭，只有Mac显式 `--observe-graphics-lock` 才在guest前启用，并用独立host队列于约10/30/90/180秒采四次；不驱动显示/VI/输入。记录只含宿主静态入口、线程ID、每次真实acquire的代际与单调时间，callback锁外段明确断开；快照全部payload为lock-free原子、最多两次一致性读取，不取graphics/lifecycle锁、对象表或guest内容，不改原锁/错误回调/资源准入。producer五路径freeze `0e1a004b222317d9d06aba005d50ad743a7333e6232a3e257fe4d1826aaea3da`，15CPU方法/22模式owner4.818秒、最终作者4.480秒、独立4.835秒完整通过，ASan/UBSan及ARC exceptions启用；四源逆剥精确恢复原body。前端6CPU owner12.435秒、独立12.426秒通过，包含默认无queue/read、cap4、非stable不印payload和主线程阻塞时真实GCD首采样；native98/100，无GPU/窗口或实际持锁结论。7ee公开进程五秒两点另核CPU4.930539125秒、归账IO0、boot metadata未变；这些指标不定位guest循环或证明死锁。
 
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
@@ -409,3 +414,5 @@ AudioOut 已整模块接入真实 AudioUnit、宿主复制、完成事件和前�
 ## 上游与许可
 
 复用 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) 的 MIT 许可改写器，固定提交 `e2a0c9a9b5d65f6cd505e967e4760e2745e90ca8`、工具 SHA256 `c9a0c7574547ab945e4648bd6664e86fa4a77de12253a55e7b464232b2cdf274`。原始工具单独校验，本地控制流识别扩展保存在 `scripts/botw_native/`；未来更新需重新审查和固定版本。
+
+测试前提修正仅改两个测试文件，生产98项逐字节保持a1。新增7项纯CPU mock先真实RED再全GREEN，两个独立审查均CLOSED；编译、查询、JSON及非bool/缺字段继续失败，不按设备名或生产错误文本判跳过。`VOLUME_FLAGS0_MODES` 同时生成native flag表达式和子case前提，缺Apple7仍调度flags0读取；write-noimage仍受既有counter前提，未宣称云端已执行。最终两测试freeze SHA `820cc2118ab991038dc1f45a5958f22c5dc73fb6635d8d65e9f83225eced74e9`。真实公开查询得到M3 Max/Apple7=true，同4个方法17个native模式完整通过5.020秒、零跳过，实际Metal Validation启用；GPU收据SHA `d96eb08c59d47201a75c534e7b88e5b90cc6012c589409c5887b2d6c61a15034`。后继完整候选仍须固定全套、精确head双CI和工件核验，不把条件跳过写成GPU功能验收。

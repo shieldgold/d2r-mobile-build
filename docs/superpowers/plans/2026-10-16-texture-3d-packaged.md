@@ -19,7 +19,7 @@
 
 - [x] 合同闭合后root定最小通用域/影响面，owner先自有CPU真实RED再薄接；保builder原metadata、正确volume/mip/region边界、权限/溢出/empty及失败状态。
 - [x] 独立真实MTLType3D多深度采样/CPU反向读写与padding canary，覆盖跨GOB的z变化；所需IMAGE/packaged语义按原合同验收，未支持消费者仍受控拒绝。
-- [ ] 默认旧2D/array/Cube/单slice3D与private authority/descriptor生命周期必要回归，双独审冻结后精确commit并push。
+- [x] 默认旧2D/array/Cube/单slice3D与private authority/descriptor生命周期必要回归，双独审冻结后精确commit并push（a1c60fa）。
 
 ## Task 3：完整候选与真机
 
@@ -43,3 +43,11 @@ IMAGE真实资源域已按Apple官方Write表限定为Apple7及以上和36个标
 测试必须先有新行为真实CPU RED，再覆盖真实Type3D、多z（跨z15/16与z31）、多mip、非2幂体积、局部xyz读写、GOB与staging padding、缓存Flush/Invalidate、opaque address1/自有PROT_NONE不解引用、虚拟映射epoch/别名/retirement，以及typed write整批前拒counter/copy/arena canary。旧2D/array/Cube/单slice3D必要回归；测试域改变须逐项解释负例迁移，不能删除保护。
 
 owner持有graphics.m/texture_family.inc及既有相关test/probe/许可纹理说明；root持有主文档/计划/集成。kernel和linear独立审查/自有fixtures；原游戏和GPU运行由root串行分配。诊断c31使用固定提交，owner可在它之后实施3D，不混入诊断构建。
+
+## 固定候选与硬件前提修正
+
+a1已push，本机完整1034项/1033通过+1条件跳过，648项源码快照前后稳定；Linux CI成功，iOS CI的11个新IMAGE子例在Apple Paravirtual上因Apple7资格拒绝而失败。该候选未组装或安装手机。生产98项保持不变；只为测试新增独立公开Apple7 bool查询及逐IMAGE子case前提，查询/编译/JSON错误仍失败，缺硬件时保留flags0读域。纯CPU mock先验证旧行为真实RED，再验证false capability只跳IMAGE；真实M3 GPU和双独审后固定新提交全套及双CI。
+
+a1普通Mac仅取得非终态检查点，没有host_return或真实frame。保存精确自有进程身份及日志后主动SIGTERM释放GPU，launcher完整exit0、进程消失；不能当guest完成或3D原游戏通过。后续测试修正不改生产，优先取得合格工件更新当前iPhone12，继续普通运行验下一实际停止点。
+
+测试前提最终freeze820cc211已双独审CLOSED，7项纯mock CPU全过；M3 Max公开Apple7=true，4方法/17native模式在该冻结测试上完整通过5.020秒、零跳过、MetalValidation启用。生产98项逐字节同a1；将据此精确提交并跑完整候选，不重复占用GPU运行尚未取得终态的Mac原游戏。

@@ -16,11 +16,12 @@ int main(void) { @autoreleasepool {
  id<MTLDevice> device=MTLCreateSystemDefaultDevice();
  NSMutableDictionary *result=[@{@"metal_device":device ? @YES : @NO,
    @"device":device.name?:@"", @"api_available":@NO,
-   @"timestamp_counter":@NO, @"stage_boundary":@NO,
+   @"timestamp_counter":@NO, @"stage_boundary":@NO, @"apple7_family":@NO,
    @"counter_sets":@{}} mutableCopy];
  if(device) {
   if(@available(macOS 11.0, iOS 14.0, *)) {
    result[@"api_available"]=@YES;
+   result[@"apple7_family"]=@([device supportsFamily:MTLGPUFamilyApple7]);
    NSMutableDictionary *sets=[NSMutableDictionary new];
    BOOL timestamp=NO;
    for(id<MTLCounterSet> set in device.counterSets) {
@@ -62,7 +63,7 @@ def counter_capabilities():
         if run.returncode:
             raise AssertionError(run.stdout + run.stderr)
         result = json.loads(run.stdout)
-    for key in ('metal_device', 'api_available', 'timestamp_counter', 'stage_boundary'):
+    for key in ('metal_device', 'api_available', 'timestamp_counter', 'stage_boundary', 'apple7_family'):
         if type(result.get(key)) is not bool:
             raise AssertionError(f'invalid public Metal capability {key}: {result!r}')
     if not isinstance(result.get('counter_sets'), dict):
@@ -83,4 +84,11 @@ def require_counter_sampling():
     capabilities = require_metal()
     if not (capabilities['timestamp_counter'] and capabilities['stage_boundary']):
         raise unittest.SkipTest('public Metal query lacks timestamp counter or stage-boundary sampling')
+    return capabilities
+
+
+def require_apple7():
+    capabilities = require_metal()
+    if not capabilities['apple7_family']:
+        raise unittest.SkipTest('public Metal query lacks Apple7 family support required by IMAGE fixtures')
     return capabilities
