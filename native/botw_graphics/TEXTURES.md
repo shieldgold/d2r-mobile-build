@@ -159,4 +159,6 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 
 原 SDK 字节复制在图形锁外运行，commit 重新验证源和目标，再仅将同一 serial 的 primary span 移至目标并增加 epoch；BWTexture、Metal资源、descriptor、canonical texel authority 和引用保持原身份。commit失败保留当前 registry，不回滚已经复制的字节。这不是并发字节写入的事务或存储 reservation，调用者仍须遵守原同步责任。copy失败走局部恢复后abort；尚有pending令牌时checked shutdown在资源清理前返回0，保留资源，abort后可重试。单次提交或abort消费记录，完整shutdown清空记录，跨图形生命周期的旧令牌不能复用。
 
+目标重叠仍按原guard拒绝；现有错误仅追加已命中的宿主span/value类型、长度、exact-base/exact-span、BWTexture primary判定与move epoch，以及目标相对该span的有符号偏移。不读取目标raw/serial或payload，不新增VM/validator调用，不把epoch、共享引用或相对位置解释为旧对象已死亡，也不授予覆盖任意目标的许可。固定main虽有共享旧值不Finalize而覆盖目标的路径，实际冲突类别仍须由该有限上下文确认后再制定窄适配。
+
 真实 Metal Validation 夹具验证已登记descriptor在迁移后仍正确采样两层三mip，源存储可被另一个sampler合法复用；私有纹理GPU清除后的逐像素结果在迁移后保持，live和retired的canonical buffer别名仍拒绝。CPU夹具另核无新增validator/VM查询、epoch/目的冲突失败不改registry、容量、错误线程和篡改令牌。它们只验证兼容层合同，原游戏下一停点须由固定版本普通运行确认。

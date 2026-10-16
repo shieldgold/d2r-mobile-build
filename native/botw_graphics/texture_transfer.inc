@@ -18,8 +18,16 @@ static BOOL textureMoveDestination(const void *source,void *destination,size_t b
         return textureMoveReject(error,capacity,"texture storage transfer size/address is invalid");
     if(memoryOverlap(source,bytes,destination,bytes))return textureMoveReject(error,capacity,"texture storage transfer source/destination overlap");
     validateObjectStorage(destination,bytes);
-    for(NSValue *value in objectSpans.allValues){NSRange span=value.rangeValue;
-        if(memoryOverlap(destination,bytes,(void*)span.location,span.length))return textureMoveReject(error,capacity,"texture storage transfer destination overlaps live NVN storage");
+    for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;
+        if(memoryOverlap(destination,bytes,(void*)span.location,span.length)){
+            /* The conflicting range and value already belong to the host.
+             * Do not inspect destination bytes to classify or retire them. */
+            id existing=objects[key];BWTexture *texture=[existing isKindOfClass:[BWTexture class]]?existing:nil;
+            BOOL exact=(uintptr_t)destination==span.location;uintptr_t offset=exact?0:(uintptr_t)destination>span.location?(uintptr_t)destination-span.location:span.location-(uintptr_t)destination;
+            const char *primary=texture?(!texture.base&&texture.identity==key.unsignedLongLongValue?"true":"false"):"not_texture";
+            char detail[384];snprintf(detail,sizeof detail,"texture storage transfer destination overlaps live NVN storage existing_class=%.48s span_bytes=%zu exact_base=%s exact_span=%s existing_primary=%s existing_move_epoch=%llu relative_offset=%c%zu",existing?class_getName([existing class]):"<none>",(size_t)span.length,exact?"true":"false",exact&&span.length==bytes?"true":"false",primary,(unsigned long long)texture.storageMoveEpoch,(uintptr_t)destination<span.location?'-':'+',(size_t)offset);
+            return textureMoveReject(error,capacity,detail);
+        }
     }
     return YES;
 }

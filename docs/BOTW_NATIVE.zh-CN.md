@@ -229,6 +229,12 @@ base-v0 的原 Write/Read 与 vendor1.9 的多层坐标语义尚未证明相同�
 
 一维数组独立 CPU3项通过（4.191秒，ASan/UBSan、fake Metal、无GPU），并核对空域在 snapshot/prepare/drain/encoder 前返回；双独审 CLOSED，8个来源 SHA 前后精确一致。冻结文件 SHA256 为 `6769484fd60f7676181a0c28ac4d1242bca0551648c2b3a02cb872b809ad0d74`，其中 paths payload 摘要为 `9f7a0d3ccea3432559af3489cc79e8531617e103b03b9497ebdd92b91bb1b392`，两者口径不同。
 
+提交 `28c0b30` 的普通 Mac 原游戏不再输出前版 target3 的零大小查询，实际先完成一次192字节纹理存储迁移，随后首个错误为 `texture move preflight: texture storage transfer destination overlaps live NVN storage`。本版尚未执行到 DeviceGetTextureHandle 的新索引诊断；不能推断实际冲突对象类别、精确重叠关系或旧对象是否仍有效。binary SHA256 为 `79317dc89f43560829ce3ca1ff223fd7f7b69080c81084bfba618f5c380ab9e9`，完整进程已退出，host_return=1，仍无游戏画面或可玩验收。证据位于 `outputs/botw-host39-mac-28c0b30/ordinary-admission-evidence.json` 和 `transfer-and-storage-evidence.json`。后续先用有限 host 登记元数据定位，保持重叠门禁，不读取旧 guest 对象来判断存活。
+
+`28c0b30` 固定全套 **962项，961通过、1个原硬件条件跳过**，217.905秒；639个来源文件前后逐项SHA稳定，source manifest SHA256 为 `a7d15c5b43b18bb237f3978ad1718e5ca3f1d2f0a4ad5f3112c220cffdd01b73`。[iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38847830436) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38847830442) 均成功，精确 head 已核验；手机更新准备与后续原游戏结果另记。
+
+目标冲突诊断保持原谓词、返回0、登记及 token 生命周期，仅在已命中的 span 上追加有界 host class、长度、exact-base/exact-span、BWTexture primary/epoch 与相对偏移；没有读取 guest raw/header/serial、扫描 VM 或新增 validator 调用。新夹具先在编译成功的旧实现上真实失败，最终10项 CPU 回归通过（4.681秒，ASan/UBSan、fake Metal）；两个独立新增 CPU 用例分别通过（4.456秒、4.257秒），零跳过、无GPU，三来源 SHA 前后稳定。逆剥格式化增量后 production 文件精确还原旧版本。384字节局部错误与512字节 runtime buffer 的容量已核验，12字节 caller buffer 的 NUL/越界 canary 通过；此诊断不构成目的存储已失效或可以覆盖的证据。freeze 文件 SHA256 为 `1389e0204c5f6343b2d7f3b76c561bdcace8d5321a1d95cc1631b48fc9943482`，native仍97。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

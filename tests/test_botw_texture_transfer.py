@@ -67,6 +67,11 @@ int main(int argc,char **argv){@autoreleasepool{
  }else if(!strcmp(mode,"token-owner")){
   CHECK(prepare(source,destination,192,&token,error,sizeof error));WrongThread state={.token=token};pthread_t thread;CHECK(!pthread_create(&thread,NULL,wrongThread,&state));CHECK(!pthread_join(thread,NULL));CHECK(!state.committed&&!state.aborted&&textureMoves.count==1);
   botw_graphics_texture_move_token tampered=token;tampered.opaque[4]^=8;CHECK(!commit(&tampered,error,sizeof error)&&!cancel(&tampered,error,sizeof error)&&textureMoves.count==1);CHECK(cancel(&token,error,sizeof error)&&!textureMoves.count);
+ }else if(!strcmp(mode,"destination-diagnostic")){
+  NVNtextureBuilder builder={0};TextureBuilder metadata=texture.metadata;memcpy(&builder,&metadata,sizeof metadata);CHECK(w_nvnTextureInitialize(destination,&builder));BWTexture *occupied=textureObject(destination);occupied.storageMoveEpoch=7;
+  NSDictionary *spans=[objectSpans copy],*values=[objects copy];NSUInteger pending=textureMoves.count;vmQueries=accessCalls=0;memoryAccessValidator=noAccess;char detail[512];
+  const intptr_t offsets[]={0,16,-16};for(unsigned i=0;i<3;i++){void *target=(void*)((uintptr_t)destination+offsets[i]);CHECK(!prepare(source,target,192,&token,detail,sizeof detail));CHECK(strstr(detail,"texture storage transfer destination overlaps live NVN storage existing_class=BWTexture span_bytes=192"));CHECK(strstr(detail,i?"exact_base=false exact_span=false":"exact_base=true exact_span=true"));CHECK(strstr(detail,"existing_primary=true existing_move_epoch=7"));char relative[64];snprintf(relative,sizeof relative,"relative_offset=%c%zu",offsets[i]<0?'-':'+',(size_t)(offsets[i]<0?-offsets[i]:offsets[i]));CHECK(strstr(detail,relative));CHECK([objectSpans isEqual:spans]&&[objects isEqual:values]&&textureMoves.count==pending&&!callbacks&&!vmQueries&&!accessCalls);}
+  memoryAccessValidator=NULL;BWSampler *sampler=[BWSampler new];put(third,sampler);spans=[objectSpans copy];values=[objects copy];memoryAccessValidator=noAccess;CHECK(!prepare(source,third,192,&token,detail,sizeof detail));CHECK(strstr(detail,"existing_class=BWSampler span_bytes=48 exact_base=true exact_span=false")&&strstr(detail,"existing_primary=not_texture existing_move_epoch=0"));struct{char text[12];char guard;} shortError;memset(&shortError,0x5a,sizeof shortError);CHECK(!prepare(source,third,192,&token,shortError.text,sizeof shortError.text));CHECK(!shortError.text[11]&&shortError.guard==0x5a&&[objectSpans isEqual:spans]&&[objects isEqual:values]&&textureMoves.count==pending&&!callbacks&&!vmQueries&&!accessCalls);memoryAccessValidator=NULL;
  }else CHECK(0);
  CHECK(callbacks==beforeCallbacks);CHECK(botw_graphics_shutdown_checked(error,sizeof error));free(source);free(destination);free(third);printf("TEXTURE_MOVE_CPU_OK mode=%s no_real_gpu=true\n",mode);return 0;
 }}
@@ -123,6 +128,9 @@ class TextureMoveCPUTests(unittest.TestCase):
 
     def test_wrong_thread_and_tampered_token_do_not_consume_the_valid_record(self):
         self.mode('token-owner')
+
+    def test_destination_conflict_reports_only_existing_host_metadata_without_state_or_accesses(self):
+        self.mode('destination-diagnostic')
 
 
 @unittest.skipUnless(platform.system() == 'Darwin' and shutil.which('xcrun'), 'Metal requires macOS')
