@@ -1,0 +1,146 @@
+{
+  "schema": "botw-base-v0-graphics-binding-v1",
+  "source": {
+    "module": "subsdk0",
+    "nso_sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000",
+    "initialized_image_sha256": "065cfc8fc879b60d0ee4b08f169a64424b62ed57366f97d2ce053dd8b0c8448c"
+  },
+  "stages": [
+    0,
+    1
+  ],
+  "uniform_buffers": {
+    "count": 14,
+    "nvn_first": 0,
+    "hardware_first": 3
+  },
+  "textures": {
+    "count": 32,
+    "bank": 2,
+    "offset": 32,
+    "stride": 8,
+    "payload_bytes": 4
+  },
+  "images": {
+    "count": 8,
+    "bank": 2,
+    "offset": 288,
+    "stride": 8,
+    "payload_bytes": 8
+  },
+  "unsupported": [
+    "compute",
+    "storage_buffers"
+  ],
+  "shader_facts": false,
+  "scope": "Static fixed-base primary NVN procedure-table contract, not per-shader facts, draw metadata, or permission to admit a variant. Unknown device modes, texture types, vertex scalar types and output types remain unknown. No Guest/GPU execution.",
+  "procedure_table": {
+    "name_count": 448,
+    "name_offset_table": 1464440,
+    "name_string_base": 1452336,
+    "primary_function_table": 1869896,
+    "alternate_function_table": 1833464,
+    "scope": "primary table only; alternate table not asserted"
+  },
+  "functions": {
+    "BindUniformBuffer": {
+      "offset": 834336,
+      "bytes": 256,
+      "sha256": "b29c0ac8ba89c414a153bf72f38c80bdd535cb35598b46917ce9358b9f65262a"
+    },
+    "BindTexture": {
+      "offset": 837160,
+      "bytes": 252,
+      "sha256": "1b0d215e6660e3d9d04282ad5bb5a2610b103395200cea638f50551604491af3"
+    },
+    "BindImage": {
+      "offset": 838776,
+      "bytes": 252,
+      "sha256": "c97a6339e6f7bcc67f7267158ff0fc8720ba0851a3036a7a8c0551d57c89c845"
+    },
+    "DeviceGetImageHandle": {
+      "offset": 728688,
+      "bytes": 12,
+      "sha256": "19161f32a08bdcaf101fc7d6a934f7292b309648e9dbdb61bbf5cd13cb2894ac"
+    },
+    "DeviceGetInteger": {
+      "offset": 728624,
+      "bytes": 48,
+      "sha256": "89fd72d6a72b161954fd6d6c474457b047349597009d9815300b13cd2e7000cf"
+    },
+    "IntegerQuery": {
+      "offset": 734280,
+      "bytes": 324,
+      "sha256": "6a0ed3143b1ebfa9deab672487e5b1038bf7ab7c034d3c18b640f32c7a01b301"
+    },
+    "IntegerConstants": {
+      "offset": 653696,
+      "bytes": 216,
+      "sha256": "b648a18a59db54f7f1ec054952b86744767a836b494c89180f86853039ad8b2f"
+    },
+    "GetProcLookup": {
+      "offset": 738168,
+      "bytes": 152,
+      "sha256": "bb8bec8094ce4442874279acffee6f06e88eb1a4a85527001c2076a4000b71d1"
+    },
+    "SelectProcTables": {
+      "offset": 714744,
+      "bytes": 384,
+      "sha256": "b5f8bdb961014bfd10c5b92c69edbc66e65d14993d781412af33067558f5e924"
+    }
+  },
+  "evidence": {
+    "integer_dispatch": {
+      "lower_table": 1446608,
+      "upper_table": 1451920,
+      "uniform": {
+        "what": 2,
+        "lower_target": 653840,
+        "upper_target": 734400,
+        "value": 14
+      },
+      "texture": {
+        "what": 9,
+        "lower_target": 653760,
+        "upper_target": 734400,
+        "value": 32
+      },
+      "image": {
+        "what": 35,
+        "lower_target": 653776,
+        "upper_target": 734400,
+        "value": 8
+      }
+    },
+    "uniform_graphics": {
+      "slot_shift_instruction": 834532,
+      "add_three_banks_instruction": 834536,
+      "bank_mask_instruction": 834540
+    },
+    "texture_graphics": {
+      "payload_low_word_instruction": 837360,
+      "stride_instruction": 837368,
+      "offset_instruction": 837372,
+      "payload_high_word": "not written; existing zero-filled stride tail remains zero"
+    },
+    "image_graphics": {
+      "payload_source_register": "x19 (unmodified full x3 argument)",
+      "stride_instruction": 838972,
+      "high_word_instruction": 838976,
+      "offset_instruction": 838984,
+      "low_word_store_instruction": 838988,
+      "high_word_store_instruction": 838992
+    },
+    "image_handle": "Fixed base DeviceGetImageHandle and the patched host both return (uint64_t)(int64_t)(int32_t)id OR 0x100000000, with no additional parameter bounds or device read. Direct image lookup retains the existing low-20-bit pool index; the driver bank copies the exact original S.img uint64 value."
+  },
+  "replay": {
+    "source": "experiments/botw_upstream_host/upstream/dm/gfx/nvn/nvn_mtl.m",
+    "source_sha256": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb",
+    "state": "original S.tex / S.img under original g_rmu; no new binding registry",
+    "image_patch": "experiments/botw_upstream_host/patches/base-v0-image-bank.patch",
+    "offline_image_admission": "The fixed upstream driver_bank_reads still rejects [0x120,0x160); no image shader is admitted by this metadata or replay patch.",
+    "interface_source": "experiments/botw_upstream_host/upstream/dm/gfx/nvn/hle_nvn.c",
+    "interface_source_sha256": "25dee0ce39ce821eac537a88cf80d2b1b5bf31a90fdfcab0317f529791b85e9f"
+  }
+}

@@ -1,0 +1,45 @@
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -3862,6 +3862,13 @@
+     return 0;
+ }
+ #endif
++static void fill_driver_bank2(uint8_t *d, int nvn_stage) {
++    for (int r = 0; r < 32; r++) { uint32_t th = (uint32_t)S.tex[nvn_stage][r]; memcpy(d + 0x20 + 8 * r, &th, 4); }
++    // Fixed base-v0 graphics BindImage writes both handle words at c2 + 0x120 + 8r.
++    // S.img is the original replay state; the caller holds g_rmu. Other stages keep their original zero bytes.
++    if (nvn_stage == 0 || nvn_stage == 1)
++        for (int r = 0; r < 8; r++) { uint64_t ih = S.img[nvn_stage][r]; memcpy(d + 0x120 + 8 * r, &ih, 8); }
++}
+ static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex) {
+     if (!sh->ae) return 1;
+     uint64_t slots[NVN_REFL_MAXB] = {0};
+@@ -3988,7 +3995,7 @@
+                     // Compute reads its uniform buffers through device pointers at c0 + 0x210 + 16 r (address, size).
+                     if (nvn_stage == 5) for (int r = 0; r < 16; r++) { uint64_t a = S.ubo[5][r].addr; uint32_t n = (uint32_t)S.ubo[5][r].size; memcpy(d + 0x210 + 16 * r, &a, 8); memcpy(d + 0x210 + 16 * r + 8, &n, 4); }
+                 } else {
+-                    for (int r = 0; r < 32; r++) { uint32_t th = (uint32_t)S.tex[nvn_stage][r]; memcpy(d + 0x20 + 8 * r, &th, 4); }
++                    fill_driver_bank2(d, nvn_stage);
+                 }
+                 slots[aid] = g_cur_arena->gpu + doff;
+                 USE(db, MTLResourceUsageRead);
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -221,7 +221,7 @@
+ NVN(nvnDeviceGetTexelFetchHandle, NVNtextureHandle, const NVNdevice *d, int texture) {
+     (void)d; return nvn_texture_handle(texture);
+ }
+-NVN(nvnDeviceGetImageHandle, NVNimageHandle, const NVNdevice *d, int id) { (void)d; return (NVNimageHandle)id; }
++NVN(nvnDeviceGetImageHandle, NVNimageHandle, const NVNdevice *d, int id) { (void)d; return (uint64_t)(int64_t)(int32_t)id | UINT64_C(0x100000000); }
+ 
+ // Preserve the native marker and integer extension rules for separate handles too.
+ NVN(nvnDeviceGetSeparateTextureHandle, NVNseparateTextureHandle, const NVNdevice *d, int id) { (void)d; return (NVNseparateTextureHandle){nvn_texture_handle(id)}; }
+@@ -1256,7 +1256,7 @@
+     *REC(c, OP_BIND_TEX_DEFERRED, p_bind_tex_deferred) = (p_bind_tex_deferred){(int32_t)st, first, n, 0, handles};
+ }
+ 
+-// Image (writable texture): handle = texture pool index (GetImageHandle returns it as-is; the game does not call RegisterImage, images and textures share registration)
++// Image handles retain the base-v0 marker; the low texture-pool index shares normal image/texture registration.
+ NVN(nvnCommandBufferBindImages, void, NVNcommandBuffer *c, NVNshaderStage st, int first, int n, const NVNimageHandle *h) {
+     bind_handles(c, OP_BIND_IMG, st, first, n, (const uint64_t *)h);
+ }

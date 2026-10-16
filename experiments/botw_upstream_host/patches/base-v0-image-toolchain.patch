@@ -1,0 +1,11 @@
+--- a/dm/gfx/tools/botw_shader_build.py
++++ b/dm/gfx/tools/botw_shader_build.py
+@@ -73,7 +73,7 @@
+ # the uniform buffer pointer table at 0x210; c2 holds the texture handle table at 0x20 + 8 r. These are the values the
+ # NVN driver writes on hardware, so a shader may read them as data.
+ DRIVER_TABLES = {0: {0: [(0x110, 0x210)], 1: [(0x510, 0x610)], 5: [(0x210, 0x410)]},
+-                 2: {0: [(0x20, 0x120)], 1: [(0x20, 0x120)], 5: [(0x20, 0x120)]}}
++                 2: {0: [(0x20, 0x160)], 1: [(0x20, 0x160)], 5: [(0x20, 0x120)]}}
+ UNIFORM_POINTER_TABLE = (0x210, 0x310)   # compute: uniform buffer r's address at c0 + 0x210 + 16 r
+ 
+ 

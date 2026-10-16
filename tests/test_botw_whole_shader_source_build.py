@@ -172,9 +172,8 @@ class WholeShaderSourceBuild(unittest.TestCase):
         self.assertEqual(receipt['input_manifest_sha256'],H((f.source/'inputs.json').read_bytes()))
         staged=json.loads((out/'toolchain/v8-stage-receipt.json').read_text())
         self.assertEqual(staged['original_files_verified'],374)
-        metadata=json.loads((upstream_shaders.VENDOR/'UPSTREAM.json').read_text())
-        for name,digest in metadata['files'].items():
-            expected=staged['changed_files'].get(name,{}).get('after',digest)
+        expected_sources=self.publisher.source_toolchain_hashes(out/'toolchain')
+        for name,expected in expected_sources.items():
             self.assertEqual(H((out/'toolchain'/name).read_bytes()),expected)
         self.assertEqual(upstream_shaders.verify_vendor(),before)
         self.assertEqual({p:H(Path(p).read_bytes()) for p in origin},origin)

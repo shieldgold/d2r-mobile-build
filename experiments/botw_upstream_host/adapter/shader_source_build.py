@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,6 +22,10 @@ from scripts.botw_native.shader_bindings import prepare_release
 SOURCE_LIMIT = 16 * 1024 * 1024
 REFLECTION_LIMIT = 1024 * 1024
 MANIFEST_LIMIT = 64 * 1024 * 1024
+IMAGE_SOURCE = 'dm/gfx/tools/botw_shader_build.py'
+IMAGE_BEFORE = '9091f46c82c30e8220a916377f5ac5c2cc1adb33add27737cd12bc0ffefc1068'
+IMAGE_AFTER = 'ad65d12d8c0f8e0a90b10bf4fc14a82123340e1e898d63c2904585656434881d'
+IMAGE_PATCH = '4026b5553dfc8155d85f6460a4cdaace915a049aca77a8b5341a1298bbc3430a'
 
 
 def sha(path):
@@ -37,6 +42,79 @@ def load(path, name):
     finally:
         sys.dont_write_bytecode = previous
     return module
+
+
+def image_stage_receipt():
+    return {'schema': 'botw-base-graphics-toolchain-stage-v1',
+        'profile': 'botw-switch-base-v0',
+        'base_subsdk0_sha256': '58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17',
+        'patch_sha256': IMAGE_PATCH, 'source_before_sha256': IMAGE_BEFORE,
+        'source_after_sha256': IMAGE_AFTER, 'image_stage_slots': {'0': 8, '1': 8},
+        'facts_invented': False, 'guest_or_gpu_executed': False}
+
+
+def source_toolchain_hashes(directory):
+    """Verify the full private v8 stage plus the paired graphics-only image table.
+
+    This permits c2 rows actually filled by the base-v0 replay patch. It does
+    not grant any per-shader binding/type fact or a compute image table.
+    The returned hashes are suitable for copying into another owned snapshot.
+    """
+    from scripts.botw_native import upstream_shaders
+    upstream_shaders.verify_vendor()
+    tool = upstream_shaders.load_tool()
+    component = Path(__file__).resolve().parents[1]
+    metadata = json.loads((upstream_shaders.VENDOR / 'UPSTREAM.json').read_bytes())
+    profile = json.loads((component / 'adapter/shader_v8_control.json').read_bytes())
+    directory = Path(directory)
+    def source_read(path, limit):
+        try:
+            return tool.read_regular(str(path), limit)
+        except tool.CaptureError as error:
+            raise ValueError('source toolchain input is unavailable: ' + str(error)) from error
+    def source_json(name):
+        try:
+            return tool.strict_json(source_read(directory / name, REFLECTION_LIMIT), name)
+        except tool.CaptureError as error:
+            raise ValueError('source toolchain receipt is invalid: ' + str(error)) from error
+    receipt = source_json('v8-stage-receipt.json')
+    if (not isinstance(receipt, dict) or receipt.get('changed_files') != profile['toolchain_changed_files'] or
+            receipt.get('toolchain_patch_sha256') != profile['toolchain_patch_sha256'] or
+            receipt.get('original_files_verified') != 374 or
+            receipt.get('facts_invented') is not False or
+            receipt.get('version_relabelled') is not False or
+            receipt.get('control_bytes_rewritten') is not False):
+        raise ValueError('source toolchain v8 stage differs from the fixed profile')
+    image = source_json('base-graphics-stage-receipt.json')
+    # Exact JSON types matter: 8.0 must not compare equal to integer 8, nor 0 to false.
+    if json.dumps(image, sort_keys=True) != json.dumps(image_stage_receipt(), sort_keys=True):
+        raise ValueError('source toolchain graphics table stage differs from the fixed profile')
+    expected = {name: profile['toolchain_changed_files'].get(name, {}).get('after', value)
+                for name, value in metadata['files'].items()}
+    if expected[IMAGE_SOURCE] != IMAGE_BEFORE:
+        raise ValueError('graphics table patch requires the exact reviewed v8 predecessor')
+    expected[IMAGE_SOURCE] = IMAGE_AFTER
+    for name, value in expected.items():
+        if hashlib.sha256(source_read(directory / name, 8 * 1024 * 1024)).hexdigest() != value:
+            raise ValueError('staged complete source differs: ' + name)
+    return expected
+
+
+def stage_source_toolchain(destination):
+    stage = load(Path(__file__).with_name('shader_v8_control.py'), 'source_v8_stage')
+    stage.stage_toolchain(destination)
+    destination = Path(destination)
+    patch = Path(__file__).resolve().parents[1] / 'patches/base-v0-image-toolchain.patch'
+    if sha(patch) != IMAGE_PATCH or sha(destination / IMAGE_SOURCE) != IMAGE_BEFORE:
+        raise ValueError('graphics table patch or predecessor identity differs')
+    result = subprocess.run(['patch', '--batch', '--forward', '--fuzz=0', '-p1', '-i', str(patch)],
+                            cwd=destination, capture_output=True, text=True)
+    if result.returncode or sha(destination / IMAGE_SOURCE) != IMAGE_AFTER:
+        raise ValueError('exact graphics image table patch failed: ' + result.stderr + result.stdout)
+    receipt = image_stage_receipt()
+    (destination / 'base-graphics-stage-receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+    source_toolchain_hashes(destination)
+    return receipt
 
 
 class SourcePublication:
@@ -151,10 +229,9 @@ def build(inputs, captures, facts, derive_report, evidence, destination, *, xlat
     destination = destination.resolve()
     if os.path.lexists(destination):
         raise FileExistsError(destination)
-    stage = load(Path(__file__).with_name('shader_v8_control.py'), 'source_v8_stage')
     # Source verification and exact v8 adaptation stay in the existing module.
     # Staging itself rejects a destination inside any Git working tree.
-    stage.stage_toolchain(destination / 'toolchain')
+    stage_source_toolchain(destination / 'toolchain')
     tool = load(destination / 'toolchain/dm/gfx/tools/botw_shader_build.py', 'source_complete_builder')
     admission = prepare_release(tool, inputs, captures, facts, derive_report, evidence,
                                 destination / 'admitted')
