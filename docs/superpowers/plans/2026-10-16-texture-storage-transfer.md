@@ -119,3 +119,14 @@ PYTHONPATH=scripts:tests .tools/botw-venv/bin/python -m unittest -v \
 ## 后续实际停止点
 
 `28c0b30` 的单层一维数组支持已固定并普通复跑原游戏。一次纹理迁移成功后，下一次 preflight 因目的地与登记 NVN storage 重叠而拒绝；本次没有旧的一维数组零大小查询或描述符索引错误，仍无游戏画面。原 main 的目标替换路径是否调用 TextureFinalize 取决于旧引用计数及 ownership，不能预设所有覆盖前都会 Finalize；也不能据此假定这次实际冲突允许覆盖。先给既有失败分支增加有界 host-owned 对象类别、跨度与精确匹配诊断，保持全部门禁、不得读取旧 guest 内容或扫描 VM。取得普通原游戏实际冲突证据后，再审计最窄生命周期适配与回归范围。
+
+## Task 6：已迁移的完整目的槽替换
+
+- [x] `190d33c` 已精确提交、推送并普通运行。原拒绝保留，有限上下文确认 actual 为 exact192、owned BWTexture primary、move epoch1、relative offset0；不把它称为旧资源已死亡。
+- [x] 原 main 的 refcount/ownership 替换分支与运行时完整 profile/LR/nC0/ownership bit0 gate 已独立核验。无需改 runtime、Guest 或已有 raw get/Finalize。
+- [x] 只允许唯一、不同于 source、此前已迁移且 epoch>0 的 exact192 owned BWTexture primary 目的；其他类、部分覆盖、未迁移、selected alias、源目标交叠仍拒绝。
+- [x] pending host record 强持旧目的及其 key/span/epoch，64字节 token ABI 保持。commit 重核 source、目的、epoch、lifecycle 和其他冲突；clone 表内完成可抛的删除/写入，单次发布登记，abort/失败不改当前全局登记。双方epoch在发布后推进，MAX前拒，其他pending source检查不扩成range reservation。
+- [x] 只交接 primary span，旧 objects/value、descriptor/recorded 引用、MTL资源、texown/flush与private authority保持；旧 alias 的原 Finalize 不能删除新 key 的目的 span。没有原 Finalize 的旧资源可能积累至 shutdown，不能拿64个 pending token上限冒称资源上限。
+- [x] 新功能先在旧实现编译成功后3项真实失败，最终18项通过（6.791秒，CPU16、GPU2方法6实际模式），覆盖成功替换、旧新公开 descriptor 像素、private authority、旧 alias Finalize、部分/错误类拒绝、epoch变更、clone异常与abort。真实GPU、CPU/fake Metal和原游戏分别记录。
+- [x] 三文件freeze3独立审查 CLOSED：CPU16项4.607秒、GPU2方法6模式2.266秒，全部通过，SHA前后稳定，native97保持。
+- [ ] 精确提交推送；普通原游戏确定下一实际边界，固定全套与CI通过后保数据更新已连接手机。仍需真实画面、操作、声音、存档重开验收。

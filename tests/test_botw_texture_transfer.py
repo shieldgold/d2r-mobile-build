@@ -25,6 +25,21 @@ static id<MTLDevice> moveCPUDevice(void){return (id<MTLDevice>)[MoveCPUDevice ne
 #undef MTLCreateSystemDefaultDevice
 #undef vm_region_recurse_64
 #include <dlfcn.h>
+static unsigned spanFailure;
+@interface MoveSpanMap:NSObject<NSFastEnumeration,NSMutableCopying>
+@property NSMutableDictionary *map;
+@property BOOL clone;
+@end
+@implementation MoveSpanMap
+- (NSUInteger)count{return self.map.count;}
+- (NSArray*)allValues{return self.map.allValues;}
+- (id)objectForKeyedSubscript:(id)key{return self.map[key];}
+- (void)setObject:(id)value forKeyedSubscript:(id<NSCopying>)key{if(self.clone&&spanFailure==3)@throw [NSException exceptionWithName:@"OwnedSpanSetFailure" reason:@"owned clone set exception" userInfo:nil];self.map[key]=value;}
+- (void)removeObjectForKey:(id)key{if(self.clone&&spanFailure==2)@throw [NSException exceptionWithName:@"OwnedSpanRemoveFailure" reason:@"owned clone remove exception" userInfo:nil];[self.map removeObjectForKey:key];}
+- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState*)state objects:(id __unsafe_unretained[])buffer count:(NSUInteger)count{return [self.map countByEnumeratingWithState:state objects:buffer count:count];}
+- (id)mutableCopyWithZone:(NSZone*)zone{(void)zone;if(spanFailure==1)@throw [NSException exceptionWithName:@"OwnedSpanCopyFailure" reason:@"owned mutableCopy exception" userInfo:nil];if(spanFailure==4)return nil;MoveSpanMap *result=[MoveSpanMap new];result.map=[self.map mutableCopy];result.clone=YES;return result;}
+- (BOOL)isEqual:(id)other{return [self.map isEqual:other];}
+@end
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"TEXTURE_MOVE_CPU_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
 static void captureError(const char *error){(void)error;callbacks++;}
 static int noAccess(const void *p,size_t n,int write){(void)p;(void)n;(void)write;accessCalls++;return 0;}
@@ -37,6 +52,10 @@ static int setup(void){
  CHECK(botw_graphics_init(NULL,captureError,NULL));BWDevice *d=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];put(&device,d);BWPool *p=[BWPool new];p.kind=BW_POOL_VIRTUAL;p.device=d;p.flags=0x221;p.size=65536;p.live=YES;put(&pool,p);p.generation=((BWObject*)&pool)->serial;
  source=calloc(1,256);destination=calloc(1,256);third=calloc(1,256);CHECK(source&&destination&&third);
  NVNtextureBuilder builder={0};TextureBuilder *b=(TextureBuilder*)&builder;b->device=&device;b->pool=&pool;b->format=NVN_FORMAT_RGBA8;b->target=NVN_TEXTURE_TARGET_2D;b->width=b->height=4;b->depth=b->levels=1;for(unsigned i=0;i<4;i++)b->swizzle[i]=i+NVN_SWZ_R;CHECK(w_nvnTextureInitialize(source,&builder));return 0;
+}
+static int replacementScene(BWTexture **old,BWTexture **fresh,NVNtexture *alias){
+ char error[512];botw_graphics_texture_move_token token;*old=textureObject(source);CHECK(botw_graphics_texture_move_preflight(source,destination,192,&token,error,sizeof error));memcpy(destination,source,192);CHECK(botw_graphics_texture_move_commit(&token,error,sizeof error));*alias=*destination;
+ NVNtextureBuilder builder={0};TextureBuilder metadata=(*old).metadata;memcpy(&builder,&metadata,sizeof metadata);CHECK(w_nvnTextureInitialize(source,&builder));*fresh=textureObject(source);CHECK(*old!=*fresh&&(*old).storageMoveEpoch==1&&(*fresh).storageMoveEpoch==0);return 0;
 }
 int main(int argc,char **argv){@autoreleasepool{
  CHECK(argc==2&&!setup());const char *mode=argv[1];char error[128];botw_graphics_texture_move_token token={0};
@@ -70,8 +89,23 @@ int main(int argc,char **argv){@autoreleasepool{
  }else if(!strcmp(mode,"destination-diagnostic")){
   NVNtextureBuilder builder={0};TextureBuilder metadata=texture.metadata;memcpy(&builder,&metadata,sizeof metadata);CHECK(w_nvnTextureInitialize(destination,&builder));BWTexture *occupied=textureObject(destination);occupied.storageMoveEpoch=7;
   NSDictionary *spans=[objectSpans copy],*values=[objects copy];NSUInteger pending=textureMoves.count;vmQueries=accessCalls=0;memoryAccessValidator=noAccess;char detail[512];
-  const intptr_t offsets[]={0,16,-16};for(unsigned i=0;i<3;i++){void *target=(void*)((uintptr_t)destination+offsets[i]);CHECK(!prepare(source,target,192,&token,detail,sizeof detail));CHECK(strstr(detail,"texture storage transfer destination overlaps live NVN storage existing_class=BWTexture span_bytes=192"));CHECK(strstr(detail,i?"exact_base=false exact_span=false":"exact_base=true exact_span=true"));CHECK(strstr(detail,"existing_primary=true existing_move_epoch=7"));char relative[64];snprintf(relative,sizeof relative,"relative_offset=%c%zu",offsets[i]<0?'-':'+',(size_t)(offsets[i]<0?-offsets[i]:offsets[i]));CHECK(strstr(detail,relative));CHECK([objectSpans isEqual:spans]&&[objects isEqual:values]&&textureMoves.count==pending&&!callbacks&&!vmQueries&&!accessCalls);}
+  const intptr_t offsets[]={0,16,-16};for(unsigned i=0;i<3;i++){occupied.storageMoveEpoch=i?7:0;void *target=(void*)((uintptr_t)destination+offsets[i]);CHECK(!prepare(source,target,192,&token,detail,sizeof detail));CHECK(strstr(detail,"texture storage transfer destination overlaps live NVN storage existing_class=BWTexture span_bytes=192"));CHECK(strstr(detail,i?"exact_base=false exact_span=false":"exact_base=true exact_span=true"));CHECK(strstr(detail,i?"existing_primary=true existing_move_epoch=7":"existing_primary=true existing_move_epoch=0"));char relative[64];snprintf(relative,sizeof relative,"relative_offset=%c%zu",offsets[i]<0?'-':'+',(size_t)(offsets[i]<0?-offsets[i]:offsets[i]));CHECK(strstr(detail,relative));CHECK([objectSpans isEqual:spans]&&[objects isEqual:values]&&textureMoves.count==pending&&!callbacks&&!vmQueries&&!accessCalls);}
   memoryAccessValidator=NULL;BWSampler *sampler=[BWSampler new];put(third,sampler);spans=[objectSpans copy];values=[objects copy];memoryAccessValidator=noAccess;CHECK(!prepare(source,third,192,&token,detail,sizeof detail));CHECK(strstr(detail,"existing_class=BWSampler span_bytes=48 exact_base=true exact_span=false")&&strstr(detail,"existing_primary=not_texture existing_move_epoch=0"));struct{char text[12];char guard;} shortError;memset(&shortError,0x5a,sizeof shortError);CHECK(!prepare(source,third,192,&token,shortError.text,sizeof shortError.text));CHECK(!shortError.text[11]&&shortError.guard==0x5a&&[objectSpans isEqual:spans]&&[objects isEqual:values]&&textureMoves.count==pending&&!callbacks&&!vmQueries&&!accessCalls);memoryAccessValidator=NULL;
+ }else if(!strncmp(mode,"replacement",11)){
+  BWTexture *old,*fresh;NVNtexture oldAlias;CHECK(!replacementScene(&old,&fresh,&oldAlias));uint64_t oldKey=old.identity,newKey=fresh.identity;NSDictionary *values=[objects copy],*spans=[objectSpans copy];
+  if(!strcmp(mode,"replacement")){
+   vmQueries=accessCalls=0;memoryAccessValidator=noAccess;CHECK(prepare(source,destination,192,&token,error,sizeof error));memcpy(destination,source,192);CHECK(commit(&token,error,sizeof error));CHECK(!vmQueries&&!accessCalls&&!callbacks&&[objects isEqual:values]&&!objectSpans[@(oldKey)]&&objectSpans[@(newKey)].rangeValue.location==(uintptr_t)destination&&old.storageMoveEpoch==2&&fresh.storageMoveEpoch==1);memoryAccessValidator=NULL;CHECK(textureObject(&oldAlias)==old&&textureObject(destination)==fresh);w_nvnTextureFinalize(&oldAlias);CHECK(objects[@(newKey)]==fresh&&objectSpans[@(newKey)].rangeValue.location==(uintptr_t)destination&&textureObject(destination)==fresh);
+  }else if(!strcmp(mode,"replacement-abort")){
+   CHECK(prepare(source,destination,192,&token,error,sizeof error));CHECK(cancel(&token,error,sizeof error));CHECK([objects isEqual:values]&&[objectSpans isEqual:spans]&&old.storageMoveEpoch==1&&fresh.storageMoveEpoch==0);
+  }else if(!strcmp(mode,"replacement-limits")){
+   old.storageMoveEpoch=0;CHECK(!prepare(source,destination,192,&token,error,sizeof error));old.storageMoveEpoch=UINT64_MAX;CHECK(!prepare(source,destination,192,&token,error,sizeof error));old.storageMoveEpoch=1;old.base=fresh;CHECK(!prepare(source,destination,192,&token,error,sizeof error));old.base=nil;old.identity=newKey;CHECK(!prepare(source,destination,192,&token,error,sizeof error));old.identity=oldKey;CHECK([objects isEqual:values]&&[objectSpans isEqual:spans]&&!textureMoves.count);
+  }else if(!strcmp(mode,"replacement-target-epoch")||!strcmp(mode,"replacement-source-epoch")){
+   CHECK(prepare(source,destination,192,&token,error,sizeof error));BOOL target=!strcmp(mode,"replacement-target-epoch");void *changing=target?(void*)destination:(void*)source;botw_graphics_texture_move_token otherToken;CHECK(prepare(changing,third,192,&otherToken,error,sizeof error));memcpy(third,changing,192);CHECK(commit(&otherToken,error,sizeof error));NSDictionary *current=[objectSpans copy];memcpy(destination,source,192);CHECK(!commit(&token,error,sizeof error)&&[objectSpans isEqual:current]&&[objects isEqual:values]);
+  }else if(!strcmp(mode,"replacement-pending")){
+   botw_graphics_texture_move_token otherToken;CHECK(prepare(destination,third,192,&otherToken,error,sizeof error));CHECK(!prepare(source,destination,192,&token,error,sizeof error));CHECK(cancel(&otherToken,error,sizeof error));CHECK(prepare(source,destination,192,&token,error,sizeof error));CHECK(prepare(destination,third,192,&otherToken,error,sizeof error));memcpy(destination,source,192);CHECK(!commit(&token,error,sizeof error)&&[objectSpans isEqual:spans]&&[objects isEqual:values]);CHECK(cancel(&otherToken,error,sizeof error));CHECK(old.storageMoveEpoch==1&&fresh.storageMoveEpoch==0);
+  }else if(!strcmp(mode,"replacement-clone-failure")){
+   NSMutableDictionary *original=objectSpans;for(unsigned failure=1;failure<=4;failure++){MoveSpanMap *proxy=[MoveSpanMap new];proxy.map=original;objectSpans=(NSMutableDictionary*)proxy;spanFailure=0;CHECK(prepare(source,destination,192,&token,error,sizeof error));memcpy(destination,source,192);spanFailure=failure;CHECK(!commit(&token,error,sizeof error)&&objectSpans==(id)proxy&&[original isEqual:spans]&&[objects isEqual:values]&&old.storageMoveEpoch==1&&fresh.storageMoveEpoch==0&&!textureMoves.count);spanFailure=0;objectSpans=original;}
+  }else CHECK(0);
  }else CHECK(0);
  CHECK(callbacks==beforeCallbacks);CHECK(botw_graphics_shutdown_checked(error,sizeof error));free(source);free(destination);free(third);printf("TEXTURE_MOVE_CPU_OK mode=%s no_real_gpu=true\n",mode);return 0;
 }}
@@ -131,6 +165,26 @@ class TextureMoveCPUTests(unittest.TestCase):
 
     def test_destination_conflict_reports_only_existing_host_metadata_without_state_or_accesses(self):
         self.mode('destination-diagnostic')
+
+    def test_exact_migrated_target_replacement_keeps_old_value_and_alias_finalize(self):
+        self.mode('replacement')
+
+    def test_target_replacement_abort_keeps_both_spans_and_epochs(self):
+        self.mode('replacement-abort')
+
+    def test_target_replacement_refuses_unmoved_selected_wrong_identity_and_max_epoch(self):
+        self.mode('replacement-limits')
+
+    def test_target_replacement_rechecks_both_source_and_target_epochs(self):
+        for mode in ['replacement-target-epoch', 'replacement-source-epoch']:
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_target_replacement_does_not_retire_another_pending_transfer_source(self):
+        self.mode('replacement-pending')
+
+    def test_actual_clone_copy_remove_set_exceptions_and_nil_preserve_global_map(self):
+        self.mode('replacement-clone-failure')
 
 
 @unittest.skipUnless(platform.system() == 'Darwin' and shutil.which('xcrun'), 'Metal requires macOS')
@@ -200,3 +254,48 @@ class TextureMoveGPUTests(unittest.TestCase):
         self.probe(source, [('private', 'GPU_PRIVATE_CONTENTS_MOVE_OK', True),
             ('private-alias', 'buffer address aliases private texture storage authority', False),
             ('private-retired-alias', 'buffer address aliases private texture storage authority', False)])
+
+    def test_exact_target_replacement_preserves_old_and_new_array_descriptor_pixels(self):
+        from test_botw_graphics import ARRAY_FEATURE, METAL_SMOKE
+        first = r'''
+    NVNtexture destinationArray,oldAlias;botw_graphics_texture_move_token moveToken;char moveError[512];
+    CHECK(botw_graphics_texture_move_preflight(&arrayTexture,&destinationArray,192,&moveToken,moveError,sizeof moveError));memcpy(&destinationArray,&arrayTexture,192);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));oldAlias=destinationArray;
+'''
+        replacement = r'''
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,textureHandle);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);NVNcommandHandle beforeReplacement=nvnCommandBufferEndRecording(&cb);
+    unsigned char *freshMemory=NULL;CHECK(!posix_memalign((void**)&freshMemory,page,page*4));for(size_t i=0;i<page*4;i++)freshMemory[i]=(unsigned char)(255-arrayMemory[i]);NVNmemoryPool freshPool;nvnMemoryPoolBuilderSetStorage(&mb,freshMemory,page*4);CHECK(nvnMemoryPoolInitialize(&freshPool,&mb));NVNtexture freshArray;nvnTextureBuilderSetStorage(&tb,&freshPool,0);CHECK(nvnTextureInitialize(&freshArray,&tb));
+    CHECK(botw_graphics_texture_move_preflight(&freshArray,&destinationArray,192,&moveToken,moveError,sizeof moveError));memcpy(&destinationArray,&freshArray,192);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));nvnTexturePoolRegisterTexture(&tp,2,&destinationArray,NULL);uint64_t freshHandle=nvnDeviceGetTextureHandle(&device,2,4);
+    nvnQueueSubmitCommands(&queue,1,&beforeReplacement);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++)CHECK(!memcmp(pixels+(y*4+x)*4,colors[x>=2][y<3?y:2],4));
+'''
+        fresh_draw = r'''
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,freshHandle);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+      for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++){unsigned layer=x>=2,level=y<3?y:2;if(pass&&!y&&layer)layer=0;for(unsigned c=0;c<3;c++)CHECK(pixels[(y*4+x)*4+c]==255-colors[layer][level][c]);CHECK(pixels[(y*4+x)*4+3]==255);}
+'''
+        feature = ARRAY_FEATURE.replace('nvnTexturePoolRegisterTexture(&tp,3,&arrayTexture,NULL);',
+            'nvnTexturePoolRegisterTexture(&tp,3,&arrayTexture,NULL);'+first)
+        feature = feature.replace('    for(unsigned pass=0;pass<2;pass++){',
+            replacement+'    for(unsigned pass=0;pass<2;pass++){')
+        feature = feature.replace('if(pass){if(r8)',
+            'if(pass)for(unsigned c=0;c<4;c++)freshMemory[layerStride+c]=(unsigned char)(255-colors[0][0][c]);if(pass){if(r8)')
+        feature = feature.replace('\n    }\n    nvnTextureFinalize(&arrayTexture);',
+            fresh_draw+'\n    }\n    nvnTextureFinalize(&oldAlias);for(unsigned pass=1;pass<2;pass++){'+fresh_draw+'}nvnTextureFinalize(&destinationArray);nvnMemoryPoolFinalize(&freshPool);free(freshMemory);')
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        self.probe(source, [('array-replace', 'GPU_ARRAY_LAYER_MIP_COLORS_OK', True)])
+
+    def test_exact_target_replacement_keeps_both_private_contents_and_authorities(self):
+        from test_botw_graphics import METAL_SMOKE
+        feature = r'''
+    API(nvnTextureFinalize);NVNtexture oldSource,newSource,destinationPrivate,oldAlias;botw_graphics_texture_move_token moveToken;char moveError[512];
+    NVNtexture *sources[]={&oldSource,&newSource};const float shades[2][4]={{.125f,.5f,.875f,1},{.75f,.25f,.5f,1}};
+    for(unsigned which=0;which<2;which++){nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetStorage(&tb,&pool,which?7168:6144);CHECK(nvnTextureInitialize(sources[which],&tb));const NVNtexture *privateTargets[]={sources[which]};nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,privateTargets,NULL,NULL,NULL);nvnCommandBufferClearColor(&cb,0,shades[which],15);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);}
+    CHECK(botw_graphics_texture_move_preflight(&oldSource,&destinationPrivate,192,&moveToken,moveError,sizeof moveError));memcpy(&destinationPrivate,&oldSource,192);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));oldAlias=destinationPrivate;
+    CHECK(botw_graphics_texture_move_preflight(&newSource,&destinationPrivate,192,&moveToken,moveError,sizeof moveError));memcpy(&destinationPrivate,&newSource,192);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));
+    unsigned char oldPixels[64],newPixels[64];CHECK(botw_graphics_read_texture(&oldAlias,oldPixels,sizeof oldPixels)&&botw_graphics_read_texture(&destinationPrivate,newPixels,sizeof newPixels));for(unsigned i=0;i<16;i++)for(unsigned c=0;c<4;c++){CHECK(abs((int)oldPixels[i*4+c]-(int)(shades[0][c]*255+.5f))<=1);CHECK(abs((int)newPixels[i*4+c]-(int)(shades[1][c]*255+.5f))<=1);}
+    int old=strstr(argv[1],"old")!=NULL;if(strstr(argv[1],"retired"))nvnTextureFinalize(old?&oldAlias:&destinationPrivate);
+    if(strstr(argv[1],"alias")){nvnCommandBufferBeginRecording(&cb);nvnCommandBufferCopyBufferToBuffer(&cb,gpu+(old?6144:7168),gpu+7680,64,0);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);return 2;}
+    nvnTextureFinalize(&oldAlias);unsigned char after[64];CHECK(botw_graphics_read_texture(&destinationPrivate,after,sizeof after)&&!memcmp(after,newPixels,sizeof after));nvnTextureFinalize(&destinationPrivate);puts("GPU_PRIVATE_OLD_NEW_REPLACEMENT_CONTENTS_OK");
+'''
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        self.probe(source, [('private-replace', 'GPU_PRIVATE_OLD_NEW_REPLACEMENT_CONTENTS_OK', True),
+            *[(mode, 'buffer address aliases private texture storage authority', False) for mode in
+              ['private-old-alias', 'private-new-alias', 'private-old-retired-alias', 'private-new-retired-alias']]])

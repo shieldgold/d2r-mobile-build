@@ -235,6 +235,16 @@ base-v0 的原 Write/Read 与 vendor1.9 的多层坐标语义尚未证明相同�
 
 目标冲突诊断保持原谓词、返回0、登记及 token 生命周期，仅在已命中的 span 上追加有界 host class、长度、exact-base/exact-span、BWTexture primary/epoch 与相对偏移；没有读取 guest raw/header/serial、扫描 VM 或新增 validator 调用。新夹具先在编译成功的旧实现上真实失败，最终10项 CPU 回归通过（4.681秒，ASan/UBSan、fake Metal）；两个独立新增 CPU 用例分别通过（4.456秒、4.257秒），零跳过、无GPU，三来源 SHA 前后稳定。逆剥格式化增量后 production 文件精确还原旧版本。384字节局部错误与512字节 runtime buffer 的容量已核验，12字节 caller buffer 的 NUL/越界 canary 通过；此诊断不构成目的存储已失效或可以覆盖的证据。freeze 文件 SHA256 为 `1389e0204c5f6343b2d7f3b76c561bdcace8d5321a1d95cc1631b48fc9943482`，native仍97。
 
+提交 `190d33c` 普通 Mac 完整退出后，首次冲突的已登记 host 元数据明确为 `BWTexture span_bytes=192 exact_base=true exact_span=true existing_primary=true existing_move_epoch=1 relative_offset=+0`，其前有一次成功迁移。该信息证明完整的、此前已迁移的宿主 primary 槽位冲突，不证明旧资源已死亡。固定 main 的旧共享引用/非 owner 分支会在不 Finalize 旧资源时给目的槽赋新值，后续适配需只交接槽位登记，保留旧 value、descriptor 和 GPU authority；其他类、部分覆盖及未迁移目的仍拒绝。本版 binary SHA256 为 `9a532333ef8e8b4e3c8580770c4e537adc03dad28834608da4ea8f0a1058a5b9`，证据位于 `outputs/botw-host39-mac-190d33c/destination-conflict-evidence.json`。仍 host_return=1，无游戏画面或可玩验收，未读取旧客体字节。
+
+`28c0b30` 的官方通用工件已核验并本机加入固定私有输入，native97来源核对后签名，IPA 19,153,725字节，SHA256 为 `45b03146cbfa5af247d16a7cee061aed65c0d104fb866029105f61c98465a1df`。主动 `lockState` 查询确认同一 iPhone12 的 passcodeRequired=false 后，已保数据安装并普通启动 PID1097，executable 匹配本次安装，启动标记32→33，累计日志40,704,362字节完整流式校验，旧前缀保留。手机实际完成一次纹理迁移，不再出现前版一维数组零大小行，首个 host error 同本版 Mac 为通用目的 storage 重叠；本版不含190d的细分字段，不能把后者 Mac 元数据写成此手机观测。RomFS 大小/mtime、UID、shader清单及权限均保留，未重传资源。仍 host_return=1，无真实游戏画面、操作、声音或存档验收；不能仅凭执行越过该查询而断言 A14 已完成1DArray真实采样。证据位于 `outputs/botw-ios-28c0b30-iphone12/device-run-report.json` 和 `policy-and-transfer-evidence.json`。
+
+完整目标槽替换继续受已审核 main profile、正常返回点、C0长度与 ownership bit0 门禁约束，不改 runtime。图形层只允许唯一、与源不同、此前迁移过且 epoch>0 的 exact192 owned BWTexture primary 目的；未迁移、部分覆盖、其他类、selected/错误identity和多重冲突仍拒绝。pending record 强持旧目的 object/key/span/epoch，commit重新核对完整快照及双方epoch，旧目的若正是另一pending记录的source则拒绝。所有可抛的 span 创建、表克隆和两次编辑在私有clone内完成，成功后一次发布，再推进双方epoch；nil/异常/abort不改变原登记。只移交primary span，旧 objects、descriptor/recorded引用、MTL资源、mapping、texown/flush及private authority均保留；旧alias按原serial Finalize，不能删除新key的span。无原Finalize的旧值和资源可能积累至shutdown，64个pending上限不构成资源总量上限。字节copy保持原非原子合同，不回滚。
+
+新替换夹具在旧实现编译成功后3项真实失败，最终18项通过（6.791秒，CPU16 ASan/UBSan、GPU2方法6个实际Metal validation模式，无GPU sanitizer）。包括clone的真实copy/remove/set异常和nil、源/目的epoch变化、pending、旧alias Finalize、旧recorded draw及descriptor继续采旧图案、新descriptor采不同backing的新图案，以及两份private纹理像素和live/retired别名保护。生产来源仍97，三文件冻结 SHA256 为 `c46427b7490cb830e66baf6e2aadb472f5a2be744abdbd56a4881d0662573477`；独审及固定提交实际运行结果另记，不把夹具像素当游戏画面。
+
+该替换 freeze 的独立CPU16项通过（4.607秒，ASan/UBSan、fake Metal、无GPU），独立GPU2方法6个真实模式通过（2.266秒、零跳过、无GPU sanitizer）。双方审查 CLOSED，三来源 SHA 前后精确一致，GPU已释放供普通原游戏验证；没有增加生产文件或修改通用对象门禁。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

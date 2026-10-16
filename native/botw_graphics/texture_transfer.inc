@@ -1,6 +1,7 @@
 /* Host-only storage transfer, entered only by the separately audited runtime
  * copy site. A registry value/resource is independent of its primary C0 slot.
- * This module never copies or reads that guest slot and never relaxes guards. */
+ * This module never copies or reads that guest slot or changes general NVN
+ * storage guards. Only this audited protocol may retire a qualified target. */
 #define BW_TEXTURE_MOVE_CAPACITY 64
 #define BW_TEXTURE_MOVE_MAGIC UINT64_C(0x4257544d4f564531)
 static NSMutableDictionary<NSNumber*,NSDictionary*> *textureMoves;
@@ -13,7 +14,9 @@ static void textureTransferBeginLifecycle(void){
 static void textureTransferRequireQuiescent(void){if(textureMoves.count)fatal("texture storage transfer is pending; graphics resources retained");}
 static void textureTransferEndLifecycle(void){textureMoves=nil;textureMoveReady=NO;}
 static int textureMoveReject(char *error,size_t capacity,const char *message){if(error&&capacity)snprintf(error,capacity,"%s",message);return 0;}
-static BOOL textureMoveDestination(const void *source,void *destination,size_t bytes,char *error,size_t capacity){
+static BOOL textureMovePendingSource(BWTexture *texture){for(NSDictionary *record in textureMoves.allValues)if(record[@"texture"]==texture)return YES;return NO;}
+static BOOL textureMoveDestination(const void *source,void *destination,size_t bytes,NSDictionary **replacement,char *error,size_t capacity){
+    *replacement=nil;NSDictionary *candidate=nil;
     if(!source||!destination||bytes!=sizeof(NVNtexture)||bytes>UINTPTR_MAX-(uintptr_t)source||bytes>UINTPTR_MAX-(uintptr_t)destination)
         return textureMoveReject(error,capacity,"texture storage transfer size/address is invalid");
     if(memoryOverlap(source,bytes,destination,bytes))return textureMoveReject(error,capacity,"texture storage transfer source/destination overlap");
@@ -25,17 +28,24 @@ static BOOL textureMoveDestination(const void *source,void *destination,size_t b
             id existing=objects[key];BWTexture *texture=[existing isKindOfClass:[BWTexture class]]?existing:nil;
             BOOL exact=(uintptr_t)destination==span.location;uintptr_t offset=exact?0:(uintptr_t)destination>span.location?(uintptr_t)destination-span.location:span.location-(uintptr_t)destination;
             const char *primary=texture?(!texture.base&&texture.identity==key.unsignedLongLongValue?"true":"false"):"not_texture";
+            if(exact&&span.length==bytes&&texture&&!texture.base&&texture.identity==key.unsignedLongLongValue&&texture.storageMoveEpoch){
+                if(candidate)return textureMoveReject(error,capacity,"texture storage transfer destination has multiple owned spans");
+                if(texture.storageMoveEpoch==UINT64_MAX)return textureMoveReject(error,capacity,"texture storage transfer target epoch exhausted");
+                if(textureMovePendingSource(texture))return textureMoveReject(error,capacity,"texture storage transfer target is another pending transfer source");
+                textureLive(texture);candidate=@{@"key":key,@"texture":texture,@"span":objectSpans[key],@"epoch":@(texture.storageMoveEpoch)};
+                if(!candidate)return textureMoveReject(error,capacity,"texture storage transfer target snapshot allocation failed");continue;
+            }
             char detail[384];snprintf(detail,sizeof detail,"texture storage transfer destination overlaps live NVN storage existing_class=%.48s span_bytes=%zu exact_base=%s exact_span=%s existing_primary=%s existing_move_epoch=%llu relative_offset=%c%zu",existing?class_getName([existing class]):"<none>",(size_t)span.length,exact?"true":"false",exact&&span.length==bytes?"true":"false",primary,(unsigned long long)texture.storageMoveEpoch,(uintptr_t)destination<span.location?'-':'+',(size_t)offset);
             return textureMoveReject(error,capacity,detail);
         }
     }
-    return YES;
+    *replacement=candidate;return YES;
 }
 static int textureMovePreflight(const void *source,void *destination,size_t bytes,botw_graphics_texture_move_token *output,char *error,size_t capacity){
     if(!output)return textureMoveReject(error,capacity,"texture storage transfer token output is missing");
     if(!gpu||!textureMoveReady||!textureMoves)return textureMoveReject(error,capacity,"texture storage transfer lifecycle is unavailable");
     if(textureMoves.count>=BW_TEXTURE_MOVE_CAPACITY||textureMoveSequence==UINT64_MAX)return textureMoveReject(error,capacity,"texture storage transfer token capacity exhausted");
-    if(!textureMoveDestination(source,destination,bytes,error,capacity))return 0;
+    NSDictionary *target=nil;if(!textureMoveDestination(source,destination,bytes,&target,error,capacity))return 0;
     NSNumber *identity=nil;BWTexture *texture=nil;
     for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;id object=objects[key];
         if(span.location!=(uintptr_t)source||span.length!=bytes||![object isKindOfClass:[BWTexture class]])continue;
@@ -45,9 +55,11 @@ static int textureMovePreflight(const void *source,void *destination,size_t byte
     if(!texture||texture.base||texture.identity!=identity.unsignedLongLongValue)return textureMoveReject(error,capacity,"texture storage transfer source is not an exact owned BWTexture primary span");
     textureLive(texture);
     if(texture.storageMoveEpoch==UINT64_MAX)return textureMoveReject(error,capacity,"texture storage transfer source epoch exhausted");
+    if(target[@"texture"]==texture)return textureMoveReject(error,capacity,"texture storage transfer source and target identities must differ");
     uint64_t sequence=textureMoveSequence+1;
     botw_graphics_texture_move_token token={{sequence,textureMoveLifecycle,texture.identity,(uintptr_t)source,(uintptr_t)destination,bytes,texture.storageMoveEpoch,BW_TEXTURE_MOVE_MAGIC}};
-    NSDictionary *record=@{@"token":[NSData dataWithBytes:&token length:sizeof token],@"texture":texture,@"owner":[NSValue valueWithPointer:pthread_self()]};
+    NSMutableDictionary *record=[@{@"token":[NSData dataWithBytes:&token length:sizeof token],@"texture":texture,@"owner":[NSValue valueWithPointer:pthread_self()]} mutableCopy];
+    if(!record)return textureMoveReject(error,capacity,"texture storage transfer token snapshot allocation failed");if(target)record[@"target"]=target;
     @try{textureMoves[@(sequence)]=record;textureMoveSequence=sequence;*output=token;}
     @catch(NSException *exception){[textureMoves removeObjectForKey:@(sequence)];@throw exception;}
     return 1;
@@ -71,9 +83,18 @@ static int textureMoveCommit(const botw_graphics_texture_move_token *token,char 
        span.location!=token->opaque[3]||span.length!=token->opaque[5]||texture.storageMoveEpoch!=token->opaque[6])
         return textureMoveReject(error,capacity,"texture storage transfer lifecycle/source/span epoch changed");
     textureLive(texture);
-    if(!textureMoveDestination((void*)(uintptr_t)token->opaque[3],(void*)(uintptr_t)token->opaque[4],token->opaque[5],error,capacity))return 0;
+    if(texture.storageMoveEpoch==UINT64_MAX)return textureMoveReject(error,capacity,"texture storage transfer source epoch exhausted");
+    NSDictionary *target=record[@"target"],*current=nil;
+    if(!textureMoveDestination((void*)(uintptr_t)token->opaque[3],(void*)(uintptr_t)token->opaque[4],token->opaque[5],&current,error,capacity))return 0;
+    if(target?![target isEqual:current]:current!=nil)
+        return textureMoveReject(error,capacity,"texture storage transfer target identity/span epoch changed");
     NSValue *replacement=[NSValue valueWithRange:NSMakeRange(token->opaque[4],token->opaque[5])];
-    objectSpans[key]=replacement;texture.storageMoveEpoch++;return 1;
+    if(!replacement)return textureMoveReject(error,capacity,"texture storage transfer span allocation failed");
+    /* All fallible dictionary work is private. A failed clone/remove/set must
+     * never retire only one side of a source/target ownership transaction. */
+    NSMutableDictionary *next=[objectSpans mutableCopy];if(!next)return textureMoveReject(error,capacity,"texture storage transfer span snapshot allocation failed");
+    if(target)[next removeObjectForKey:target[@"key"]];next[key]=replacement;
+    objectSpans=next;texture.storageMoveEpoch++;BWTexture *retired=target[@"texture"];if(retired)retired.storageMoveEpoch++;return 1;
 }
 static int textureMoveAbort(const botw_graphics_texture_move_token *token,char *error,size_t capacity){
     if(!textureMoveRecord(token,error,capacity))return 0;[textureMoves removeObjectForKey:@(token->opaque[0])];return 1;
