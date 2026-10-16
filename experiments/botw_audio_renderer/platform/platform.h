@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include "memory_provider.h"
 
 namespace botw::audio {
 
@@ -20,6 +21,7 @@ using Address = std::uint64_t;
 enum class Access : unsigned { Read = 1, Write = 2, ReadWrite = 3 };
 
 namespace detail { struct Region; struct MemoryState; struct PoolState; struct EventState; }
+struct MemoryProvenance { std::uint64_t backing_id = 0, backing_offset = 0; };
 
 // A pin holds both the registration and the host backing alive. Rights may only
 // be narrowed by a slice. No pointer is obtained by casting a guest address. Owners
@@ -49,15 +51,24 @@ public:
     // lifetime.get() must be bytes.data(), and its deleter must retain/release the
     // real backing. This records host ownership; it does not change VM protection.
     Status register_region(Owner owner, Address address, std::span<std::byte> bytes,
-                           Access access, std::shared_ptr<void> lifetime);
+                           Access access, std::shared_ptr<void> lifetime,
+                           MemoryProvenance provenance = {});
     Status allocate(Owner owner, Address address, std::size_t size, Access access);
     Status pin(Owner owner, Address address, std::size_t length, Access access,
                MemoryView& out) const;
+    // Configure once before registrations. Only pool/span mapping may resolve
+    // a complete registered miss; transfer attach keeps pin() registered-only.
+    Status configure_provider(const botw_audren_memory_provider& provider,
+        void* failure_context, void (*failed)(void*, Status));
+    Status pin_pool(Owner owner, Address address, std::size_t length, Access access,
+                    MemoryView& out) const;
+    Status retry_provider_cleanup();
+    Status provider_idle() const;
     Status read(Owner owner, Address address, std::span<std::byte> out) const;
     Status write(Owner owner, Address address, std::span<const std::byte> bytes) const;
     Status unregister_region(Owner owner, Address address);
 private:
-    std::unique_ptr<detail::MemoryState> state_;
+    std::shared_ptr<detail::MemoryState> state_;
 };
 
 class TransferView {

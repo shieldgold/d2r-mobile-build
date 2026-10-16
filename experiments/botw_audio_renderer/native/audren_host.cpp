@@ -43,6 +43,9 @@ struct botw_audren_host {
             auto& host = *static_cast<botw_audren_host*>(context);
             host.failed(host.failure_context, static_cast<int32_t>(status));
         }}));
+        require(memory.configure_provider(config.memory_provider, &ports, [](void* context, Status status) {
+            static_cast<RendererHost*>(context)->fail(status);
+        }));
         require(ports.bind_renderer(adsp));
         manager = std::make_unique<AR::Manager>(ports);
     }
@@ -157,7 +160,10 @@ extern "C" botw_audren_result botw_audren_host_destroy(botw_audren_host** owner,
         auto* host = *owner;
         {
             std::lock_guard lock(host->control);
-            if (!host->sessions.empty() || !host->regions.empty()) return platform_result(Status::Busy);
+            if (!host->sessions.empty()) return platform_result(Status::Busy);
+            require(host->memory.retry_provider_cleanup());
+            require(host->memory.provider_idle());
+            if (!host->regions.empty()) return platform_result(Status::Busy);
             (void)host->ports.set_paused(true);
             host->manager->Stop(); host->adsp.Stop(); host->sink->CloseStreams();
         }
@@ -176,6 +182,11 @@ extern "C" botw_audren_result botw_audren_host_set_active(botw_audren_host* host
 }
 extern "C" botw_audren_result botw_audren_register_region(botw_audren_host* host, uint64_t owner,
     uint64_t address, botw_audren_backing backing, uint32_t access, char* error, size_t capacity) {
+    return botw_audren_register_region_provenance(host,owner,address,backing,access,0,0,error,capacity);
+}
+extern "C" botw_audren_result botw_audren_register_region_provenance(botw_audren_host* host,
+    uint64_t owner, uint64_t address, botw_audren_backing backing, uint32_t access,
+    uint64_t backing_id, uint64_t backing_offset, char* error, size_t capacity) {
     return boundary(error, capacity, [&] {
         if (!host || !backing.data || !backing.size || !backing.retain || !backing.release ||
             access < 1 || access > 3) throw PlatformError(Status::InvalidArgument);
@@ -183,7 +194,8 @@ extern "C" botw_audren_result botw_audren_register_region(botw_audren_host* host
         host->regions.reserve(host->regions.size() + 1);
         auto resource = retain_resource(backing.data, backing.context, backing.retain, backing.release);
         require(host->memory.register_region(owner, address,
-            {static_cast<std::byte*>(backing.data), backing.size}, static_cast<Access>(access), resource));
+            {static_cast<std::byte*>(backing.data), backing.size}, static_cast<Access>(access), resource,
+            {backing_id,backing_offset}));
         host->regions.push_back({owner, address});
         return platform_result(Status::Ok);
     });
@@ -205,7 +217,7 @@ extern "C" botw_audren_result botw_audren_get_work_buffer_size(const void* wire,
         const auto params = parameters(wire, size);
         Status fatal = Status::Ok;
         const botw_audren_configuration config{BOTW_AUDREN_HOST_ABI, sizeof config, 0, 0, 0,
-            &fatal, [](void* context, int32_t status) { *static_cast<Status*>(context) = static_cast<Status>(status); }};
+            &fatal, [](void* context, int32_t status) { *static_cast<Status*>(context) = static_cast<Status>(status); },{}};
         botw_audren_host host(config);
         std::uint64_t required = 0;
         const auto result = host.manager->GetWorkBufferSize(params, required);
@@ -276,9 +288,14 @@ extern "C" botw_audren_result botw_audren_update(botw_audren_session* session,
         aligned_descriptor(input, input_size); aligned_descriptor(output, output_size);
         aligned_descriptor(performance, performance_size, true);
         std::lock_guard lock(session->host.control); checked_session(session);
-        return service_result(session->renderer.RequestUpdate(
+        const auto result = session->renderer.RequestUpdate(
             {static_cast<const u8*>(input), input_size}, {static_cast<u8*>(performance), performance_size},
-            {static_cast<u8*>(output), output_size}));
+            {static_cast<u8*>(output), output_size});
+        // Ordinary pool attach rejection is reported by the unchanged original
+        // pool status. A terminal backing failure/producer contract violation
+        // during Update must not escape as a successful service completion.
+        require(session->host.ports.failure());
+        return service_result(result);
     });
 }
 extern "C" botw_audren_result botw_audren_get_info(botw_audren_session* session,
@@ -312,6 +329,7 @@ extern "C" botw_audren_result botw_audren_close(botw_audren_session** owner, cha
             const auto previous_failure = host.ports.failure();
             if (session->initialized) { session->renderer.Finalize(); session->initialized = false; }
             if (session->attached) { require(session->transfer.detach()); session->attached = false; }
+            require(host.memory.retry_provider_cleanup());
             if (!session->event_closed) { session->event.close(); session->event_closed = true; }
             // Stop/flush errors remain observable. The owner survives one error
             // for cleanup/retry, although workers have already been joined.

@@ -47,6 +47,12 @@ class CompleteRendererTests(unittest.TestCase):
 
     def test_fieldwise_wire_profiles_and_checked_update_section_lengths(self):
         checked([self.build / 'botw_owned_renderer_wire'], timeout=20)
+    def test_original_update_pool_mapper_resolves_actual_owned_backing(self):
+        checked([self.build / 'botw_owned_audren_provider','normal'], timeout=20)
+    def test_original_finalize_keeps_failed_memory_release_owner_for_real_retry(self):
+        checked([self.build / 'botw_owned_audren_provider','release-failure'], timeout=20)
+    def test_provider_contract_violation_is_fatal_and_its_owner_survives_cleanup(self):
+        checked([self.build / 'botw_owned_audren_provider','failed-owner'], timeout=20)
 
 
 if __name__ == '__main__':

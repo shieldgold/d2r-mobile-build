@@ -93,6 +93,16 @@
       "bytes": 3564,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_audren.c": {
+      "sha256": "e07718fd9b30f3e4b026d73d991b449994b3fa3c04ba3107a415f8bada439eb3",
+      "bytes": 20690,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_audren.h": {
+      "sha256": "23485c261f7fe62719825acfa3301baa35120e7d2a119d8c43195add3b29add2",
+      "bytes": 2449,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/whole_guest_memory.c": {
       "sha256": "d5fad80a4dd5ba89a786aa9f663abb03059d858d5d04e5c60312db968fbf5610",
       "bytes": 2928,
@@ -409,8 +419,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/services_audren_probe.cpp": {
-      "sha256": "95d0d21d3106a7d1675bbde17e471ddc4d806d10bc21b9881a8275c7342b39cd",
-      "bytes": 20957,
+      "sha256": "f8f18452c8277c1676c45bb311fe0a8332e0d1bd2bb7c11ea95dff8fc705e163",
+      "bytes": 21125,
       "role": "thin-adapter-or-verification"
     },
     "tests/shader_v8_control_probe.c": {
@@ -431,6 +441,16 @@
     "tests/whole_audio_platform_probe.c": {
       "sha256": "df786c5fc2418f45bc5285b72f14fde077020b14b90714e5f366ac136f7ba026",
       "bytes": 7458,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_audren_kernel_probe.c": {
+      "sha256": "50d4f5733b198649ed1ac275a195cab3479f14fd149e307a7dfa9b9e66c756eb",
+      "bytes": 2885,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_audren_probe.cpp": {
+      "sha256": "d3e77e8f557c2d2bc7c94f58abe1521c98306a1c8d14daad7b620d5012602113",
+      "bytes": 15618,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_dirty_checked_probe.c": {
@@ -1336,7 +1356,8 @@
     "adapter/whole_pool_backing_gate.c",
     "adapter/whole_pool_backing_memory.m",
     "adapter/whole_transfer_vm.c",
-    "adapter/whole_guest_memory.c"
+    "adapter/whole_guest_memory.c",
+    "adapter/whole_audren.c"
   ],
   "swforce_record_count": 127,
   "swforce_metadata_sha256": "df5207fef17b2bcae2a98d9f76c009bb2ea27040c383fd30aad8ff6618444932",
@@ -1428,8 +1449,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/NATIVE.lock.json": {
-      "sha256": "e3b41a3de1e1fc125160b199df43dedc516997b869a5e91d78585ca9a0374367",
-      "bytes": 8541,
+      "sha256": "dbf80320f187e883c071654b8c9264b30d3d67bbc3b7380d5844958ec48dbc30",
+      "bytes": 9200,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/README.md": {
@@ -1463,23 +1484,23 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/CMakeLists.txt": {
-      "sha256": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585",
-      "bytes": 8513,
+      "sha256": "b2e52a910eda2bda76343a2a6a8f75f7a1e4325c4eda21f7ca3f6f718ded35fc",
+      "bytes": 9147,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/README.md": {
-      "sha256": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76",
-      "bytes": 7661,
+      "sha256": "3274435028744935d54ad9e6b13ce04a447b1c4abaebe87e6ccd58ba4a81640b",
+      "bytes": 10401,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/audren_host.cpp": {
-      "sha256": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc",
-      "bytes": 16667,
+      "sha256": "bdd6173aed363d414715d84cf6ede7f1bf68e1854a7b7c756eb96f0632e91d62",
+      "bytes": 17804,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/audren_host.h": {
-      "sha256": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc",
-      "bytes": 6468,
+      "sha256": "bb4b5227b8dbad95321895d485d56e74ce7092203dedca5229a3158ad4d9ac98",
+      "bytes": 7167,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/common_ports.cpp": {
@@ -1508,8 +1529,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/renderer_memory.cpp": {
-      "sha256": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4",
-      "bytes": 7637,
+      "sha256": "53919fa753bd108bb010591cf228d16bd29308016713e23336e4ccdd4e1a19da",
+      "bytes": 7642,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/renderer_memory.h": {
@@ -1547,6 +1568,11 @@
       "bytes": 11021,
       "role": "complete-verified-audio-component"
     },
+    "experiments/botw_audio_renderer/platform/memory_provider.h": {
+      "sha256": "34bdda8edab56834ecb44d75e6314af703acee855794f9797e2d174dbc3afe85",
+      "bytes": 1985,
+      "role": "complete-verified-audio-component"
+    },
     "experiments/botw_audio_renderer/platform/pcm_output.cpp": {
       "sha256": "71438d8550b736ad894e081ce7dd06e7dae131d0185c490527392c579306a809",
       "bytes": 1965,
@@ -1558,13 +1584,13 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/platform/platform.cpp": {
-      "sha256": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65",
-      "bytes": 12225,
+      "sha256": "d22211206c263b09f03968b3ac7ce54c29f428bea47544698225e2c46b0c785b",
+      "bytes": 27417,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/platform/platform.h": {
-      "sha256": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b",
-      "bytes": 4431,
+      "sha256": "3e0fe6b6f59de83b35357b215a757b51a5e8522a05f208451a73936a87aeb1cb",
+      "bytes": 5097,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/provenance/eden-cpmfile.json": {
@@ -1573,8 +1599,18 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/audren_host_probe.cpp": {
-      "sha256": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592",
-      "bytes": 9160,
+      "sha256": "795c5ad3df7ebf0c1e68383655c114d8be88f1f3143b45a76b170d86c6cef8ee",
+      "bytes": 9163,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/audren_provider_probe.cpp": {
+      "sha256": "edd9323908cf9295e36cece52f2010d69c704a5ef0c0b5851d839481e2ba0eb1",
+      "bytes": 6241,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/memory_provider_probe.cpp": {
+      "sha256": "f5368ae35e1a2cfb03dff55f2594693b3dbc010ecd9754b01b18fed7edf7e938",
+      "bytes": 11038,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/native_sink_stream_probe.cpp": {
@@ -1647,6 +1683,11 @@
       "bytes": 3015,
       "role": "complete-verified-audio-component"
     },
+    "experiments/botw_audio_renderer/tests/test_memory_provider.py": {
+      "sha256": "e0fdbb04657b22042c7a0ed4ec392085c7a605db492b21c10f1a8472617d36d2",
+      "bytes": 2710,
+      "role": "complete-verified-audio-component"
+    },
     "experiments/botw_audio_renderer/tests/test_native_pcm_sink.py": {
       "sha256": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02",
       "bytes": 10630,
@@ -1663,8 +1704,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/test_renderer_module.py": {
-      "sha256": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817",
-      "bytes": 2171,
+      "sha256": "0b12d7f17dbfd84cb71cb225b31a9f224f99189ce2d44fec96538f4cdec7d5c4",
+      "bytes": 2685,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/test_renderer_ports.py": {
@@ -1688,8 +1729,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tools/verify_native.py": {
-      "sha256": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522",
-      "bytes": 2327,
+      "sha256": "07408d54d4babf5dbc5767517b1f6757c379a27300b59fe7f84d5d608499265a",
+      "bytes": 2383,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/vendor/eden/CMakeLists.txt": {
@@ -2954,23 +2995,23 @@
     "files": {
       "CMakeLists.txt": "45c2dfa6e2b14db6f5360ffab811e8bec8cdec496732de459a3ef52efb4fba3e",
       "DEPENDENCIES.lock.json": "d03405dfea28cbbd970401894cf4fd576e78145c4d88dbf67b5d01cf3bcbcc79",
-      "NATIVE.lock.json": "e3b41a3de1e1fc125160b199df43dedc516997b869a5e91d78585ca9a0374367",
+      "NATIVE.lock.json": "dbf80320f187e883c071654b8c9264b30d3d67bbc3b7380d5844958ec48dbc30",
       "README.md": "165ecfbe922d4fec62b5a58cccb67d2a5982cfbf2d57a090679713d9c74b91f3",
       "SOURCE.lock.json": "bf9a925daf4f704cbb994e047c9e66246dedcbac72d6b8cdb69aa388625cf121",
       "adapter/native_sink_stream.cpp": "862a9cc09e756c023b485cff7bf410b8ea09818440653609b783c183f83585c2",
       "adapter/native_sink_stream.h": "bc59db65540d49996a108024df600500d3e519e7e20915351e22736f4a1709aa",
       "licenses/eden/GPL-2.0-or-later.txt": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
       "licenses/eden/GPL-3.0-or-later.txt": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e",
-      "native/CMakeLists.txt": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585",
-      "native/README.md": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76",
-      "native/audren_host.cpp": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc",
-      "native/audren_host.h": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc",
+      "native/CMakeLists.txt": "b2e52a910eda2bda76343a2a6a8f75f7a1e4325c4eda21f7ca3f6f718ded35fc",
+      "native/README.md": "3274435028744935d54ad9e6b13ce04a447b1c4abaebe87e6ccd58ba4a81640b",
+      "native/audren_host.cpp": "bdd6173aed363d414715d84cf6ede7f1bf68e1854a7b7c756eb96f0632e91d62",
+      "native/audren_host.h": "bb4b5227b8dbad95321895d485d56e74ce7092203dedca5229a3158ad4d9ac98",
       "native/common_ports.cpp": "14eeb8428ccd639dff1ac2e32fc5e8793999d03932a2284913c2752e8c6bf8fa",
       "native/renderer_event.cpp": "dfcf5cc4a63351f181bd6cb4fdbacd38e132451c1689082d767094b34a8ae621",
       "native/renderer_event.h": "01213fd876b437a6907fe592df9b75bba10bb5ff70803faed95f3af6564a63a6",
       "native/renderer_host.cpp": "597eadac7796883b6937394bdabaf6c9432b93fd41998b21f8442281b445314f",
       "native/renderer_host.h": "096cad29d15a1d7014f20993850d531bc5853d7e0e16e6cc3603b2ae434ac35f",
-      "native/renderer_memory.cpp": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4",
+      "native/renderer_memory.cpp": "53919fa753bd108bb010591cf228d16bd29308016713e23336e4ccdd4e1a19da",
       "native/renderer_memory.h": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868",
       "native/wire.cpp": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
       "native/wire.h": "a89673593b6fafab3e51906f9393f441dd58d0071649f06a83b77829ffb12b11",
@@ -2978,12 +3019,15 @@
       "patches/native-host.patch": "79e0a59b1d28c4fb1fab6f31ce7593014f703ffe8ac973136e1632ee220f52d1",
       "patches/native-pcm-sink.patch": "8a679f42f43c65220bfaad8b0e199132dc6961edae6517bad449aa16d739083d",
       "patches/pool-memory.patch": "4db537387ecacfd28a6440f518a292f50cf23e781b87a171d69b2679a6c74535",
+      "platform/memory_provider.h": "34bdda8edab56834ecb44d75e6314af703acee855794f9797e2d174dbc3afe85",
       "platform/pcm_output.cpp": "71438d8550b736ad894e081ce7dd06e7dae131d0185c490527392c579306a809",
       "platform/pcm_output.h": "be4905005f5b7ca1b2b1d116d35cfe315430a33aa6b629ad61d68d77a91ba466",
-      "platform/platform.cpp": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65",
-      "platform/platform.h": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b",
+      "platform/platform.cpp": "d22211206c263b09f03968b3ac7ce54c29f428bea47544698225e2c46b0c785b",
+      "platform/platform.h": "3e0fe6b6f59de83b35357b215a757b51a5e8522a05f208451a73936a87aeb1cb",
       "provenance/eden-cpmfile.json": "e1a263a2825e1204a243998cd5254c600201a0d3ed9b542f7a25ef99f2bdb157",
-      "tests/audren_host_probe.cpp": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592",
+      "tests/audren_host_probe.cpp": "795c5ad3df7ebf0c1e68383655c114d8be88f1f3143b45a76b170d86c6cef8ee",
+      "tests/audren_provider_probe.cpp": "edd9323908cf9295e36cece52f2010d69c704a5ef0c0b5851d839481e2ba0eb1",
+      "tests/memory_provider_probe.cpp": "f5368ae35e1a2cfb03dff55f2594693b3dbc010ecd9754b01b18fed7edf7e938",
       "tests/native_sink_stream_probe.cpp": "f55513466e436c23d5a88e043d2da96ac6817df62448059630c8a6c93ef5e035",
       "tests/pcm_mock_au.c": "86165ff9fd0cc85b1b3b403cebefdbcf7031d4657e8cbb1eb30236def33a4cd8",
       "tests/pcm_output_probe.cpp": "1cdb3b3e77bf010a39f22641fe2c5827ff96a2d714f45328123a4af08c54dde6",
@@ -2998,15 +3042,16 @@
       "tests/renderer_pcm_mock.c": "842a8804e165f46c797266b4b1e46d3a6c78ddeafa5d5ee0de2aee823ddb9028",
       "tests/renderer_update_probe.cpp": "7483d270322df1ca84888c90fa43d11cf9e0767189adde9ccaa0522d79da629d",
       "tests/renderer_worker_probe.cpp": "4fceed359344b6209f415efee23b17929024edf7e6308868beda1a3857278fe7",
+      "tests/test_memory_provider.py": "e0fdbb04657b22042c7a0ed4ec392085c7a605db492b21c10f1a8472617d36d2",
       "tests/test_native_pcm_sink.py": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02",
       "tests/test_native_platform.py": "0e260ffaa605d6bbba34e0c2dfb4cc145049de3d35cdba1901347b7e41837c49",
       "tests/test_renderer_memory.py": "67025f2f80f29297a34b1c9061e29dec9e7a316c0dfff2208b116e53aaa5f125",
-      "tests/test_renderer_module.py": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817",
+      "tests/test_renderer_module.py": "0b12d7f17dbfd84cb71cb225b31a9f224f99189ce2d44fec96538f4cdec7d5c4",
       "tests/test_renderer_ports.py": "1dd913c708a2245d9772e679247375da8e8d636158ce98d39223e86dfab686fa",
       "tests/wire_probe.cpp": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d",
       "tools/prepare_eden.py": "4e7afdc60b8b2f250357e31b4082f632e2bddcff3eb27e56578c4de480072da4",
       "tools/vendor_from_receipts.py": "e76f4b07a84e5903a1d8806b03f3dc41b4b60957ba6559e116c6229d95a67963",
-      "tools/verify_native.py": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522",
+      "tools/verify_native.py": "07408d54d4babf5dbc5767517b1f6757c379a27300b59fe7f84d5d608499265a",
       "vendor/eden/CMakeLists.txt": "4ac86a4906bfa588753c41b120dc8a42a7b1dab3e407e962c8521e4c51b8a262",
       "vendor/eden/LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
       "vendor/eden/src/audio_core/CMakeLists.txt": "dd84e22af1d1001571eaf4ee05ddb6afb954384eb78a056bbda247338678c73a",

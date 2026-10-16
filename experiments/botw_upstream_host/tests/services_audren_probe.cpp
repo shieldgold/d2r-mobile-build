@@ -83,8 +83,10 @@ struct Fixture {
     int initialize() {
         auto result=botw_audren_get_work_buffer_size(wire.data(),wire.size(),&size,error,sizeof error);
         if(result.host_status || result.service_result_valid!=1 || result.service_result) return -1;
-        botw_audren_configuration config{BOTW_AUDREN_HOST_ABI,sizeof config,0,0,0,this,
-            [](void* p,int32_t){++static_cast<Fixture*>(p)->fatal;}};
+        botw_audren_configuration config{};
+        config.abi_version=BOTW_AUDREN_HOST_ABI;config.struct_size=sizeof config;
+        config.initially_active=0;config.dump_audio_commands=0;config.inspect_guest_stack=0;
+        config.failure_context=this;config.failed=[](void* p,int32_t){++static_cast<Fixture*>(p)->fatal;};
         if(botw_audren_host_create(&config,&host,error,sizeof error).host_status) return -1;
         if(posix_memalign(&bytes,4096,size)) return -1;
         std::memset(bytes,0,size);

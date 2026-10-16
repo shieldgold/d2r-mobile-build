@@ -125,12 +125,19 @@ if(BOTW_AUDIO_RENDERER_OWNED_UPDATE_FIXTURE)
     add_executable(botw_owned_renderer_wire "${BOTW_AUDIO_COMPONENT}/tests/wire_probe.cpp")
     target_link_libraries(botw_owned_renderer_wire PRIVATE
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,botw_audio_renderer_engine>")
+    add_executable(botw_owned_audren_provider "${BOTW_AUDIO_COMPONENT}/tests/audren_provider_probe.cpp")
+    target_link_libraries(botw_owned_audren_provider PRIVATE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,botw_audio_renderer_engine>")
     enable_testing()
     add_test(NAME owned_complete_rev1_update COMMAND botw_owned_renderer_update)
     add_test(NAME owned_renderer_worker COMMAND botw_owned_renderer_worker)
     add_test(NAME owned_audren_host COMMAND botw_owned_audren_host)
     add_test(NAME owned_adsp_pause COMMAND botw_owned_adsp_pause)
     add_test(NAME owned_renderer_wire COMMAND botw_owned_renderer_wire)
+    add_test(NAME owned_audren_provider COMMAND botw_owned_audren_provider normal)
+    add_test(NAME owned_audren_provider_cleanup_retry COMMAND botw_owned_audren_provider release-failure)
+    add_test(NAME owned_audren_provider_contract_failure COMMAND botw_owned_audren_provider failed-owner)
     set_tests_properties(owned_complete_rev1_update owned_renderer_worker owned_audren_host
-        owned_adsp_pause owned_renderer_wire PROPERTIES TIMEOUT 20)
+        owned_adsp_pause owned_renderer_wire owned_audren_provider owned_audren_provider_cleanup_retry
+        owned_audren_provider_contract_failure PROPERTIES TIMEOUT 20)
 endif()

@@ -41,7 +41,7 @@ int main() {
     auto bad=botw_audren_get_work_buffer_size(client.data(),client.size(),&size,error,sizeof error);
     CHECK(bad.host_status!=0 && !bad.service_result_valid && error[0]);
     Fatal fatal;
-    botw_audren_configuration config{BOTW_AUDREN_HOST_ABI,sizeof config,0,0,0,&fatal,failed};
+    botw_audren_configuration config{BOTW_AUDREN_HOST_ABI,sizeof config,0,0,0,&fatal,failed,{}};
     botw_audren_host* host=nullptr;
     CHECK(platform_ok(botw_audren_host_create(&config,&host,error,sizeof error)) && host);
     botw_audren_host* rejected=nullptr; config.dump_audio_commands=1;

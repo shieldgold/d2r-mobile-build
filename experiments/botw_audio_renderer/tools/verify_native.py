@@ -17,7 +17,8 @@ def snapshot(component):
         files += [path for path in (component / folder).rglob('*') if path.is_file()
                   and path.suffix in ('.h', '.cpp', '.c', '.py', '.patch', '.md', '.txt')]
     files += [component / 'tools/prepare_eden.py', component / 'tools/verify_native.py',
-              component / 'platform/platform.h', component / 'platform/platform.cpp']
+              component / 'platform/platform.h', component / 'platform/platform.cpp',
+              component / 'platform/memory_provider.h']
     external = ['../botw_upstream_host/upstream/dm/host/botw_pcm.c',
                 '../botw_upstream_host/upstream/dm/host/botw_pcm.h',
                 '../botw_upstream_host/adapter/whole_audio_platform.h',

@@ -2,11 +2,12 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "../platform/memory_provider.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define BOTW_AUDREN_HOST_ABI 1u
+#define BOTW_AUDREN_HOST_ABI 2u
 #define BOTW_AUDREN_WIRE_PARAMETER_SIZE 0x34u
 typedef enum {
     BOTW_AUDREN_OK = 0, BOTW_AUDREN_INVALID_ARGUMENT = 1, BOTW_AUDREN_NOT_FOUND = 2,
@@ -43,6 +44,7 @@ typedef struct {
     // reenter the engine or synchronously join/destroy the current worker. Must
     // not throw. This is not a successful guest completion event.
     void (*failed)(void* context, int32_t host_status);
+    botw_audren_memory_provider memory_provider; // All-zero = registered-only.
 } botw_audren_configuration;
 
 typedef struct {
@@ -85,9 +87,16 @@ botw_audren_result botw_audren_host_destroy(botw_audren_host** host,
     char* error, size_t error_capacity);
 botw_audren_result botw_audren_host_set_active(botw_audren_host* host, int active,
     char* error, size_t error_capacity);
+// Legacy registered-only entry. With a configured provider, use the provenance
+// entry below so distinct physical aliases cannot bypass overlap validation.
 botw_audren_result botw_audren_register_region(botw_audren_host* host, uint64_t owner,
     uint64_t logical_address, botw_audren_backing backing, uint32_t access,
     char* error, size_t error_capacity);
+// Mandatory when a provider is configured. Provenance is the unique kernel's
+// source-backing identity and byte offset, including explicit transfer aliases.
+botw_audren_result botw_audren_register_region_provenance(botw_audren_host* host,
+    uint64_t owner, uint64_t logical_address, botw_audren_backing backing, uint32_t access,
+    uint64_t backing_id, uint64_t backing_offset, char* error, size_t error_capacity);
 botw_audren_result botw_audren_unregister_region(botw_audren_host* host, uint64_t owner,
     uint64_t logical_address, char* error, size_t error_capacity);
 

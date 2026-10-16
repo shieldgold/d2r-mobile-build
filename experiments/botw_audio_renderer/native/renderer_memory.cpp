@@ -48,7 +48,7 @@ Status RendererMemory::map_impl(const void* identity, Address address, std::size
     if (!identity || !address || !size || (page_aligned && (address % TransferPool::Alignment ||
         size % TransferPool::Alignment))) return Status::InvalidArgument;
     MemoryView pin;
-    auto status = memory_.pin(owner_, address, size, Access::ReadWrite, pin);
+    auto status = memory_.pin_pool(owner_, address, size, Access::ReadWrite, pin);
     if (status != Status::Ok) return status;
     const auto dsp = reinterpret_cast<Address>(pin.writable().data());
     if (page_aligned && dsp % TransferPool::Alignment) return Status::InvalidArgument;

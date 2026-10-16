@@ -21,23 +21,23 @@
     },
     {
       "path": "native/CMakeLists.txt",
-      "bytes": 8513,
-      "sha256": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585"
+      "bytes": 9147,
+      "sha256": "b2e52a910eda2bda76343a2a6a8f75f7a1e4325c4eda21f7ca3f6f718ded35fc"
     },
     {
       "path": "native/README.md",
-      "bytes": 7661,
-      "sha256": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76"
+      "bytes": 10401,
+      "sha256": "3274435028744935d54ad9e6b13ce04a447b1c4abaebe87e6ccd58ba4a81640b"
     },
     {
       "path": "native/audren_host.cpp",
-      "bytes": 16667,
-      "sha256": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc"
+      "bytes": 17804,
+      "sha256": "bdd6173aed363d414715d84cf6ede7f1bf68e1854a7b7c756eb96f0632e91d62"
     },
     {
       "path": "native/audren_host.h",
-      "bytes": 6468,
-      "sha256": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc"
+      "bytes": 7167,
+      "sha256": "bb4b5227b8dbad95321895d485d56e74ce7092203dedca5229a3158ad4d9ac98"
     },
     {
       "path": "native/common_ports.cpp",
@@ -66,8 +66,8 @@
     },
     {
       "path": "native/renderer_memory.cpp",
-      "bytes": 7637,
-      "sha256": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4"
+      "bytes": 7642,
+      "sha256": "53919fa753bd108bb010591cf228d16bd29308016713e23336e4ccdd4e1a19da"
     },
     {
       "path": "native/renderer_memory.h",
@@ -105,19 +105,34 @@
       "sha256": "4db537387ecacfd28a6440f518a292f50cf23e781b87a171d69b2679a6c74535"
     },
     {
+      "path": "platform/memory_provider.h",
+      "bytes": 1985,
+      "sha256": "34bdda8edab56834ecb44d75e6314af703acee855794f9797e2d174dbc3afe85"
+    },
+    {
       "path": "platform/platform.cpp",
-      "bytes": 12225,
-      "sha256": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65"
+      "bytes": 27417,
+      "sha256": "d22211206c263b09f03968b3ac7ce54c29f428bea47544698225e2c46b0c785b"
     },
     {
       "path": "platform/platform.h",
-      "bytes": 4431,
-      "sha256": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b"
+      "bytes": 5097,
+      "sha256": "3e0fe6b6f59de83b35357b215a757b51a5e8522a05f208451a73936a87aeb1cb"
     },
     {
       "path": "tests/audren_host_probe.cpp",
-      "bytes": 9160,
-      "sha256": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592"
+      "bytes": 9163,
+      "sha256": "795c5ad3df7ebf0c1e68383655c114d8be88f1f3143b45a76b170d86c6cef8ee"
+    },
+    {
+      "path": "tests/audren_provider_probe.cpp",
+      "bytes": 6241,
+      "sha256": "edd9323908cf9295e36cece52f2010d69c704a5ef0c0b5851d839481e2ba0eb1"
+    },
+    {
+      "path": "tests/memory_provider_probe.cpp",
+      "bytes": 11038,
+      "sha256": "f5368ae35e1a2cfb03dff55f2594693b3dbc010ecd9754b01b18fed7edf7e938"
     },
     {
       "path": "tests/native_sink_stream_probe.cpp",
@@ -190,6 +205,11 @@
       "sha256": "4fceed359344b6209f415efee23b17929024edf7e6308868beda1a3857278fe7"
     },
     {
+      "path": "tests/test_memory_provider.py",
+      "bytes": 2710,
+      "sha256": "e0fdbb04657b22042c7a0ed4ec392085c7a605db492b21c10f1a8472617d36d2"
+    },
+    {
       "path": "tests/test_native_pcm_sink.py",
       "bytes": 10630,
       "sha256": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02"
@@ -206,8 +226,8 @@
     },
     {
       "path": "tests/test_renderer_module.py",
-      "bytes": 2171,
-      "sha256": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817"
+      "bytes": 2685,
+      "sha256": "0b12d7f17dbfd84cb71cb225b31a9f224f99189ce2d44fec96538f4cdec7d5c4"
     },
     {
       "path": "tests/test_renderer_ports.py",
@@ -226,8 +246,8 @@
     },
     {
       "path": "tools/verify_native.py",
-      "bytes": 2327,
-      "sha256": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522"
+      "bytes": 2383,
+      "sha256": "07408d54d4babf5dbc5767517b1f6757c379a27300b59fe7f84d5d608499265a"
     }
   ],
   "external_files": [
