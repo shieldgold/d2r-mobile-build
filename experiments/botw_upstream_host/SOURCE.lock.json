@@ -98,6 +98,16 @@
       "bytes": 3128,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_address_space.c": {
+      "sha256": "f967b0906e2c4422554e382145fa0a2d3b2fb9cb5a3b3780a2cee942f2a2cb27",
+      "bytes": 975,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_address_space.h": {
+      "sha256": "8bcd2054345722ea6783de1b0c419a359d1a1509aef40411d55de73d9a4f2cfa",
+      "bytes": 462,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/whole_applet.c": {
       "sha256": "def1cc857765dbbc0e13962626e1b16db8359a8af36c9e6934fc9aaff4f389db",
       "bytes": 5816,
@@ -463,6 +473,11 @@
       "bytes": 3830,
       "role": "thin-adapter-or-verification"
     },
+    "patches/bounded-address-space.patch": {
+      "sha256": "a548a06d59e33d9f32ad253e9d98c7e9fd14596e0ea88aeba1b251ca1509ec84",
+      "bytes": 5957,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/checked-dirty-write.patch": {
       "sha256": "dab2a0616f11bc035ee0ba3c6faacdacb1d31ac5a15307c8cc207b42cc2b99b3",
       "bytes": 11979,
@@ -623,6 +638,11 @@
       "bytes": 1372,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_address_space_probe.c": {
+      "sha256": "3de8598ef3d3ac914a6de3439d27b917fcf069da8935769bff3d8be0cc1adaca",
+      "bytes": 6498,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_applet_probe.c": {
       "sha256": "99d2147a9b97c920143dc053eedccfdf7ee82804a2595380f1446d9957644889",
       "bytes": 5693,
@@ -774,8 +794,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_transfer_probe.c": {
-      "sha256": "b5588da3de706cfb68a2011135677b7de1d98ea5c54838c833e12ae53ea32cd5",
-      "bytes": 16853,
+      "sha256": "617d1b6ee13738cbfde38e5f3d462e007940dfbb8ec6d53d9391658aedb94ea7",
+      "bytes": 16886,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_transfer_vm_hooks.h": {
@@ -1535,7 +1555,8 @@
     "patches/normal-heap-lease.patch",
     "patches/portable-shader-source.patch",
     "patches/base-v0-image-bank.patch",
-    "patches/conditional-shader-runtime.patch"
+    "patches/conditional-shader-runtime.patch",
+    "patches/bounded-address-space.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1565,7 +1586,7 @@
     "dm/host/hle.c": "5b1be568e3bf9eabb3c7e130fe6e25d6ce84ee0f73922f4923578ebe9576bf82",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
-    "dm/host/hle_svc.c": "c4cc59f13b3840a458b902416cf27c3816466cb8a9cb8f8bab4d17b14108ca54",
+    "dm/host/hle_svc.c": "4590cc81b1f5ebf7d6fe15f76a10913ab9a4697b8899d3cb218d3b55f7c29a87",
     "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
     "dm/host/loader.c": "04aaa69127387f94d571665bc1334c7d41f42d81afdd9ab319878efe7c4e3882",
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",
@@ -1639,7 +1660,8 @@
     "adapter/whole_runtime_resources.m",
     "adapter/whole_shader_publication.m",
     "adapter/whole_shader_conditional.m",
-    "adapter/whole_shader_bundle_publication.m"
+    "adapter/whole_shader_bundle_publication.m",
+    "adapter/whole_address_space.c"
   ],
   "runtime_configuration_translation_units": [
     "frontend/whole_runtime_configuration.m"

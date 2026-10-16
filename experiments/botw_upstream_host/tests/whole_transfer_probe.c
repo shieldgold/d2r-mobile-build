@@ -53,6 +53,7 @@ struct dm_flags g_flag;
 #define MIB ((size_t)1024*1024)
 #define RESERVE ((uint64_t)1024*MIB)
 static uint8_t *g_as,*g_heap,*g_stack;
+static size_t g_as_size=RESERVE;
 static size_t g_heap_cap=640*MIB,g_stack_cap=64*MIB;
 static _Atomic size_t g_heap_cur;
 static int g_heap_rejects;

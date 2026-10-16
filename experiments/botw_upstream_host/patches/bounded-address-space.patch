@@ -1,0 +1,94 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -6,2 +6,4 @@
+ #include "hle_thread_core.h"
++#include "whole_address_space.h"
++#include <TargetConditionals.h>
+ #include "base_v0_heap.h"
+@@ -16,10 +18,6 @@
+ 
+-// Reserve one whole block of guest address space, partitioned the Horizon way (address values are the real addresses returned by the host's mmap).
+-// It only takes address space, not memory.
+-// Size 5 GB: the game needs the first 1 GB (alias region, stacks) + one whole heap block (application memory pool of 3285 MiB, see APP_POOL below),
+-// about 4.2 GB in total; on iOS without the "extended virtual addressing" entitlement a single reservation can be at most 6 GB
+-// (read on a real device: 6 GB succeeds, 7 GB fails), so it cannot be made any wider --
+-// with an 8 GB reservation, builds from developer accounts that cannot sign that entitlement (free accounts) would exit at this step.
+-#define RESERVE (5ull << 30)
++// One retained owned AS; physical iOS may select a smaller fixed candidate.
+ static uint8_t *g_as;              // ASLR region base = the whole block
++static size_t g_as_size;
++static pthread_once_t g_as_once = PTHREAD_ONCE_INIT;
+ static uint8_t *g_heap; static _Atomic size_t g_heap_cur; static size_t g_heap_cap; static int g_heap_rejects;
+@@ -31,11 +29,23 @@
+ 
++static void mem_initialize_once(void) {
++    botw_whole_address_space chosen; int allocation_error=0;
++    const int physical_ios=TARGET_OS_IOS&&!TARGET_OS_SIMULATOR&&!TARGET_OS_MACCATALYST;
++    if(botw_whole_address_space_reserve(&chosen,physical_ios,&allocation_error)) {
++        LOG("[ERROR] guest AS reservation failed errno=%d",allocation_error);
++        die("reserve guest AS");
++    }
++    // Publish only a fully retained allocation. The original normal memory
++    // metadata consumers already hold this same resize lock.
++    pthread_mutex_lock(&g_heap_resize_lock);
++    g_as_size=chosen.size;
++    g_alias=(uint8_t*)chosen.base+0x10000000; g_alias_cap=0x20000000;
++    g_stack=(uint8_t*)chosen.base+0x30000000; g_stack_cap=0x10000000;
++    g_heap=(uint8_t*)chosen.base+0x40000000; g_heap_cap=chosen.size-0x40000000;
++    g_as=chosen.base;
++    pthread_mutex_unlock(&g_heap_resize_lock);
++    LOG("guest AS capacity bytes=%zu heap_capacity=%zu fallback=%u",
++        chosen.size,g_heap_cap,(unsigned)(chosen.size!=(UINT64_C(5)<<30)));
++}
+ static void mem_init(void) {
+-    if (g_as) return;
+-    g_as = mmap(NULL, RESERVE, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+-    if (g_as == MAP_FAILED) die("reserve guest AS");
+-    // Fixed partition (all inside the reserved block): alias 512MB, stack 256MB, heap the rest starting at 2GB
+-    g_alias = g_as + 0x10000000; g_alias_cap = 0x20000000;
+-    g_stack = g_as + 0x30000000; g_stack_cap = 0x10000000;
+-    g_heap  = g_as + 0x40000000; g_heap_cap  = RESERVE - 0x40000000;   // 4 GB, enough to hold the game's single heap block of about 3.2 GB
+-    LOG("guest AS %p +%#llx  heap %p alias %p stack %p", g_as, (unsigned long long)RESERVE, g_heap, g_alias, g_stack);
++    if(pthread_once(&g_as_once,mem_initialize_once))die("initialize guest AS once");
+ }
+@@ -52,4 +62,18 @@
+ // +512 rather than more: to leave room for devices with 6 GB of RAM; to be revisited once there are readings of the limit on real devices.
+-static uint64_t app_pool(void) { static uint64_t v; if (!v) { const char *e = getenv("DM_APP_POOL_ADD_MB"); long add = e ? atol(e) : 512; v = APP_POOL + ((uint64_t)add << 20); if (e) LOG("DM_APP_POOL_ADD_MB: application memory pool reported as %llu MB (Switch's 3285 MB %+ld)", (unsigned long long)(v >> 20), add); } return v; }
+ static size_t image_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) n += g_mod[i].size; return (n + 0x1fffff) & ~(size_t)0x1fffff; }
++static pthread_once_t g_pool_once=PTHREAD_ONCE_INIT;
++static uint64_t g_pool_configured;
++static void app_pool_initialize(void) {
++    const char *e=getenv("DM_APP_POOL_ADD_MB");long add=e?atol(e):512;
++    g_pool_configured=APP_POOL+((uint64_t)add<<20);
++    if(e)LOG("DM_APP_POOL_ADD_MB: application memory pool reported as %llu MB (Switch's 3285 MB %+ld)",
++        (unsigned long long)(g_pool_configured>>20),add);
++}
++static uint64_t app_pool(void) {
++    if(pthread_once(&g_pool_once,app_pool_initialize))die("initialize application memory pool once");
++    size_t image=image_bytes();
++    if(image>UINT64_MAX-g_heap_cap)die("guest AS pool accounting overflow");
++    uint64_t retained=g_heap_cap+image;
++    return g_pool_configured<retained?g_pool_configured:retained;
++}
+ 
+@@ -101,3 +125,7 @@
+ // For memory accounting (memstat.m): the range of the whole guest address space block (base = NULL when not initialized)
+-void svc_guest_range(uint8_t **base, size_t *size) { *base = g_as; *size = RESERVE; }
++void svc_guest_range(uint8_t **base, size_t *size) {
++    pthread_mutex_lock(&g_heap_resize_lock);
++    *base=g_as;*size=g_as_size;
++    pthread_mutex_unlock(&g_heap_resize_lock);
++}
+ 
+@@ -223,4 +251,4 @@
+         else if ((k = map_find(addr, 1))) { base=g_map[k-1].base; size=g_map[k-1].size; state=g_map[k-1].state; perm=3; }
+-        else if (a >= g_as && a < g_as + RESERVE) {   // Free: up to the adjacent mapping/heap boundary
+-            uint64_t lo = (uint64_t)g_as, hi = (uint64_t)g_as + RESERVE;
++        else if (a >= g_as && a < g_as + g_as_size) {   // Free: up to the adjacent mapping/heap boundary
++            uint64_t lo = (uint64_t)g_as, hi = (uint64_t)g_as + g_as_size;
+             if (a >= g_heap) lo = (uint64_t)g_heap + g_heap_cur;
+@@ -274,3 +302,3 @@
+         case I_HeapAddr:  v = (uint64_t)g_heap;  break;   case I_HeapSize:  v = g_heap_cap;  break;
+-        case I_AslrAddr:  v = (uint64_t)g_as;    break;   case I_AslrSize:  v = RESERVE;     break;
++        case I_AslrAddr:  v = (uint64_t)g_as;    break;   case I_AslrSize:  v = g_as_size;     break;
+         case I_StackAddr: v = (uint64_t)g_stack; break;   case I_StackSize: v = g_stack_cap; break;
