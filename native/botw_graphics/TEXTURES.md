@@ -87,17 +87,29 @@ metadata class `0x101` 等不会开放 MapVirtual、vendor 或 GPU resolver 的 
 
 新增 flags8 的 Size/GPU 子域限定原始 samples0，以及 flags8 与 DISPLAY1/IMAGE4 的组合；VIDEO_DECODE2、SPARSE20、MINIMAL_LAYOUT200、fast-clear 和未知位不借此开放布局或创建。无 COMPRESSIBLE 的旧域保持原行为。Size 保留原 GOB 算法、维度/mip/array/packaged-layout 边界；GL name 非0先返回0，再考虑 provider 或 geometry，packagedData 对 metadata 始终只是不解引用的 opaque 指针。Class/Align 各守原 provider 条件。Texture 仍保存64位大小快照，getter显式投影为signed low32；Builder/Texture/descriptor 的原 flags8 均可读回，不会被归一操作清除。
 
-virtual 纹理只对这个已证有效 compression0 的新布局子域请求现有 FE kind；vendor Map 类、resolver、canonical/alias/generation、authority、整批提交前检查及 NoCopy segment/ACK 合同不变。ordinary Initialize 对未证明的格式、depth 压缩或未支持的 flags/samples，在对象写入和实际 Metal 创建前明确拒绝。R8、ASTC 等创建继续独立核原 Metal 格式、设备能力和 target；BC/转换解码、GL/packaged 导入、MSAA及其它未验证语义保留原拒绝。ASTC/BC 的数据块压缩与这里的 NVN 硬件压缩资格是不同合同。
+virtual 纹理只对这个已证有效 compression0 的新布局子域请求现有 FE kind；vendor Map 类、resolver、canonical/alias/generation、authority、整批提交前检查及 NoCopy segment/ACK 合同不变。ordinary Initialize 对未证明的格式、未准入的depth压缩请求或未支持的 flags/samples，在对象写入和实际 Metal 创建前明确拒绝。R8、ASTC 等创建继续独立核原 Metal 格式、设备能力和 target；BC/转换解码、GL/packaged 导入、MSAA及其它未验证语义保留原拒绝。ASTC/BC 的数据块压缩与这里的 NVN 硬件压缩资格是不同合同。
 
 回归使用固定原记录的65正集和48余集、真实只读 Builder/canary、live/伪造/过期 provider、GL早0及受限Size/GPU域。真实 Metal fixture 保留 flags8，验证 virtual R8/已有ASTC的非零图案采样、重映后另一图案、别名、wrong-kind/跨segment整批零写、R8私有GPU权威拒绝重映并保留结果，以及物理pool Finalize真实资源清退和已录旧消费拒绝。这些兼容层证据不表示原游戏已可玩。
 
 
 ## MetalPlainColor 后端配置
 
-`BWDevice` 初始化一次、只读保存 `MetalPlainColor`；未配置或未知值在需要此策略的 COMPRESSIBLE 路径明确拒绝。来源是本桥未实现 NVIDIA 硬件 kind 表示的后端配置，不是硬件 `GetInteger` 查询，也不是向原 provider 的私有字段写假值。它不宣称 Metal 已解码或生成 NV DB/E9/F5 压缩数据，也不以 Metal 自身的 lossless 优化作 NV kind 等价证明。设备初始化仅输出一次不含地址/内容的具名策略来源。
+`BWDevice` 初始化一次、只读保存具名 kind policy；枚举1 `MetalPlainColor` 保持仅color含义，当前枚举2 `MetalPlainColorDepth` 在此基础上增加下述受限普通depth表示。未配置或未知值在需要此策略的 COMPRESSIBLE 路径明确拒绝。来源是本桥未实现 NVIDIA 硬件 kind 表示的后端配置，不是硬件 `GetInteger` 查询，也不是向原 provider 的私有字段写假值。它不宣称 Metal 已解码或生成 NV DB/E9/F5 压缩数据，也不以 Metal 自身的 lossless 优化作 NV kind 等价证明。设备初始化仅输出一次不含地址/内容的具名策略来源。
 
 固定原 SDK 的设备初始化将 `+1948/+194c/+1950` 设为 `0/0/1`，可经原 `NvOsGetConfigString` 配置通道覆盖；`+1a60` 由 `+1950` 的位计算，关闭时即使原请求 flags8 保留，三个存储查询仍共同选择 effective compression0。该配置来自 nvhost 控制接口，不是公开稳定能力 API；数字配置名的友好语义没有证明。原默认开启不等于本桥默认。本桥明确选择原可达的普通 color 分支，保存请求 flags，并让全部113个原有效 color 在具名后端策略下取 FE/512/既有 GOB size；原65个无关 provider 的固定资格事实继续独立保留，未扩其 predicate。[deko3d 的可选硬件压缩标志](https://github.com/devkitPro/deko3d/blob/350f2b00a3e76ecd4f00191f8c5d6544ffbcb9db/include/deko3d.h#L374)同样将其定义为允许启用的优化；其原 NV kind/大页重保护实现不能直接当作 Metal 映射模块。
 
-Class、Alignment、Size、Initialize 和 virtual kind 都通过精确 live BWDevice 的同一 selector；复制 serial、过期 provider、未知 policy 不能按格式常量获得新资格。Texture 保存所属 device、policy 与原 Builder flags 快照，selected view 继承，原生命周期检查继续有效。仅新 COMPRESSIBLE 的 Size/GPU 域为 raw samples0 与 flags8/9/C/D；MSAA、depth COMPRESSIBLE、其它 flags、GL/packaged GPU 导入和未实现 Metal 格式不扩大。GL Size 非0仍先0，不提前读 provider，packagedData metadata 保持 opaque。旧无 COMPRESSIBLE、pitch、depth 非压缩与 size ABI 合同保持。
+Class、Alignment、Size、Initialize 和 virtual kind 都通过精确 live BWDevice 的同一 selector；复制 serial、过期 provider、未知 policy 不能按格式常量获得新资格。Texture 保存所属 device、policy 与原 Builder flags 快照，selected view 继承，原生命周期检查继续有效。仅新 COMPRESSIBLE 的 Size/GPU 域为 raw samples0 与 flags8/9/C/D；MSAA、其它 flags、GL/packaged GPU 导入和未实现 Metal 格式不扩大；depth COMPRESSIBLE 使用下一节独立的更窄合同。GL Size 非0仍先0，不提前读 provider，packagedData metadata 保持 opaque。旧无 COMPRESSIBLE、pitch、depth 非压缩与 size ABI 合同保持。
 
-MapVirtual/resolver 仍只接受 class100/1FE。显式 DB 等硬压缩 kind 输入拒绝，不承诺预压缩 NV payload 导入；canonical identity、映射代际、别名、整批前置拒绝、private GPU authority 与各 segment 的 NoCopy ACK 不变。R32UI/RG32UI/RGBA32UI 真实 GPU 探针用 `texture2d<uint>` 读取大于2^24且含高位的32位图案，整像素校验独立算出的四字节结果，再验证 FE remap/alias、DB映射拒绝、wrong-kind/跨segment整批零写、private权威与Finalize清退。这些结果仅验证兼容层，不表示原游戏有首帧或可玩。
+color 路径仍使用 class100/1FE；下节新增精确101/17B深度映射。显式 DB 等硬压缩 kind 输入拒绝，不承诺预压缩 NV payload 导入；canonical identity、映射代际、别名、整批前置拒绝、private GPU authority 与各 segment 的 NoCopy ACK 不变。R32UI/RG32UI/RGBA32UI 真实 GPU 探针用 `texture2d<uint>` 读取大于2^24且含高位的32位图案，整像素校验独立算出的四字节结果，再验证 FE remap/alias、DB映射拒绝、wrong-kind/跨segment整批零写、private权威与Finalize清退。这些结果仅验证兼容层，不表示原游戏有首帧或可玩。
+
+## MetalPlainColorDepth 与有限深度 GPU 表示
+
+枚举2是显式、不可变的bridge/backend configuration，表示未实现NVIDIA硬件kind压缩表示并选择原可达的effective compression0分支。它不是原设备默认或硬件能力查询；原始flags8/108不清零，原65色格式的provider无关事实和113个color策略资格保持分离。枚举0/未知值、仅color的枚举1不能获得新depth资格。新COMPRESSIBLE的Class/Alignment/Size/Initialize/virtual kind共同使用精确live-device selector，非法/复制serial的provider在读取对象header前受控拒绝。Texture保存device/policy/flags/64位storage size快照，selected继承。
+
+固定原双HAL普通深度分支对raw samples0的五种格式给出D16→raw1、D24→raw46、D32F→raw7B、D24S8→raw46、D32FS8→rawC3。Class为100|raw，Alignment为65536；只在flags8或108且现有geometry/mip/packaged-layout合法时，Size复用完整GOB布局并按64KiB checked round，而texel payload/layer extent不变。flags108的fast-clear请求只在这些metadata中已证不改变普通分支，不代表本桥实现fast clear。GL Size非0早于provider或geometry返回0；packagedData只作opaque metadata，GPU导入仍拒。BUFFER/flags50的原pitch优先级、无COMPRESSIBLE旧域、STENCIL8的Class拒绝与旧Size/Align范围、signed-low32 Size getter ABI均保留。
+
+新增实际GPU域仅2D、raw samples0、flags恰为8的D16与D32F，分别精确映为Metal Depth16Unorm/Depth32Float，并请求virtual class101/17B。普通pool的旧flags0深度路径保留；virtual flags0原未支持，本批仍具名拒绝。D24转换、组合depth/stencil、S8、MSAA、array、其它新flags、原生压缩kind和预压缩NV数据不由该策略开放；Map登记也不证明格式可创建。源是普通未压缩GOB字节，Metal private depth资源通过既有deswizzle/staging上传，不实现新allocator/layout/压缩器或隐式cache刷新。public CPU WriteTexels对virtual CPU_NO_ACCESS继续拒绝；GPU ReadTexels用完成后的staging读取实际深度。virtual Invalidate保持CPU_NO_ACCESS的原no-op，不谎称导出CPU数据；ordinary coherent Invalidate才受检回写texel并保持全部padding。
+
+合成真实Metal回归分别验证D16 UNORM和D32 float：四个不同GOB角点的depth2d采样、完整GPU读回、mip1、两份非零源的remap/alias；深度清除、近远绘制及失败深度测试；ordinary CPU局部区域写与clear后Invalidate的完整64KiB canary；私有/retired GPU权威、raw0别名、wrong-kind/跨segment整批前置拒绝和物理Finalize真实资源清退。它们不能替代A14实测，更不表示原游戏有首帧或可玩。
+
+呈现仍使用既有固定float颜色shader，本批不增加呈现能力。Window SetTextures、直接Builder Initialize及Present共用必要的非array 2D、float/normalized ordinary-color类型guard，array、深度、S8和整数会在list发布或nextDrawable/encode前具名拒绝。现exact+identity可创建的19个ordinary整数中，RGB10A2UI补入共享uint scalar trait；正确uint读取其10/10/10/2分量有真实像素证据，错误float binding在整批提交前拒绝。此类型guard不等于已证明每个float格式的线性过滤或设备呈现能力，现有已验证普通颜色呈现场景继续单独回归。

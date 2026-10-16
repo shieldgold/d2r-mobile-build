@@ -28,6 +28,9 @@ static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView view,BOOL 
 static BWDevice *textureStorageDevice(const NVNdevice *raw);
 static BOOL textureColorSelected(const TextureBuilder *b);
 static BOOL textureColorLayout(const TextureBuilder *b);
+static BOOL textureDepthSelected(const TextureBuilder *b,unsigned *kind);
+static BOOL textureDepthLayout(const TextureBuilder *b);
+static BOOL textureCompressionGPU(const TextureBuilder *b);
 /* Selected views can outlive their descriptor entry or object-table record in
  * recorded commands. Weak tracking finds all wrappers without extending them. */
 static NSHashTable<BWTexture *> *textureReferences;
@@ -78,6 +81,11 @@ static int textureLinearLayout(const TextureBuilder *b,BWLinearLayout *layout){
 }
 static size_t textureBytes(const TextureBuilder *b){
     unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)){
+        if(b->glName)return 0; /* Preserve original GL-before-provider Size order. */
+        if(!textureDepthLayout(b))return 0;
+        depthStorage=textureDepthSelected(b,&depthKind);
+    }
     if(!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)&&!depthStorage)return 0;
     if(depthStorage&&b->glName)return 0; /* Original Builder Size bf1d4..bf1e0. */
     if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_ordinary_color_format(b->format)){
@@ -110,7 +118,7 @@ static BWDevice *textureStorageDevice(const NVNdevice *raw){
 }
 static BOOL textureColorSelected(const TextureBuilder *b){
     BWDevice *device=textureStorageDevice(b->device);
-    if(device.textureKindPolicy!=BW_TEXTURE_KIND_METAL_PLAIN_COLOR)fatal("texture device representation policy is unavailable");
+    if(device.textureKindPolicy!=BW_TEXTURE_KIND_METAL_PLAIN_COLOR&&device.textureKindPolicy!=BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH)fatal("texture device representation policy is unavailable");
     return bw_texture_plain_color_selected(device.textureKindPolicy,b->format);
 }
 static BOOL textureColorLayout(const TextureBuilder *b){
@@ -118,13 +126,31 @@ static BOOL textureColorLayout(const TextureBuilder *b){
     if(!bw_texture_color_layout_inputs(b->format,b->flags,b->samples))return NO;
     return textureColorSelected(b);
 }
+static BOOL textureDepthSelected(const TextureBuilder *b,unsigned *kind){
+    unsigned available=0;if(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)||(b->flags&0x50)||!bw_texture_plain_depth_kind(b->format,b->samples,&available))return NO;
+    BWDevice *device=textureStorageDevice(b->device);
+    if(device.textureKindPolicy!=BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH)fatal("texture device plain-depth representation policy is unavailable");
+    return bw_texture_plain_depth_selected(device.textureKindPolicy,b->format,b->flags,b->samples,kind);
+}
+static BOOL textureDepthLayout(const TextureBuilder *b){
+    if(!bw_texture_plain_depth_layout_inputs(b->format,b->flags,b->samples))return NO;
+    unsigned kind=0;return textureDepthSelected(b,&kind);
+}
+static BOOL textureCompressionGPU(const TextureBuilder *b){
+    if(bw_texture_depth_storage_format(b->format)){
+        if(!bw_texture_plain_depth_gpu_inputs(b->format,b->target,b->flags,b->samples))return NO;
+        unsigned kind=0;return textureDepthSelected(b,&kind);
+    }
+    return textureColorLayout(b);
+}
 /* Base-v0 returns 0x100 | rawKind. BUFFER and flags&0x50 take rawKind=0
  * before accessing the device. Otherwise GK100/GM200 share ChooseKind+0x68:
  * uncompressed color is the pure 0x316c0 leaf returning 0xfe. The caller
  * still requires a live device provider; no pool or Metal creation is needed. */
 static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
     if(b->target==NVN_TEXTURE_TARGET_BUFFER||(b->flags&0x50))return 0x100;
-    unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)){
+    unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)||
+        (bw_texture_depth_storage_format(b->format)&&(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&textureDepthSelected(b,&depthKind))){
         textureStorageDevice(b->device);return 0x100|depthKind;
     }
     if(textureOrdinaryStorageFormat(b->format)&&(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)||textureColorSelected(b))){
@@ -155,9 +181,15 @@ NVN(nvnTextureViewCompare,NVNboolean,const NVNtextureView *a,const NVNtextureVie
 static int textureMappingKind(TextureBuilder b,BWPool *pool){
     if(pool.kind==BW_POOL_PHYSICAL)fatal("physical pool cannot be a direct texture GPU resource");
     if(pool.kind!=BW_POOL_VIRTUAL)return -1;
-    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!textureColorLayout(&b))fatal("virtual texture hardware compressed kind is not implemented");
-    if(!(b.flags&0x50)&&!textureOrdinaryStorageFormat(b.format))fatal("virtual texture depth/non-color kind is not implemented");
-    return (b.flags&0x50)?0:0xfe;
+    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!textureCompressionGPU(&b))fatal("virtual texture hardware compressed kind is not implemented");
+    if(b.flags&0x50)return 0;
+    if(b.format==NVN_FORMAT_DEPTH16||b.format==NVN_FORMAT_DEPTH32F){
+        if(!bw_texture_plain_depth_gpu_inputs(b.format,b.target,b.flags,b.samples))fatal("virtual plain-depth textures require 2D flags=8 raw samples=0");
+        unsigned kind=0;
+        if(textureDepthSelected(&b,&kind))return (int)kind;
+    }
+    if(!textureOrdinaryStorageFormat(b.format))fatal("virtual texture depth/non-color kind is not implemented");
+    return 0xfe;
 }
 static BOOL textureMappingEqual(BWPoolRange *a,BWPoolRange *b){
     return a&&b&&a.pool==b.pool&&a.physical==b.physical&&a.physicalID==b.physicalID&&
@@ -224,7 +256,7 @@ static void textureRetirePoolReferences(BWPool *pool){
 }
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
     TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;
-    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureColorLayout(b))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
     BWDevice *device=get(b->device,[BWDevice class]);
     if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
@@ -232,7 +264,8 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return report("Texture component conversion is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return report("texture device/pool mismatch");
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return report("Texture storage bounds");
-    unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)&&
+    unsigned depthKind=0;if((bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)||
+        ((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_depth_storage_format(b->format)&&textureDepthSelected(b,&depthKind)))&&
         (size_t)b->offset%bw_pool_policy().mappingPageBytes)return report("Texture depth storage offset is not aligned to native mapping page");
     BOOL linear=!!(b->flags&(0x10|0x40));BWLinearLayout linearLayout={0};
     if(linear){

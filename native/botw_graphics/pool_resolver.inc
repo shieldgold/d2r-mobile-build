@@ -59,7 +59,7 @@ static BWPoolIdentity *poolTryIdentity(BWPool *p,size_t off,size_t bytes,int exp
     if(failure)*failure=NULL;
     if(!poolHostLive(p)||p.retiring)POOL_RESOLVE_FAIL("pool lifetime/retiring");
     if(!bytes||off>p.size||bytes>p.size-off)POOL_RESOLVE_FAIL("pool range bounds");
-    if(expected!=-1&&expected!=0&&expected!=0xfe)POOL_RESOLVE_FAIL("unknown required raw kind");
+    if(expected!=-1&&expected!=0&&expected!=0xfe&&expected!=1&&expected!=0x7b)POOL_RESOLVE_FAIL("unknown required raw kind");
     if(p.kind==BW_POOL_PHYSICAL)POOL_RESOLVE_FAIL("physical pool has no logical consumer identity");
     BWPool *physical=p;size_t physicalOffset=off;uint64_t gen=p.generation,id=p.generation;
     unsigned kind=0;uint64_t logical=p.kind==BW_POOL_VIRTUAL?p.gpuBase:(uint64_t)(uintptr_t)p.memory;

@@ -127,6 +127,18 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 该批最终定点 **72 项通过**，独立公开查询与实际整数纹理 GPU 正反场景 **36 项通过**。独立审查发现的新 COMP 初始化来源顺序问题，以 foreign/不可读/复制 provider 的 guarded-header 读取计数真 RED 复现；修复后三项均在读取对象头前拒绝。独立完整 graphics TU 的纯 CPU 九场景同时确认新域零读取，旧无 COMP/pitch 顺序保留。此前冻结版的相关 **223 项通过**另行保存，不替代最终修改后的固定源码全套回归。R32UI/RG32UI/RGBA32UI 使用正确整数纹理 shader，核验高位图案、FE 重映和别名，以及错误 kind/跨 segment 整批拒绝、GPU 权威和实际清退；这些结果仍不是原游戏首帧或可玩证明。
 
+该策略提交 `d5746f9` 的普通 Mac 原游戏启动实际记录 `MetalPlainColor` 来源和 120 MiB physical pool 两段成功发布，首个停止点从 R32UI 改为 D16 `target=1 flags=0x8 format=0x32 samples=0` 的 StorageClass 查询，`mac_host_return=1`、`mac_process_exit=1`，`frontend_resources_released=false`。原堆参数、十三线程、143,743,378 字节最大读取保持；无游戏绘制呈现日志。对应 binary SHA256 为 `01f523bd0e5367112520c1d6f11c7d77846a8523ff775ef3a2414440418b2e67`，报告位于 `outputs/botw-host39-mac-d5746f9/ordinary-admission-evidence.json`。depth COMP 仍是明确未实现边界，没有将 D16 当作普通 color 资格放行。
+
+`d5746f9` 固定源码完整回归共 **859 项，858 通过、1 项原有硬件条件跳过**，耗时 181.760 秒；632 个跟踪源码文件保持不变，源码清单 SHA256 为 `97f233cb59cfb27aa5fce15c4ace777658ea08ca666dd154053d99b6c85d90e0`。该轮涵盖最终初始化顺序修复，不能据此将原游戏停止状态写成可玩。
+
+该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38832450939) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38832450926) 均成功，核验 94 个 native 文件后本地组装签名，已保数据更新当前 iPhone 12 / iOS 18.1 并普通启动为 PID 1049。累计日志保留原前缀，bootstrap 从 24 增至 25，实际策略来源为 `MetalPlainColor`；手机同样记录 120 MiB physical pool 两段成功发布，随后在 D16 `target=1 flags=0x8 format=0x32 samples=0` 受控停止，`host_return=1`，约 24.3 秒后仍见同 PID。RomFS 大小/mtime、UID、shader manifest 和权限均保持，未重传资源。无游戏画面或操作、音频、存档、重开验收。报告位于 `outputs/botw-ios-d5746f9-iphone12/device-run-report.json`，IPA SHA256 为 `cbc134f15a92f2ad004cd0769e210f6bc96857d7f114dca5c99b8bef876df8eb`。
+
+后续深度适配将初始化配置明确扩为枚举2 `MetalPlainColorDepth`，枚举1保留仅 color 含义。五种原普通 depth 格式的 COMPRESSIBLE metadata 分别保留双 HAL 的 raw `1/46/7B/46/C3`、64 KiB 对齐及受检大小取整；原请求 flags 不清零，Size 新域仅 flags8/108。实际 GPU 新域另限 2D、raw samples0、flags恰8的 D16/D32F，virtual Map 仅新增精确 `0x101/0x17B`，由既有完整 interval/transaction/resolver 处理。其余压缩 kind、S8、组合 depth/stencil、MSAA、array 和 fast-clear GPU 语义没有因此获得支持。完整合同见 [TEXTURES.md](../native/botw_graphics/TEXTURES.md) 与 [MEMORY_POOLS.md](../native/botw_graphics/MEMORY_POOLS.md)。
+
+深度资源继续复用 GOB、staging、别名、映射代际与 private GPU 权威检查；buffer、descriptor、vertex、uniform、storage 和 copy 消费仍要求各自原 kind。Window 三入口针对既有 float 颜色 shader 校验资源类型，RGB10A2UI 归入共享 uint scalar trait；这些兼容层检查不构成原游戏首帧、手机呈现或可玩验收。
+
+该批独立最终定点 **22 项通过**，涵盖真实 Metal 深度采样、读回、mip、清除/深度测试、重映、别名、CPU 局部写及 padding、错误 kind/跨段整批拒绝和旧颜色回归；20 个冻结文件 SHA256 前后保持。独立公共入口复现并修复了直接 Window Builder 的 array 类型旁路，同一无 GPU fixture 的 Initialize/Present 两场景由 RED 转为 GREEN，Present 拒绝发生在取 drawable 前。完整 vendor 模块 **9 项通过**，保留 109 个原检查、3000 组随机批和 20000 次并发重映；只将原来作为非法样本的、现已支持的 `0x101` 改为仍不支持的 `0x107`。此前相关 262 项的那次单一旧负例失败仍保留，后续定点通过不改写其记录。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

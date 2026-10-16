@@ -232,7 +232,7 @@ static void test_invalid_batches(void) {
         {ureq(UINT64_MAX - PG + 1, 2 * PG), NVN_VPOOL_INVALID, "unmap range wraps"},
         {mreq(&other, 0, 0, PG, 0), NVN_VPOOL_E_UNKNOWN_POOL, "unregistered physical pool"},
         {mreq(&vo, 0, 0, PG, 0), NVN_VPOOL_E_UNKNOWN_POOL, "virtual pool used as physical"},
-        {mreq(&po, 0, 0, PG, 0x101), NVN_VPOOL_E_CLASS, "storage class 0x101"},
+        {mreq(&po, 0, 0, PG, 0x107), NVN_VPOOL_E_CLASS, "storage class 0x107"},
         {mreq(&po, 0, 0, PG, 1), NVN_VPOOL_E_CLASS, "storage class 1"},
         {mreq(&po, 0, 0, PG, -1), NVN_VPOOL_E_CLASS, "storage class -1"},
     };

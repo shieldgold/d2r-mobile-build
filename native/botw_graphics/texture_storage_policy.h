@@ -17,7 +17,7 @@ static inline int bw_texture_color_disables_compression(uint32_t format){
 }
 /* Explicit bridge representation policy, not an original NV configuration
  * word or a physical GPU feature query. Unknown is never a usable policy. */
-typedef enum { BW_TEXTURE_KIND_UNKNOWN=0, BW_TEXTURE_KIND_METAL_PLAIN_COLOR=1 } BWTextureKindPolicy;
+typedef enum { BW_TEXTURE_KIND_UNKNOWN=0, BW_TEXTURE_KIND_METAL_PLAIN_COLOR=1, BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH=2 } BWTextureKindPolicy;
 /* Original 113 valid ordinary-color records, independent of Metal support. */
 static inline int bw_texture_ordinary_color_format(uint32_t format){
     return (format>=0x01&&format<=0x18)||(format>=0x22&&format<=0x30)||
@@ -36,7 +36,7 @@ static inline int bw_texture_color_compression_layout(uint32_t format,uint32_t f
  * the original driver's effective-compression=0 color branch while retaining
  * the request. The provider-independent 65-format fact above stays separate. */
 static inline int bw_texture_plain_color_selected(BWTextureKindPolicy policy,uint32_t format){
-    return policy==BW_TEXTURE_KIND_METAL_PLAIN_COLOR&&bw_texture_ordinary_color_format(format);
+    return (policy==BW_TEXTURE_KIND_METAL_PLAIN_COLOR||policy==BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH)&&bw_texture_ordinary_color_format(format);
 }
 static inline int bw_texture_plain_color_layout(BWTextureKindPolicy policy,uint32_t format,uint32_t flags,int32_t samples){
     return bw_texture_plain_color_selected(policy,format)&&bw_texture_color_layout_inputs(format,flags,samples);
@@ -44,8 +44,9 @@ static inline int bw_texture_plain_color_layout(BWTextureKindPolicy policy,uint3
 static inline int bw_texture_depth_storage_format(uint32_t format){
     return format>=NVN_FORMAT_DEPTH16&&format<=NVN_FORMAT_DEPTH32F_STENCIL8;
 }
-static inline int bw_texture_depth_storage_kind(uint32_t format,uint32_t flags,int32_t samples,unsigned *kind){
-    if(!kind||samples!=0||(flags&(NVN_TEXTURE_FLAGS_COMPRESSIBLE|0x50)))return 0;
+/* Original compression=0 depth kind, independently of the bridge policy. */
+static inline int bw_texture_plain_depth_kind(uint32_t format,int32_t samples,unsigned *kind){
+    if(!kind||samples!=0)return 0;
     unsigned value;
     switch(format){
         case NVN_FORMAT_DEPTH16:value=1;break;
@@ -55,6 +56,22 @@ static inline int bw_texture_depth_storage_kind(uint32_t format,uint32_t flags,i
         default:return 0;
     }
     *kind=value;return 1;
+}
+/* Keep the historical no-COMPRESSIBLE domain distinct from host policy. */
+static inline int bw_texture_depth_storage_kind(uint32_t format,uint32_t flags,int32_t samples,unsigned *kind){
+    return !(flags&(NVN_TEXTURE_FLAGS_COMPRESSIBLE|0x50))&&bw_texture_plain_depth_kind(format,samples,kind);
+}
+static inline int bw_texture_plain_depth_selected(BWTextureKindPolicy policy,uint32_t format,uint32_t flags,int32_t samples,unsigned *kind){
+    return policy==BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH&&(flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(flags&0x50)&&bw_texture_plain_depth_kind(format,samples,kind);
+}
+/* Original flags 0x100 changes a ChooseKind parameter unused by the plain
+ * HAL leaf. Its layout chain does not consume it. VIDEO/SPARSE/MINIMAL and
+ * other flags have separate layout semantics and are not admitted here. */
+static inline int bw_texture_plain_depth_layout_inputs(uint32_t format,uint32_t flags,int32_t samples){
+    return bw_texture_depth_storage_format(format)&&samples==0&&(flags==8||flags==0x108);
+}
+static inline int bw_texture_plain_depth_gpu_inputs(uint32_t format,uint32_t target,uint32_t flags,int32_t samples){
+    return (format==NVN_FORMAT_DEPTH16||format==NVN_FORMAT_DEPTH32F)&&target==NVN_TEXTURE_TARGET_2D&&flags==8&&samples==0;
 }
 static inline int bw_texture_storage_round_size(size_t payload,size_t alignment,size_t *result){
     if(!result||!alignment||(alignment&(alignment-1))||payload>SIZE_MAX-(alignment-1))return 0;

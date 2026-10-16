@@ -391,7 +391,8 @@ static int check_req(const virt_t *v, const NVNmappingRequest *r, int i, char *e
         return NVN_VPOOL_INVALID;
     }
     if (!r->physicalPool) return NVN_VPOOL_OK;
-    if (r->storageClass != 0 && r->storageClass != 0x100 && r->storageClass != 0x1fe) {
+    unsigned raw_kind = 0;
+    if (r->storageClass != 0 && !bw_pool_storage_class_kind(r->storageClass, &raw_kind)) {
         errf(err, errlen, "request %d: unsupported storage class %#x", i, (unsigned)r->storageClass);
         return NVN_VPOOL_E_CLASS;
     }

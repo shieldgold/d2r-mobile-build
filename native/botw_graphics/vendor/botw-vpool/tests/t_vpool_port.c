@@ -46,7 +46,12 @@ static void test_kinds(void){
     CHECK(nvn_vpool_lease_acquire(&l,base,2*PG)==NVN_VPOOL_OK&&l.contiguous&&l.nspans==1&&l.raw_kind==0xfe,"same generation FE coalesces");uint64_t id=l.phys_id;nvn_vpool_lease_release(&l);
     CHECK(map1(req(&po,0,0,PG,0x1fe))==NVN_VPOOL_OK,"remap only first FE page");
     CHECK(nvn_vpool_lease_acquire(&l,base,2*PG)==NVN_VPOOL_OK&&l.contiguous&&l.nspans==2&&l.raw_kind==0xfe,"different generations remain contiguous when kind and offsets agree");nvn_vpool_lease_release(&l);
-    int bad[]={-1,1,0xfe,0x101,0x102,0x1ff,0x200,0x7fffffff};
+    const int depthClasses[]={0x101,0x17b};for(unsigned k=0;k<2;k++){
+        CHECK(map1(req(&po,0,0,2*PG,depthClasses[k]))==NVN_VPOOL_OK,"uncompressed exact depth kind maps");
+        CHECK(nvn_vpool_lease_acquire(&l,base,2*PG)==NVN_VPOOL_OK&&l.contiguous&&l.raw_kind==(unsigned)(depthClasses[k]&255)&&l.cpu==p,"depth contiguous raw kind/bytes preserved");nvn_vpool_lease_release(&l);
+    }
+    CHECK(map1(req(&po,0,0,2*PG,0x1fe))==NVN_VPOOL_OK,"restore FE baseline");
+    int bad[]={-1,1,0xfe,0x107,0x146,0x186,0x102,0x1ff,0x200,0x7fffffff};
     for(unsigned i=0;i<sizeof bad/sizeof *bad;i++){
         uint64_t gen=nvn_vpool_generation();r[0]=req(&po,2*PG,0,PG,0x100);r[1]=req(&po,PG,PG,PG,bad[i]);
         CHECK(nvn_vpool_map(&vo,r,2,NULL,0)==NVN_VPOOL_E_CLASS&&nvn_vpool_generation()==gen,"unknown later class preserves whole batch");

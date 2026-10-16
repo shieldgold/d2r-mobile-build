@@ -44,6 +44,94 @@ class VirtualTextureTests(unittest.TestCase):
                         'failed assertion'):
             self.assertNotIn(failure, result.stderr)
 
+    def test_plain_depth_virtual_gpu_upload_uses_exact_depth_kind(self):
+        for mode in ('plain-depth16-upload', 'plain-depth32-upload'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_packed_uint_texture_uses_uint_shader_and_rejects_float_before_publication(self):
+        for mode in ('policy-rgb10a2ui', 'policy-rgb10a2ui-float'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_integer_textures_are_rejected_by_all_color_present_entrypoints(self):
+        for scalar in ('int', 'sint', 'packed'):
+            for entry in ('window', 'swap-init', 'present'):
+                with self.subTest(scalar=scalar, entry=entry):
+                    self.mode(f'policy-{scalar}-{entry}')
+
+    def test_array_color_cannot_bypass_direct_window_initialize_or_present_type_gate(self):
+        for mode in ('policy-array-swap-init', 'policy-array-present'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_requires_explicit_immutable_depth_policy(self):
+        for mode in ('depth-policy-color-only', 'depth-policy-unknown', 'depth-policy-invalid'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_gpu_domain_does_not_expand_virtual_zero_flags_msaa_array_or_import(self):
+        for mode in ('plain-depth16-unsupported', 'plain-depth32-unsupported'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_mip_one_uses_complete_gob_layout_and_exact_depth_view(self):
+        for mode in ('plain-depth16-mips', 'plain-depth32-mips'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_cross_segment_rejects_before_earlier_counter_and_clear(self):
+        require_counter_sampling()
+        for mode in ('plain-depth16-cross-counter', 'plain-depth32-cross-counter', 'plain-depth16-wrong-kind-counter', 'plain-depth32-wrong-kind-counter'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_remains_outside_color_swapchain_and_present_before_resource_creation(self):
+        for mode in ('plain-depth16-window', 'plain-depth32-window', 'plain-depth16-present', 'plain-depth32-present', 'plain-depth16-swap-init', 'plain-depth32-swap-init'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_four_distinct_gob_corners_survive_upload_readback_remap_and_alias(self):
+        for mode in ('plain-depth16-pattern', 'plain-depth32-pattern'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_types_never_authorize_code_descriptor_or_raw_gpu_buffer(self):
+        for mode in ('plain-depth16-raw-consumers', 'plain-depth32-raw-consumers'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_raw_buffer_rejects_before_earlier_counter_and_clear(self):
+        require_counter_sampling()
+        for mode in ('plain-depth16-raw-consumers-counter', 'plain-depth32-raw-consumers-counter'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_clear_test_and_staging_readback(self):
+        for mode in ('plain-depth16-render', 'plain-depth32-render'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_cpu_region_write_and_invalidate_preserve_gob_padding(self):
+        for mode in ('plain-depth16-cpu', 'plain-depth32-cpu'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_wrong_depth_kind_rejects_entire_batch(self):
+        for mode in ('plain-depth16-wrong-kind', 'plain-depth32-wrong-kind'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_cross_segment_depth_rejects_entire_batch(self):
+        for mode in ('plain-depth16-cross', 'plain-depth32-cross'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_depth_retired_depth_releases_backing_and_rejects_recorded_draw(self):
+        for mode in ('plain-depth16-finalize', 'plain-depth32-finalize'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
     def test_plain_color_backend_uses_uint_32_64_128_bit_texels_through_real_fe_remaps(self):
         for mode in ('policy-r32ui', 'policy-rg32ui', 'policy-rgba32ui'):
             with self.subTest(mode=mode):

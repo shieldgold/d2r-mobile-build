@@ -2,7 +2,7 @@
 
 B 接入复用完整 registry，并以同一 resolver 将可消费范围绑定为真实 `MTLBuffer + offset`。新 physical/virtual 只支持 coherent physical backing、同一 physical 连续且 raw kind 相同的范围；登记成功不代表任意碎片范围可供 GPU 使用。普通池保留既有 copied CPU_CACHED 和 empty metadata 行为。
 
-`0x100/raw0` 用于 buffer、代码、descriptor 和 linear texture；`0x1fe/rawFE` 仅用于原格式 traits 可确证、非 COMPRESSIBLE 的普通 color block-linear texture。physical backing 的 COMPRESSIBLE flag 不代表实现了压缩 texture、depth/stencil kind、fast clear 或硬件 page-table alias。
+`0x100/raw0` 用于 buffer、代码、descriptor 和 linear texture；`0x1fe/rawFE` 用于已选择有效无硬件压缩表示的普通 color block-linear texture；`0x101/raw1` 与 `0x17b/raw7B` 分别用于明确准入的 D16 与 D32F。请求的 COMPRESSIBLE 标志保留；physical backing 的该标志不代表实现 NV 硬件压缩、组合 depth/stencil、fast clear 或硬件 page-table alias。
 
 ## 原 base-v0 ABI
 
@@ -29,7 +29,7 @@ Metal NoCopy还要求真实宿主页对齐、连续的单一VM allocation和正�
 
 ## 完整模块与薄port
 
-`vendor/botw-vpool/SOURCE.json` 固定来源和每项port，完整保留interval、批事务、lease、generation、tombstone及差分/并发测试。原baseline的class0/100和unmap忽略class/physicalOffset仍由baseline测试覆盖；native薄adapter的纯校验只接受100/raw0和1FE/rawFE，unmap的physicalOffset必须0且不消费storageClass。未知class不因为physical COMPRESSIBLE就放行。
+`vendor/botw-vpool/SOURCE.json` 固定来源和每项port，完整保留interval、批事务、lease、generation、tombstone及差分/并发测试。原baseline的class0/100和unmap忽略class/physicalOffset仍由baseline测试覆盖；native薄adapter的纯校验只接受100/raw0、1FE/rawFE、101/raw1和17B/raw7B，unmap的physicalOffset必须0且不消费storageClass。未知class不因为physical COMPRESSIBLE就放行。
 
 port保留span的raw kind，使不同kind不能coalesce或被判断为同一个连续GPU消费范围。strict reservation失败不发布owner/token/generation，并清理未publish宿主reservation。旧入口仍覆盖原fallback行为；strict窗口属于桥接 host 策略，不是 A14 GPU VA 位宽实测。
 
@@ -46,7 +46,7 @@ CPU lease只保证当前映射和physical CPU字节寿命，同线程获取释�
 | command/control memory、counter | 需要真实 ordinary CPU 可访问后备；不得将 virtual token 当 CPU pointer。counter 还要求 coherent、16B对齐、真实 timestamp capability |
 | scratch | Metal-private lowering 不访问外部 NVN scratch bytes；保留 device、logical bounds/代际与独立 lowering proof 检查 |
 
-所有 submission 先在独立 replay snapshot 检查当前映射、canonical alias/私有权威、当前及历史 write intent、code/descriptor 冲突、反射 size/alignment/type 与 render state，然后写 CPU arena，再封存同键范围快照并 encode。counter 的分段 commit 不会跳过后半批静态错误。未知 raw kind、碎片 GPU 消费、FE raw buffer、virtual depth/压缩纹理及丢失的 private GPU 权威均具名拒绝。
+所有 submission 先在独立 replay snapshot 检查当前映射、canonical alias/私有权威、当前及历史 write intent、code/descriptor 冲突、反射 size/alignment/type 与 render state，然后写 CPU arena，再封存同键范围快照并 encode。counter 的分段 commit 不会跳过后半批静态错误。未知 raw kind、碎片 GPU 消费、FE/1/7B raw buffer、未支持的 depth/原生压缩纹理及丢失的 private GPU 权威均具名拒绝。
 
 ordinary copied cache 仍需要既有 Flush/Invalidate 同步。代码匹配和提交校验读取实际 GPU buffer 中的字节；SetShaders 先等待先前 GPU producer，不自动刷新或失效 guest CPU cache。新 physical 必须满足实际宿主页范围、全范围逻辑访问和连续 RW VM 覆盖。每个 Metal segment 必须位于单个真实 VM leaf；整个 outward-rounded pool span 仍受宿主 `maxBufferLength` 的原保守限制，本批不扩大总容量。virtual 只保留 logical token，不分配同尺寸 Metal buffer，也不受该 buffer 长度限制。
 
@@ -91,3 +91,11 @@ Finalize 先置 retiring，等待所有已提交 GPU 工作，完成 checked dir
 `test_botw_virtual_pool_gpu.py` 与 `test_botw_virtual_texture.py` 在真实 Metal 下启用 ARC 异常清理、ASan/UBSan 和 Metal API Validation，使用自有非零图案检查 GPU copy、vertex/uniform/storage、两队列、纹理采样/RT/padding、record→submit remap、descriptor/code冲突和失败前置。共享事件明确控制在途 GPU 完成时点，Finalize/Map 的等待采用有界协作线程；失败批先 Finish/drain 再检查 sentinel。真实 encoder 异常另用协议代理在实际资源捕获后注入，验证 finally 与 checked cleanup；与可静态预检输入错误分开。segments 使用自有 mmap 的不同 inheritance 形成真实相邻 RW leaf，逐段检查合法 NoCopy、三段非零图案、第二段线性 RT、完整 shader buffers、private sampling、descriptor alias、64 KiB private-authority remap guard及跨段整批拒绝。真实第二资源外持及第二次 Metal nil 负例验证 checked shutdown 等待全部实际 deallocator 回执后才允许 munmap。
 
 这些测试验证桥接合同，不证明手机已经执行此版本、音频/完整画面或游戏可玩。A14 验收须记录同源工件与真实普通启动，不以 M3 结果代替。
+
+## 精确无压缩深度映射
+
+完整 vendor registry 新增101/raw1与17B/raw7B，复用原 interval、batch transaction、lease、generation、physicalID和tombstone算法。原 class0 仅留 standalone baseline 兼容；生产 adapter不接受0或裸1/7B，也不接受107/186等真正硬压缩kind、146/1C3等尚无本桥GPU表示的深度组合。kind继续参与合并/连续性，末项非法或任一scratch分配失败均不发布任何span/generation。unmap、重映和physical地址复用不能复活旧代际。
+
+`poolTryIdentity(...,-1)` 仅供CPU canonical alias、64KiB Map权威guard及cache失效，不是GPU许可。GPU buffer、代码、descriptor、vertex/uniform/storage和copy仍需raw0；counter另需ordinary coherent CPU可写池，不能写typed virtual深度。只有texture family的受限depth selector请求raw1/7B，且实际GPU范围仍必须同physical、同kind、连续并落在单个合法NoCopy segment。64KiB reservation/offset校验是pool-relative合同，不要求Host39 canonical CPU VA绝对64KiB对齐；texel权威和GPU上传仍只覆盖完整GOB payload，不把reservation padding当纹理字节。
+
+D16/D32F的private GPU写权威继续拒绝受影响remap和raw0别名读写；Finalize后的retired权威也不能由重新标为raw0绕过。物理Finalize清理texture/selected/descriptor/recorded-view缓存后等待全部真实NoCopy deallocator ACK，原quarantine与checked shutdown合同不变。真实GPU用例验证typed kind错误、跨segment及typed-as-buffer在前置counter/clear之后仍使整批零发布，并以Finish/drain后的CPU、arena与counter canary判断；CPU模块测试另验证typed lease/别名、末项错误、两个分配失败点、unmap/remap ABA与带宿主页bias的physical重注册。

@@ -69,6 +69,7 @@ class MemoryPoolAdapterCPUTests(unittest.TestCase):
     def test_fragmented_kind_hole_stale_and_physical_direct_rejections(self): self.run_mode('resolve-negative')
     def test_batch_preflight_snapshots_and_sealed_miss(self): self.run_mode('batch')
     def test_physical_virtual_public_family_and_nocopy_bias(self): self.run_mode('family')
+    def test_depth_kinds_keep_exact_gpu_type_and_canonical_identity_across_transaction_and_aba(self): self.run_mode('depth-kinds')
     def test_full_request_snapshot_later_failure_and_unknown_kind(self): self.run_mode('mapping')
     def test_unmap_count_zero_and_actual_request_protection(self): self.run_mode('mapping-negative')
     def test_physical_vm_alignment_max_and_failed_creation_publish_nothing(self): self.run_mode('initialize-negative')

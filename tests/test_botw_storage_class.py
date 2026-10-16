@@ -21,6 +21,15 @@ int main(void) {
         unsigned kind=0;CHECK(bw_texture_depth_storage_kind(formats[i],0,0,&kind)&&kind==kinds[i]);
         CHECK(bw_texture_depth_storage_kind(formats[i],0x100,0,&kind)&&kind==kinds[i]);
         for(unsigned flags=8;flags<=0x108;flags+=0x100) {kind=0xdead;CHECK(!bw_texture_depth_storage_kind(formats[i],flags,0,&kind)&&kind==0xdead);}
+        for(unsigned flags=8;flags<=0x108;flags+=0x100){
+            kind=0xdead;CHECK(!bw_texture_plain_depth_selected(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,formats[i],flags,0,&kind)&&kind==0xdead);
+            CHECK(!bw_texture_plain_depth_selected(BW_TEXTURE_KIND_UNKNOWN,formats[i],flags,0,&kind)&&kind==0xdead);
+            CHECK(!bw_texture_plain_depth_selected((BWTextureKindPolicy)99,formats[i],flags,0,&kind)&&kind==0xdead);
+            CHECK(bw_texture_plain_depth_selected(BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH,formats[i],flags,0,&kind)&&kind==kinds[i]);
+            CHECK(bw_texture_plain_depth_layout_inputs(formats[i],flags,0));
+            CHECK(bw_texture_plain_depth_gpu_inputs(formats[i],NVN_TEXTURE_TARGET_2D,flags,0)==((i==0||i==2)&&flags==8));
+        }
+        CHECK(!bw_texture_plain_depth_layout_inputs(formats[i],9,0)&&!bw_texture_plain_depth_gpu_inputs(formats[i],NVN_TEXTURE_TARGET_2D_ARRAY,8,0));
         const int samples[]={-1,1,2,4,8,16,INT32_MAX};
         for(unsigned j=0;j<sizeof samples/sizeof *samples;j++) {kind=0xdead;CHECK(!bw_texture_depth_storage_kind(formats[i],0,samples[j],&kind)&&kind==0xdead);}
     }
@@ -36,6 +45,7 @@ int main(void) {
         int valid=(format>=1&&format<=0x18)||(format>=0x22&&format<=0x30)||(format>=0x37&&format<=0x50)||(format>=0x6d&&format<=0x9c);
         CHECK(bw_texture_ordinary_color_format(format)==valid);colorCount+=valid;
         CHECK(bw_texture_plain_color_selected(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format)==valid);
+        CHECK(bw_texture_plain_color_selected(BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH,format)==valid);
         CHECK(!bw_texture_plain_color_selected(BW_TEXTURE_KIND_UNKNOWN,format));CHECK(!bw_texture_plain_color_selected((BWTextureKindPolicy)99,format));
         CHECK(bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,8,0)==valid);
         CHECK(bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,13,0)==valid);
@@ -96,6 +106,16 @@ class StorageClassTests(unittest.TestCase):
         self.assertIn(expected, run.stdout)
         self.assertNotIn('failed assertion', run.stderr)
 
+    def test_plain_depth_initialize_checks_live_registry_before_untrusted_provider_header(self):
+        for state in ('foreign', 'inaccessible', 'copy'):
+            with self.subTest(state=state):
+                self.probe('depth-init-provider-' + state, 'METAL_PLAIN_COLOR_INIT_REGISTRY_BEFORE_HEADER_OK')
+
+    def test_plain_depth_policy_unifies_five_formats_but_preserves_flags_gl_and_size_scope(self):
+        for mode in ('plain-depth-query', 'plain-depth-readonly'):
+            with self.subTest(mode=mode):
+                self.probe(mode, 'PLAIN_DEPTH_FIVE_METADATA_FLAGS_GL_AND_SIZE_SCOPE_OK')
+
     def test_backend_plain_color_policy_unifies_all_113_queries_without_changing_flags(self):
         for mode in ('policy-class', 'policy-align', 'policy-size', 'policy-readonly'):
             with self.subTest(mode=mode):
@@ -140,7 +160,7 @@ class StorageClassTests(unittest.TestCase):
             with self.subTest(state=state):
                 self.probe('compression-invalid-device-' + state, 'STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK')
 
-    def test_unknown_color_and_depth_compression_cannot_create_ordinary_texture(self):
+    def test_unknown_color_and_combined_depth_compression_cannot_create_ordinary_texture(self):
         self.probe('compression-unknown-create', 'COMPRESSIBLE_UNKNOWN_CREATION_REJECTED_BEFORE_PUBLICATION_OK')
 
     def test_builder_pitch_class_is_pure_metadata_independent_of_gpu_creation(self):
@@ -201,7 +221,7 @@ class StorageClassTests(unittest.TestCase):
             with self.subTest(state=state):
                 self.probe('builder-invalid-device-' + state, 'STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK')
 
-    def test_depth_compression_msaa_stencil_and_unknown_formats_require_native_kind(self):
+    def test_depth_msaa_stencil_and_unknown_formats_require_native_kind(self):
         for mode in ('builder-block', 'builder-rejected-formats'):
             with self.subTest(mode=mode):
                 self.probe(mode, 'STORAGE_CLASS_NATIVE_KIND_REQUIRED_REJECTED_OK')
