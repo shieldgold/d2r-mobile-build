@@ -30,6 +30,23 @@ class WholeHostBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reviewed"):
             build.audit_external_references({"_task_threads"}, "adapter/whole_pool_builder.c", lock)
 
+    def test_pool_backing_permission_query_has_its_own_exact_source_exception(self):
+        relative = "adapter/whole_pool_backing_memory.m"
+        lock = {"forbidden_external_references": ["_vm_region_recurse_64", "_task_threads"],
+                "normal_operand_validation_references": {
+                    relative: ["_vm_region_recurse_64"]}}
+        self.assertEqual(build.audit_external_references(
+            {"_vm_region_recurse_64", "_vm_read_overwrite"}, relative, lock),
+            {"_vm_region_recurse_64"})
+        with self.assertRaisesRegex(ValueError, "diagnostic"):
+            build.audit_external_references({"_task_threads"}, relative, lock)
+        with self.assertRaisesRegex(ValueError, "diagnostic"):
+            build.audit_external_references({"_vm_region_recurse_64"},
+                                            "dm/gfx/nvn/nvn_mtl.m", lock)
+        lock["normal_operand_validation_references"][relative].append("_task_threads")
+        with self.assertRaisesRegex(ValueError, "reviewed"):
+            build.audit_external_references({"_task_threads"}, relative, lock)
+
     def test_only_selected_sdk_dependencies_may_be_outside_locked_component(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

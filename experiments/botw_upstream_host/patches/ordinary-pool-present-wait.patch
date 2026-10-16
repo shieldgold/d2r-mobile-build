@@ -1,0 +1,13 @@
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -7472,7 +7472,9 @@
+         uint64_t n = tk - g_pq_read;
+         for (uint64_t k = g_pq_read + 1; k <= tk; k++) g_pres[k % PRING] = (pres_ent){k, -1};
+         g_link_dropped += n; g_pq_read = tk;
+-        while (g_pq_inflight) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
++        // Dropping later unclaimed tickets must not ACK an earlier frame
++        // already owned by the display-link CPU callback before GPU commit.
++        while (g_pq_inflight || g_pool_present_busy) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
+         if (g_pq_done < tk) g_pq_done = tk;
+         pthread_cond_broadcast(&g_pq_cv);
+         if (!g_stall_t0) { g_stall_t0 = last ? last : now; g_stall_drop = 0; g_stall_red = 0; g_stall_logged = 0; g_stall_n++; }

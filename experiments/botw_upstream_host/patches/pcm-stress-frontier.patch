@@ -1,0 +1,41 @@
+--- a/dm/host/tests/t_botw_pcm.c
++++ b/dm/host/tests/t_botw_pcm.c
+@@ -507,6 +507,25 @@
+     return NULL;
+ }
+ 
++static void check_stress_sequence(const consumer_ctx *c, uint64_t next,
++                                  uint64_t flush_dropped, uint64_t final_flush) {
++    // A gap is observed only when a later data frame crosses it. A periodic
++    // stop/restart may flush the last ring without any later callback consuming
++    // data, so the unobserved suffix can include more than the final stop alone.
++    // Account for the exact decoded sequence frontier, with no missing-frame
++    // tolerance: observed holes plus the whole unseen suffix equal every flush.
++    CHECK(c->expect >= 0 && (uint64_t)c->expect <= next);
++    CHECK(flush_dropped <= next && c->gap_total <= next);
++    uint64_t trailing = next - (uint64_t)c->expect;
++    CHECK(final_flush <= trailing && trailing <= flush_dropped);
++    CHECK_EQ(c->nonzero_frames, next - flush_dropped);
++    CHECK_EQ(c->gap_total, flush_dropped - trailing);
++    CHECK_EQ((uint64_t)c->expect, c->nonzero_frames + c->gap_total);
++    CHECK_EQ(c->backwards, 0);
++    CHECK_EQ(c->order_errors, 0);
++    CHECK_EQ(c->silent_flags_wrong, 0);
++}
++
+ static void test_stress(void) {
+     const char *env = getenv("T_BOTW_PCM_STRESS_FRAMES");
+     uint64_t target = env ? strtoull(env, NULL, 10) : 4000000;
+@@ -554,11 +573,7 @@
+     CHECK(g_au.dispose_calls == 1 && atomic_load(&c.stop) == 1);
+     // Every submitted frame was either consumed in order or flushed by a stop; silence is never
+     // mistaken for data, data never follows silence inside a buffer, and the flag matches.
+-    CHECK_EQ(c.nonzero_frames, next - flush_dropped);
+-    CHECK_EQ(c.gap_total, flush_dropped - final_flush);
+-    CHECK_EQ(c.backwards, 0);
+-    CHECK_EQ(c.order_errors, 0);
+-    CHECK_EQ(c.silent_flags_wrong, 0);
++    check_stress_sequence(&c, next, flush_dropped, final_flush);
+     CHECK(c.zero_frames > 0 && c.renders > 0);
+     free(in);
+     fprintf(stderr, "stress: %" PRIu64 " frames submitted, %" PRIu64 " consumed, %" PRIu64 " overflow-dropped, %" PRIu64 " flush-dropped, %" PRIu64 " restarts, %" PRIu64 " renders, %" PRIu64 " silent frames, gap total %" PRIu64 "\n",

@@ -1,0 +1,13 @@
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -7393,7 +7393,9 @@
+         uint64_t n = g_pq_in - g_pq_read;
+         for (uint64_t k = g_pq_read + 1; k <= g_pq_in; k++) g_pres[k % PRING] = (pres_ent){k, -1};
+         g_link_dropped += n; g_pq_read = g_pq_in;
+-        while (g_pq_inflight) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
++        // A display-link callback can own a dequeued frame before committing
++        // its command buffer. Do not publish done while that CPU borrow lives.
++        while (g_pq_inflight || g_pool_present_busy) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
+         if (g_pq_done < g_pq_in) g_pq_done = g_pq_in;
+         pthread_cond_broadcast(&g_pq_cv);
+         if (n) MLOG("entering background: dropping %llu queued frames not yet on screen (display link does not fire in background)", (unsigned long long)n);

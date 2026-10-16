@@ -1,0 +1,77 @@
+{
+  "capture_entries": [
+    "nvnTextureInitialize",
+    "nvnTextureFinalize",
+    "nvnTexturePoolInitialize",
+    "nvnSamplerPoolInitialize",
+    "nvnTexturePoolRegisterTexture",
+    "nvnSamplerPoolRegisterSampler",
+    "nvnProgramFinalize",
+    "nvnEventInitialize",
+    "nvnEventGetValue",
+    "nvnCommandBufferAddCommandMemory",
+    "nvnWindowInitialize",
+    "nvnQueueFinish",
+    "nvnQueueSubmitCommands",
+    "nvnQueuePresentTexture"
+  ],
+  "capture_helpers": [
+    "snap_tex",
+    "read_texels",
+    "write_texels",
+    "flush_texels",
+    "program_set_shaders",
+    "ev_signal"
+  ],
+  "exact_function_ports": [
+    "poolVMRegions",
+    "poolNoCopyGeometry"
+  ],
+  "limits": [
+    "Physical/virtual/MapVirtual are not enabled by this ordinary slice; their flag values fail explicitly.",
+    "Owned fixture uses protocol stand-ins and normal CPU mappings. No whole host, guest code or GPU command was executed.",
+    "Caller owns NVN operand lifetimes and excludes concurrent VM remapping; protected_copy does not promise rollback against concurrent remapping.",
+    "Sources outside existing accepted heap/module metadata fail logical admission; no inferred address ownership is substituted.",
+    "iPhoneOS availability of vm_region_recurse_64 is determined by the real iPhoneOS CI; local Mac compilation does not establish iOS availability."
+  ],
+  "mutations": [
+    "MemoryPoolInitialize",
+    "MemoryPoolFinalize",
+    "MemoryPoolFlushMappedRange",
+    "MemoryPoolInvalidateMappedRange"
+  ],
+  "ownership": "existing dm_guest_heap_readable accepted heap extent or existing g_mod initialized module extent; actual VM permission/leaf checks are separate",
+  "patch_order": [
+    "checked-dirty-write.patch",
+    "base-v0-pool-builder.patch",
+    "ordinary-pool-backing.patch"
+  ],
+  "profile": "botw-switch-base-v0",
+  "registry": "original nvn_mtl.m g_pools/g_keep, g_res_objects/g_res_mu, g_by_serial/g_alias/g_treg, and original gfx admission gate; no new live object/address catalog",
+  "reused_sources": {
+    "experiments/botw_upstream_host/adapter/whole_pool_builder.json": {
+      "sha256": "2d55b56cf86365311a769b5369420102854c43c9e1d9784d96569bf3b947576e"
+    },
+    "native/botw_graphics/memory_pool_family.inc": {
+      "sha256": "35485784969728d882d89b0871b92224a7280ebb128bf7843a11cd1a0b47925b"
+    },
+    "native/botw_graphics/pool_policy.h": {
+      "sha256": "f210a77ce9ab09f2903b42a3a2d50cab7f787d000ad8137a704135165a418b40"
+    },
+    "native/botw_host/protected_copy.h": {
+      "sha256": "23ac1867254adcbfe353530eeea64e95d92fe8cd61c492588836567a73bdc3e2"
+    }
+  },
+  "schema": 1,
+  "scope": "ordinary memory pools: admission, backing, publication, cache coherence, capture mutation barrier and actual borrowed release ACK",
+  "semantics": [
+    "Checks ordinary flags, original device magic, logical ownership, overlap, capacity, VM geometry and real leaf access. Rounded spans require logical ownership of the full rounded operand.",
+    "Original ordinary path remains one VM leaf for NoCopy; readable CPU_CACHED fallback uses a conditional independent protected snapshot. Exact protected ordinary memory remains metadata-only until an actual RW single-leaf consumer.",
+    "CPU_CACHED copied flush/invalidate transfer actual bytes; invalid ranges/protection failures do not report success. Invalidation follows real queue drain.",
+    "Unpublished entry anchors precede factories. Checked dirty registration and backing failure roll back; unknown borrowed factory outcome never synthesizes a release ACK.",
+    "One original gfx gate admits scoped readers and independent pool mutation writers/app suspension. New capture stops before CPU translation drain and actual main/upload/present CPU+GPU completion; drain/ACK run outside admission and registry locks.",
+    "Retirement removes original serial/alias/descriptor/bloom/present/deferred references, including NvPkg wrapper and actual texture owners; original residency removal is idempotent under its own registry mutex.",
+    "A per-resource once token and one common one-second dispatch-group deadline preserve actual deallocator ACK semantics. Missing ACK leaves g_pools entry/backing/object retained and causes a controlled stop.",
+    "Original global initialization serial supplies pool birth ordering without changing the 128-byte texture payload; stale textures from a reinitialized pool are rejected."
+  ]
+}

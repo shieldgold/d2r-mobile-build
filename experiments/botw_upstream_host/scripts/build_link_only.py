@@ -93,12 +93,14 @@ def verify_staged(staged: Path, before: dict, patched: dict) -> None:
 
 def audit_external_references(symbols: set[str], relative: str, lock: dict) -> set[str]:
     approved = set(lock.get("normal_operand_validation_references", {}).get(relative, []))
-    if approved and (relative != "adapter/whole_pool_builder.c" or
+    reviewed = {"adapter/whole_pool_builder.c", "adapter/whole_pool_backing_memory.m"}
+    if approved and (relative not in reviewed or
                      approved != {"_vm_region_recurse_64"}):
         raise ValueError("normal VM exception is outside the reviewed operand copier")
-    # This one source-locked copier checks only its 4..20-byte operands and
-    # reads protection/submap metadata; it never enumerates unrelated addresses
-    # or emits VM state. Original crash/sample/inspection TUs remain forbidden.
+    # These exact source-locked ports check explicit API operands: builder
+    # fields or backing spans. They read leaf/protection metadata without
+    # enumerating unrelated addresses or emitting VM state. Original
+    # crash/sample/inspection translation units remain forbidden.
     forbidden = symbols.intersection(lock["forbidden_external_references"]) - approved
     if forbidden:
         raise ValueError("unrouted host diagnostic: " + repr(sorted(forbidden)))

@@ -22,7 +22,8 @@ class WholeAudioPlatformTests(unittest.TestCase):
         (cls.source / 'dm/host/tests').mkdir(parents=True)
         for name in ('botw_pcm.c', 'botw_pcm.h', 'tests/t_botw_pcm.c'):
             shutil.copyfile(source / 'dm/host' / name, cls.source / 'dm/host' / name)
-        for patch in ('ios-audio-output.patch', 'audio-write-observed.patch'):
+        for patch in ('ios-audio-output.patch', 'audio-write-observed.patch',
+                      'pcm-stress-frontier.patch'):
             patched = subprocess.run(['patch', '--fuzz=0', '-p1', '-i', str(EXPERIMENT / 'patches' / patch)],
                 cwd=cls.source, text=True, capture_output=True)
             if patched.returncode:
