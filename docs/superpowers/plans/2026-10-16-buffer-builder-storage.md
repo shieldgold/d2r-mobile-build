@@ -26,8 +26,8 @@
 ## Task 3：提交、实际游戏与手机
 
 - [x] root核9冻结SHA与index精确一致，连同4自有文档精确13路径提交并push `cae045f9f79ae4144131581bfcbf6f2f10e2aafd`；native98/100，不上传私有输入。
-- [ ] 精确提交普通Mac核binary和200私有输入后运行原游戏，完整退出后记录下一停止点/真实第一帧；不得把launcher exit0当game exit0。
-- [ ] 对连贯功能候选跑固定全套和精确head iOS/Linux CI，核官方工件、本机组装签名，再保数据更新当前iPhone12；累计日志流式核前缀，不截断、不重传14GB资源。
+- [x] cae精确binary及200私有输入核后普通Mac完整退出host_return=1，旧BufferBuilder错误不再出现；新首fatal为TextureInitialize generic拒绝，尚不知实际Init参数，不把前3次Cube零query当其因果。无真实第一帧。
+- [x] 固定cae全套995项/994pass+1skip完整exit0（254.925秒），643 tracked及manifest7127c3aa…前后稳；iOS/Linux精确head CI与官方工件核验后本机组装签名，保数据更新iPhone12/PID1160。首采样为运行中无host_return，无帧；UID、RomFS大小/mtime、shader与权限保留，继续采后续证据。
 - [ ] 真机真实画面、操作、音频、存档与重开全部验证后才可称能玩。安装、启动、测试或绘制fixture通过均不足以替代。
 
 当前owner最终freeze2八路径 SHA256 `a7f4b013328a02b2216092343f22980139383b6b68652fe73520b879eafe6c9d`；第八路径仅澄清texture_transfer顶部注释，零逻辑差异。native98/100。CPU相关28/28完整通过13.913秒（新10、既有诊断2、transfer16），初8新方法真RED含6行为失败；实际device消费验证、mmap边界及原短路负例已补强。独审CPU/GPU与原游戏仍待闭合，不能据此称可玩。
@@ -39,3 +39,7 @@
 cae普通Mac binary `bc995ad14674a0cc03600ddf20ac13b8ae47e066445db8db46abb869a75154a6` 与200私有输入核验后已启动；live检查时Mac锁屏、无完整host_return/真实帧，未观察旧fatal不足以证明越过。`outputs/botw-host39-mac-cae045f/locked-live-checkpoint.json` 保留非终态，已请求用户手动解锁，不能改显示时钟来绕过。Linux精确head CI成功，iOS CI仍运行。
 
 精确cae的iOS CI38853804418与Linux CI38853804430均已完整success。官方无游戏三文件shell已独立下载核验，98项生产来源逐一匹配Git blob，shell SHA256 `cabcfcac6a4bedb060cd08b972474a0ad10d3be7821b1f9accec14cc08a58c5d`；暂存于 `outputs/botw-ci-cae045f-stage/verified-shell/`。后续固定全套OUT建好后可复用此工件，不需重复下载。Mac仍锁屏待用户解锁，普通运行会话未退出，local fixed full尚未启动；手机保持已完整核验的b41，不宣称cae已装。
+
+继续时已live核Mac IOConsoleLocked=No，原cae launcher会话完整exit0、进程不在，完整日志含mac_host_return=1及process_exit=1。ordinary-admission-evidence.json已保存；新TextureInitialize generic缺少实际snapshot字段，后继只追加原失败分支正常API已有scalar并保原前缀/BOOL/回调/调用次数，不读取运行时旧对象或新增VM诊断。固定cae全套现在执行，官方工件已复用到phone OUT，手机连接通道已主动核验。
+
+后继纹理Init纯诊断三路径已freeze：`outputs/botw-texture-init-layout-context-audit/owner-freeze.json` SHA `b9cbd0dbd392caa9d87a913b4249550fbe2f32172b34eec9afe92b054e936a15`。只generic失败原report一行追加同validated快照，不增native98，不变条件/短路/BOOL/回调或textureBytes次数。owner4CPU/11mode4.739秒、真实RED为缺字段4subfail（compile0），原validator应2非3的旧fixture假设单独保留不算RED；独立静态逆剥全文恢复679d1d6d…且最坏runtime消息407<512，独立CPU4/4与11mode通过4.644秒，双独审CLOSED、三SHA前后稳定，最坏407B及原单行逆剥匹配，已具备精确提交和普通Mac分型条件。

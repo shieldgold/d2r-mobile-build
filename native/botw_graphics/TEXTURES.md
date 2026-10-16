@@ -183,6 +183,8 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 
 真实Metal Validation夹具验证已登记descriptor在迁移后仍正确采样两层三mip，源存储可被另一个sampler合法复用；exact目标替换后，替换前已录draw/旧descriptor仍读旧图案，独立backing的新descriptor读不同图案，Finalize旧alias后新descriptor仍正确。两份GPU清除的private纹理在替换后保持各自像素，旧/新backing的live与retired canonical buffer别名均拒绝。CPU夹具另核无新增validator/VM查询、双方epoch变化/目标冲突/abort/实际clone异常与nil不改registry、容量、错误线程和篡改令牌。它们只验证兼容层合同，原游戏下一停点须由固定版本普通运行确认。
 
+TextureInitialize 的通用布局失败保留原错误前缀、FALSE、短路顺序与单次回调，仅追加同一次 validated Builder snapshot 的形状、flags/format/samples/stride、pool是否非空、GL/packaged布尔及layout位值；不读取pool或packaged指针内容，不新增成功输出、validator/VM查询或支持域。它与先前GetStorageSize零查询是独立API事件，参数相同之前不推定因果。
+
 BufferBuilder/Buffer 的 overlap 拒绝前缀保留，并附已匹配宿主记录的 class、span/requested字节数、同base/完整span标志、BWTexture primary/移动epoch及有限相对offset。这些错误上下文不读取candidate header或oldraw，不新增诊断VM查询，也不证明旧对象已死亡。
 
 BufferBuilder 的三个字段写复用完整 buffer vendor setter，在独立宿主临时值上生成输出：SetDevice 仅写首8字节并原样存device pointer，SetDefaults/SetStorage 仅写+8..31的24字节，保device和其余tail。Initialize消费builder时仍严格验证device/pool；getter与Initialize的既有完整builder读取域不变。正常写按真实输出范围做logical权限、受保护VM写与dirty准备，失败不使用裸写fallback。

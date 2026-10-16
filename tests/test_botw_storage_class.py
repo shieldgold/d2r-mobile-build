@@ -179,6 +179,17 @@ int main(int argc,char **argv){@autoreleasepool{
   }else if(!strcmp(mode,"compare-query-only")){
    CHECK(!compareExpected(&empty,&second,1));CHECK(objects.count==count&&serial==nextSerial);CHECK(!badWrite(&empty));unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureFinalize(&empty);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"object lifetime/type expected=BWTexture")&&objects.count==count&&serial==nextSerial);
   }else CHECK(0);
+ }else if(!strncmp(mode,"init-layout-context",19)){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_CUBEMAP;b->width=b->height=4;b->depth=6;
+  BOOL maximum=!strcmp(mode,"init-layout-context-maximum"),missing=!strcmp(mode,"init-layout-context-no-pool"),foreign=!strcmp(mode,"init-layout-context-foreign-pool");
+  if(maximum){b->pool=NULL;b->target=b->flags=b->format=UINT32_MAX;b->width=b->height=b->depth=b->levels=b->samples=INT32_MIN;b->stride=UINT32_MAX;b->glName=0;b->packaged=UINT16_MAX-1;b->packagedData=NULL;}
+  if(!strcmp(mode,"init-layout-context-imports")){b->glName=7;b->packagedData=(const void*)(uintptr_t)1;b->packaged=0x7a51;b->stride=177;}
+  if(missing)b->pool=NULL;if(foreign){b->pool=(void*)(uintptr_t)1;deniedAddress=b->pool;}
+  unsigned char before[sizeof raw];memset(&raw,0xa5,sizeof raw);memcpy(before,&raw,sizeof raw);NSUInteger count=objects.count,spans=objectSpans.count;uint64_t nextSerial=serial;void *map=(__bridge void*)objectSpans;
+  CHECK(!w_nvnTextureInitialize(&raw,&builder));CHECK(notifications==1&&accessCalls==2&&!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(objects.count==count&&objectSpans.count==spans&&serial==nextSerial&&(__bridge void*)objectSpans==map&&!memcmp(before,&raw,sizeof raw));
+  CHECK(strstr(lastError,"entry=nvnTextureInitialize: Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data "));char expected[512];
+  snprintf(expected,sizeof expected,"target=%u flags=0x%x format=0x%x width=%d height=%d depth=%d levels=%d samples=%d stride=%u pool_present=%s gl_name_nonzero=%s packaged_data_nonnull=%s packaged_layout_set=%s packaged_layout_bits=0x%x",(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->width,b->height,b->depth,b->levels,b->samples,b->stride,b->pool?"true":"false",b->glName?"true":"false",b->packagedData?"true":"false",(b->packaged&1)?"true":"false",(b->packaged>>4)&0xfffu);CHECK(strstr(lastError,expected));
+  char runtimeError[512];int length=snprintf(runtimeError,sizeof runtimeError,"error=NVN: %s",lastError);CHECK(length>0&&length<(int)sizeof runtimeError&&strstr(runtimeError,"packaged_layout_bits="));printf("INIT_LAYOUT_CONTEXT_BYTES=%d\n",length);deniedAddress=NULL;
  }else if(!strcmp(mode,"size-zero")||!strcmp(mode,"size-zero-gl")||!strcmp(mode,"size-zero-buffer")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->format=NVN_FORMAT_R8;b->width=7;b->height=9;b->depth=11;b->levels=3;b->stride=177;b->packaged=0x7a51;b->packagedData=(const void*)(uintptr_t)0xdeadbeef;
   if(!strcmp(mode,"size-zero-gl")){b->target=NVN_TEXTURE_TARGET_2D;b->flags=8;b->format=NVN_FORMAT_R32UI;b->glName=9;b->device=NULL;b->width=-7;}
@@ -248,6 +259,16 @@ int main(int argc,char **argv){@autoreleasepool{
         self.assertNotIn('ERROR: AddressSanitizer', result.stderr)
         return [s for s in result.stderr.splitlines()
                 if s.startswith('[botw graphics] texture_lifecycle_context ')], result
+
+    def test_rejected_init_appends_only_existing_snapshot_and_keeps_false_callback_access_and_budget(self):
+        for mode in ['init-layout-context', 'init-layout-context-maximum',
+                     'init-layout-context-no-pool', 'init-layout-context-foreign-pool',
+                     'init-layout-context-imports']:
+            with self.subTest(mode=mode):
+                lines, result = self.mode(mode)
+                self.assertEqual(lines, [])
+                self.assertEqual(sum('entry=nvnTextureInitialize:' in line for line in result.stderr.splitlines()), 1)
+                self.assertIn('INIT_LAYOUT_CONTEXT_BYTES=', result.stdout)
 
     def test_no_init_entry_has_no_retained_history_and_preserves_one_callback(self):
         lines, _ = self.mode('none')
