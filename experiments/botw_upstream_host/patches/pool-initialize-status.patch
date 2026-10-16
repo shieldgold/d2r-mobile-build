@@ -1,0 +1,35 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -31,6 +31,8 @@
+ #include "nvn_dirty.h"
+ #include "whole_pool_backing_memory.h"
+ #include "whole_pool_backing_gate.h"
++#include "whole_policy.h"
++#include <errno.h>
+ #include "botw_shader.h"
+ #include "nvn_clock.h"
+ #include "nvn_handle.h"
+@@ -308,7 +310,7 @@
+     return snapshot;
+ }
+ // WHOLE_POOL_BACKING_ENTRIES_END
+-NVN(nvnMemoryPoolInitialize, NVNboolean, NVNmemoryPool *p, const NVNmemoryPoolBuilder *b) {
++static NVNboolean botw_nvn_memory_pool_initialize_impl(NVNmemoryPool *p, const NVNmemoryPoolBuilder *b) {
+     POOL_MUTATION();pool_builder_t builder;char error[192];int anchored=0,shader=0,dirty=0;
+     if(!p||!botw_whole_pool_read(&builder,b,28)||!botw_whole_pool_writable(p,sizeof(pool_t))||!mtl_pool_available(p,builder.mem,builder.size))return 0;
+     uint32_t device_magic=0;
+@@ -333,6 +335,14 @@
+     if(dirty)nvn_dirty_remove_range(builder.mem);
+     if(shader)botw_shader_pool_remove(p);
+     return 0;
++}
++NVN(nvnMemoryPoolInitialize, NVNboolean, NVNmemoryPool *p, const NVNmemoryPoolBuilder *b) {
++    NVNboolean result = botw_nvn_memory_pool_initialize_impl(p, b);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_NVN_MEMORY_POOL_INITIALIZE,
++                              result != 0 ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
+ }
+ NVN(nvnMemoryPoolFinalize, void, NVNmemoryPool *p) {
+     POOL_MUTATION();pool_t object=pool_checked(p);char error[192];

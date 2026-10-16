@@ -244,13 +244,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "f8b05d5bec5c29d1e3055eed7ba6758f1042ffae785aee09971759287f2b502a",
-      "bytes": 6512,
+      "sha256": "3a6b578f14b5e3f69be0c84e30fed10609139ed0d22c3c873ec1af2bc15f0b38",
+      "bytes": 6563,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "e95081a361a646864c1aed1b9ed4f032813bc219223d6d81d21ee9b72fc732c9",
-      "bytes": 2226,
+      "sha256": "bba50397ec2184893508a9e392ebc5626d4c4842026c3c44a8f4640a0ed348dc",
+      "bytes": 2286,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -608,6 +608,11 @@
       "bytes": 1571,
       "role": "thin-adapter-or-verification"
     },
+    "patches/pool-initialize-status.patch": {
+      "sha256": "939d90d88c355bc40e9e4dd87ce4bbb2c0ea2a571faf7e45120a1d825e984f98",
+      "bytes": 1508,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/portable-shader-source.patch": {
       "sha256": "3931eff1a22910ab30096de451617740326a55e074d463e634484cf7c8771a12",
       "bytes": 13660,
@@ -799,8 +804,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_normal_api_status_probe.c": {
-      "sha256": "d2064aa8c3ff0cde430bdaffd438ad7d45c4fe849996cf9a8d925ac97ece7d08",
-      "bytes": 7775,
+      "sha256": "9baabd502454470caa068b63e8d2680ea1196235a5472174a1c53a1a92c4c41f",
+      "bytes": 9018,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_nvn_version_probe.c": {
@@ -1653,7 +1658,8 @@
     "patches/base-v0-nvn-version.patch",
     "patches/graphics-bootstrap-status.patch",
     "patches/base-v0-vi-layer.patch",
-    "patches/base-v0-queue-acquire.patch"
+    "patches/base-v0-queue-acquire.patch",
+    "patches/pool-initialize-status.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1661,7 +1667,7 @@
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
-    "dm/gfx/nvn/hle_nvn.c": "8cc755e238eb595f037b06bc77d8c384e400ae9883998bcfccc41d9451b2083f",
+    "dm/gfx/nvn/hle_nvn.c": "c5f3c10a212ecd97425e04294e625963af749b1ecb341b1ac9d1a6cedb7d91da",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",

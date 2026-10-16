@@ -11,7 +11,8 @@ ROOT=Path(__file__).resolve().parents[1]
 EXP=ROOT/'experiments/botw_upstream_host'
 BASELINE=os.environ.get('BOTW_NORMAL_API_STATUS_BASELINE')=='1'
 NAMES=('SetHeapSize','SetMemoryPermission','SetMemoryAttribute','MapMemory','UnmapMemory','QueryMemory','CreateThread','StartThread',
-       'CreateTransferMemory','CloseHandle','WaitSynchronization','GetInfo','ConnectToNamedPort','SendSyncRequest')
+       'CreateTransferMemory','CloseHandle','WaitSynchronization','GetInfo','ConnectToNamedPort','SendSyncRequest',
+       'NvnMemoryPoolInitialize')
 CAPACITY='[botw whole-host] heap_plan heap_bytes=671088640 root_bytes=637534208\n'
 
 
@@ -53,6 +54,11 @@ class NormalApiStatus(OwnedRunner,unittest.TestCase):
         text=self.run_owned(self.logger,'enum')
         self.assertEqual(text,''.join('[botw whole-host] api='+name+' result='+outcome+'\n'
             for name in NAMES for outcome in ('ok','error')))
+
+    def test_appended_nvn_boolean_api_preserves_all_fourteen_original_enum_values(self):
+        self.assertEqual(self.run_owned(self.logger,'appended-api'),
+            '[botw whole-host] api=NvnMemoryPoolInitialize result=ok\n'
+            '[botw whole-host] api=NvnMemoryPoolInitialize result=error\n')
 
     def test_invalid_api_or_outcome_never_logs(self):self.assertEqual(self.run_owned(self.logger,'invalid'),'')
     def test_failed_write_and_duplicate_preserve_errno(self):self.assertEqual(self.run_owned(self.logger,'write-failure'),'')

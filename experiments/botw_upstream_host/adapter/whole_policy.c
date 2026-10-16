@@ -35,7 +35,8 @@ void botw_whole_host_api_result(botw_whole_host_api api, botw_whole_host_api_out
         NORMAL_API_LINES(CreateThread), NORMAL_API_LINES(StartThread),
         NORMAL_API_LINES(CreateTransferMemory), NORMAL_API_LINES(CloseHandle),
         NORMAL_API_LINES(WaitSynchronization), NORMAL_API_LINES(GetInfo),
-        NORMAL_API_LINES(ConnectToNamedPort), NORMAL_API_LINES(SendSyncRequest)
+        NORMAL_API_LINES(ConnectToNamedPort), NORMAL_API_LINES(SendSyncRequest),
+        NORMAL_API_LINES(NvnMemoryPoolInitialize)
     };
 #undef NORMAL_API_LINES
     if ((unsigned)api < BOTW_HOST_API_COUNT && (unsigned)outcome <= BOTW_HOST_API_ERROR &&
