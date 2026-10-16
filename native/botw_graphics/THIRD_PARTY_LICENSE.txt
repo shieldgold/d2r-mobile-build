@@ -162,3 +162,12 @@ establish named anisotropy encodings, not a promise of cross-GPU pixel identity.
 Apple primary API availability and feature tables establish that current
 A14/iOS18 and M3 cannot use the newer sampler-level lodBias property. A shader
 instruction bias operand alone is not an implementation of sampler-state bias.
+
+The sampler storage/value-lifetime correction additionally follows the complete
+fixed base-v0 SamplerInitialize/Finalize pair (BC338..BC3C8 / BC49C RET) and
+main's normal local-Init -> cache memcpy -> source-Finalize path. Host primary
+storage spans are distinct from immutable copied sampler values: exact-slot
+replacement retires old spans only after publication, and Finalize leaves value
+snapshots available until graphics shutdown. Existing host registry/descriptor
+algorithms are retained; no native object-byte fallback, expanded opaque budget,
+guest diagnostic reads, new codec or runtime-wide lifetime change is imported.

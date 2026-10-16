@@ -193,6 +193,14 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 最终 freeze3 的相关采样器20项全部通过（5.934秒，含7个真实 Metal 模式），独立公共接口复核3项方法通过（6.777秒，含11次实际 Metal validation 运行与1个 CPU 模式），独立最小 CPU 增量3项通过（4.677秒）；非零 subnormal 的同一旧源码真实失败探针，在修复后确认拒绝、Metal 创建数不增加且正常回调。较早83项相关回归绑定 freeze1，不作为 freeze3 全套结果；后续固定提交需另跑全套。8个来源 SHA 在两次独审前后稳定，manifest SHA256 为 `47e93436d967e21f1fd0885fdda056f7a504429b713bc72cdce6ebc2719a90b6`。新增 sampler include 后生产 native 文件95个，既有100文件上限与来源 schema 不改；iOS 工作流对新测试的 push/pull_request 均有精确触发路径。以上是合成接口验证，未替代原游戏或手机可玩验收。
 
+提交 `ea7fc87` 的普通 Mac 原游戏越过原 `nvnSamplerBuilderSetLodBias` 停止点，首个 fatal 改为 `nvnSamplerInitialize` 内的 `texture metadata overlaps live NVN object`。binary SHA256 为 `1d9d8870a7400caccffeec70f3c0f51a7d941c58b94c76dbed57ee8a9d3fff8e`，证据位于 `outputs/botw-host39-mac-ea7fc87/ordinary-admission-evidence.json`。没有 bias 具名拒绝行，但本次未输出实际参数；不能把未记录的位值或重叠对象身份写成实际观测。原 Init 不读取 prior header、Finalize 为直接返回，main 另有按值缓存路径，后续需核对宿主同址替换与旧引用保护。host_return=1，仍无游戏呈现或可玩验收。
+
+`ea7fc87` 固定全套 **926项，925通过、1个原硬件条件跳过**，207.655秒；634个来源文件前后逐项SHA稳定，source manifest SHA256 为 `9cb1befce58d3e9ba93f1f2d21ecc180f065c6235c4a81c52f3c5fa9dd86a9f4`。全套包含最终 sampler 源码；测试通过仍不构成游戏或手机版本可玩验收。
+
+后续固定 main/SDK 静态链确认：临时 sampler 与 Builder 各占 main 栈布局0x60，游戏将 sampler 按值复制进缓存后立即 Finalize 源对象；原 Finalize 是 RET。宿主旧实现删除 serial 快照会破坏这条正常路径，旧测试中“Finalize 后查询失效”和“只读 Finalize 必须拒绝”的假设因此更正。sampler-only 修复把不可变值快照和原址 storage span 分开：Init 只允许同址、同完整 host 预算的 BWSampler 替换，新对象发布成功后才退旧 span；Finalize 不改 raw 或删除快照，只退精确本址及同对象身份的 primary span，Finalize 副本不会退另地址的 span。旧快照及 Metal state 保持到 graphics_shutdown，这是当前显式资源成本。跨类、部分重叠、队列/录制区与忙回调仍在创建前拒绝；nil 或异常保留 raw、serial、objects 和 spans。没有扩大原对象预算、全局 get/put 或新增 guest 内容读取。实际重叠对象类型及地址尚未观测，静态与夹具只能证明该兼容缺口存在，不能替代现场归因。
+
+本次25项 CPU 回归在 ea 基线上编译成功后有8项真实失败，修复后25项全部通过（4.663秒，ASan/UBSan、fake Metal）；最窄真实 GPU 链通过（0.897秒），覆盖按值副本、源 Finalize、同槽重用、从旧副本注册 descriptor，以及副本 Finalize 后仍采到原 mip2。独立 CPU 8项通过（4.292秒）；独立 public GPU 两项方法/两个模式通过（1.783秒，均实际 Metal validation banner，无 GPU sanitizer），包含新 value-copy 链和旧 retained-snapshot。双独审 CLOSED，四个修改来源 SHA 前后稳定，manifest SHA256 为 `cf37b5f0a8579a4ffb26d1b3e4eb1b5b41793b1d44ec1f8ca885cbddcdb1152b`，native95与schema100保持。固定提交后的原游戏验证另行记录，不把合成像素当成游戏画面。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

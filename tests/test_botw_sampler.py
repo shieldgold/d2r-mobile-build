@@ -12,12 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 CPU_SOURCE = r'''
 #import <Metal/Metal.h>
 static unsigned samplerCreations;
-static BOOL failSampler;
+static BOOL failSampler,throwSampler;
 static MTLSamplerDescriptor *capturedDescriptor;
 @interface SamplerCPUDevice:NSObject @end
 @implementation SamplerCPUDevice
 - (id<MTLCommandQueue>)newCommandQueue{return (id<MTLCommandQueue>)[NSObject new];}
-- (id<MTLSamplerState>)newSamplerStateWithDescriptor:(MTLSamplerDescriptor*)descriptor{samplerCreations++;if(failSampler)return nil;capturedDescriptor=[descriptor copy];return (id<MTLSamplerState>)[NSObject new];}
+- (id<MTLSamplerState>)newSamplerStateWithDescriptor:(MTLSamplerDescriptor*)descriptor{samplerCreations++;if(throwSampler)@throw [NSException exceptionWithName:@"OwnedSamplerFactoryFailure" reason:@"owned sampler creation exception" userInfo:nil];if(failSampler)return nil;capturedDescriptor=[descriptor copy];return (id<MTLSamplerState>)[NSObject new];}
 @end
 static id<MTLDevice> samplerCPUDevice(void){return (id<MTLDevice>)[SamplerCPUDevice new];}
 #define MTLCreateSystemDefaultDevice samplerCPUDevice
@@ -53,7 +53,7 @@ int main(int argc,char **argv){@autoreleasepool{
    API(nvnSamplerBuilderSetLodBias);const uint32_t values[]={0x3f000000,0xbf800000,0x7f800000,0xff800000,0x7fc01234};for(unsigned i=0;i<sizeof values/sizeof *values;i++){nvnSamplerBuilderSetLodBias(&b,floatBits(values[i]));memset(&raw,0xa5,sizeof raw);NVNsampler before=raw;unsigned callbacks=notifications,created=samplerCreations;CHECK(!nvnSamplerInitialize(&raw,&b));CHECK(notifications==callbacks+1&&samplerCreations==created&&!memcmp(&raw,&before,sizeof raw));CHECK(strstr(lastError,"sampler LOD bias")&&strstr(lastError,"bits=0x"));CHECK(objects.count==1&&!graphicsDepth&&!pendingError&&!pendingFatal);}
   }else if(!strcmp(mode,"snapshot")){
    API(nvnSamplerBuilderSetLodBias);API(nvnSamplerGetLodBias);API(nvnSamplerGetLodClamp);API(nvnSamplerGetMinMagFilter);API(nvnSamplerGetWrapMode);API(nvnSamplerGetMaxAnisotropy);API(nvnSamplerGetCompare);
-   nvnSamplerBuilderSetLodBias(&b,floatBits(0x80000000));nvnSamplerBuilderSetMinMagFilter(&b,5,0);nvnSamplerBuilderSetWrapMode(&b,7,6,3);nvnSamplerBuilderSetLodClamp(&b,2,9);nvnSamplerBuilderSetMaxAnisotropy(&b,4);nvnSamplerBuilderSetCompare(&b,1,8);CHECK(nvnSamplerInitialize(&raw,&b));CHECK(samplerCreations==1&&capturedDescriptor.minFilter==MTLSamplerMinMagFilterLinear&&capturedDescriptor.magFilter==MTLSamplerMinMagFilterNearest&&capturedDescriptor.mipFilter==MTLSamplerMipFilterLinear&&capturedDescriptor.lodMinClamp==2&&capturedDescriptor.lodMaxClamp==9&&capturedDescriptor.maxAnisotropy==4&&capturedDescriptor.compareFunction==MTLCompareFunctionAlways);nvnSamplerBuilderSetDefaults(&b);float lo,hi;NVNminFilter min;NVNmagFilter mag;NVNwrapMode s,t,r;NVNcompareMode cm;NVNcompareFunc cf;nvnSamplerGetLodClamp(&raw,&lo,&hi);nvnSamplerGetMinMagFilter(&raw,&min,&mag);nvnSamplerGetWrapMode(&raw,&s,&t,&r);nvnSamplerGetCompare(&raw,&cm,&cf);CHECK(bits(nvnSamplerGetLodBias(&raw))==0x80000000&&lo==2&&hi==9&&min==5&&mag==0&&s==7&&t==6&&r==3&&nvnSamplerGetMaxAnisotropy(&raw)==4&&cm==1&&cf==8);nvnSamplerFinalize(&raw);unsigned callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){(void)nvnSamplerGetLodBias(&raw);CHECK(0);}recoverNow=NO;CHECK(notifications==callbacks+1&&strstr(lastError,"object lifetime/type"));
+   nvnSamplerBuilderSetLodBias(&b,floatBits(0x80000000));nvnSamplerBuilderSetMinMagFilter(&b,5,0);nvnSamplerBuilderSetWrapMode(&b,7,6,3);nvnSamplerBuilderSetLodClamp(&b,2,9);nvnSamplerBuilderSetMaxAnisotropy(&b,4);nvnSamplerBuilderSetCompare(&b,1,8);CHECK(nvnSamplerInitialize(&raw,&b));CHECK(samplerCreations==1&&capturedDescriptor.minFilter==MTLSamplerMinMagFilterLinear&&capturedDescriptor.magFilter==MTLSamplerMinMagFilterNearest&&capturedDescriptor.mipFilter==MTLSamplerMipFilterLinear&&capturedDescriptor.lodMinClamp==2&&capturedDescriptor.lodMaxClamp==9&&capturedDescriptor.maxAnisotropy==4&&capturedDescriptor.compareFunction==MTLCompareFunctionAlways);nvnSamplerBuilderSetDefaults(&b);float lo,hi;NVNminFilter min;NVNmagFilter mag;NVNwrapMode s,t,r;NVNcompareMode cm;NVNcompareFunc cf;nvnSamplerGetLodClamp(&raw,&lo,&hi);nvnSamplerGetMinMagFilter(&raw,&min,&mag);nvnSamplerGetWrapMode(&raw,&s,&t,&r);nvnSamplerGetCompare(&raw,&cm,&cf);CHECK(bits(nvnSamplerGetLodBias(&raw))==0x80000000&&lo==2&&hi==9&&min==5&&mag==0&&s==7&&t==6&&r==3&&nvnSamplerGetMaxAnisotropy(&raw)==4&&cm==1&&cf==8);unsigned callbacks=notifications;NVNsampler beforeFinalize=raw;nvnSamplerFinalize(&raw);CHECK(notifications==callbacks&&!memcmp(&raw,&beforeFinalize,sizeof raw)&&bits(nvnSamplerGetLodBias(&raw))==0x80000000);
   }else if(!strcmp(mode,"zero")){
    CHECK(nvnSamplerInitialize(&raw,&b));CHECK(samplerCreations==1&&capturedDescriptor.minFilter==MTLSamplerMinMagFilterLinear&&capturedDescriptor.magFilter==MTLSamplerMinMagFilterLinear&&capturedDescriptor.mipFilter==MTLSamplerMipFilterNotMipmapped&&capturedDescriptor.lodMinClamp==0&&capturedDescriptor.lodMaxClamp==15);nvnSamplerFinalize(&raw);
   }else if(!strcmp(mode,"all-fields")){
@@ -75,7 +75,7 @@ int main(int argc,char **argv){@autoreleasepool{
   }else if(!strcmp(mode,"minimal-spans")){
    API(nvnSamplerBuilderGetLodBias);size_t page=getpagesize();void *memory=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(memory!=MAP_FAILED);CHECK(!mprotect((char*)memory+page,page,PROT_NONE));NVNsamplerBuilder *shortBuilder=(NVNsamplerBuilder*)((char*)memory+page-0x28);uint32_t value=0x3f000000;memcpy((char*)shortBuilder+0x24,&value,4);CHECK(bits(nvnSamplerBuilderGetLodBias(shortBuilder))==value);CHECK(!munmap(memory,page*2));
   }else if(!strcmp(mode,"anisotropy")){
-   const float accepted[]={1,2,4,8,16};for(unsigned i=0;i<5;i++){nvnSamplerBuilderSetMaxAnisotropy(&b,accepted[i]);CHECK(nvnSamplerInitialize(&raw,&b));CHECK(capturedDescriptor.maxAnisotropy==(NSUInteger)accepted[i]);nvnSamplerFinalize(&raw);}const float refused[]={0,1.5f,3,5,6,10,12,17};for(unsigned i=0;i<sizeof refused/sizeof *refused;i++){nvnSamplerBuilderSetMaxAnisotropy(&b,refused[i]);unsigned count=samplerCreations;CHECK(!nvnSamplerInitialize(&raw,&b)&&samplerCreations==count&&objects.count==1);}
+   const float accepted[]={1,2,4,8,16};for(unsigned i=0;i<5;i++){nvnSamplerBuilderSetMaxAnisotropy(&b,accepted[i]);CHECK(nvnSamplerInitialize(&raw,&b));CHECK(capturedDescriptor.maxAnisotropy==(NSUInteger)accepted[i]);nvnSamplerFinalize(&raw);}unsigned retainedValues=(unsigned)objects.count;const float refused[]={0,1.5f,3,5,6,10,12,17};for(unsigned i=0;i<sizeof refused/sizeof *refused;i++){nvnSamplerBuilderSetMaxAnisotropy(&b,refused[i]);unsigned count=samplerCreations;CHECK(!nvnSamplerInitialize(&raw,&b)&&samplerCreations==count&&objects.count==retainedValues);}
   }else if(!strcmp(mode,"device-compare")){
    API(nvnSamplerCompare);NVNdevice alias=device;CHECK(nvnSamplerInitialize(&raw,&b));nvnSamplerBuilderSetDevice(&b,&alias);CHECK(nvnSamplerInitialize(&other,&b));CHECK(!nvnSamplerCompare(&raw,&other)&&!nvnSamplerCompare(&other,&raw));nvnSamplerFinalize(&raw);nvnSamplerFinalize(&other);
   }else if(!strcmp(mode,"bias-fpcr")){
@@ -83,7 +83,21 @@ int main(int argc,char **argv){@autoreleasepool{
    API(nvnSamplerBuilderSetLodBias);const uint32_t values[]={0x00000001,0x80000001,0x007fffff,0x807fffff};for(unsigned i=0;i<4;i++){nvnSamplerBuilderSetLodBias(&b,floatBits(values[i]));uint64_t saved;__asm__ volatile("mrs %0, fpcr":"=r"(saved));uint64_t changed=saved|UINT64_C(0x1000000);memset(&raw,0xa5,sizeof raw);NVNsampler before=raw;unsigned callbacks=notifications,created=samplerCreations;__asm__ volatile("msr fpcr, %0"::"r"(changed));int accepted=nvnSamplerInitialize(&raw,&b);__asm__ volatile("msr fpcr, %0"::"r"(saved));CHECK(!accepted&&notifications==callbacks+1&&samplerCreations==created&&objects.count==1&&!memcmp(&raw,&before,sizeof raw));char expected[32];snprintf(expected,sizeof expected,"bits=0x%08x",values[i]);CHECK(strstr(lastError,expected)&&!strstr(lastError,"value=0 ")&&!strstr(lastError,"value=-0 "));}
 #endif
   }else if(!strcmp(mode,"readonly-finalize")){
-   API(nvnSamplerGetLodBias);size_t page=getpagesize();NVNsampler *placed=mmap(NULL,page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(placed!=MAP_FAILED&&nvnSamplerInitialize(placed,&b));uint64_t identity=word(placed,0);CHECK(!mprotect(placed,page,PROT_READ));unsigned callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){nvnSamplerFinalize(placed);CHECK(0);}recoverNow=NO;CHECK(notifications==callbacks+1&&word(placed,0)==identity&&objects.count==2&&nvnSamplerGetLodBias(placed)==0);CHECK(!mprotect(placed,page,PROT_READ|PROT_WRITE));nvnSamplerFinalize(placed);CHECK(objects.count==1);CHECK(!munmap(placed,page));
+   API(nvnSamplerGetLodBias);size_t page=getpagesize();NVNsampler *placed=mmap(NULL,page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(placed!=MAP_FAILED&&nvnSamplerInitialize(placed,&b));NVNsampler copied=*placed,before=*placed;CHECK(!mprotect(placed,page,PROT_READ));unsigned callbacks=notifications;nvnSamplerFinalize(placed);CHECK(notifications==callbacks&&!memcmp(placed,&before,sizeof before)&&objects.count==2&&objectSpans.count==1&&nvnSamplerGetLodBias(placed)==0&&nvnSamplerGetLodBias(&copied)==0);CHECK(!mprotect(placed,page,PROT_READ|PROT_WRITE));nvnSamplerFinalize(&copied);CHECK(objects.count==2&&objectSpans.count==1);CHECK(!munmap(placed,page));
+  }else if(!strcmp(mode,"reinitialize")){
+   API(nvnSamplerGetLodClamp);API(nvnSamplerCompare);CHECK(nvnSamplerInitialize(&raw,&b));NVNsampler copied=raw;BWSampler *old=get(&copied,[BWSampler class]);id retainedState=old.state;uint64_t oldKey=((BWObject*)&raw)->serial;nvnSamplerBuilderSetLodClamp(&b,1,3);CHECK(nvnSamplerInitialize(&raw,&b));uint64_t newKey=((BWObject*)&raw)->serial;CHECK(oldKey!=newKey&&objects.count==3&&objectSpans.count==2&&!objectSpans[@(oldKey)]&&objectSpans[@(newKey)]);float lo,hi;nvnSamplerGetLodClamp(&copied,&lo,&hi);CHECK(lo==0&&hi==1000&&old.state==retainedState&&!nvnSamplerCompare(&raw,&copied));nvnSamplerFinalize(&copied);CHECK(objects.count==3&&objectSpans[@(newKey)]&&nvnSamplerCompare(&copied,&copied));nvnSamplerGetLodClamp(&raw,&lo,&hi);CHECK(lo==1&&hi==3);nvnSamplerFinalize(&raw);CHECK(objects.count==3&&objectSpans.count==1);
+  }else if(!strcmp(mode,"value-after-finalize")){
+   API(nvnSamplerCompare);API(nvnSamplerGetLodBias);CHECK(nvnSamplerInitialize(&raw,&b));NVNsampler copied=raw,before=raw;nvnSamplerFinalize(&raw);CHECK(!memcmp(&raw,&before,sizeof raw)&&objects.count==2&&objectSpans.count==1&&nvnSamplerCompare(&raw,&copied)&&nvnSamplerGetLodBias(&copied)==0);nvnSamplerFinalize(&raw);CHECK(objects.count==2&&objectSpans.count==1);
+  }else if(!strcmp(mode,"alias-finalize")){
+   CHECK(nvnSamplerInitialize(&raw,&b));NVNsampler copied=raw;uint64_t key=((BWObject*)&raw)->serial;nvnSamplerFinalize(&copied);CHECK(objects[@(key)]&&objectSpans[@(key)]&&objectSpans.count==2);nvnSamplerFinalize(&raw);CHECK(objects[@(key)]&&!objectSpans[@(key)]&&objectSpans.count==1);
+  }else if(!strcmp(mode,"reuse-after-finalize")){
+   _Alignas(8) unsigned char storage[128]={0};NVNsampler *placed=(NVNsampler*)storage;CHECK(nvnSamplerInitialize(placed,&b));NVNsampler copied=*placed;API(nvnSamplerGetLodClamp);nvnSamplerFinalize(placed);nvnSamplerBuilderSetDefaults((NVNsamplerBuilder*)storage);float lo,hi;nvnSamplerGetLodClamp(&copied,&lo,&hi);CHECK(lo==0&&hi==1000&&objects.count==2&&objectSpans.count==1);
+  }else if(!strcmp(mode,"replace-rollback")){
+   CHECK(nvnSamplerInitialize(&raw,&b));NVNsampler before=raw;NSDictionary *spans=[objectSpans copy],*values=[objects copy];uint64_t oldSerial=serial;unsigned callbacks=notifications;failSampler=YES;CHECK(!nvnSamplerInitialize(&raw,&b));CHECK(!memcmp(&raw,&before,sizeof raw)&&serial==oldSerial&&[objectSpans isEqual:spans]&&[objects isEqual:values]&&notifications==callbacks+1);failSampler=NO;throwSampler=YES;callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){(void)nvnSamplerInitialize(&raw,&b);CHECK(0);}recoverNow=NO;throwSampler=NO;CHECK(!memcmp(&raw,&before,sizeof raw)&&serial==oldSerial&&[objectSpans isEqual:spans]&&[objects isEqual:values]&&notifications==callbacks+1&&strstr(lastError,"owned sampler creation exception"));
+  }else if(!strcmp(mode,"replace-incompatible")){
+   _Alignas(8) unsigned char storage[256]={0};NVNsampler *placed=(NVNsampler*)storage;CHECK(nvnSamplerInitialize(placed,&b));unsigned count=samplerCreations,callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){(void)nvnSamplerInitialize((NVNsampler*)(storage+8),&b);CHECK(0);}recoverNow=NO;CHECK(samplerCreations==count&&notifications==callbacks+1&&strstr(lastError,"existing_class=BWSampler")&&strstr(lastError,"exact_base=false"));
+   NVNdevice collision={0};put(&collision,[BWDevice new]);callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){(void)nvnSamplerInitialize((NVNsampler*)&collision,&b);CHECK(0);}recoverNow=NO;CHECK(samplerCreations==count&&notifications==callbacks+1&&strstr(lastError,"existing_class=BWDevice")&&strstr(lastError,"exact_base=true"));
+   NVNcommandBuffer busy={0};BWCommands *command=[BWCommands new];command.callbackActive=YES;put(&busy,command);callbacks=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){(void)nvnSamplerInitialize((NVNsampler*)&busy,&b);CHECK(0);}recoverNow=NO;CHECK(samplerCreations==count&&notifications==callbacks+1&&strstr(lastError,"busy in a memory callback"));command.callbackActive=NO;
   }else if(!strcmp(mode,"allocation-failure")){
    failSampler=YES;memset(&raw,0xa5,sizeof raw);NVNsampler before=raw;CHECK(!nvnSamplerInitialize(&raw,&b)&&samplerCreations==1&&objects.count==1&&!memcmp(&raw,&before,sizeof raw)&&notifications==1&&strstr(lastError,"Metal sampler creation failed"));
   }else if(!strcmp(mode,"output-transaction")){
@@ -174,7 +188,7 @@ class SamplerContractCPUTests(unittest.TestCase):
     def test_nonzero_subnormal_bias_is_rejected_even_when_fpcr_flushes_float_inputs(self):
         self.mode('bias-fpcr')
 
-    def test_readonly_finalize_retains_original_object_until_writable_retry(self):
+    def test_readonly_finalize_preserves_native_value_without_output_writes(self):
         self.mode('readonly-finalize')
 
     def test_native_sampler_allocation_failure_preserves_registry_and_output_canary(self):
@@ -184,32 +198,51 @@ class SamplerContractCPUTests(unittest.TestCase):
         self.mode('output-transaction')
 
 
+    def test_same_base_reinitialization_retires_only_old_storage_and_keeps_copied_values(self):
+        self.mode('reinitialize')
+
+    def test_source_finalize_keeps_normal_api_copied_sampler_values_usable(self):
+        self.mode('value-after-finalize')
+
+    def test_alias_finalize_does_not_retire_another_address_primary_span(self):
+        self.mode('alias-finalize')
+
+    def test_finalized_source_storage_can_be_reused_while_copied_value_survives(self):
+        self.mode('reuse-after-finalize')
+
+    def test_reinitialization_allocation_failure_and_exception_preserve_entire_old_state(self):
+        self.mode('replace-rollback')
+
+    def test_partial_wrong_class_and_busy_callback_overlaps_still_reject_before_metal(self):
+        self.mode('replace-incompatible')
+
+
 @unittest.skipUnless(platform.system() == 'Darwin' and shutil.which('xcrun'),
                      'requires real Metal sampler and texture sampling')
 class SamplerMetalTests(unittest.TestCase):
-    def test_zero_bias_mip_sampling_clamps_and_descriptor_snapshot_lifetime(self):
+    def run_sampling_modes(self, modes):
         import test_botw_graphics as baseline
         from unittest.mock import patch
         feature = baseline.ARRAY_FEATURE
         feature = feature.replace('    API(nvnDeviceGetTextureHandle);',
-            '    API(nvnSamplerBuilderSetLodBias);API(nvnSamplerBuilderSetLodClamp);API(nvnSamplerFinalize);\n    API(nvnDeviceGetTextureHandle);')
+            '    API(nvnSamplerBuilderSetLodBias);API(nvnSamplerBuilderSetLodClamp);API(nvnSamplerGetLodClamp);API(nvnSamplerFinalize);\n    API(nvnDeviceGetTextureHandle);')
         feature = feature.replace('    CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&sampler);', r'''
-    int maxZero=argc>1&&!strcmp(argv[1],"clamp-zero"),onlyOne=argc>1&&!strcmp(argv[1],"clamp-one"),negativeZero=argc>1&&!strcmp(argv[1],"negative-zero"),retained=argc>1&&!strcmp(argv[1],"retained-snapshot");
+    int valueCopy=argc>1&&!strcmp(argv[1],"value-copy"),maxZero=argc>1&&!strcmp(argv[1],"clamp-zero"),onlyOne=argc>1&&!strcmp(argv[1],"clamp-one"),negativeZero=argc>1&&!strcmp(argv[1],"negative-zero"),retained=argc>1&&!strcmp(argv[1],"retained-snapshot");
     nvnSamplerBuilderSetLodBias(&sb,negativeZero?-0.0f:0.0f);
     if(maxZero)nvnSamplerBuilderSetLodClamp(&sb,0,0);if(onlyOne)nvnSamplerBuilderSetLodClamp(&sb,1,1);
     if(argc>1&&(!strcmp(argv[1],"positive-bias")||!strcmp(argv[1],"negative-bias"))){
       float bias=!strcmp(argv[1],"positive-bias")?.5f:-1;nvnSamplerBuilderSetLodBias(&sb,bias);memset(&sampler,0xa5,sizeof sampler);NVNsampler before=sampler;CHECK(!nvnSamplerInitialize(&sampler,&sb)&&!memcmp(&sampler,&before,sizeof sampler));CHECK(strstr(botw_graphics_last_error(),"sampler LOD bias")&&strstr(botw_graphics_last_error(),!strcmp(argv[1],"positive-bias")?"bits=0x3f000000":"bits=0xbf800000"));puts("SAMPLER_NONZERO_BIAS_REJECTED_WITH_EXACT_VALUE_AND_NO_OBJECT_OK");goto array_done;
     }
-    CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&sampler);if(retained){nvnSamplerFinalize(&sampler);nvnSamplerBuilderSetLodBias(&sb,4);}
+    CHECK(nvnSamplerInitialize(&sampler,&sb));if(valueCopy){NVNsampler cached=sampler;nvnSamplerFinalize(&sampler);nvnSamplerBuilderSetLodClamp(&sb,0,0);CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&cached);nvnSamplerFinalize(&cached);float lo,hi;nvnSamplerGetLodClamp(&sampler,&lo,&hi);CHECK(lo==0&&hi==0);nvnSamplerFinalize(&sampler);}else nvnSamplerPoolRegisterSampler(&sp,4,&sampler);if(retained){nvnSamplerFinalize(&sampler);nvnSamplerBuilderSetLodBias(&sb,4);}
 ''')
         old = 'float4 color=t.sample(s,float2(.01),uint(pos.x)>=2u?1u:0u,level(float(min(uint(pos.y),2u))));'
         # Implicit derivatives request a smaller mip; clamp modes must select
         # each independently colored level without an explicit shader LOD.
         feature = feature.replace('char arrayMSL[1200];',
-            'char arrayMSL[1200];const char *sampleCall=(maxZero||onlyOne)?"t.sample(s,float2(pos.x/4.0f,pos.y/4.0f),uint(pos.x)>=2u?1u:0u)":"t.sample(s,float2(.01),uint(pos.x)>=2u?1u:0u,level(float(min(uint(pos.y),2u))))";')
+            'char arrayMSL[1200];const char *sampleCall=(maxZero||onlyOne||valueCopy)?"t.sample(s,float2(pos.x/4.0f,pos.y/4.0f),uint(pos.x)>=2u?1u:0u)":"t.sample(s,float2(.01),uint(pos.x)>=2u?1u:0u,level(float(min(uint(pos.y),2u))))";')
         feature = feature.replace(old, 'float4 color=%s;')
         feature = feature.replace('r8?"color.rrr":"color.rgb");', 'sampleCall,r8?"color.rrr":"color.rgb");')
-        feature = feature.replace('level=y<3?y:2;', 'level=maxZero?0:onlyOne?1:y<3?y:2;')
+        feature = feature.replace('level=y<3?y:2;', 'level=valueCopy?2:maxZero?0:onlyOne?1:y<3?y:2;')
         # A source-CPU mutation affects level0 only; expected comparison follows
         # the sampled level, rather than the screen row used by the old probe.
         feature = feature.replace('if(pass){if(r8)', 'if(pass&&!maxZero&&!onlyOne){if(r8)')
@@ -230,6 +263,13 @@ class SamplerMetalTests(unittest.TestCase):
                 patch.object(baseline.subprocess, 'run', side_effect=checked_run):
             baseline.MetalBridgeTests.compile_render_probe(self, source, [
                 (name, 'SAMPLER_ZERO_BIAS_REAL_MIP_COLORS_CLAMPS_AND_RETAINED_DESCRIPTOR_OK', True)
-                for name in ('zero', 'negative-zero', 'clamp-zero', 'clamp-one', 'retained-snapshot')
+                for name in modes if name not in ('positive-bias', 'negative-bias')
             ] + [(name, 'SAMPLER_NONZERO_BIAS_REJECTED_WITH_EXACT_VALUE_AND_NO_OBJECT_OK', True)
-                 for name in ('positive-bias', 'negative-bias')])
+                 for name in modes if name in ('positive-bias', 'negative-bias')])
+
+    def test_zero_bias_mip_sampling_clamps_and_descriptor_snapshot_lifetime(self):
+        self.run_sampling_modes(('zero', 'negative-zero', 'clamp-zero', 'clamp-one',
+                                 'retained-snapshot', 'positive-bias', 'negative-bias'))
+
+    def test_value_copy_registers_and_samples_after_source_finalize_and_slot_reuse(self):
+        self.run_sampling_modes(('value-copy',))

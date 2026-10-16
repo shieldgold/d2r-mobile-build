@@ -104,6 +104,23 @@ static double samplerFloatValue(uint32_t bits){
     double value=exponent==255?(significand?NAN:INFINITY):ldexp((double)(significand|(exponent?0x800000:0)),exponent?(int)exponent-150:-149);
     return (bits>>31)?-value:value;
 }
+/* Object construction can replace this exact primary sampler slot. Builder
+ * metadata writes cannot. Retain value records for already copied serials,
+ * and do not retire old storage records until the replacement is published. */
+static NSArray<NSNumber*> *samplerOutputStorage(NVNsampler *raw){
+    size_t bytes=sizeof *raw;
+    if(!raw||bytes>UINTPTR_MAX-(uintptr_t)raw||(memoryAccessValidator&&!memoryAccessValidator(raw,bytes,1)))fatal("sampler object memory is not writable");
+    validateObjectStorage(raw,bytes);NSMutableArray *replaced=[NSMutableArray new];
+    for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;
+        if(!memoryOverlap(raw,bytes,(void*)span.location,span.length))continue;
+        id existing=objects[key];BOOL exact=span.location==(uintptr_t)raw;
+        if(!exact||span.length!=bytes||![existing isKindOfClass:[BWSampler class]]){
+            char reason[256];snprintf(reason,sizeof reason,"sampler object storage overlaps incompatible live NVN object existing_class=%s span_bytes=%zu exact_base=%s",existing?class_getName([existing class]):"<none>",(size_t)span.length,exact?"true":"false");fatal(reason);
+        }
+        [replaced addObject:key];
+    }
+    texturePrepareWrite(raw,bytes);return replaced;
+}
 NVN(nvnSamplerInitialize,NVNboolean,NVNsampler *raw,const NVNsamplerBuilder *builder){
     SamplerBuilder b=samplerBuilder(builder);BWDevice *device=get(b.device,[BWDevice class]);BWSamplerParameters p=b.p;
     /* Metal's sampler-state bias is OS26/Apple10. The supported backend has
@@ -114,7 +131,7 @@ NVN(nvnSamplerInitialize,NVNboolean,NVNsampler *raw,const NVNsamplerBuilder *bui
     if(p.min<0||p.min>5||p.mag<0||p.mag>1||p.compareMode<0||p.compareMode>1||p.compareFunc<1||p.compareFunc>8||
        !isfinite(p.lodMin)||!isfinite(p.lodMax)||!isfinite(p.aniso)||(p.aniso!=1&&p.aniso!=2&&p.aniso!=4&&p.aniso!=8&&p.aniso!=16))return report("invalid or unrepresentable sampler state");
     MTLSamplerAddressMode s=samplerWrapMode(p.wrap[0]),t=samplerWrapMode(p.wrap[1]),r=samplerWrapMode(p.wrap[2]);
-    textureMemory(raw,sizeof *raw,YES);
+    NSArray<NSNumber*> *replaced=samplerOutputStorage(raw);
     MTLSamplerDescriptor *descriptor=[MTLSamplerDescriptor new];
     descriptor.minFilter=(p.min&1)?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;
     descriptor.magFilter=p.mag?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;
@@ -126,7 +143,7 @@ NVN(nvnSamplerInitialize,NVNboolean,NVNsampler *raw,const NVNsamplerBuilder *bui
     descriptor.compareFunction=p.compareMode?(MTLCompareFunction)(p.compareFunc-1):MTLCompareFunctionNever;
     BWSampler *sampler=[BWSampler new];sampler.device=device;sampler.parameters=[NSData dataWithBytes:&b length:sizeof b];
     sampler.state=[gpu newSamplerStateWithDescriptor:descriptor];if(!sampler.state)return report("Metal sampler creation failed");
-    put(raw,sampler);return 1;
+    put(raw,sampler);for(NSNumber *key in replaced)[objectSpans removeObjectForKey:key];return 1;
 }
 NVN(nvnSamplerCompare,NVNboolean,const NVNsampler *rawA,const NVNsampler *rawB){
     SamplerBuilder a=samplerSnapshot(rawA),b=samplerSnapshot(rawB);BWSamplerParameters p=a.p,q=b.p;
@@ -134,4 +151,12 @@ NVN(nvnSamplerCompare,NVNboolean,const NVNsampler *rawA,const NVNsampler *rawB){
       p.lodMin==q.lodMin&&p.lodMax==q.lodMax&&p.lodBias==q.lodBias&&p.compareMode==q.compareMode&&p.compareFunc==q.compareFunc&&
       !memcmp(p.border,q.border,sizeof p.border)&&p.aniso==q.aniso&&p.reduction==q.reduction;
 }
-NVN(nvnSamplerFinalize,void,NVNsampler *raw){get(raw,[BWSampler class]);texturePrepareWrite(raw,sizeof *raw);removeObject(raw);}
+NVN(nvnSamplerFinalize,void,NVNsampler *raw){
+    BWSampler *sampler=get(raw,[BWSampler class]);
+    /* Native Finalize is RET. A normal caller copies the value to its cache
+     * before finalizing the source. Keep raw and its immutable registry value;
+     * retire only this looked-up value's primary storage, never an alias's. */
+    for(NSNumber *key in objectSpans.allKeys){NSRange span=objectSpans[key].rangeValue;
+        if(objects[key]==sampler&&span.location==(uintptr_t)raw&&span.length==sizeof *raw)[objectSpans removeObjectForKey:key];
+    }
+}
