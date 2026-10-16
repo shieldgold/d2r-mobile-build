@@ -1,9 +1,14 @@
 /* Owned source/metadata fixture. Never creates a Metal device, guest or GPU. */
-#import "whole_shader_conditional.h"
+/* Include the implementation to exercise its private filesystem helper with
+ * owned directory authority; production exposes no root-override API. */
+#import "../adapter/whole_shader_conditional.m"
 #import "botw_shader_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 @interface ConditionalFunctionPort : NSObject
 @property(nonatomic) MTLFunctionType functionType;
 @end
@@ -29,6 +34,14 @@
 - (id)newLibraryWithData:(dispatch_data_t)d error:(NSError **)e {(void)d;(void)e;abort();}
 @end
 int main(int argc,char **argv) {
+    if(argc==4&&!strcmp(argv[1],"directory")) {
+        @autoreleasepool {
+            int fd=directory_fd_at_trusted_root(@(argv[2]),strcmp(argv[3],"-")?@(argv[3]):nil);
+            if(fd<0){fprintf(stderr,"directory errno=%d\n",errno);return 30;}
+            struct stat st;int rc=fstat(fd,&st);close(fd);
+            return rc||!S_ISDIR(st.st_mode)?31:0;
+        }
+    }
     if(argc!=10)return 2;
     @autoreleasepool {
         NSError *error=nil;

@@ -319,8 +319,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_shader_conditional.m": {
-      "sha256": "35a2064d521fabe3c910b3d9eb08982ee182d913d2166aeca673188474d200ae",
-      "bytes": 19197,
+      "sha256": "a4d5bf334682a1b733424cbf1bbfa15fd9f582d8957e23e4e87f03d26b548a7c",
+      "bytes": 20960,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_shader_publication.h": {
@@ -759,8 +759,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_shader_conditional_probe.m": {
-      "sha256": "1822f80ef5bf4ade7146cdb5443687bafe53f71c509bda7e0d9c1ac420f43246",
-      "bytes": 3700,
+      "sha256": "d0f3399c1ec286aa3e4593b89d57d199fa87fab233b09bedff599658d8ec06c3",
+      "bytes": 4297,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_shader_conditional_runtime_probe.m": {

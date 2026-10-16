@@ -18,7 +18,7 @@ class ConditionalShaders(unittest.TestCase):
   run=subprocess.run(['patch','--fuzz=0','-p1','-i',str(C/'patches/conditional-shader-runtime.patch')],cwd=cls.work/'upstream',capture_output=True,text=True)
   if run.returncode:raise AssertionError(run.stdout+run.stderr)
   nvn=cls.work/'upstream/dm/gfx/nvn';cls.binary=cls.work/'probe'
-  run=subprocess.run(['clang','-fobjc-arc','-fblocks','-Werror','-Wno-deprecated-declarations','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I'+str(nvn),'-I'+str(nvn/'include'),'-I'+str(C/'adapter'),str(C/'tests/whole_shader_conditional_probe.m'),str(C/'adapter/whole_shader_conditional.m'),str(nvn/'botw_shader_manifest.m'),str(nvn/'botw_shader_runtime.m'),str(nvn/'nvn_refl.m'),'-framework','Foundation','-framework','Metal','-o',str(cls.binary)],capture_output=True,text=True)
+  run=subprocess.run(['clang','-fobjc-arc','-fblocks','-Werror','-Wno-deprecated-declarations','-fsanitize=address,undefined','-fno-sanitize-recover=all','-I'+str(nvn),'-I'+str(nvn/'include'),'-I'+str(C/'adapter'),str(C/'tests/whole_shader_conditional_probe.m'),str(nvn/'botw_shader_manifest.m'),str(nvn/'botw_shader_runtime.m'),str(nvn/'nvn_refl.m'),'-framework','Foundation','-framework','Metal','-o',str(cls.binary)],capture_output=True,text=True)
   if run.returncode:raise AssertionError(run.stdout+run.stderr)
   source=(nvn/'nvn_mtl.m').read_text();start=source.index('/* WHOLE_CONDITIONAL_HELPERS_BEGIN');end=source.index('/* WHOLE_CONDITIONAL_HELPERS_END */',start)
   (cls.work/'conditional_runtime_helpers.inc').write_text(source[start:end])
@@ -72,6 +72,32 @@ class ConditionalShaders(unittest.TestCase):
   p,s,_=self.package();alias=p.parent.parent.with_name(p.parent.parent.name+'-alias');alias.symlink_to(p.parent.parent,target_is_directory=True);self.run_case(alias/p.parent.name/p.name,s,success=False)
  def test_same_short_key_different_full_hash_never_shares_cache_identity(self):
   p,s,_=self.package();a=self.run_case(p,s).stdout;p,t,_=self.package(sha=s[:-1]+'1');b=self.run_case(p,t).stdout;self.assertNotEqual(a,b)
+
+ def directory_case(self,path,root,success):
+  r=subprocess.run([str(self.binary),'directory',str(path),str(root) if root is not None else '-'],capture_output=True,text=True,timeout=10)
+  self.assertEqual(r.returncode,0 if success else 30,r.stdout+r.stderr)
+ def test_trusted_bundle_anchor_does_not_open_its_ancestors(self):
+  # An ancestor alias models a path which may be traversed to the granted root,
+  # but which the loader must not open separately. Only OS authority supplies it.
+  actual=Path(tempfile.mkdtemp(dir=self.work));(actual/'App.app/botw/shaders').mkdir(parents=True)
+  alias=actual.with_name(actual.name+'-authority');alias.symlink_to(actual,target_is_directory=True)
+  root=alias/'App.app';path=root/'botw/shaders'
+  self.directory_case(path,root,True)
+  self.directory_case(path,None,False)
+ def test_trusted_bundle_anchor_rejects_aliases_and_escape(self):
+  root=Path(tempfile.mkdtemp(dir=self.work))/'App.app';(root/'botw/shaders').mkdir(parents=True)
+  self.directory_case(root/'botw/shaders',root,True)
+  (root/'child-alias').symlink_to(root/'botw/shaders',target_is_directory=True)
+  (root/'parent-alias').symlink_to(root/'botw',target_is_directory=True)
+  self.directory_case(root/'child-alias',root,False)
+  self.directory_case(root/'parent-alias/shaders',root,False)
+  root_alias=root.with_name('RootAlias.app');root_alias.symlink_to(root,target_is_directory=True)
+  self.directory_case(root_alias/'botw/shaders',root,False)
+  self.directory_case(root_alias/'botw/shaders',root_alias,False)
+  sibling=root.with_name('App.app-sibling');(sibling/'botw/shaders').mkdir(parents=True)
+  self.directory_case(sibling/'botw/shaders',root,False)
+  self.directory_case(str(root)+'/../App.app/botw/shaders',root,False)
+  self.directory_case(root,root,False)
 
  def test_actual_draw_helpers_reject_compiler_time_mode_or_descriptor_changes(self):
   for mode in (0,1,2,3):

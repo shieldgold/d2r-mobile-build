@@ -1,5 +1,6 @@
 #import "whole_shader_conditional.h"
 #import <CommonCrypto/CommonDigest.h>
+#import <TargetConditionals.h>
 #import "nvn_refl.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -39,15 +40,51 @@ static BOOL hex(id x, NSUInteger n) {
     return YES;
 }
 static NSString *digest(NSData *d){unsigned char sum[CC_SHA256_DIGEST_LENGTH];char h[65];CC_SHA256(d.bytes,(CC_LONG)d.length,sum);for(unsigned i=0;i<sizeof sum;i++)snprintf(h+2*i,3,"%02x",sum[i]);return @(h);}
-/* Walk every directory with openat/O_NOFOLLOW and retain that exact directory
- * descriptor across the sibling read. realpath must never erase symlink evidence. */
+static NSArray<NSString *> *absolute_components(NSString *path) {
+    if(!str(path)||!path.isAbsolutePath){errno=EINVAL;return nil;}
+    const char *bytes=path.UTF8String;
+    if(!bytes||strlen(bytes)!=[path lengthOfBytesUsingEncoding:NSUTF8StringEncoding]){errno=EINVAL;return nil;}
+    /* Do not standardize the request: that would hide dot/parent components. */
+    NSArray<NSString *> *parts=[path componentsSeparatedByString:@"/"];
+    for(NSUInteger i=1;i<parts.count;i++) {
+        NSString *part=parts[i];
+        if(!part.length||[part isEqual:@"."]||[part isEqual:@".."]) {errno=EINVAL;return nil;}
+    }
+    return parts;
+}
+static int directory_fd_at_trusted_root(NSString *path,NSString *trustedRoot) {
+    NSArray<NSString *> *parts=absolute_components(path);
+    if(!parts)return -1;
+    NSUInteger first=1;
+    const char *anchor="/";
+    if(trustedRoot) {
+        NSArray<NSString *> *rootParts=absolute_components(trustedRoot);
+        if(!rootParts)return -1;
+        /* The trailing separator enforces strict containment, including the
+         * root itself and sibling names sharing the root's string prefix. */
+        if(![path hasPrefix:[trustedRoot stringByAppendingString:@"/"]]) {errno=EPERM;return -1;}
+        first=rootParts.count;anchor=trustedRoot.fileSystemRepresentation;
+    }
+    int fd=open(anchor,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    for(NSUInteger i=first;fd>=0&&i<parts.count;i++) {
+        int next=openat(fd,parts[i].fileSystemRepresentation,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+        int failure=errno;close(fd);fd=next;if(fd<0)errno=failure;
+    }
+    return fd;
+}
+/* iOS grants access to the signed bundle, not directory enumeration of every
+ * sandbox ancestor. Only this OS-owned root is canonicalized. Artifact paths
+ * are never resolved, and every component below the anchor remains NOFOLLOW.
+ * Desktop/untrusted loading retains its complete walk from '/'. */
 static int directory_fd(NSString *path) {
-    if(!str(path)||!path.isAbsolutePath)return -1;
-    NSArray *parts=path.pathComponents;int fd=open("/",O_RDONLY|O_DIRECTORY|O_CLOEXEC);
-    for(NSUInteger i=1;fd>=0&&i<parts.count;i++){
-        NSString *p=parts[i];if(!p.length||[p isEqual:@"."]||[p isEqual:@".."]) {close(fd);return -1;}
-        int next=openat(fd,p.fileSystemRepresentation,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);close(fd);fd=next;
-    }return fd;
+#if TARGET_OS_IOS && !TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST
+    static NSString *root;static dispatch_once_t once;
+    dispatch_once(&once,^{root=[NSBundle.mainBundle.bundlePath.stringByResolvingSymlinksInPath copy];});
+    if(!root.length){errno=EINVAL;return -1;}
+    return directory_fd_at_trusted_root(path,root);
+#else
+    return directory_fd_at_trusted_root(path,nil);
+#endif
 }
 static NSData *read_file(NSString *dir,NSString *name,size_t limit,NSError **error) {
     int parent=directory_fd(dir);if(parent<0){reject(error,@"conditional directory is not a symlink-free absolute path");return nil;}
