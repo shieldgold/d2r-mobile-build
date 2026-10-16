@@ -4,20 +4,31 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #if defined(OWNED_STATUS_MAP)
+#define block inherited_transfer_abort_block
 #define main inherited_transfer_fixture_main
 #include "whole_transfer_probe.c"
 #undef main
+#undef block
+#include "actual_status_wait.inc"
+static int actual_status_word_svc(int number,uint64_t *regs) {switch(number){
+#include "original_word_cases.inc"
+default:abort();}}
 static int status_lock_checks;
+static int status_write_errno;
 static unsigned dispatch_calls;
 static uint64_t svc_dispatch_impl(int number,uint64_t *frame,uint64_t original) {
     (void)original;dispatch_calls++;
     if(number==4||number==5)return owned_memory_svc(number,frame);
+    if(number==0x1c||number==0x1d||number==0x34||number==0x35) {
+        assert(actual_status_word_svc(number,frame)==1);return 0;
+    }
     frame[0]=0;frame[1]=0x1234;return 0x5a; /* Owned excluded-API stand-in. */
 }
 #if defined(BOTW_NORMAL_API_STATUS_BASELINE)
@@ -31,10 +42,75 @@ ssize_t owned_status_write(int fd,const void *data,size_t size) {
         assert(!pthread_mutex_trylock(&g_heap_resize_lock));pthread_mutex_unlock(&g_heap_resize_lock);
         assert(!pthread_mutex_trylock(&g_map_lock));pthread_mutex_unlock(&g_map_lock);
     }
-    return write(fd,data,size);
+    ssize_t result=write(fd,data,size);if(status_write_errno)errno=EIO;return result;
+}
+static void status_thread_prepare(thr_t *thread) {
+    memset(thread,0,sizeof *thread);assert(!pthread_cond_init(&thread->cv,NULL));
+    pthread_mutex_lock(&G);thread->handle=h_new(O_THREAD,thread);pthread_mutex_unlock(&G);
+}
+static void status_thread_finish(thr_t *thread) {
+    assert(!thread->wkind&&!thread->next&&!pthread_cond_destroy(&thread->cv));
+    pthread_mutex_lock(&G);unsigned slot=thread->handle-0x1000;
+    assert(g_h[slot].type==O_THREAD&&g_h[slot].obj==thread);
+    memset(&g_h[slot],0,sizeof g_h[slot]);pthread_mutex_unlock(&G);
+}
+typedef struct {thr_t thread;int number;uint64_t frame[31],before[31],returned;int saved_errno;} status_wait_job;
+static void *status_wait_worker(void *context) {
+    status_wait_job *job=context;assert(!pthread_setspecific(g_keythr,&job->thread));
+    errno=ENOTTY;job->returned=svc_dispatch(job->number,job->frame,0);job->saved_errno=errno;
+    assert(!pthread_setspecific(g_keythr,NULL));return NULL;
+}
+static void status_wait_until_linked(thr_t *thread,int kind) {
+    uint64_t deadline=now_ns()+UINT64_C(2000000000);
+    for(;;) {
+        pthread_mutex_lock(&G);int linked=thread->wkind==kind&&g_wait==thread;pthread_mutex_unlock(&G);
+        if(linked)return;
+        assert(now_ns()<deadline);sched_yield();
+    }
+}
+static void status_wait_success(int number) {
+    status_wait_job job={.number=number};status_thread_prepare(&job.thread);
+    uint32_t *word=(uint32_t *)(g_heap+2*MIB),*key=word+1;
+    *word=number==0x1c?job.thread.handle:7;*key=0;
+    for(unsigned i=0;i<31;i++)job.frame[i]=UINT64_C(0xfeed0000)+i;
+    job.frame[0]=(uintptr_t)word;job.frame[1]=number==0x1c?(uintptr_t)key:2;
+    job.frame[2]=number==0x1c?job.thread.handle:7;job.frame[3]=UINT64_MAX;
+    memcpy(job.before,job.frame,sizeof job.frame);pthread_t worker;
+    assert(!pthread_create(&worker,NULL,status_wait_worker,&job));
+    status_wait_until_linked(&job.thread,number==0x1c?2:3);
+    uint64_t signal[31]={0};signal[0]=(uintptr_t)(number==0x1c?key:word);
+    signal[1]=number==0x1c?UINT64_MAX:0;signal[3]=1;
+    assert(!svc_dispatch(number==0x1c?0x1d:0x35,signal,0)&&!signal[0]);
+    assert(!pthread_join(worker,NULL)&&!job.returned&&!job.frame[0]&&job.saved_errno==ENOTTY);
+    assert(!memcmp(job.frame+1,job.before+1,sizeof job.frame-sizeof *job.frame)&&!g_wait);
+    if(number==0x1c)assert(*word==job.thread.handle&&!*key);
+    status_thread_finish(&job.thread);
+}
+static void status_wait_errors(int number) {
+    thr_t self;status_thread_prepare(&self);assert(!pthread_setspecific(g_keythr,&self));
+    uint32_t *word=(uint32_t *)(g_heap+2*MIB),*key=word+1;
+    for(unsigned n=0;n<3;n++) {
+        uint64_t frame[31],before[31];for(unsigned i=0;i<31;i++)frame[i]=UINT64_C(0xfeed0000)+i;
+        *word=number==0x1c?self.handle:7;*key=0;
+        frame[0]=(uintptr_t)word+(n==0?1:0);
+        frame[1]=number==0x1c?(uintptr_t)key:2;
+        frame[2]=number==0x1c?self.handle:(n==1?8:7);frame[3]=0;
+        memcpy(before,frame,sizeof frame);errno=ENOTTY;
+        assert(!svc_dispatch(number,frame,0)&&errno==ENOTTY);
+        assert(frame[0]==(n==0?0xd401u:number==0x34&&n==1?R_BAD_STATE:R_TIMEOUT));
+        assert(!memcmp(frame+1,before+1,sizeof frame-sizeof *frame)&&!self.wkind&&!g_wait);
+        if(number==0x1c&&n)assert(!*word&&*key==1);
+    }
+    assert(!pthread_setspecific(g_keythr,NULL));status_thread_finish(&self);
 }
 int main(int argc,char **argv) {
     CHECK(argc==2);CHECK(!initialize());status_lock_checks=1;
+    if(!strncmp(argv[1],"wait-",5)) {
+        status_write_errno=1;int condition=!strncmp(argv[1],"wait-key-",9);
+        if(!strcmp(argv[1],condition?"wait-key-ok":"wait-address-ok"))status_wait_success(condition?0x1c:0x34);
+        else {assert(!strcmp(argv[1],condition?"wait-key-error":"wait-address-error"));status_wait_errors(condition?0x1c:0x34);}
+        return 0;
+    }
     uint64_t frame[31],before[31];for(unsigned i=0;i<31;i++)frame[i]=UINT64_C(0xfeed0000)+i;
     if(!strcmp(argv[1],"map")) {
         size_t page=(size_t)getpagesize();frame[0]=0;frame[1]=(uintptr_t)(g_heap+2*MIB);frame[2]=page;
@@ -165,7 +241,6 @@ int main(int argc,char **argv) {
             BOTW_HOST_API_NVN_QUEUE_ACQUIRE_TEXTURE,
             BOTW_HOST_API_NVN_COMMAND_BUFFER_INITIALIZE};
         assert((unsigned)appended[0]==15&&(unsigned)appended[1]==16);
-        assert(BOTW_HOST_API_COUNT==17);
         for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)for(unsigned n=0;n<3;n++) {
             errno=ENOTTY;
             botw_whole_host_api_result(appended[i],BOTW_HOST_API_OK);
@@ -175,6 +250,21 @@ int main(int argc,char **argv) {
         }
         botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
         assert(atomic_load(&writes)==4);
+    } else if(!strcmp(argv[1],"buffer-wait-apis")) {
+        assert((unsigned)BOTW_HOST_API_NVN_COMMAND_BUFFER_INITIALIZE==16);
+        const botw_whole_host_api appended[]={BOTW_HOST_API_NVN_BUFFER_INITIALIZE,
+            BOTW_HOST_API_WAIT_PROCESS_WIDE_KEY_ATOMIC,BOTW_HOST_API_WAIT_FOR_ADDRESS};
+        for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)assert((unsigned)appended[i]==17+i);
+        assert(BOTW_HOST_API_COUNT==20);
+        for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)for(unsigned n=0;n<3;n++) {
+            errno=ENOTTY;
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_OK);
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_ERROR);
+            botw_whole_host_api_result(appended[i],(botw_whole_host_api_outcome)2);
+            assert(errno==ENOTTY);
+        }
+        botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
+        assert(atomic_load(&writes)==6&&BOTW_HOST_API_COUNT==20);
     } else if(!strcmp(argv[1],"invalid")) {
         errno=ENOTTY;botw_whole_host_api_result((botw_whole_host_api)-1,BOTW_HOST_API_OK);
         botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_ERROR);

@@ -12,7 +12,8 @@ EXP=ROOT/'experiments/botw_upstream_host'
 BASELINE=os.environ.get('BOTW_NORMAL_API_STATUS_BASELINE')=='1'
 NAMES=('SetHeapSize','SetMemoryPermission','SetMemoryAttribute','MapMemory','UnmapMemory','QueryMemory','CreateThread','StartThread',
        'CreateTransferMemory','CloseHandle','WaitSynchronization','GetInfo','ConnectToNamedPort','SendSyncRequest',
-       'NvnMemoryPoolInitialize','NvnQueueAcquireTexture','NvnCommandBufferInitialize')
+       'NvnMemoryPoolInitialize','NvnQueueAcquireTexture','NvnCommandBufferInitialize',
+       'NvnBufferInitialize','WaitProcessWideKeyAtomic','WaitForAddress')
 CAPACITY='[botw whole-host] heap_plan heap_bytes=671088640 root_bytes=637534208\n'
 
 
@@ -67,6 +68,11 @@ class NormalApiStatus(OwnedRunner,unittest.TestCase):
             '[botw whole-host] api=NvnCommandBufferInitialize result=ok\n'
             '[botw whole-host] api=NvnCommandBufferInitialize result=error\n')
 
+    def test_buffer_and_wait_apis_append_after_all_seventeen_original_values(self):
+        self.assertEqual(self.run_owned(self.logger,'buffer-wait-apis'), ''.join(
+            '[botw whole-host] api='+name+' result='+outcome+'\n'
+            for name in NAMES[17:] for outcome in ('ok','error')))
+
     def test_invalid_api_or_outcome_never_logs(self):self.assertEqual(self.run_owned(self.logger,'invalid'),'')
     def test_failed_write_and_duplicate_preserve_errno(self):self.assertEqual(self.run_owned(self.logger,'write-failure'),'')
     def test_parallel_duplicate_outcomes_emit_only_two_literal_lines(self):
@@ -87,11 +93,26 @@ class NormalApiStatusMap(OwnedRunner,unittest.TestCase):
         class PrivateTransfer(transfer_fixtures.WholeTransfer):pass
         PrivateTransfer.setUpClass();cls.addClassCleanup(PrivateTransfer.doClassCleanups)
         work=PrivateTransfer.binary.parent
+        thread=(work/'dm/host/hle_thread.c').read_text()
+        function=transfer_fixtures.source_fixtures.function
+        # The transfer fixture deliberately aborts if its block stand-in runs.
+        # Keep that older fixture untouched; extract the original wait code for
+        # this test into the same TU, sharing its actual G/g_h/wait primitives.
+        (work/'actual_status_wait.inc').write_text(
+            'static int64_t block_inner(thr_t *,int,int64_t);\n'+
+            function(thread,'static int64_t block(')+'\n'+
+            function(thread,'static int64_t block_inner(thr_t *t, int kind, int64_t ns) {')+'\n'+
+            function((work/'dm/host/botw_diag.c').read_text(),'void dm_prof_add(')+'\n')
         original=(work/'dm/host/hle_svc.c').read_text()
         if not BASELINE:
             result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(EXP/'patches/normal-api-status.patch')],
                 cwd=work,capture_output=True,text=True)
             if result.returncode:raise AssertionError(result.stdout+result.stderr)
+            wait_patch=EXP/'patches/normal-wait-status.patch'
+            if wait_patch.is_file():
+                result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(wait_patch)],
+                    cwd=work,capture_output=True,text=True)
+                if result.returncode:raise AssertionError(result.stdout+result.stderr)
             patched=(work/'dm/host/hle_svc.c').read_text()
             old=original[original.index('uint64_t svc_dispatch('):]
             impl=patched[patched.index('static uint64_t svc_dispatch_impl('):patched.index('\n/* The original dispatcher owns')]
@@ -101,8 +122,8 @@ class NormalApiStatusMap(OwnedRunner,unittest.TestCase):
         cls.map=build(work,'map',['-DOWNED_STATUS_MAP=1','-Wno-unused-function','-Wno-unused-variable','-Wno-format',
             '-include',EXP/'tests/whole_transfer_vm_hooks.h',EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c'])
 
-    # Only these two map tests belong here; generic/heap contracts have their
-    # own portable fixture and must not be discovered twice.
+    # Generic/heap contracts have their own portable fixture. These cases use
+    # only the original owned memory and single-kernel synchronization paths.
     def test_actual_map_failure_returns_zero_but_logs_error_and_success_unchanged(self):
         self.assertEqual(self.run_owned(self.map,'map'),CAPACITY+
             '[botw whole-host] api=MapMemory result=error\n[botw whole-host] api=MapMemory result=ok\n'+
@@ -110,5 +131,21 @@ class NormalApiStatusMap(OwnedRunner,unittest.TestCase):
 
     def test_unknown_counter_exit_sleep_and_debug_are_not_metadata_results(self):
         self.assertEqual(self.run_owned(self.map,'excluded'),CAPACITY)
+
+    def test_actual_condition_wait_completes_after_original_signal_and_logs_success(self):
+        self.assertEqual(self.run_owned(self.map,'wait-key-ok'),CAPACITY+
+            '[botw whole-host] api=WaitProcessWideKeyAtomic result=ok\n')
+
+    def test_actual_condition_wait_invalid_and_zero_timeout_log_one_error(self):
+        self.assertEqual(self.run_owned(self.map,'wait-key-error'),CAPACITY+
+            '[botw whole-host] api=WaitProcessWideKeyAtomic result=error\n')
+
+    def test_actual_address_wait_completes_after_original_signal_and_logs_success(self):
+        self.assertEqual(self.run_owned(self.map,'wait-address-ok'),CAPACITY+
+            '[botw whole-host] api=WaitForAddress result=ok\n')
+
+    def test_actual_address_wait_mismatch_invalid_and_timeout_log_one_error(self):
+        self.assertEqual(self.run_owned(self.map,'wait-address-error'),CAPACITY+
+            '[botw whole-host] api=WaitForAddress result=error\n')
 
 if __name__=='__main__':unittest.main()

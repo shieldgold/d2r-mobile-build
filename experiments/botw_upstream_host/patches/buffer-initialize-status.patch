@@ -1,0 +1,35 @@
+--- a/dm/gfx/nvn/botw_buffer.c
++++ b/dm/gfx/nvn/botw_buffer.c
+@@ -3,6 +3,8 @@
+ #include "../../host/dm.h"
+ #include "nvn_protos.h"
+ #include "nvn_obj.h"
++#include "whole_policy.h"
++#include <errno.h>
+ 
+ struct buffer_builder { uint64_t reserved; NVNdevice *device; pool_t *pool; ptrdiff_t offset; size_t size; };
+ struct buffer { uint32_t magic, reserved; NVNdevice *device; pool_t *pool; ptrdiff_t offset; size_t size; uint64_t serial; };
+@@ -32,7 +34,7 @@
+ API(nvnBufferBuilderGetMemoryPool, NVNmemoryPool *, const NVNbufferBuilder *b) { return (NVNmemoryPool *)BC(b)->pool; }
+ API(nvnBufferBuilderGetMemoryOffset, ptrdiff_t, const NVNbufferBuilder *b) { return BC(b)->offset; }
+ API(nvnBufferBuilderGetSize, size_t, const NVNbufferBuilder *b) { return BC(b)->size; }
+-API(nvnBufferInitialize, NVNboolean, NVNbuffer *buffer, const NVNbufferBuilder *builder) {
++static NVNboolean botw_nvn_buffer_initialize_impl(NVNbuffer *buffer, const NVNbufferBuilder *builder) {
+     const struct buffer_builder *b = BC(builder);
+     if (!b->pool || b->pool->magic != MAGIC('P','O','O','L') || b->offset < 0 ||
+         (uint64_t)b->offset > b->pool->size || b->size > b->pool->size - (uint64_t)b->offset) {
+@@ -43,6 +45,14 @@
+     }
+     *BUF(buffer) = (struct buffer){BUFFER_MAGIC, 0, b->device, b->pool, b->offset, b->size, nvn_new_serial()};
+     return 1;
++}
++API(nvnBufferInitialize, NVNboolean, NVNbuffer *buffer, const NVNbufferBuilder *builder) {
++    NVNboolean result = botw_nvn_buffer_initialize_impl(buffer, builder);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_NVN_BUFFER_INITIALIZE,
++                              result != 0 ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
+ }
+ API(nvnBufferSetDebugLabel, void, NVNbuffer *b, const char *label) { (void)b; (void)label; }
+ API(nvnBufferFinalize, void, NVNbuffer *b) { BUF(b)->magic = 0; }

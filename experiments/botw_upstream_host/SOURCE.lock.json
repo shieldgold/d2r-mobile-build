@@ -249,13 +249,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "79d030f7757bd6845fbe63015a76954280bc4a79a8a2163c0b1621568a5b7b61",
-      "bytes": 6659,
+      "sha256": "d59a2a304fccbcfb3c82094c60ec835957524f7181b4d32bcaba7bf9aa21938b",
+      "bytes": 6792,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "b593055cc5200d6f4e3a19f416e022d978dfa2271fa3f61fad241e7026a49f28",
-      "bytes": 2384,
+      "sha256": "6cf7ddd05b66462534e74d39c92cc446adb0ed7315a63024f230cdc3118476db",
+      "bytes": 2509,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -528,6 +528,11 @@
       "bytes": 5957,
       "role": "thin-adapter-or-verification"
     },
+    "patches/buffer-initialize-status.patch": {
+      "sha256": "0c988961c9af98db23005bde08c0a3e8cc6216f21aea35dbe38bd29de469d5da",
+      "bytes": 1915,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/checked-dirty-write.patch": {
       "sha256": "dab2a0616f11bc035ee0ba3c6faacdacb1d31ac5a15307c8cc207b42cc2b99b3",
       "bytes": 11979,
@@ -596,6 +601,11 @@
     "patches/normal-thread-tlr.patch": {
       "sha256": "5001c69a5cb212cbf798feef7c0cad70d17a8a51ece6d44ea6008c6e12dc0986",
       "bytes": 915,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/normal-wait-status.patch": {
+      "sha256": "0eddb3fbd02c6301172dec6efbea6a306ad964cd112b449f65d2803ca2db52cf",
+      "bytes": 519,
       "role": "thin-adapter-or-verification"
     },
     "patches/ordinary-pool-backing.patch": {
@@ -743,6 +753,11 @@
       "bytes": 15618,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_buffer_initialize_status_probe.m": {
+      "sha256": "1a3140efd601459b0252ce20bf42a398c45645ae49cee97039d6587574f27b23",
+      "bytes": 7009,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_constructor_order_probe.c": {
       "sha256": "ef17aa071f75222bf77f0d0718683d4fe88e88660b7868cdf72f8cd267d814f2",
       "bytes": 2304,
@@ -824,8 +839,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_normal_api_status_probe.c": {
-      "sha256": "fe127315b0ddd20da80481b36904a2a4e857f27275bc4e5a807d356a7801b820",
-      "bytes": 10589,
+      "sha256": "598008f9095ca18737dd4e1528a2e1a032854ffff0e9b76da1a2917dc7692b60",
+      "bytes": 15730,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_nvn_version_probe.c": {
@@ -1686,9 +1701,12 @@
     "patches/base-v0-queue-acquire.patch",
     "patches/pool-initialize-status.patch",
     "patches/base-v0-sync-wait.patch",
-    "patches/early-graphics-initialize-status.patch"
+    "patches/early-graphics-initialize-status.patch",
+    "patches/buffer-initialize-status.patch",
+    "patches/normal-wait-status.patch"
   ],
   "patched_source_sha256": {
+    "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
     "dm/gfx/nvn/botw_shader_manifest.h": "a95145b9f7fbeb9a72f082ecf38cab776af078d7ecf91c99e6824afd24386501",
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
@@ -1718,7 +1736,7 @@
     "dm/host/hle.c": "721c43f02f361e0ace50a9b7ed7561109f27cf8e9494e34e4371b55d03bdf552",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
-    "dm/host/hle_svc.c": "fe293ff4bae63ebde2af0845caa927a87f11273617c2eacdc9c32f8b05c83b1a",
+    "dm/host/hle_svc.c": "92a18e39a1a5753d2a3f6fe826691fec3fd9f54aa369fbc8190b14a3a434f866",
     "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
     "dm/host/loader.c": "42e7e7eb2a0d67b860b02a74e11af0ca395951e9219da7bdbc2dedb4a1104ab5",
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",

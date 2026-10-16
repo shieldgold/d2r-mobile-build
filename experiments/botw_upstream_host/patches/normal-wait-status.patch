@@ -1,0 +1,11 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -353,6 +353,8 @@
+     case 0x29: api = BOTW_HOST_API_GET_INFO; break;
+     case 0x1F: api = BOTW_HOST_API_CONNECT_TO_NAMED_PORT; break;
+     case 0x21: api = BOTW_HOST_API_SEND_SYNC_REQUEST; break;
++    case 0x1C: api = BOTW_HOST_API_WAIT_PROCESS_WIDE_KEY_ATOMIC; break;
++    case 0x34: api = BOTW_HOST_API_WAIT_FOR_ADDRESS; break;
+     default: return returned;
+     }
+     botw_whole_host_api_result(api, (uint32_t)regs[0] ? BOTW_HOST_API_ERROR : BOTW_HOST_API_OK);

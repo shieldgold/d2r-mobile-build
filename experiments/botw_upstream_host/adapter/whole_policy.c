@@ -37,7 +37,9 @@ void botw_whole_host_api_result(botw_whole_host_api api, botw_whole_host_api_out
         NORMAL_API_LINES(WaitSynchronization), NORMAL_API_LINES(GetInfo),
         NORMAL_API_LINES(ConnectToNamedPort), NORMAL_API_LINES(SendSyncRequest),
         NORMAL_API_LINES(NvnMemoryPoolInitialize),
-        NORMAL_API_LINES(NvnQueueAcquireTexture), NORMAL_API_LINES(NvnCommandBufferInitialize)
+        NORMAL_API_LINES(NvnQueueAcquireTexture), NORMAL_API_LINES(NvnCommandBufferInitialize),
+        NORMAL_API_LINES(NvnBufferInitialize), NORMAL_API_LINES(WaitProcessWideKeyAtomic),
+        NORMAL_API_LINES(WaitForAddress)
     };
 #undef NORMAL_API_LINES
     if ((unsigned)api < BOTW_HOST_API_COUNT && (unsigned)outcome <= BOTW_HOST_API_ERROR &&
