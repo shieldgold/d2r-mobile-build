@@ -1,0 +1,29 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -1671,6 +1671,26 @@
+     return NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS;
+ }
+ 
++NVN(nvnQueueAcquireTexture, NVNqueueAcquireTextureResult, NVNqueue *q, NVNwindow *w, int *idx) {
++    if (!q || !w || !idx) return NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_NATIVE_ERROR;
++    const queue_t *queue = (const queue_t *)q;
++    const win_t *window = (const win_t *)w;
++    if (queue->magic != MAGIC('Q', 'U', 'E', 'U') || window->magic != MAGIC('W', 'I', 'N', 'D') ||
++        window->ntex < 1 || window->ntex > 4 || window->next < 0 || window->next == INT32_MAX)
++        return NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_NATIVE_ERROR;
++
++    // Base-v0 combines WindowAcquire, a temporary sync and QueueWaitSync here.
++    // Reuse the complete window path: it owns image rotation, pacing and the
++    // previous present ticket's completion. All submits and presents use the
++    // same ordered translation queue and single Metal stream, so later draws
++    // already follow the fence that WindowAcquire would put in that sync.
++    // This local composition does not implement arbitrary QueueWaitSync.
++    NVNwindowAcquireTextureResult result = h_nvnWindowAcquireTexture(w, NULL, idx);
++    return result == NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS
++        ? NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_SUCCESS
++        : NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_NATIVE_ERROR;
++}
++
+ 
+ // Frame boundary: on each present, print / write to disk the call count of each NVN function for this frame
+ static uint64_t g_prev[NVN_NFUNC];

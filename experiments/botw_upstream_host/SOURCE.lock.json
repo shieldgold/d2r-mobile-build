@@ -503,6 +503,11 @@
       "bytes": 3830,
       "role": "thin-adapter-or-verification"
     },
+    "patches/base-v0-queue-acquire.patch": {
+      "sha256": "b9a81e4a79f09445fef87993011cbb9414f13a3c2c376de0cc7fbcb3764b4b09",
+      "bytes": 1551,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/base-v0-vi-layer.patch": {
       "sha256": "ddf6522db5980bb0fa4eec72bc13fc91d490f5cc634de7611be8532cd219f985",
       "bytes": 4742,
@@ -826,6 +831,11 @@
     "tests/whole_pool_suspend_probe.c": {
       "sha256": "22fc31169325cbcc5b61ef6c0e6ad640daca0bb28ec3ac434bde48b0a41ed67a",
       "bytes": 2118,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_queue_acquire_probe.c": {
+      "sha256": "e9741240ca6ac8dc973e5ae5ecc12e84419b4cd81bfb54cbfb9da3883a12ac4e",
+      "bytes": 9929,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_romfs_probe.c": {
@@ -1642,7 +1652,8 @@
     "patches/normal-api-status.patch",
     "patches/base-v0-nvn-version.patch",
     "patches/graphics-bootstrap-status.patch",
-    "patches/base-v0-vi-layer.patch"
+    "patches/base-v0-vi-layer.patch",
+    "patches/base-v0-queue-acquire.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1650,7 +1661,7 @@
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
-    "dm/gfx/nvn/hle_nvn.c": "e9e824c7431ba5747de28e859fcaac0275b2751f399faf465505e7c5b48feba7",
+    "dm/gfx/nvn/hle_nvn.c": "8cc755e238eb595f037b06bc77d8c384e400ae9883998bcfccc41d9451b2083f",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
