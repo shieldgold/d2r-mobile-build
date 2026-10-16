@@ -139,6 +139,14 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 该批独立最终定点 **22 项通过**，涵盖真实 Metal 深度采样、读回、mip、清除/深度测试、重映、别名、CPU 局部写及 padding、错误 kind/跨段整批拒绝和旧颜色回归；20 个冻结文件 SHA256 前后保持。独立公共入口复现并修复了直接 Window Builder 的 array 类型旁路，同一无 GPU fixture 的 Initialize/Present 两场景由 RED 转为 GREEN，Present 拒绝发生在取 drawable 前。完整 vendor 模块 **9 项通过**，保留 109 个原检查、3000 组随机批和 20000 次并发重映；只将原来作为非法样本的、现已支持的 `0x101` 改为仍不支持的 `0x107`。此前相关 262 项的那次单一旧负例失败仍保留，后续定点通过不改写其记录。
 
+提交 `3a22d53` 的固定源码全套回归共 **879 项，878 通过、1 项原有硬件条件跳过**，耗时 184.620 秒；632 个跟踪源码文件保持，源码清单 SHA256 为 `782dca35f2d1ef6e0ad147b451a6b227b4b95ae000fc6f790c19a73c4b50ec7c`。普通 Mac 原游戏启动实际记录 `MetalPlainColorDepth`，首个停止点从 D16 存储查询推进到 `nvnMemoryPoolMapVirtual index=0 storageClass=0x146`，`mac_host_return=1`、`mac_process_exit=1`、`frontend_resources_released=false`。原堆、十三线程、最大读取和 120 MiB physical pool 两段发布保持，仍无游戏呈现；不能由越过查询推断深度 GPU 已被原游戏消费。binary SHA256 为 `4050b4bb2f85ee8f4559c0010ae8134dc6163c51b56c283cd4accf2b906b134a`，报告位于 `outputs/botw-host39-mac-3a22d53/ordinary-admission-evidence.json`。
+
+该版 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38835428644) 和 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38835428480) 均成功，94 个 native 文件来源经核验后本机组装、签名，保数据安装当前 iPhone 12 / iOS 18.1，普通启动 PID 1057。旧日志前缀保留，bootstrap 从 25 增至 26，手机实际策略为 `MetalPlainColorDepth`，同样停在 MapVirtual `0x146`，`host_return=1`；没有原游戏画面、操作、音频、存档、重开验收。RomFS 大小/mtime、32 字节 UID、shader 清单和权限均保持，未重传资源。报告位于 `outputs/botw-ios-3a22d53-iphone12/device-run-report.json`，IPA 为 19,139,615 字节，SHA256 `d4fb9f1d35407865789e646e6fd0f033191a8831dfb366be2b00ebc01f88c4e0`。
+
+随后仅增加精确 `0x146→raw46` 的 Map/CPU identity 资格，复用现有完整 interval/transaction、lease、别名和代际算法。D24 与 D24S8 共用该 label，单凭 Map 错误不能区分实际格式。GPU resolver 在身份验证后、任何 Metal backing 物化前明确拒绝 raw46，包括 expected=-1；原 raw0、FE、D16/32F 的 GPU 域不扩大，D24/组合 depth-stencil 的 Texture Initialize 继续拒绝。现有两种初始化错误仅追加已验证 Builder 快照的 target/flags/format/samples，不读取纹理内容、地址或新增 VM 查询。
+
+该小批四个相关模块共 **100 项通过、零跳过**，35.358 秒，涵盖完整 vendor 基线和事务、CPU Map/别名/代际、GPU 物化前拒绝及初始化错误上下文。初始四项行为 RED 与中途“只开放 identity 会误入 GPU resolver”的独立 RED 均单独保留；未实现 24 位深度转换，未将这些测试计作原游戏 GPU 消费或可玩证明。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

@@ -63,7 +63,7 @@ int nvn_vpool_virt_finalize(const void *owner);
 // nothing is mutated. Requests apply in order, so a later overlapping request wins. Every
 // request needs voff and size to be multiples of NVN_VPOOL_PAGE; zero-size requests are
 // rejected as NVN_VPOOL_INVALID because their native meaning is unverified. Mapping requests
-// also need poff to be a page multiple and storage class 0, 0x100, 0x1fe, 0x101 or 0x17b. Unmap requests
+// also need poff to be a page multiple and storage class 0, 0x100, 0x1fe, 0x101, 0x17b or 0x146. Unmap requests
 // (physicalPool == NULL) ignore physicalOffset and storageClass.
 // count == 0 succeeds on a live virtual pool without reading reqs. err (optional) receives an
 // English description of the first failing request.
@@ -83,7 +83,7 @@ typedef struct {
     const void *phys_owner;
     uint8_t *cpu;           // Current physical CPU address of addr
     uint64_t phys_id;       // Unique id of the physical registration (owner pointers can be reused)
-    uint32_t raw_kind;      // Valid when contiguous: 0 (pitch), 0xfe (color), 1 (D16) or 0x7b (D32F)
+    uint32_t raw_kind;      // Valid when contiguous: 0 (pitch), 0xfe (color), 1 (D16), 0x7b (D32F) or 0x46 (D24/D24S8 CPU metadata)
     // Private:
     const void *v_;
     unsigned first_;
@@ -98,7 +98,7 @@ typedef struct {
     uint8_t *cpu;           // Physical CPU address backing the piece's first byte
     uint64_t phys_off;      // Offset inside the physical pool
     uint64_t gen;           // Generation at which this mapping was established
-    uint32_t raw_kind;      // Exact raw kind of this piece (0, 0xfe, 1 or 0x7b)
+    uint32_t raw_kind;      // Exact raw kind of this piece (0, 0xfe, 1, 0x7b or 0x46)
 } nvn_vpool_span;
 
 int nvn_vpool_lease_acquire(nvn_vpool_lease *l, uint64_t addr, uint64_t len);

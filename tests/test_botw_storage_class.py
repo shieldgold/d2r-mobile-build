@@ -106,6 +106,9 @@ class StorageClassTests(unittest.TestCase):
         self.assertIn(expected, run.stdout)
         self.assertNotIn('failed assertion', run.stderr)
 
+    def test_raw46_depth_creation_remains_refused_with_exact_normal_builder_error_context(self):
+        self.probe('raw46-create-context', 'RAW46_CREATION_STILL_REFUSED_WITH_NORMAL_BUILDER_SCALARS_OK')
+
     def test_plain_depth_initialize_checks_live_registry_before_untrusted_provider_header(self):
         for state in ('foreign', 'inaccessible', 'copy'):
             with self.subTest(state=state):

@@ -254,12 +254,17 @@ static void textureRetirePoolReferences(BWPool *pool){
         t.texture=nil;t.mapping=nil;t.uploadHash=nil;nvn_texflush_forget(t.identity);
     }
 }
+/* Existing entrypoint-error context from the validated Builder snapshot only.
+ * No address, texture data, extra validator, or VM query is evaluated here. */
+static int textureInitializeRejected(const TextureBuilder *b,const char *reason){
+    return report("%s target=%u flags=0x%x format=0x%x samples=%d",reason,(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->samples);
+}
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
     TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;
-    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return textureInitializeRejected(b,"Texture hardware compression/layout request is not implemented for this format/flags/samples");
     BWDevice *device=get(b->device,[BWDevice class]);
     if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
-    uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
+    uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return textureInitializeRejected(b,"Texture format requires an unimplemented conversion/BC decoder");
     if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");
     for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return report("Texture component conversion is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return report("texture device/pool mismatch");

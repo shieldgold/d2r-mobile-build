@@ -113,3 +113,9 @@ color 路径仍使用 class100/1FE；下节新增精确101/17B深度映射。显
 合成真实Metal回归分别验证D16 UNORM和D32 float：四个不同GOB角点的depth2d采样、完整GPU读回、mip1、两份非零源的remap/alias；深度清除、近远绘制及失败深度测试；ordinary CPU局部区域写与clear后Invalidate的完整64KiB canary；私有/retired GPU权威、raw0别名、wrong-kind/跨segment整批前置拒绝和物理Finalize真实资源清退。它们不能替代A14实测，更不表示原游戏有首帧或可玩。
 
 呈现仍使用既有固定float颜色shader，本批不增加呈现能力。Window SetTextures、直接Builder Initialize及Present共用必要的非array 2D、float/normalized ordinary-color类型guard，array、深度、S8和整数会在list发布或nextDrawable/encode前具名拒绝。现exact+identity可创建的19个ordinary整数中，RGB10A2UI补入共享uint scalar trait；正确uint读取其10/10/10/2分量有真实像素证据，错误float binding在整批提交前拒绝。此类型guard不等于已证明每个float格式的线性过滤或设备呈现能力，现有已验证普通颜色呈现场景继续单独回归。
+
+## 已登记的146不开放24bit资源
+
+Map146/raw46新增范围仅CPU登记与canonical身份解析，GPU物化显式拒绝，creator域仍只有已证D16/D32F。D24和D24S8共用该标签，实际普通调用失败时，Initialize原有COMP/layout及format/conversion错误只追加已验证Builder快照的target、flags、format、samples标量；不额外扫描内存、查询VM或读取payload，不打印地址。它用于区分真正的format，不从Map146反推其中一种。
+
+iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byte GOB可直接blit。固定完整上游存在可复用的depth/stencil aspect/view/clear/sample模块，但pkg/import/copy链没有完整D24/D24S8双向codec。原24bit packing/unused byte、归一化与GPU写后量化/回写、combined双aspect一致性以及近阈值比较/bias/equality必须另成可验证合同，本批不根据精度升级注释宣称行为等价或提前实现。

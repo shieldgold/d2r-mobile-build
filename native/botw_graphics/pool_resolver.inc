@@ -59,7 +59,7 @@ static BWPoolIdentity *poolTryIdentity(BWPool *p,size_t off,size_t bytes,int exp
     if(failure)*failure=NULL;
     if(!poolHostLive(p)||p.retiring)POOL_RESOLVE_FAIL("pool lifetime/retiring");
     if(!bytes||off>p.size||bytes>p.size-off)POOL_RESOLVE_FAIL("pool range bounds");
-    if(expected!=-1&&expected!=0&&expected!=0xfe&&expected!=1&&expected!=0x7b)POOL_RESOLVE_FAIL("unknown required raw kind");
+    if(expected!=-1&&expected!=0&&expected!=0xfe&&expected!=1&&expected!=0x7b&&expected!=0x46)POOL_RESOLVE_FAIL("unknown required raw kind");
     if(p.kind==BW_POOL_PHYSICAL)POOL_RESOLVE_FAIL("physical pool has no logical consumer identity");
     BWPool *physical=p;size_t physicalOffset=off;uint64_t gen=p.generation,id=p.generation;
     unsigned kind=0;uint64_t logical=p.kind==BW_POOL_VIRTUAL?p.gpuBase:(uint64_t)(uintptr_t)p.memory;
@@ -95,6 +95,9 @@ static BWPoolIdentity *poolTryIdentity(BWPool *p,size_t off,size_t bytes,int exp
 static BWPoolRange *poolTryResolve(BWPool *p,size_t off,size_t bytes,int expected,const char **failure){
 #define POOL_BIND_FAIL(message) do{if(failure)*failure=(message);return nil;}while(0)
     BWPoolIdentity *identity=poolTryIdentity(p,off,bytes,expected,failure);if(!identity)return nil;
+    /* Map/CPU metadata is not a 24-bit depth Metal representation. This also
+     * fences callers using expected=-1, before any backing materialization. */
+    if(identity.rawKind==0x46)POOL_BIND_FAIL("raw kind 0x46 has no implemented 24-bit depth GPU representation");
     if(p.flags&NVN_MEMORY_POOL_FLAGS_GPU_NO_ACCESS)POOL_BIND_FAIL("pool has GPU_NO_ACCESS");
     BWPool *physical=identity.physical;
     if(physical.noCopyDeferred&&!poolEnsureOrdinaryBacking(physical,failure))return nil;

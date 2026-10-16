@@ -47,9 +47,10 @@ int main(void){
  NVNmappingRequest r={(NVNmemoryPool*)(uintptr_t)0x1234,0,0,65536,0x100,0};
  CHECK(bw_pool_mapping_request_valid(&p,&r,131072,65536,0x189));
  unsigned depthKind=99;CHECK(bw_pool_storage_class_kind(0x101,&depthKind)&&depthKind==1);CHECK(bw_pool_storage_class_kind(0x17b,&depthKind)&&depthKind==0x7b);
+ unsigned raw46=99;CHECK(bw_pool_storage_class_kind(0x146,&raw46)&&raw46==0x46);
  unsigned kind=99;CHECK(bw_pool_storage_class_kind(0x100,&kind)&&kind==0);CHECK(bw_pool_storage_class_kind(0x1fe,&kind)&&kind==0xfe);
  r.storageClass=0x1fe;CHECK(bw_pool_mapping_request_valid(&p,&r,131072,65536,0x189));
- int bad[]={0,1,0xfe,0x107,0x146,0x186,0x1ff,0x200,-1};
+ int bad[]={0,1,0xfe,0x107,0x1c3,0x186,0x1ff,0x200,-1};
  for(unsigned i=0;i<sizeof bad/sizeof *bad;i++){kind=99;r.storageClass=bad[i];CHECK(!bw_pool_mapping_request_valid(&p,&r,131072,65536,0x189));CHECK(!bw_pool_storage_class_kind(bad[i],&kind)&&kind==99);}
  r.storageClass=0x100;r.physicalOffset=4096;CHECK(!bw_pool_mapping_request_valid(&p,&r,131072,65536,0x189));
  r.physicalOffset=0;r.virtualOffset=4096;CHECK(!bw_pool_mapping_request_valid(&p,&r,131072,65536,0x189));
