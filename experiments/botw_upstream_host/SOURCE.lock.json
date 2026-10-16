@@ -583,6 +583,11 @@
       "bytes": 17870,
       "role": "thin-adapter-or-verification"
     },
+    "patches/weak-import-resolution.patch": {
+      "sha256": "b50819ea08f1c9a175b8d960bc541369300a020b7808a2583e5f3fec9400f8f4",
+      "bytes": 3263,
+      "role": "thin-adapter-or-verification"
+    },
     "scripts/audio_sources.py": {
       "sha256": "8ab4191e135b7c3ae747640ab534e929bc41d066dcc61954a0ae8535c42b20df",
       "bytes": 4126,
@@ -801,6 +806,11 @@
     "tests/whole_transfer_vm_hooks.h": {
       "sha256": "20fe622a04eb11f872d7526a1785befe78973a99e1b55edffdfc2980526857fb",
       "bytes": 625,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_weak_import_probe.c": {
+      "sha256": "9982b81e358246df4582408c3d8c90d509657989749bdcc0ef88e924add04731",
+      "bytes": 7032,
       "role": "thin-adapter-or-verification"
     },
     "upstream/LICENSE": {
@@ -1556,7 +1566,8 @@
     "patches/portable-shader-source.patch",
     "patches/base-v0-image-bank.patch",
     "patches/conditional-shader-runtime.patch",
-    "patches/bounded-address-space.patch"
+    "patches/bounded-address-space.patch",
+    "patches/weak-import-resolution.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1583,12 +1594,12 @@
     "dm/host/crash.c": "f3ae211a438aee136ac2f7307fed57d620da204107959f1433aa97b44cf5b311",
     "dm/host/dm.h": "27cbad1e7034cf33726e0328259acf70e2d7b234c50b2e5bdb06c50772c49756",
     "dm/host/dm_title.c": "3967eb6b141445f192bd7bc28d4ced1fcbde021a43ea3bb9282f87c1715a87c9",
-    "dm/host/hle.c": "5b1be568e3bf9eabb3c7e130fe6e25d6ce84ee0f73922f4923578ebe9576bf82",
+    "dm/host/hle.c": "721c43f02f361e0ace50a9b7ed7561109f27cf8e9494e34e4371b55d03bdf552",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
     "dm/host/hle_svc.c": "4590cc81b1f5ebf7d6fe15f76a10913ab9a4697b8899d3cb218d3b55f7c29a87",
     "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
-    "dm/host/loader.c": "04aaa69127387f94d571665bc1334c7d41f42d81afdd9ab319878efe7c4e3882",
+    "dm/host/loader.c": "42e7e7eb2a0d67b860b02a74e11af0ca395951e9219da7bdbc2dedb4a1104ab5",
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",
     "dm/host/tests/t_botw_pcm.c": "eedde76aead52c05888f3541a7529e30d6febdb16e2683bb56bff254ef7f09c6",
     "dm/host/thread.c": "554d07f4f1028fa771a00080c741bfaf5646ed3a8aa46304846f82922dc1828a",

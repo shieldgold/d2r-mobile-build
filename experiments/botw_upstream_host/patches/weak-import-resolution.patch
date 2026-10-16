@@ -1,0 +1,53 @@
+--- a/dm/host/hle.c
++++ b/dm/host/hle.c
+@@ -28,7 +28,7 @@
+ // Per module, one cache of symbol number → resolved address
+ static uint64_t g_cache[MAX_MOD][8192];
+ 
+-uint64_t resolve_import(module_t *m, const char *name) {
++uint64_t resolve_import(module_t *m, const char *name, int weak_undefined) {
+     static const hle_ent *sec; static unsigned long secsz;
+     if (!sec) sec = (const hle_ent *)getsectiondata(&_mh_execute_header, "__DATA", "swhle", &secsz);
+     for (unsigned i = 0; i < secsz / sizeof(hle_ent); i++)
+@@ -36,6 +36,9 @@
+             if (g_flag.imports) { Dl_info di; dladdr(sec[i].fn, &di); LOG("import %s -> %s", name, di.dli_sname); }
+             void *hlecount_wrap(const char *, const char *, void *); return (uint64_t)hlecount_wrap("HLE", name, sec[i].fn);   // With DM_HLECOUNT it is a counting stub (including the libc passthrough table)
+         }
++    // A missing weak definition stays NULL after real HLE lookup. Do this
++    // before stub reuse: a same-name strong reference may already own a stub.
++    if (weak_undefined) return 0;
+     // Reuse the stub if one was already allocated for the same name
+     void *hlecount_wrap(const char *, const char *, void *);
+     for (unsigned k = 0; k < g_nstub; k++)
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -19,7 +19,7 @@
+ pthread_key_t g_keyres[2], g_keyaspect, g_keyaspectui;   // g_keyaspect: aspect ratio upper-limit parameter slot (KASPECT)          // resolution parameter slots (rewriter PARAMS, KRES0 handheld / KRES1 docked); 0 and not allocated if the build output lacks them
+ enum { KEY_K18, KEY_KTLS, KEY_KTLR, KEY_KGATE, KEY_KRES0, KEY_KRES1, KEY_KASPECT, KEY_KASPECTUI, KEY_N };
+ 
+-uint64_t resolve_import(module_t *m, const char *name);
++uint64_t resolve_import(module_t *m, const char *name, int weak_undefined);
+ void gate_register(uint64_t ret_addr, const char *kind, int arg, uint64_t orig);
+ 
+ static pthread_key_t key_value(unsigned i) {
+@@ -111,9 +111,9 @@
+ }
+ 
+ // Cross-module symbol resolution: first look for a definition in the loaded modules, and only if not found hand over to HLE / stubs
+-static uint64_t resolve_sym(module_t *m, const char *name) {
++static uint64_t resolve_sym(module_t *m, const char *name, int weak_undefined) {
+     for (int i = 0; i < g_nmod; i++) { void *p = module_sym(&g_mod[i], name); if (p) return (uint64_t)p; }
+-    return resolve_import(m, name);
++    return resolve_import(m, name, weak_undefined);
+ }
+ 
+ // Forced take-over table (hle.h HLE_FORCE, the __DATA,swforce section): a hit overrides the definition inside the module.
+@@ -266,7 +266,7 @@
+             if (type == R_AARCH64_RELATIVE) { *where = (uint64_t)m->base + r->r_addend; cnt[0]++; continue; }
+             const Elf64_Sym *s = &m->symtab[si];
+             uint64_t v = (uint64_t)force_lookup(m, m->strtab + s->st_name);
+-            if (!v) v = s->st_shndx ? (uint64_t)m->base + s->st_value : resolve_sym(m, m->strtab + s->st_name);
++            if (!v) v = s->st_shndx ? (uint64_t)m->base + s->st_value : resolve_sym(m, m->strtab + s->st_name, (s->st_info >> 4) == 2/*STB_WEAK*/);
+             if (type == R_AARCH64_JUMP_SLOT) { *where = v; cnt[2]++; }
+             else { *where = v + r->r_addend; cnt[1]++; }       // ABS64 / GLOB_DAT
+         }
