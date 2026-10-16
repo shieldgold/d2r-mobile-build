@@ -25,7 +25,7 @@
 
 ## Task 3：提交、实际游戏与手机
 
-- [ ] root核所有changed/untracked路径及native来源数量，精确stage、commit并push；不改100上限、不上传私有游戏、证书或keys。
+- [x] root核9冻结SHA与index精确一致，连同4自有文档精确13路径提交并push `cae045f9f79ae4144131581bfcbf6f2f10e2aafd`；native98/100，不上传私有输入。
 - [ ] 精确提交普通Mac核binary和200私有输入后运行原游戏，完整退出后记录下一停止点/真实第一帧；不得把launcher exit0当game exit0。
 - [ ] 对连贯功能候选跑固定全套和精确head iOS/Linux CI，核官方工件、本机组装签名，再保数据更新当前iPhone12；累计日志流式核前缀，不截断、不重传14GB资源。
 - [ ] 真机真实画面、操作、音频、存档与重开全部验证后才可称能玩。安装、启动、测试或绘制fixture通过均不足以替代。
@@ -35,3 +35,7 @@
 独立CPU12/12通过9.352秒，freeze2八SHA稳定；global get、vendor、Initialize/Finalize及十项资源依赖原SHA保持。最终freeze3九路径SHA256 `128605449a74f889d4d081eec048f55dcbb5974d7f7275c84ec371e3664b3fd3`，只新增旧probe permission oracle两处地址迁移，前八项逐字节未改；新GPU与CPU不重复运行，旧probe按失败定点复验。
 
 旧Buffer permission夹具迁移后owner1/1通过0.877秒、独立1/1通过0.867秒，实际MTLValidation启用，编译/运行exit0；与新2方法/4mode GPU合并独审CLOSED，GPU释放给原游戏。
+
+cae普通Mac binary `bc995ad14674a0cc03600ddf20ac13b8ae47e066445db8db46abb869a75154a6` 与200私有输入核验后已启动；live检查时Mac锁屏、无完整host_return/真实帧，未观察旧fatal不足以证明越过。`outputs/botw-host39-mac-cae045f/locked-live-checkpoint.json` 保留非终态，已请求用户手动解锁，不能改显示时钟来绕过。Linux精确head CI成功，iOS CI仍运行。
+
+精确cae的iOS CI38853804418与Linux CI38853804430均已完整success。官方无游戏三文件shell已独立下载核验，98项生产来源逐一匹配Git blob，shell SHA256 `cabcfcac6a4bedb060cd08b972474a0ad10d3be7821b1f9accec14cc08a58c5d`；暂存于 `outputs/botw-ci-cae045f-stage/verified-shell/`。后续固定全套OUT建好后可复用此工件，不需重复下载。Mac仍锁屏待用户解锁，普通运行会话未退出，local fixed full尚未启动；手机保持已完整核验的b41，不宣称cae已装。
