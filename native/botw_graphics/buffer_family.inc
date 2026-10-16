@@ -9,10 +9,19 @@ static uint64_t bwu_new_serial(void){return ++serial;}
 #undef BUFFER_UPSTREAM
 #undef BWU_DIE
 #undef BWU_LOG
+/* Normal rejection context uses only the host-owned matching span/value.
+ * Never inspect the candidate object/header to infer stale storage. */
+__attribute__((noreturn)) static void bufferStorageOverlap(const void *raw,size_t bytes,NSNumber *key,NSRange span){
+    id existing=objects[key];BWTexture *texture=[existing isKindOfClass:[BWTexture class]]?existing:nil;
+    BOOL exact=(uintptr_t)raw==span.location;uintptr_t offset=(uintptr_t)raw<span.location?span.location-(uintptr_t)raw:(uintptr_t)raw-span.location;
+    const char *primary=texture?(!texture.base&&texture.identity==key.unsignedLongLongValue?"true":"false"):"not_texture";
+    char detail[384];snprintf(detail,sizeof detail,"buffer storage overlaps live NVN object existing_class=%.48s span_bytes=%zu requested_bytes=%zu exact_base=%s exact_span=%s existing_primary=%s existing_move_epoch=%llu relative_offset=%c%zu",existing?class_getName([existing class]):"<none>",(size_t)span.length,bytes,exact?"true":"false",exact&&span.length==bytes?"true":"false",primary,(unsigned long long)texture.storageMoveEpoch,(uintptr_t)raw<span.location?'-':'+',(size_t)offset);
+    fatal(detail);
+}
 static void bufferMemory(const void *raw,size_t bytes,BOOL write,BOOL builder){
     if(!raw||(memoryAccessValidator&&!memoryAccessValidator(raw,bytes,write)))fatal(builder?"buffer builder memory is not fully accessible":"buffer object memory is not fully accessible");
-    if(write){validateObjectStorage((void*)raw,bytes);for(NSValue *v in objectSpans.allValues){NSRange span=v.rangeValue;if(memoryOverlap(raw,bytes,(void*)span.location,span.length)){
-        if(builder||span.location!=(NSUInteger)raw||span.length!=sizeof(NVNbuffer)||![objects[@(((BWObject*)raw)->serial)] isKindOfClass:[BWBuffer class]])fatal("buffer storage overlaps live NVN object");}}}
+    if(write){validateObjectStorage((void*)raw,bytes);for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;if(memoryOverlap(raw,bytes,(void*)span.location,span.length)){
+        if(builder||span.location!=(NSUInteger)raw||span.length!=sizeof(NVNbuffer)||![objects[@(((BWObject*)raw)->serial)] isKindOfClass:[BWBuffer class]])bufferStorageOverlap(raw,bytes,key,span);}}}
 }
 static BWBuffer *bufferObject(const NVNbuffer *raw,BOOL requirePool){
     bufferMemory(raw,sizeof *raw,NO,NO);BWBuffer *b=get(raw,[BWBuffer class]);

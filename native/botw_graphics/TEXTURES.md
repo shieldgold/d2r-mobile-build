@@ -182,3 +182,5 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 未准入目标仍受控拒绝。现有错误仅追加已命中的宿主span/value类型、长度、exact-base/exact-span、BWTexture primary判定与move epoch，以及目标相对该span的有符号偏移。不读取目标raw/serial或payload，不新增VM/validator调用；这些上下文本身不证明旧对象已死亡，也不授予覆盖任意目标的许可。
 
 真实Metal Validation夹具验证已登记descriptor在迁移后仍正确采样两层三mip，源存储可被另一个sampler合法复用；exact目标替换后，替换前已录draw/旧descriptor仍读旧图案，独立backing的新descriptor读不同图案，Finalize旧alias后新descriptor仍正确。两份GPU清除的private纹理在替换后保持各自像素，旧/新backing的live与retired canonical buffer别名均拒绝。CPU夹具另核无新增validator/VM查询、双方epoch变化/目标冲突/abort/实际clone异常与nil不改registry、容量、错误线程和篡改令牌。它们只验证兼容层合同，原游戏下一停点须由固定版本普通运行确认。
+
+BufferBuilder/Buffer 的原 overlap 拒绝前缀继续保留，现仅追加已匹配宿主记录的 class、span/requested字节数、同base/完整span标志、BWTexture primary/移动epoch及有限相对offset。不读取candidate header、oldraw或VM，也不改变任何准入、BOOL、回调或资源寿命。Builder目前检查完整64-byte宿主POD预算，而原SetDevice只写首8字节；诊断的全span相交本身不证明实际字段写命中、旧对象死亡或可安全跨类复用。

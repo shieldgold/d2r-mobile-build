@@ -497,6 +497,67 @@ int main(void){NVNbufferBuilder builder;memset(&builder,0xa5,sizeof builder);NVN
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation ABI')
+class BufferStorageDiagnosticCPUTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory(prefix='botw-buffer-diagnostic-')
+        cls.addClassCleanup(cls.directory.cleanup)
+        folder = Path(cls.directory.name)
+        graphics = ROOT / 'native/botw_graphics'
+        source = folder / 'diagnostic.m'
+        source.write_text(r'''
+#import <Foundation/Foundation.h>
+#include <mach/mach.h>
+#include <setjmp.h>
+static unsigned vmQueries,accessCalls,callbacks;
+static kern_return_t diagnosticVMQuery(vm_map_read_t task,vm_address_t *address,vm_size_t *size,natural_t *depth,vm_region_recurse_info_t info,mach_msg_type_number_t *count){(void)task;(void)address;(void)size;(void)depth;(void)info;(void)count;vmQueries++;return KERN_FAILURE;}
+#define vm_region_recurse_64 diagnosticVMQuery
+#include "graphics.m"
+#undef vm_region_recurse_64
+static sigjmp_buf recovery;
+static void diagnosticError(const char *error){(void)error;callbacks++;siglongjmp(recovery,1);}
+static int diagnosticAccess(const void *address,size_t bytes,int write){(void)address;(void)bytes;(void)write;accessCalls++;return 1;}
+#define CHECK(x) do{if(!(x)){fprintf(stderr,"BUFFER_DIAGNOSTIC_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
+int main(int argc,char **argv){@autoreleasepool{
+ CHECK(argc==2&&!gpu&&!commandQueue);objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];uint64_t allocation[96];memset(allocation,0xa5,sizeof allocation);unsigned char before[sizeof allocation];memcpy(before,allocation,sizeof before);unsigned char *base=(unsigned char*)allocation+256;void *destination=base;size_t spanBytes=sizeof(NVNtexture);NSNumber *key=@101;BWTexture *texture=[BWTexture new];texture.identity=101;texture.storageMoveEpoch=7;id value=texture;
+ if(!strcmp(argv[1],"inside"))destination=base+16;else if(!strcmp(argv[1],"prefix"))destination=base-16;else if(!strcmp(argv[1],"exact-span"))spanBytes=sizeof(NVNbufferBuilder);else if(!strcmp(argv[1],"selected"))texture.base=[BWTexture new];else if(!strcmp(argv[1],"wrong-identity"))texture.identity=99;else if(!strcmp(argv[1],"other-class")){value=[BWSampler new];spanBytes=sizeof(NVNsampler);}else if(!strcmp(argv[1],"missing"))value=nil;
+ size_t page=getpagesize();void *none=NULL;if(!strcmp(argv[1],"unreadable")){none=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(none!=MAP_FAILED);base=none;destination=none;}
+ if(value)objects[key]=value;objectSpans[key]=[NSValue valueWithRange:NSMakeRange((NSUInteger)base,spanBytes)];uint64_t serialBefore=serial;NSUInteger count=objects.count;void *map=(__bridge void*)objectSpans;errorCallback=diagnosticError;memoryAccessValidator=diagnosticAccess;
+ if(!strcmp(argv[1],"nonoverlap")){destination=(unsigned char*)allocation;NVNdevice rawDevice={0};BWDevice *device=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];memoryAccessValidator=NULL;put(&rawDevice,device);serialBefore=serial;count=objects.count;memoryAccessValidator=diagnosticAccess;w_nvnBufferBuilderSetDevice(destination,&rawDevice);CHECK(!callbacks&&!vmQueries&&accessCalls==2&&serial==serialBefore&&objects.count==count&&(__bridge void*)objectSpans==map);CHECK(*(NVNdevice**)destination==&rawDevice);CHECK(!memcmp((char*)destination+8,before+8,sizeof allocation-8));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK positive");return 0;}
+ if(!sigsetjmp(recovery,1)){w_nvnBufferBuilderSetDevice(destination,(NVNdevice*)(uintptr_t)1);CHECK(0);}
+ CHECK(callbacks==1&&accessCalls==1&&!vmQueries&&!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(serial==serialBefore&&objects.count==count&&objectSpans.count==1&&(__bridge void*)objectSpans==map&&objects[key]==value);CHECK(!memcmp(before,allocation,sizeof allocation));
+ CHECK(strstr(lastError,"entry=nvnBufferBuilderSetDevice: Unsupported or invalid NVN operation: buffer storage overlaps live NVN object"));char field[128];snprintf(field,sizeof field,"existing_class=%s",value?class_getName([value class]):"<none>");CHECK(strstr(lastError,field));snprintf(field,sizeof field,"span_bytes=%zu",spanBytes);CHECK(strstr(lastError,field));snprintf(field,sizeof field,"requested_bytes=%zu",sizeof(NVNbufferBuilder));CHECK(strstr(lastError,field));BOOL exact=destination==base;CHECK(strstr(lastError,exact?"exact_base=true":"exact_base=false"));CHECK(strstr(lastError,exact&&spanBytes==sizeof(NVNbufferBuilder)?"exact_span=true":"exact_span=false"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?(texture.base||texture.identity!=101?"existing_primary=false":"existing_primary=true"):"existing_primary=not_texture"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?"existing_move_epoch=7":"existing_move_epoch=0"));CHECK(strstr(lastError,!strcmp(argv[1],"prefix")?"relative_offset=-16":!strcmp(argv[1],"inside")?"relative_offset=+16":"relative_offset=+0"));CHECK(strlen(lastError)<512);CHECK(!pthread_mutex_trylock(&graphicsLock));pthread_mutex_unlock(&graphicsLock);if(none)CHECK(!munmap(none,page));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK refused_unchanged");return 0;
+}}
+''')
+        cls.executable = folder / 'diagnostic'
+        build = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+            '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            '-Wno-unused-function', '-O1', '-g', '-fsanitize=address,undefined',
+            '-I', str(graphics), str(source), '-framework', 'Foundation',
+            '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(cls.executable)],
+            capture_output=True, text=True, timeout=120)
+        if build.returncode:
+            raise AssertionError(build.stdout+build.stderr)
+
+    def mode(self, mode):
+        run = subprocess.run([str(self.executable), mode], capture_output=True,
+                             text=True, timeout=15)
+        self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        self.assertIn('BUFFER_STORAGE_DIAGNOSTIC_CPU_OK', run.stdout)
+        self.assertNotIn('runtime error:', run.stderr)
+        self.assertNotIn('ERROR: AddressSanitizer', run.stderr)
+
+    def test_rejected_buffer_builder_reports_only_owned_conflict_metadata(self):
+        for mode in ['exact', 'inside', 'prefix', 'exact-span', 'selected',
+                     'wrong-identity', 'other-class', 'missing', 'unreadable']:
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_nonoverlapping_buffer_builder_preserves_original_write_and_access_count(self):
+        self.mode('nonoverlap')
+
+
+@unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation ABI')
 class TextureHandleCodecCPUTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

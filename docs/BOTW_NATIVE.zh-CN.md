@@ -263,6 +263,10 @@ Size/Align/Init三项先真实失败，新增trace字段也有独立行为RED。
 
 该codec的独立GPU新方法4模式全部通过（1.349秒、零跳过），实际Metal validation及counter capability查询完整结束，arena/copy/counter/RT不发布的负例已复核。四SHA及consumer依赖前后稳定，双独审CLOSED，GPU已释放供固定提交原游戏；没有为UINT64_MAX提供特殊成功或特殊拒绝。
 
+codec提交 `b41cf07` 已推送并普通Mac完整运行，原句柄构造阶段错误消失。Cube零大小查询实际出现三次，均为target8/4×4×6/单mip/flags0/raw0/layoutbits0；它们没有在此阶段阻断程序，不等于Cube资源已可用。新首fatal为 `nvnBufferBuilderSetDevice: buffer storage overlaps live NVN object`，实际冲突类别/范围尚未记录，不推断原对象死亡或实际写足迹相交。binary SHA256为 `2eb971a8d17f8bff9362f29aca42eb7e43782368586f21f6a6ba07a30fea679e`，完整退出host_return=1，无游戏画面；证据位于 `outputs/botw-host39-mac-b41cf07/transfer-and-storage-evidence.json`。该合并候选固定全套981项完整结束：980通过、1项既有跳过，230.304秒；641项tracked源码身份及前后快照稳定，Linux精确head CI已成功，iOS CI仍待完成，手机此时仍为dc。
+
+后继缓冲构建器调查先保现guard，仅在原命中分支追加有限host class/span/exact/relative及Texture primary/epoch，不新增guest读取、VM扫描或旧raw存活判断。该纯诊断已完成两个CPU方法/10场景：owner 4.459秒、独审4.168秒，ASan/UBSan及ARC exceptions启用；PROT_NONE候选早拒、非重叠首8字节正常写入、原validator/回调/registry/canary/锁恢复均保留。三SHA稳定，生产逆剥精确恢复b41；另一独审静态核正文上界314字节小于384预算，双CLOSED，无GPU。证据位于 `outputs/botw-buffer-storage-diagnostic-audit/`。原BufferBuilderSetDevice只写8字节，Defaults/SetStorage写+8..31；现桥却对opaque64字节统一判span交叠。收到实际相对范围后，须区分实际写足迹与仅未写padding的交叠，再审POD值存储和资源快照寿命；不能把永久rawspan表当guest内存sandbox，也不能据此放宽Queue/CommandBuffer、arena/busy、权限、authority或descriptor witness。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

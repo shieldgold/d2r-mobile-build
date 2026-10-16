@@ -22,11 +22,20 @@
 ## Task 3：独审与固定提交
 
 - [x] 独立CPU2/2通过3.968秒，GPU1方法4模式通过1.349秒、零跳过；四SHA及consumer依赖稳定，双CLOSED/GPU_RELEASED。原整数构造、合成像素和实际游戏分开记录。
-- [ ] root核对所有changed/untracked路径及现有CI触发，精确stage、commit并push `botw-archive/codex/botw-native-preflight`。
-- [ ] 普通Mac使用精确提交、核binary和200个私有输入后运行原游戏，记录是否出现真实第一帧或新的实际停止点；GPU窗口优先原游戏。
+- [x] root精确7路径提交并推送 `b41cf07312013e73fbcc28b652c80542f7c2b421`，native97/100及CI路径保持。
+- [x] 普通Mac核binary及200私有输入后完整运行，原GetHandle构造错误消失；Cube零查询3次，随后新停点BufferBuilderSetDevice的storage overlap，未出现真实第一帧。
 
 ## Task 4：最终候选整套与手机更新
 
 - [ ] 对连贯修复后的候选提交执行固定全套及精确head的iOS/Linux CI，核验官方通用工件后本机组装和签名；没有完整流水线的中间版不宣称手机已更新。
 - [ ] 保数据更新当前iPhone12，核安装位置、普通启动、完整流式日志前缀、UID、RomFS大小/mtime及shader清单/权限；不重传14GB资源、不截断累计日志。
 - [ ] 真实游戏画面、操作、音频、存档及重开均验收后才能称可玩。安装、启动或编码成功不替代这些结果。
+
+固定b41全套已完整通过：981项中980通过、1项既有跳过，230.304秒；641 tracked及manifest `7ec2972e13d5a7c23e40c74932b0795855577389230f444063df32cff8828413` 稳定。Linux精确head CI成功，iOS与手机验收仍待完成。
+
+## 后继构建器存储分型
+
+- [x] 固定b41普通运行已定位新首错误，尚不知冲突class/精确范围；不能预先认对象已死。
+- [x] owner纯诊断三路径已冻结，原谓词/返回/回调不变，CPU2方法/10场景真RED到GREEN4.459秒；独审CPU4.168秒及另一静态审查双CLOSED，三SHA稳定、逆剥恢复b41，无新增guest读取/VM。root精确提交该诊断后以普通Mac核实际class/offset。
+- [ ] kernel/linear只读核原Buffer字段写足迹、POD按值与资源快照，结合实际范围区分padding交叠和真正写入交叠；评估现永久exclusive span的额外假设及真实资源门依赖，不泛化取消arena/非值对象/权限/authority/witness保护。
+- [ ] 实际分型后才制定最窄功能修复与回归，遵循原完整模块合同，避免无证据的生命周期推断。
