@@ -52,11 +52,7 @@ _Static_assert(sizeof(six_axis_ring)==0x708,"old SDK SixAxis Lifo");
 _Static_assert(offsetof(npad_memory,six_axis)==0x1758,"old SDK SixAxis ring family");
 _Static_assert(offsetof(npad_memory,reserved)==0x4188,"old SDK SixAxis family end");
 _Static_assert(sizeof(npad_memory)==BOTW_HID_NPAD_STRIDE,"old SDK Npad stride");
-typedef struct {
-    uint64_t sampling;
-    uint32_t attributes, buttons;
-    int32_t rx, ry, lx, ly;
-} debug_pad_state;
+typedef botw_debug_pad_state debug_pad_state;
 typedef struct { _Atomic uint64_t sampling; debug_pad_state state; } debug_pad_entry;
 typedef struct {
     _Atomic uint64_t ticks, capacity, tail, count;
@@ -247,6 +243,26 @@ int botw_input_activate_debug_pad(botw_input *input,uint64_t ticks) {
         input->debug_pad_active=1;publish_debug_pad(input,ticks);
     }
     pthread_mutex_unlock(&input->mutex);return 0;
+}
+int botw_input_sample_debug_pad(botw_input *input,uint64_t ticks) {
+    if(!input||!ticks)return -1;
+    pthread_mutex_lock(&input->mutex);
+    if(!input->debug_pad_active) { pthread_mutex_unlock(&input->mutex);return -1; }
+    publish_debug_pad(input,ticks);
+    pthread_mutex_unlock(&input->mutex);return 0;
+}
+int botw_input_read_debug_pad(botw_input *input,botw_debug_pad_state *out) {
+    if(!input||!out)return -1;
+    pthread_mutex_lock(&input->mutex);
+    if(!input->debug_pad_active) { pthread_mutex_unlock(&input->mutex);return -1; }
+    debug_pad_ring *ring=(debug_pad_ring *)(void *)(input->memory+BOTW_HID_DEBUG_PAD_OFFSET);
+    uint64_t capacity=atomic_load_explicit(&ring->capacity,memory_order_acquire);
+    uint64_t tail=atomic_load_explicit(&ring->tail,memory_order_acquire);
+    uint64_t count=atomic_load_explicit(&ring->count,memory_order_acquire);
+    if(capacity!=17||tail>=17||count>16) { pthread_mutex_unlock(&input->mutex);return -1; }
+    if(!count) { pthread_mutex_unlock(&input->mutex);return 0; }
+    memcpy(out,&ring->entries[tail].state,sizeof *out);
+    pthread_mutex_unlock(&input->mutex);return 1;
 }
 static void publish_six_axis(botw_input *input,unsigned index,unsigned which,uint64_t ticks) {
     six_axis_ring *ring=&npad(input,index)->six_axis[which];

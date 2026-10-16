@@ -14,6 +14,7 @@
 #include "front.h"
 #include "botw_front.h"
 #include "botw_hid.h"
+void botw_base_v0_debug_pad_tick(void);
 
 enum { WHOLE_THREAD_STACK = 8 * 1024 * 1024 };
 static whole_front_state g_state = WHOLE_FRONT_STATE_INITIALIZER;
@@ -425,6 +426,7 @@ static void apply_lifecycle(void) {
         pthread_mutex_lock(&g_display_lock); g_refresh = 1 / interval; pthread_mutex_unlock(&g_display_lock);
     }
     /* VI has already bound its system event. Never acquire or submit a drawable. */
+    if (whole_front_state_touch(&g_state, NULL)) botw_base_v0_debug_pad_tick();
     whole_front_state_display_tick(&g_state);
 }
 - (BOOL)prefersStatusBarHidden { return YES; }

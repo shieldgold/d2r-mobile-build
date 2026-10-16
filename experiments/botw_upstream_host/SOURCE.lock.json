@@ -28,9 +28,14 @@
       "bytes": 4447,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/base_v0_debug_pad.json": {
+      "sha256": "7ca5f10d44bc59bdee7f1a6c566e03bdee3b90567f14fde9ae0b514f193cd064",
+      "bytes": 5902,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/base_v0_force.c": {
-      "sha256": "68fc218bca90c3d8ece10f808a063176439550b77b5af75a7e0bef583a6a28ea",
-      "bytes": 25655,
+      "sha256": "5fe817f9cf0686b4cf533781d74cde822c82e0a290a6254d755b239573c653de",
+      "bytes": 25915,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.h": {
@@ -434,8 +439,8 @@
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_frontend.m": {
-      "sha256": "46255587b14d4c2793795aaae0dd8ee7aa47e4aab6243ddef507d0fe3bff4dce",
-      "bytes": 31968,
+      "sha256": "05312b121dfdacad5cbf13b474f0e13fbc85bd30207736dbc30eca71429d9731",
+      "bytes": 32088,
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_main.m": {
@@ -476,6 +481,11 @@
     "patches/base-v0-constructor-order.patch": {
       "sha256": "613318b1e00f4e7a2b8aad3a5efd1b7cbbef217417914bb1bc00a6146a746cc4",
       "bytes": 875,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-debug-pad.patch": {
+      "sha256": "6e1fa25393761891b1d1de76c5c0601af507b438dcb911a4c699fce3298884a6",
+      "bytes": 3048,
       "role": "thin-adapter-or-verification"
     },
     "patches/base-v0-force.patch": {
@@ -714,8 +724,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/base_v0_force_probe.c": {
-      "sha256": "8bbd13591b1d50e8c1183aa1bceb886fbc2a0b370c243642414140fa39acd4f8",
-      "bytes": 9754,
+      "sha256": "c94f777e138472b93ae96cedf67a6309d6bd8dd97b6a6af925fbf7a0844f4ef8",
+      "bytes": 9755,
       "role": "thin-adapter-or-verification"
     },
     "tests/base_v0_heap_probe.c": {
@@ -776,6 +786,11 @@
     "tests/whole_constructor_order_probe.c": {
       "sha256": "ef17aa071f75222bf77f0d0718683d4fe88e88660b7868cdf72f8cd267d814f2",
       "bytes": 2304,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_debug_pad_probe.c": {
+      "sha256": "c18de52a90faeaf781681d35ff91b72eff913549945e7ab59a3c3f49561b1139",
+      "bytes": 9877,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_dirty_checked_probe.c": {
@@ -1724,7 +1739,8 @@
     "patches/early-graphics-initialize-status.patch",
     "patches/buffer-initialize-status.patch",
     "patches/normal-wait-status.patch",
-    "patches/base-v0-stack-allocator.patch"
+    "patches/base-v0-stack-allocator.patch",
+    "patches/base-v0-debug-pad.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1747,7 +1763,7 @@
     "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",
     "dm/host/botw_fs.c": "c8c986526bc02ddd396be8d96ca8d93933525dea8babf9d59a8e0e6ec9395881",
     "dm/host/botw_graphics.c": "b1f61695cd93d0bb61a4cc2594c23f56b3c094a83d7c088e701766b9ffb07a2d",
-    "dm/host/botw_hid.c": "5cafc0c71e9abe4e000610a06a962383a515d3c80c1706a2f0032cff58b8f413",
+    "dm/host/botw_hid.c": "a77e3ef83ba65378fb493e12ef243d032f334333bcf1e729eb794bcb3f6f65cc",
     "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
     "dm/host/botw_pcm.c": "7b77d126af15ab5015770f823d47cf67ab08e4fdb52b9f167ae8179365e6a17e",
     "dm/host/botw_pcm.h": "de8e71d559f744a2959d0afb4e768633663aa88590e571ddb417d7db40dc9cd1",
@@ -1838,8 +1854,8 @@
   "runtime_configuration_translation_units": [
     "frontend/whole_runtime_configuration.m"
   ],
-  "swforce_record_count": 134,
-  "swforce_metadata_sha256": "1e242f26e7dc19d575fafc09c41e5c045825b6c708c2a465d76f9abf19ca19eb",
+  "swforce_record_count": 136,
+  "swforce_metadata_sha256": "c60f596da2d6aaf2025d9204bad37c9680768eea992835659fc0c003a328e54d",
   "normal_operand_validation_references": {
     "adapter/whole_pool_builder.c": [
       "_vm_region_recurse_64"
@@ -1908,13 +1924,13 @@
       "role": "existing-complete-resource-provider"
     },
     "native/botw_input/input.c": {
-      "sha256": "318718ce562dfda8b5bb047cb95e53451fc7e74858ba12d8724a3f9c5d1d1fee",
-      "bytes": 15833,
+      "sha256": "58f93ad92692a6aec62045588a310528e0c273c4eccd9f63f0980a740bdc452c",
+      "bytes": 16892,
       "role": "existing-complete-resource-provider"
     },
     "native/botw_input/input.h": {
-      "sha256": "56f50a0597497eb5a1860ad7d58e517b0d01e6955001d02bafaf4eb5a4d06b2e",
-      "bytes": 5015,
+      "sha256": "a7a1386a3d6755a167344f8082c1b0afaa72f8c5dcd357f74b271207a2df18b1",
+      "bytes": 5960,
       "role": "existing-complete-resource-provider"
     },
     "experiments/botw_audio_renderer/CMakeLists.txt": {

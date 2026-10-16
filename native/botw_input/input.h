@@ -61,6 +61,22 @@ int botw_input_disconnect(botw_input *input, uint32_t npad_id);
  * Returns 0 on success, -1 for NULL input. bind/unbind clears this activation
  * and its independent sequence; the frontend source-state rules are unchanged. */
 int botw_input_activate_debug_pad(botw_input *input, uint64_t ticks);
+/* Independent old-SDK DebugPad layout. This host has no connected debug
+ * controller: attributes, buttons and both sticks remain zero. */
+typedef struct {
+    uint64_t sampling;
+    uint32_t attributes, buttons;
+    int32_t rx, ry, lx, ly;
+} botw_debug_pad_state;
+/* Advance only an already active DebugPad stream, using the normal host clock.
+ * Does not sample Npad or change its source/configuration/rings. Returns 0 on
+ * success, -1 for NULL/inactive input or zero ticks, without changing memory. */
+int botw_input_sample_debug_pad(botw_input *input, uint64_t ticks);
+/* Read the latest coherent 32-byte sample without advancing its sequence.
+ * Returns 1 and writes exactly one state, 0 for an active empty stream with
+ * output unchanged, or -1 for NULL/inactive input/output or invalid ring bounds.
+ * Caller-provided output is normal host-owned storage. */
+int botw_input_read_debug_pad(botw_input *input, botw_debug_pad_state *out);
 /* Old SDK standard Npad handles encode style/id/sensor in their low 3 bytes.
  * FullKey(3)/Handheld(4) sensor=2; JoyDual(5) sensor=0/1; JoyLeft(6) sensor=0;
  * JoyRight(7) sensor=1. IDs are 0..7/0x20/0x10 and the top byte must be zero.

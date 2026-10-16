@@ -1,0 +1,175 @@
+{
+  "schema": "botw-base-v0-debug-pad-contract-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "scope": "Only fixedbase DebugPad Initialize/GetState; original upstream Npad source/configuration remains unchanged. General HID service/shared-memory support is not provided by this adaptation.",
+  "source_symbols": [
+    {
+      "module": "rtld",
+      "sha256": "2bf1918e54e3d6378f150e45a264c151558198703a778408db5ac26263a3a362",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "main",
+      "sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "symbols": [
+        {
+          "index": 281,
+          "name": "_ZN2nn3hid18InitializeDebugPadEv",
+          "info": 18,
+          "section": 0,
+          "value": "0x0",
+          "bytes": 0
+        },
+        {
+          "index": 282,
+          "name": "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
+          "info": 18,
+          "section": 0,
+          "value": "0x0",
+          "bytes": 0
+        }
+      ],
+      "relocations": [
+        {
+          "table": "JMPREL",
+          "slot": "0x22638b0",
+          "type": 1026,
+          "name": "_ZN2nn3hid18InitializeDebugPadEv",
+          "addend": 0
+        },
+        {
+          "table": "JMPREL",
+          "slot": "0x22638b8",
+          "type": 1026,
+          "name": "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
+          "addend": 0
+        }
+      ]
+    },
+    {
+      "module": "subsdk0",
+      "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk1",
+      "sha256": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk2",
+      "sha256": "e56eec1a58d1fa53779469e6eea36a795c0deac90bbf25b54b97c44ed195bd65",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk3",
+      "sha256": "2f344d84badf826937317e033b47f32bb2e1e8b7856553ce7356616268b5e238",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "sdk",
+      "sha256": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31",
+      "symbols": [
+        {
+          "index": 9136,
+          "name": "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
+          "info": 18,
+          "section": 1,
+          "value": "0x232588",
+          "bytes": 100,
+          "span_sha256": "0540270201b3b68c2c550fc45eabd7dfdb490ecdfdce0a71f69e3bf506b5d25b"
+        },
+        {
+          "index": 9720,
+          "name": "_ZN2nn3hid18InitializeDebugPadEv",
+          "info": 18,
+          "section": 1,
+          "value": "0x232524",
+          "bytes": 100,
+          "span_sha256": "e69a2ca2d5d54c696bc397b5165faeca0b243d22233f4a61683e116c81a8ad1e"
+        }
+      ],
+      "relocations": []
+    }
+  ],
+  "wire_contract": {
+    "initialize": "publicvoid; original SDK creates/activates DebugPad via HID. Replacement initializes one actual native disconnected producer.",
+    "get_state": "publicvoid; nulloutput(detailResult0x30ca) or uninitialized(detailResult0x2aca) goes to originalpublicAbort. Emptyring leaves calleroutput unchanged; nonempty copies one stable32B state.",
+    "layout": {
+      "bytes": 32,
+      "fields": {
+        "sampling": {
+          "offset": 0,
+          "type": "u64"
+        },
+        "attributes": {
+          "offset": 8,
+          "type": "u32"
+        },
+        "buttons": {
+          "offset": 12,
+          "type": "u32"
+        },
+        "rx": {
+          "offset": 16,
+          "type": "i32"
+        },
+        "ry": {
+          "offset": 20,
+          "type": "i32"
+        },
+        "lx": {
+          "offset": 24,
+          "type": "i32"
+        },
+        "ly": {
+          "offset": 28,
+          "type": "i32"
+        }
+      }
+    }
+  },
+  "implementation": {
+    "source": "Complete existing native/botw_input/input.c publisher; no replacement packet/sampling algorithm.",
+    "owner": "One processlifetime botw_input backing, bounded256KiB. Native defaults remain unchanged but no sources/configure/fullsample/sharedmemory or services binding is used.",
+    "publication": "pthread_once creates and activates using nonzero real monotonic19.2MHz ticks, then atomicrelease publishes pointer. Only failed unpublished construction may destroy input.",
+    "tick": "botw_base_v0_debug_pad_tick no-ops before initialization; normal frontend readiness cadence supplies a realclock tick to native DebugPad-only sample. Getter never creates samples.",
+    "getter": "Acquire pointer; actual native typedreader copies latest under its mutex into hostlocal32B. After readerunlocks, checkedguestwrite preparation precedes memcpy. Emptyring does not prepare or write caller output.",
+    "errors": "Allocation/clock/activation/sample/read/writepreparation failure uses fixedhostfatal. No fakeconnectedcontroller, handle, IPC response or gueststate diagnostic."
+  },
+  "references": {
+    "each_rule": {
+      "titles": 4,
+      "candidate": 1,
+      "reference_mask": 1
+    },
+    "loader_order": [
+      "main",
+      "subsdk0",
+      "subsdk1",
+      "subsdk2",
+      "subsdk3",
+      "sdk"
+    ],
+    "actual_force_lookup_count": 2,
+    "all_other_original_rules_unchanged": 134
+  },
+  "expected_registry": {
+    "entries": 136,
+    "candidates": 134,
+    "active": 101,
+    "force_lookup_references": 142,
+    "canonical_metadata_sha256": "c60f596da2d6aaf2025d9204bad37c9680768eea992835659fc0c003a328e54d"
+  },
+  "limits": [
+    "Static/ownedCPU evidence does not prove gameplay or identify an actualGuestfaultsite.",
+    "DebugPad remains disconnected because no DebugPad hardware/source backend exists.",
+    "Original upstream touch/GameController Npad producer is not replaced or duplicated."
+  ]
+}

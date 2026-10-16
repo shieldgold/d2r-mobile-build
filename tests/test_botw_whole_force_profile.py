@@ -69,6 +69,8 @@ EXPECTED_REFERENCES = {
     "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj": 1,
     "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj": 1,
     "_ZN2nn3hid14InitializeNpadEv": 1,
+    "_ZN2nn3hid18InitializeDebugPadEv": 1,
+    "_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE": 1,
     "_ZN2nn3hid15GetNpadStyleSetERKj": 1,
     "_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14VibrationValueE": 1,
     "_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE": 1,
@@ -130,6 +132,8 @@ def stage_source(destination):
         patches.append('patches/base-v0-vi-layer.patch')
     if 'patches/base-v0-stack-allocator.patch' not in patches:
         patches.append('patches/base-v0-stack-allocator.patch')
+    if 'patches/base-v0-debug-pad.patch' not in patches:
+        patches.append('patches/base-v0-debug-pad.patch')
     for name in patches:
         if BASELINE and name == 'patches/base-v0-force.patch':
             continue
@@ -164,7 +168,7 @@ class WholeForceProfileTests(unittest.TestCase):
         end = text.index('// Read the rewriter table header', begin)
         (cls.work / 'loader_force.inc').write_text(text[begin:end])
         rows = source_registry(stage)
-        if len(rows) != 134:
+        if len(rows) != 136:
             raise AssertionError('actual source registry changed: ' + str(len(rows)))
         owned = []
         for name, why, title in rows:
@@ -250,7 +254,7 @@ class WholeForceProfileTests(unittest.TestCase):
         manifest = {r.split()[0]: r.split()[1:] for r in rows}
         candidate_names = {name for name, _, title in source_registry(self.staged)
                            if title == 4 or name in BORROWED}
-        self.assertEqual(len(candidate_names), 132)
+        self.assertEqual(len(candidate_names), 134)
         actual = {}
         for module_index, name in enumerate(ORDER):
             data = (directory / name).read_bytes()
@@ -287,7 +291,7 @@ class WholeForceProfileTests(unittest.TestCase):
                 self.assertEqual(count, 1)
                 actual[symbol_name] = actual.get(symbol_name, 0) | (1 << module_index)
         self.assertEqual(actual, EXPECTED_REFERENCES)
-        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 140)
+        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 142)
 
     @unittest.skipIf(BASELINE, 'baseline has no stream verifier')
     def test_real_fixed_images_hash_as_raw_and_three_padded_signed_sections(self):

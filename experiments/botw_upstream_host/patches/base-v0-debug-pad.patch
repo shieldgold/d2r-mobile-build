@@ -1,0 +1,64 @@
+--- a/dm/host/botw_hid.c
++++ b/dm/host/botw_hid.c
+@@ -19,6 +19,7 @@
+ #define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
+ #include "botw_hid.h"
++#include "../botw_input/input.h"
+ #include "botw_keys.h"
+ #include <math.h>
+ #include <pthread.h>
+@@ -551,3 +552,53 @@
+         id, style_name(style), min, max);
+     return RES_OK;
+ }
++
++/* BASE_V0_DEBUG_PAD_BEGIN */
++_Static_assert(sizeof(botw_debug_pad_state) == 0x20, "base-v0 DebugPadState size");
++_Static_assert(offsetof(botw_debug_pad_state, attributes) == 8, "DebugPad attributes");
++_Static_assert(offsetof(botw_debug_pad_state, buttons) == 12, "DebugPad buttons");
++_Static_assert(offsetof(botw_debug_pad_state, rx) == 16, "DebugPad right stick");
++_Static_assert(offsetof(botw_debug_pad_state, lx) == 24, "DebugPad left stick");
++
++/* This process-owned backing never supplies Npad, shared-memory IPC or sources.
++ * Only the native DebugPad publisher and reader touch its DebugPad ring. */
++static pthread_once_t g_base_v0_debug_pad_once = PTHREAD_ONCE_INIT;
++static _Atomic(botw_input *) g_base_v0_debug_pad;
++static void botw_base_v0_debug_pad_create(void) {
++    botw_input *input = botw_input_create();
++    if (!input) die("base-v0 DebugPad producer allocation failed");
++    uint64_t ticks = botw_input_monotonic_ticks();
++    if (!ticks || botw_input_activate_debug_pad(input, ticks)) {
++        botw_input_destroy(input);
++        die("base-v0 DebugPad producer activation failed");
++    }
++    atomic_store_explicit(&g_base_v0_debug_pad, input, memory_order_release);
++}
++HLE_FORCE("_ZN2nn3hid18InitializeDebugPadEv",
++          "base-v0 DebugPad uses the complete native disconnected producer", void,
++          botw_base_v0_debug_pad_initialize, void) {
++    if (pthread_once(&g_base_v0_debug_pad_once, botw_base_v0_debug_pad_create))
++        die("base-v0 DebugPad producer initialization failed");
++}
++HLE_FORCE("_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
++          "base-v0 DebugPad uses the complete native disconnected producer", void,
++          botw_base_v0_debug_pad_get_state, botw_debug_pad_state *out) {
++    if (!out) die("base-v0 DebugPad GetState requires an output");
++    botw_input *input = atomic_load_explicit(&g_base_v0_debug_pad, memory_order_acquire);
++    if (!input) die("base-v0 DebugPad GetState before initialization");
++    botw_debug_pad_state state;
++    int count = botw_input_read_debug_pad(input, &state);
++    if (count < 0 || count > 1) die("base-v0 DebugPad state is unavailable");
++    if (!count) return;
++    if (!dm_guest_write_prepare_checked(out, sizeof state))
++        die("base-v0 DebugPad state write preparation failed");
++    memcpy(out, &state, sizeof state);
++}
++void botw_base_v0_debug_pad_tick(void) {
++    botw_input *input = atomic_load_explicit(&g_base_v0_debug_pad, memory_order_acquire);
++    if (!input) return;
++    uint64_t ticks = botw_input_monotonic_ticks();
++    if (!ticks || botw_input_sample_debug_pad(input, ticks))
++        die("base-v0 DebugPad sampling failed");
++}
++/* BASE_V0_DEBUG_PAD_END */

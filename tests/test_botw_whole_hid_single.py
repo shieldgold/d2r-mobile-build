@@ -32,8 +32,8 @@ class WholeHidSingle(unittest.TestCase):
   ignore=cls.work/'metadata-only.asan.ignore';ignore.write_text('global:hle_force_*\n')
   cls.binary=cls.work/'probe'
   command=['clang','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-format','-Wno-unused-function',
-   '-pthread','-fsanitize=address,undefined','-fno-sanitize-recover=all','-fsanitize-ignorelist='+str(ignore),'-I',str(cls.source),'-I',str(cls.source/'dm/host'),'-I',str(cls.work),
-   str(COMPONENT/'tests/whole_hid_single_probe.c'),'-o',str(cls.binary)]
+   '-pthread','-fsanitize=address,undefined','-fno-sanitize-recover=all','-fsanitize-ignorelist='+str(ignore),'-I',str(cls.source),'-I',str(cls.source/'dm/host'),'-I',str(ROOT/'native/botw_host'),'-I',str(cls.work),
+   str(COMPONENT/'tests/whole_hid_single_probe.c'),str(ROOT/'native/botw_input/input.c'),'-o',str(cls.binary)]
   if BASELINE:command+=['-DBOTW_WHOLE_HID_SINGLE_BASELINE=1']
   r=subprocess.run(command,capture_output=True,text=True)
   if r.returncode:raise AssertionError(r.stdout+r.stderr)
