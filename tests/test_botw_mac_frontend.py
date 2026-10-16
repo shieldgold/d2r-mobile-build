@@ -100,7 +100,8 @@ class MacFrontendTests(unittest.TestCase):
         command = ['xcrun', 'clang', '-std=c11', '-mmacosx-version-min=14.0', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                    '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_host'),
                    '-I', str(ROOT / 'native/botw_graphics'),
-                   str(ROOT / 'native/botw_app/mac_main.m'), str(stub), '-framework', 'AppKit',
+                   str(ROOT / 'native/botw_app/mac_main.m'),
+                   str(ROOT / 'native/botw_app/BOTWEventLog.m'), str(stub), '-framework', 'AppKit',
                    '-framework', 'QuartzCore', '-framework', 'Metal', '-o', str(cls.binary)]
         result = subprocess.run(command, text=True, capture_output=True)
         if result.returncode:

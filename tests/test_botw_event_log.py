@@ -14,6 +14,12 @@ PROBE = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "BOTWEventLog.h"
+#include "graphics.h"
+/* UI history must never enable or sample the independent host observer. */
+int botw_graphics_enable_lock_observation(void) { abort(); }
+botw_graphics_lock_observation_status botw_graphics_read_lock_observation(botw_graphics_lock_observation *out) {
+    (void)out; abort();
+}
 static unsigned callbacks;
 static int heartbeat;
 static uint64_t footprint(void) {
@@ -92,7 +98,7 @@ class EventLogTests(unittest.TestCase):
         source = folder / 'probe.m'; source.write_text(PROBE)
         cls.binary = folder / 'probe'
         command = ['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
-                   '-I', str(ROOT / 'native/botw_app'), str(source),
+                   '-I', str(ROOT / 'native/botw_app'), '-I', str(ROOT / 'native/botw_graphics'), str(source),
                    str(ROOT / 'native/botw_app/BOTWEventLog.m'), '-framework', 'Foundation', '-o', str(cls.binary)]
         compiled = subprocess.run(command, text=True, capture_output=True)
         if compiled.returncode:

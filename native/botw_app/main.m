@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include "runtime.h"
 #include "memory_policy.h"
@@ -47,6 +48,14 @@ static NSString *documentsRoot;
 static botw_input *frontendInput; /* Process lifetime: guest threads borrow it. */
 static BOOL audioSessionPrepared, audioInterrupted, audioServicesLost;
 static BOTWEventLog *frontendEventLog;
+static BOOL lock_observation_enable_rejected;
+
+static void logLockObservationEnableRejection(void) {
+    if (!lock_observation_enable_rejected) return;
+    lock_observation_enable_rejected = NO;
+    fprintf(stderr, "host_graphics_lock_observation enabled=false reason=pre_start_enable_rejected\n");
+    fflush(stderr);
+}
 
 static void hostEvent(const char *message) {
     fprintf(stdout, "%s\n", message);
@@ -232,6 +241,7 @@ static void *runGuest(void *unused) {
     close(descriptor);
     setvbuf(stdout, NULL, _IOLBF, 0); setvbuf(stderr, NULL, _IOLBF, 0);
     hostEvent("\n=== BOTW native bootstrap ===");
+    logLockObservationEnableRejection();
     id configuredBits = [NSBundle.mainBundle objectForInfoDictionaryKey:@"BOTWGuestAddressBits"];
     if (configuredBits && ![configuredBits isKindOfClass:NSNumber.class]) {
         hostEvent("error=invalid packaged guest address policy"); return;
@@ -262,7 +272,10 @@ static void *runGuest(void *unused) {
     if (!result) result = pthread_create(&thread, &attributes, runGuest, NULL);
     pthread_attr_destroy(&attributes);
     if (result) hostEvent("error=unable to start guest thread");
-    else self.started = YES;
+    else {
+        self.started = YES;
+        botw_frontend_start_graphics_lock_observations();
+    }
 }
 @end
 
@@ -309,5 +322,13 @@ static void *runGuest(void *unused) {
 @end
 
 int main(int argc, char **argv) {
-    @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(BOTWDelegate.class)); }
+    @autoreleasepool {
+        for (int i = 1; i < argc; ++i) {
+            if (!strcmp(argv[i], "--observe-graphics-lock")) {
+                lock_observation_enable_rejected = !botw_frontend_enable_graphics_lock_observation();
+                break;
+            }
+        }
+        return UIApplicationMain(argc, argv, nil, NSStringFromClass(BOTWDelegate.class));
+    }
 }

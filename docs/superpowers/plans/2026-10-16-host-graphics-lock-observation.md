@@ -36,3 +36,22 @@ producer五路径freeze SHA256 `0e1a004b222317d9d06aba005d50ad743a7333e6232a3e25
 c31实际诊断已闭合。固定binary SHA `b945f91d756ef7ff945d2ef99de84726c9690d1fa3dd4bbec1130c95b940d69f`，PID63302，10/30/90/180秒四次均为w_nvnMemoryPoolMap，generation分别50886/282877/423024/628736，held分别43/27/546/636微秒，lifecycle1且同owner。generation变化排除一轮不间断持锁横跨四采样的解释，不证明其它入口或未采样区间没有阻塞。公开libproc独立5.005秒两点CPU4.863秒（97.166%单核）、归账磁盘IO0；没有推具体guest循环或缓存读取量。
 
 四样本后仍无host_return/真实frame，先保存有界日志SHA和精确磁盘binary SHA、LC_UUID、proc_start身份及正常ps，再SIGTERM自有有限诊断；launcher随后完整exit0、目标进程消失。该结束明确为agent-stop，不是guest完成，未调用普通terminal recorder。checkpoint `outputs/botw-host39-mac-c31ef9a/host-lock-checkpoint.json` SHA `4a4b3195383d732fa30470e550ba073d682f58859054ff4a6ff3c8cf700079c7`，另存agent-stop及launcher回执，GPU已释放给3D自有夹具。桌面接口仍报告Mac锁屏，未取得屏幕核验，不据系统单一字段反推屏幕状态。
+
+
+## iOS 后继：复用有限宿主观测
+
+b7bd5a2已完整测试、双CI及工件核验后保数据更新iPhone12/PID1181。37.683秒与261.208秒两份完整boot采样均13线程/无host_return/error/frame；后续541.937、680.120、791.321、952.261、1106.370及1168.611秒只查公开文件metadata，大小51,587,549和mtime均同首份，没有新frame文件。1190.152秒进程查询仍见PID1181。用户直接反馈新版仍黑或灰。后续metadata不冒充重新读过boot内容，不以无日志断言具体guest循环、死锁或3D已通过。
+
+固定b7的只读锁范围审查确认run_lock跨整次guest，但display/input/frame count不取它；lifecycle在DT_INIT/nnMain前已释放，input及VI就绪状态不等guest返回。仍有display持lifecycle同步取graphics、input链等可能等待路径；没有当前实际持锁状态证据。审计收据 `outputs/botw-lifecycle-display-lock-audit/b7-kernel-peer/receipt.json` SHA dce371e776064b9b4c40fb13e1bcbd62c0237a9bcaeb1d509fc293f7f37241ac。
+
+当前运行继续保留，同时实施明确opt-in的iOS有限观测；它用于取得宿主状态，不宣称修复黑灰画面。方案收据 `outputs/botw-ios-lock-observation-plan-audit/graphics-owner/receipt.json` SHA458c7594ffc6999d1c270125841a8923c6fc9f54c926cedf72983c22d4e18675。
+
+- [x] 先有可运行CPU行为RED，将既有mac完整consumer迁入现有BOTWEventLog.m/h中的独立C/GCD路径，两个前端复用单套cap4；不经过其UI NSLock/append/handler/hostEvent，不改graphics producer和资源行为。native仍98，上限/schema不变。
+- [x] iOS仅精确argv token在UIApplicationMain前pre-start启用；无flag零producer/queue/read/output。boot stdout/stderr接通后首次pthread_create成功才start_once，scene/audio重试不重排；晚启拒绝不改变游戏返回/错误/回调。保原argv及默认启动。
+- [x] Mac原consumer合同及全部链接调用点迁移，EventLog独立测试用host-only producer stubs；验证默认off、状态/时间边界、独立serialqueue、主线程阻塞仍首采、四次上限及重复start。iOS主函数/线程启动用明确投影的真实函数体与host stubs核顺序/失败路径，不将它等同实际UIKit或屏幕验收。
+- [ ] 双独审冻结，root精确提交推送，固定完整测试、精确head双CI与官方工件后再保数据更新当前手机。继续保留旧普通运行直到下一次实际安装启动决定，所有旧证据不覆盖。
+- [ ] 真机fresh launch核explicit argv/PID/唯一新bootstrap，取得至多4条普通boot中的host-only样本；默认off对照及c31原producer测试仍保。若出现新的实际fatal则回到该功能边界，不把观察结果当游戏完成。
+
+采样仍仅静态NVN入口名、lock-free宿主原子及宿主时钟/线程标量，不读guest PC/栈/堆/对象或VM、不新增validator，不驱动display/VI/input/时钟，不取graphics/lifecycle锁。iOS挂起、调度或stdio可使点迟到/缺失；观察者无新增后台权限。当前PID不能中途补启，后续明确新进程启动才生效。
+
+后继共享consumer已双独审CLOSED，freeze2 dd4d8828；owner18项/17PASS+1旧条件skip14.285秒，kernel6/6 0.498秒，linear12/12 14.069秒+3自有ASan/UBSan模式完整0。新增off-start后enable边界先真RED91，再只调整started封口顺序；原Mac核心逆剥时明确此额外delta。原producer/UI日志body不改，native98。现b7普通运行已有新首fatal：MemoryPoolInitialize Metal allocation failed（obs3报告c3eaa4a1…），转向两个失败分支的有限参数诊断。此观测实现先归档，不单独安装；下一连贯候选统一完整流水线后按需要显式启动，不把本计划当无帧原因证明。

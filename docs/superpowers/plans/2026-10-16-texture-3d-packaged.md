@@ -24,7 +24,8 @@
 ## Task 3：完整候选与真机
 
 - [x] 固定连贯提交完整测试、精确head双CI与官方无游戏工件核后本机签名，保数据更新当前iPhone12，继续核UID/RomFS/shader（b7bd5a2/PID1181，首样本无真实frame）。
-- [ ] 独立普通运行取得下一实际停止点或真实画面；通过操作、音频、存档及重开才可称可玩。
+- [x] 独立普通运行取得下一实际停止点：b7手机observation-3完整return1，首错为MemoryPoolInitialize Metal分配失败，分支/大小未知。
+- [ ] 取得真实游戏画面，并通过操作、音频、存档及重开验收。
 
 ## Root 实施域决定（合同闭合后）
 
@@ -53,3 +54,5 @@ a1普通Mac仅取得非终态检查点，没有host_return或真实frame。保�
 测试前提最终freeze820cc211已双独审CLOSED，7项纯mock CPU全过；M3 Max公开Apple7=true，4方法/17native模式在该冻结测试上完整通过5.020秒、零跳过、MetalValidation启用。生产98项逐字节同a1；将据此精确提交并跑完整候选，不重复占用GPU运行尚未取得终态的Mac原游戏。
 
 b7bd5a2固定全套1041项/1040通过+1条件跳过，648项源码稳定；iOS38884375964及Linux38884375878精确head均成功。iOS真实Paravirtual Apple7=false已独立核mock上下文及官方head两测试SHA，992项/45条件跳过；flags0-read完成，counter method条件不具备，未报write-noimage执行。官方无游戏工件核98源后本机组装签名、保数据更新iPhone12/PID1181，IPA SHA33f34a74e2591415c455230d3717c1b809b0c09f91b05b4c36ff6bba4f5b6b9d。首份37.683秒观察仍非终态：13线程，无host_return/error/frame，不能说已通过原Init；UID/RomFS大小mtime/shader/权限保全，约14.4GB资源无重传。后续继续普通观察，完成实际游戏验收前保持Task3第二项未完成。
+
+b7后续obs3已完整return1/13线程/无frame，首个NVN错误变为MemoryPoolInitialize Metal分配失败，两个同文案分支尚不能区分。累计boot51,588,872、fresh2,178,248字节SHAf6c4fb34bf925c3185c63fe3de413885c2bc9935e10020139f6ee640be305fee，报告c3eaa4a1330ccc8db7ce4d2e802d34fe9063d0b2d477b8aa1aa87dfa5559ce1a；资源再次fresh核保全。没有据此将并发调用中所有3D资源宣称为已验收。后继纯失败诊断与默认off的共享宿主观测合成候选，继续当前手机主线。
