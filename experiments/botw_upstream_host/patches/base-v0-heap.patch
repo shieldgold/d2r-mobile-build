@@ -1,0 +1,156 @@
+--- a/dm/host/thread.c
++++ b/dm/host/thread.c
+@@ -1,26 +1,41 @@
+ // Guest thread environment: gate slot = host gate entry; x18 slot cleared; tpidr_el0 slot = ELF TLS block; tpidrro_el0 slot = Horizon ThreadLocalRegion (0x200).
+ // The SDK's internal critical section takes the current thread object pointer from TLR[0x1f8]; here each thread gets a zero-initialized object allocated and written in.
+ #include "dm.h"
++#include "base_v0_heap.h"
+ #define TLS_SIZE 8192
+ #define TLR_SIZE 0x200
+ #define THREAD_OBJ_SIZE 0x400
+ extern void dm_gate(void);            // entry.S: common gate entry
+ void (*g_guest_thread_params)(void);   // Installed when the title is chosen (dm_title.h on_select); NULL = no parameter slots
++static void base_v0_thread_params(void) {
++    char error[256];
++    if (botw_base_v0_heap_thread_init(g_keyres[0], g_keyres[1], dm_guest_heap_plan_inputs,
++            error, sizeof error)) die("%s", error);
++}
++void botw_base_v0_heap_enable(void) {
++    if (g_guest_thread_params && g_guest_thread_params != base_v0_thread_params)
++        die("base-v0 heap: another title owns thread parameters");
++    g_guest_thread_params = base_v0_thread_params;
++}
+ static pthread_key_t g_keyown;   // Raw pointers of the TLS block / thread-local region allocated by this thread (see the end of the function)
+ static pthread_once_t g_keyown_once = PTHREAD_ONCE_INIT;
+ static void own_free(void *p) { void **own = p; free(own[0]); free(own[1]); free(own); }
+ static void own_key_init(void) { if (pthread_key_create(&g_keyown, own_free)) die("failed to create the TLS-block release key"); }
+ void guest_thread_init(void) {
+-    pthread_setspecific(g_keygate, (void *)dm_gate);
++    if (pthread_setspecific(g_keygate, (void *)dm_gate)) die("failed to install thread gate TSD");
+     // Title parameter slots (Diablo II: resolution / aspect ratio, see d2r_thread_params in title_d2r.c); other titles set none and the key slots stay 0
+     if (g_guest_thread_params) g_guest_thread_params();
+-    pthread_setspecific(g_key18, 0);
++    if (pthread_setspecific(g_key18, 0)) die("failed to clear guest x18 TSD");
+     // These two blocks are freed when the thread exits. The guest overwrites the slots of the TLS / thread-local-region keys (it sets its own thread pointer), so they cannot be freed by the current value in the key:
+     // the raw pointers that were allocated are recorded separately on this file's own key g_keyown and freed by its destructor (key destructors are called at pthread_exit, same as the signal alternate stack, crash.c altstack_free;
+     // the destructor only calls free, which is safe on the small stack of a guest thread as well). They used not to be freed: the game starts short-lived threads frequently, and each leaked 8192 + 0x200 + 0x400 = 9728 bytes.
+     // The thread-local region and the current thread object are merged into one block (the slot TLR[0x1f8] may also be overwritten by the SDK)
+     void **own = calloc(2, sizeof *own); uint8_t *tlr = calloc(1, TLR_SIZE + THREAD_OBJ_SIZE);
++    if (!own || !tlr) { free(own); free(tlr); die("failed to allocate guest thread ownership/TLR"); }
+     own[0] = calloc(1, TLS_SIZE); own[1] = tlr;
++    if (!own[0]) { free(tlr); free(own); die("failed to allocate guest thread TLS"); }
+     *(void **)(tlr + 0x1f8) = tlr + TLR_SIZE;               // current thread object
+-    pthread_once(&g_keyown_once, own_key_init); pthread_setspecific(g_keytls, own[0]); pthread_setspecific(g_keytlr, tlr); pthread_setspecific(g_keyown, own);
++    if (pthread_once(&g_keyown_once, own_key_init) || pthread_setspecific(g_keytls, own[0]) ||
++            pthread_setspecific(g_keytlr, tlr) || pthread_setspecific(g_keyown, own))
++        die("failed to install guest thread TLS/TLR ownership TSD");
+ }
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -4,6 +4,7 @@
+ #include "hle.h"
+ #include "dm_title.h"
+ #include "hle_thread_core.h"
++#include "base_v0_heap.h"
+ #include <stdatomic.h>
+ #include <sys/mman.h>
+ #include <errno.h>
+@@ -21,7 +22,8 @@
+ // with an 8 GB reservation, builds from developer accounts that cannot sign that entitlement (free accounts) would exit at this step.
+ #define RESERVE (5ull << 30)
+ static uint8_t *g_as;              // ASLR region base = the whole block
+-static uint8_t *g_heap; static size_t g_heap_cur, g_heap_cap; static int g_heap_rejects;
++static uint8_t *g_heap; static _Atomic size_t g_heap_cur; static size_t g_heap_cap; static int g_heap_rejects;
++static pthread_mutex_t g_heap_resize_lock = PTHREAD_MUTEX_INITIALIZER;
+ // The address range lies entirely within the currently opened (readable and writable) part of the guest heap: such reads need no kernel trap to check, memcpy directly (used where guest memory is read every tick, such as diag.c tk_rd)
+ int dm_guest_heap_readable(uint64_t a, size_t n) { uint64_t b = (uint64_t)(uintptr_t)g_heap; size_t cur = g_heap_cur; return g_heap && a >= b && n <= cur && a - b <= cur - n; }
+ static uint8_t *g_alias; static size_t g_alias_cap;
+@@ -50,6 +52,24 @@
+ // +512 rather than more: to leave room for devices with 6 GB of RAM; to be revisited once there are readings of the limit on real devices.
+ static uint64_t app_pool(void) { static uint64_t v; if (!v) { const char *e = getenv("DM_APP_POOL_ADD_MB"); long add = e ? atol(e) : 512; v = APP_POOL + ((uint64_t)add << 20); if (e) LOG("DM_APP_POOL_ADD_MB: application memory pool reported as %llu MB (Switch's 3285 MB %+ld)", (unsigned long long)(v >> 20), add); } return v; }
+ static size_t image_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) n += g_mod[i].size; return (n + 0x1fffff) & ~(size_t)0x1fffff; }
++
++/* Normal allocator capacities only. The plan query never takes the resize
++ * lock: SVC resize -> plan lock -> immutable allocator metadata / OS query. */
++int dm_guest_heap_plan_inputs(botw_base_v0_heap_inputs *out, char *error, size_t capacity) {
++    if (!out) return -1;
++    mem_init();
++    uint64_t pool = app_pool(); size_t image = image_bytes();
++    if (pool < image || pool - image > SIZE_MAX) {
++        if (error && capacity) snprintf(error, capacity, "base-v0 heap: invalid allocator pool/image accounting");
++        return -1;
++    }
++    size_t available = (size_t)(pool - image);
++    if (available > g_heap_cap) available = g_heap_cap;
++    size_t live = 0;
++    if (botw_base_v0_heap_live_available(&live, error, capacity)) return -1;
++    *out = (botw_base_v0_heap_inputs){available, live, image}; return 0;
++}
++size_t dm_guest_heap_current(void) { return atomic_load(&g_heap_cur); }
+ 
+ // Game main heap readout: the main heap = the nn::mem::StandardAllocator at main+0x32137a0 (the whole heap block is handed to it at startup). A failed allocation returns null, and the original game writes through it without a null check in many places
+ // (after 82 minutes of boss rush, the asynchronous disk-read callback main+0x27ecdc asked for a contiguous 765 KB block, got null, and memset wrote to address 0; the process resident memory does not show this).
+@@ -146,17 +166,29 @@
+     if (svc_thread(num, regs)) return regs[0];
+     if (num >= 0x80) { const dm_title_desc *T = dm_title(); if (T->svc_host_call && T->svc_host_call(num, regs)) return regs[0]; }   // from 0x80: the title's own cut host calls (Diablo II: hle_tact.c); titles without them fall through to the unknown SVC below
+     switch (num) {
+-    case 0x01: {  // SetHeapSize(out_addr*, size)  → x1 = heap base
+-        size_t size = regs[1];
+-        if (size > g_heap_cap) { LOG("SetHeapSize OOM: req %#zx > cap %#zx", size, g_heap_cap); regs[0] = 0xD401; return 0; }
+-        if (size + image_bytes() > app_pool()) { g_heap_rejects++; regs[0] = 0x10801; return 0; }   // Exceeds the application memory pool: ResultLimitReached. At startup the game retries in 2 MB decrements until it fits (main+0x1b66184)
++    case 0x01: {  // SetHeapSize: same upstream backing, checked before publication.
++        size_t size = regs[1]; char heap_error[256] = {0};
++        pthread_mutex_lock(&g_heap_resize_lock);
++        int initial = botw_base_v0_heap_initial_pending();
++        regs[0] = 0xd001; // Real Horizon OutOfMemory on failed admission/permission change.
++        if (size & 0x1fffffu) { regs[0] = 0xca01; snprintf(heap_error, sizeof heap_error, "unaligned heap size"); goto heap_failed; }
++        if (size > g_heap_cap || image_bytes() > app_pool() || size > app_pool() - image_bytes()) {
++            g_heap_rejects++; snprintf(heap_error, sizeof heap_error, "allocator capacity or pool exceeded"); goto heap_failed;
++        }
++        if (botw_base_v0_heap_admit(size, g_heap_cur, heap_error, sizeof heap_error)) goto heap_failed;
+         int rc = 0;
+         if (size > g_heap_cur) rc = mprotect(g_heap + g_heap_cur, size - g_heap_cur, PROT_READ | PROT_WRITE);
+         else if (size < g_heap_cur) rc = mprotect(g_heap + size, g_heap_cur - size, PROT_NONE);
+-        if (g_flag.svc) LOG("SetHeapSize %#zx -> base %p mprotect=%d errno=%d", size, g_heap, rc, errno);
+-        { static int said; if (!said && size) { said = 1; LOG("SetHeapSize: first heap sizing succeeded at %zu MB (application pool %llu MB - image %zu MB; %d rejections before)", size >> 20, (unsigned long long)(app_pool() >> 20), image_bytes() >> 20, g_heap_rejects); } }
+-        g_heap_cur = size;
+-        regs[0] = 0; regs[1] = (uint64_t)g_heap; return 0;
++        if (rc) { snprintf(heap_error, sizeof heap_error, "mprotect failed: %s", strerror(errno)); goto heap_failed; }
++        if (botw_base_v0_heap_record(size, heap_error, sizeof heap_error)) goto heap_failed;
++        g_heap_cur = size; regs[0] = 0; regs[1] = (uint64_t)g_heap;
++        pthread_mutex_unlock(&g_heap_resize_lock); return 0;
++heap_failed:
++        pthread_mutex_unlock(&g_heap_resize_lock);
++        /* This fixed startup ignores a failed allocation before consuming x1.
++         * Stop on its first failure; ordinary later resizes retain Result errors. */
++        if (initial) die("base-v0 initial heap sizing failed: %s", heap_error);
++        return 0;
+     }
+     case 0x02: regs[0] = 0; return 0;   // SetMemoryPermission
+     case 0x03: regs[0] = 0; return 0;   // SetMemoryAttribute
+--- a/dm/host/title_botw.c
++++ b/dm/host/title_botw.c
+@@ -3,6 +3,7 @@
+ #define HLE_FORCE_TITLES DM_TM_BOTW   // The forced takeover entries in this file belong to Breath of the Wild only
+ #include "hle.h"
+ #include "dm_title.h"
++#include "base_v0_heap.h"
+ 
+ // Native time startup installs a libc callback backed by Horizon time services.
+ // Keep the SDK counter callback; botw_time.c hosts the imported nn::time APIs.
+@@ -21,9 +22,14 @@
+     NULL,
+ };
+ static const char *const botw_modules[] = {"main", "subsdk0", "sdk", NULL};
++static void base_v0_before_nnmain(void) {
++    char error[256];
++    if (botw_base_v0_heap_verify(dm_guest_heap_current(), error, sizeof error)) die("%s", error);
++}
+ static const dm_title_desc botw_title = {
+     .id = DM_TITLE_BOTW, .name = "botw", .argv0 = "BotW", .program_id = 0x01007EF00011E000ull, .modules = botw_modules,
+     .force_also = botw_force_also,
+-    // All other hooks empty: no Diablo II probes / tick gate / prefetch / cut host calls / thread parameter slots / App form
++    .on_select = botw_base_v0_heap_enable, .before_nnmain = base_v0_before_nnmain,
++    // Remaining hooks stay empty; no foreign-title thread parameters are installed.
+ };
+ DM_TITLE_REGISTER(botw_title);

@@ -213,6 +213,25 @@ def main() -> int:
             argv += ["-framework", framework]
         run("whole-host-link-only", argv + ["-o", str(executable)])
         receipt.update({"link_exit": 0, "link_executable_sha256": sha(executable)})
+        # Inspect the actual linked file for this target. iOS conditional
+        # compilation may change registration; a Mac table cannot prove it.
+        registry_path = output / "swforce-registry.json"
+        run("swforce-static-audit", [sys.executable,
+            str(component / "scripts/read_swforce_registry.py"),
+            "--input", str(executable), "--output", str(registry_path),
+            "--expect-metadata-sha256", lock["swforce_metadata_sha256"]])
+        registry_bytes = registry_path.read_bytes()
+        registry = json.loads(registry_bytes)
+        if (registry["binary_sha256"] != receipt["link_executable_sha256"] or
+                sha(executable) != receipt["link_executable_sha256"] or
+                registry["expected_registry_verified"] is not True or
+                registry["canonical_metadata_sha256"] != lock["swforce_metadata_sha256"] or
+                registry["count"] != lock["swforce_record_count"]):
+            raise ValueError("linked executable/static registry identity changed")
+        receipt["swforce_registry"] = {
+            "report_sha256": hashlib.sha256(registry_bytes).hexdigest(), "count": registry["count"],
+            "canonical_metadata_sha256": registry["canonical_metadata_sha256"],
+            "actual_linked_binary_verified": True}
         if sha(lock_path) != receipt["source_lock_sha256"] or verify_sources(component, lock) != before:
             raise ValueError("source changed during build")
         if any((repository / p).is_symlink() or sha(repository / p) != row["sha256"]

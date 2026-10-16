@@ -1,0 +1,106 @@
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -11,6 +11,7 @@
+ #include "hle.h"
+ #include "dm_title.h"
+ #include "relr.h"
++#include "base_v0_force.h"
+ 
+ module_t g_mod[MAX_MOD];
+ int g_nmod;
+@@ -122,6 +123,7 @@
+ static void force_init(void) {
+     dm_title_select();   // The mask follows the current title (normally already chosen in host_preload)
+     unsigned long sz; g_force = (const hle_force_ent *)getsectiondata(&_mh_execute_header, "__DATA", "swforce", &sz);
++    if (g_force && sz % sizeof *g_force) die("base-v0 force registry layout mismatch");
+     g_nforce = g_force ? (unsigned)(sz / sizeof *g_force) : 0;
+     g_force_hits = calloc(g_nforce + 1, sizeof *g_force_hits); g_force_on = calloc(g_nforce + 1, 1);
+     unsigned mask = DM_TM(g_dm_title);
+@@ -132,6 +134,14 @@
+         for (unsigned i = 0; i < g_nforce; i++) if (!strcmp(g_force[i].name, *a)) { g_force_on[i] = 1; hit = 1; }
+         if (!hit) die("title %s's force_also lists %s, but this binary has no such forced takeover entry", dm_title()->name, *a);
+     }
++    /* Select only the fixed base-v0 by-name relocation contract. The source
++     * registry, implementations, duplicate check and strict hit check remain. */
++    if (base_v0_force_registry_begin()) die("base-v0 force identity unavailable");
++    for (unsigned i = 0; i < g_nforce; i++)
++        if (base_v0_force_registry_entry(g_force[i].name, g_force[i].titles,
++                g_force[i].why, g_force_on[i], g_force[i].fn != NULL, &g_force_on[i]))
++            die("base-v0 force registry mismatch");
++    if (base_v0_force_registry_end()) die("base-v0 force registry incomplete");
+     g_force_active = 0;
+     for (unsigned i = 0; i < g_nforce; i++) {
+         if (!g_force_on[i]) continue;
+@@ -140,9 +150,10 @@
+             if (g_force_on[j] && !strcmp(g_force[i].name, g_force[j].name)) die("duplicate forced takeover entry: %s", g_force[i].name);
+     }
+ }
+-static void *force_lookup(const char *name) {
++static void *force_lookup(module_t *owner, const char *name) {
+     for (unsigned i = 0; i < g_nforce; i++)
+         if (g_force_on[i] && !strcmp(g_force[i].name, name)) {
++            if (base_v0_force_reference(owner->name, name)) die("base-v0 force reference mismatch");
+             if (!g_force_hits[i]++ && g_flag.imports) LOG("force %s  (%s)", name, g_force[i].why);
+             void *hlecount_wrap(const char *, const char *, void *); return hlecount_wrap("FORCE", name, g_force[i].fn);   // A counting stub when DM_HLECOUNT is set
+         }
+@@ -254,7 +265,7 @@
+             unsigned type = ELF64_R_TYPE(r->r_info), si = ELF64_R_SYM(r->r_info);
+             if (type == R_AARCH64_RELATIVE) { *where = (uint64_t)m->base + r->r_addend; cnt[0]++; continue; }
+             const Elf64_Sym *s = &m->symtab[si];
+-            uint64_t v = (uint64_t)force_lookup(m->strtab + s->st_name);
++            uint64_t v = (uint64_t)force_lookup(m, m->strtab + s->st_name);
+             if (!v) v = s->st_shndx ? (uint64_t)m->base + s->st_value : resolve_sym(m, m->strtab + s->st_name);
+             if (type == R_AARCH64_JUMP_SLOT) { *where = v; cnt[2]++; }
+             else { *where = v + r->r_addend; cnt[1]++; }       // ABS64 / GLOB_DAT
+@@ -308,6 +319,17 @@
+     }
+ }
+ 
++/* Authenticate the immutable byte stream before key-page or relocation
++ * writes. Hash signed sections incrementally; never copy a full Guest image. */
++static void base_v0_verify_image(module_t *m, const void *const *parts,
++                                 const size_t *lengths, size_t count, int padded) {
++    base_v0_force_layout layout = {m->text_end, m->ro_off, m->data_off,
++        m->patch_off, m->key_page_off, m->key_page_size, {0}};
++    memcpy(layout.key_idx, m->key_idx, sizeof layout.key_idx);
++    if (base_v0_force_image(m->name, &layout, parts, lengths, count, padded))
++        die("base-v0 force image identity mismatch");
++}
++
+ #if TARGET_OS_IPHONE
+ // iOS does not allow code loaded at run time to execute, and Apple allows an executable only one segment with execute permission (ITMS-90999): the image is compiled into this executable by dm/ios/tools/gen_embed.py --
+ // the two code blocks (original text, patch area) are sections in __TEXT, and W (the rest of ro + data + bss) is a separate RW segment. The three blocks are not adjacent in the file; here one contiguous address range is reserved,
+@@ -346,6 +368,8 @@
+     if (!x0 || !w || !x1) die("embedded sections %s / %s / %s missing", sx0, dm, sx1);
+     if (z0 + zw != m->patch_off || (z0 & 0x3FFF) || (zw & 0x3FFF) || (z1 & 0x3FFF) || ((uintptr_t)x0 & 0x3FFF) || ((uintptr_t)w & 0x3FFF) || ((uintptr_t)x1 & 0x3FFF))
+         die("%s embedded section layout mismatch (x0 %#lx w %#lx x1 %#lx, PATCH_OFF %#llx)", m->name, z0, zw, z1, (unsigned long long)m->patch_off);
++    const void *parts[3] = {x0, w, x1}; size_t lengths[3] = {z0, zw, z1};
++    base_v0_verify_image(m, parts, lengths, 3, 1);
+     m->size = m->patch_off + z1;
+     vm_address_t base = 0;
+     if (vm_allocate(mach_task_self(), &base, m->size, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) die("%s failed to reserve %#zx bytes of address space", m->name, m->size);
+@@ -369,6 +393,8 @@
+ static void map_image(module_t *m, const char *dir) {
+     char path[1024]; snprintf(path, sizeof path, "%s/%s.patched.bin", dir, m->name);
+     size_t sz; uint8_t *raw = slurp(path, &sz);
++    const void *parts[1] = {raw}; size_t lengths[1] = {sz};
++    base_v0_verify_image(m, parts, lengths, 1, 0);
+     m->size = (sz + 0x3FFF) & ~0x3FFFull;
+     m->base = mmap(NULL, m->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+     if (m->base == MAP_FAILED) die("%s mmap", m->name);
+@@ -381,6 +407,7 @@
+ #endif
+ 
+ void load_modules(const char *dir, const char **names, int n) {
++    if (n < 0 || base_v0_force_begin(names, (size_t)n)) die("base-v0 force module profile mismatch");
+     // Map everything and parse the symbol tables first, then relocate all at once (cross-module symbols must all be in place first)
+     // DM_BOOTPROF: breakdown of ① host loading (milliseconds), to set the upper bound for ③ pre-relocation / mmap
+     uint64_t t0 = now_ns(), tm = 0, tp = 0, tg = 0, tr = 0, t;
+@@ -401,6 +428,7 @@
+     }
+     force_init();
+     t = now_ns(); for (int i = 0; i < g_nmod; i++) relocate(&g_mod[i]); tr = now_ns() - t;
++    if (base_v0_force_references_end()) die("base-v0 force references incomplete");
+     force_check();
+     { void hlecount_seal(void); hlecount_seal(); }   // DM_HLECOUNT: relocation done, seal the counting stub pages as read-only executable
+     if (getenv("DM_SYMCHECK")) LOG("DM_SYMCHECK: %lu symbol lookups checked during loading, hash vs linear mismatches %lu", g_symchk_n, g_symchk_bad);

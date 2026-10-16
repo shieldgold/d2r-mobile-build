@@ -1,0 +1,63 @@
+{
+  "guest_final_image_sha256": "cba191507c56577c3b81d61f7c32c3873a3bcfd980537a43b806bf6ab38458f7",
+  "heap_manifest": {
+    "input_image_bytes": 37723204,
+    "input_image_sha256": "dba3105888571a9e11bd07bec9ef921341b12e4c03c944b39379cc0a0a05f87c",
+    "layout": {
+      "KEY_KRES0_IDX": 4,
+      "KEY_KRES1_IDX": 5,
+      "KEY_PAGE_OFF": 37240832,
+      "PATCH_OFF": 37289984
+    },
+    "module": "main",
+    "output_image_bytes": 37723268,
+    "output_image_sha256": "ce71996b482072ac62cffe8b29ece8cdc46b1e1e4d272a0661b0f974a500ca75",
+    "patches": [
+      {
+        "branch_bytes": "50127314",
+        "context": "fd030091ff4300d1004cb85222f43b94e0230091",
+        "offset": 7557892,
+        "register": 0,
+        "slot": "KRES0",
+        "thunk_bytes": "f0031ff860d03bd550fcfff0101240f90000108b000040f9f0035ff8aaed8c17",
+        "thunk_offset": 37723204
+      },
+      {
+        "branch_bytes": "2d127314",
+        "context": "e0430091a2230b94080cb852e0430091e80b00f9",
+        "offset": 7558064,
+        "register": 8,
+        "slot": "KRES1",
+        "thunk_bytes": "f0031ff868d03bd550fcfff0101640f90801108b080140f9f0035ff8cded8c17",
+        "thunk_offset": 37723236
+      }
+    ],
+    "profile": "botw-switch-base-v0-bounded-heap-v1",
+    "schema": 1,
+    "slots": {
+      "heap": "KRES0",
+      "root": "KRES1"
+    },
+    "source_image_sha256": "4af35ab17f7afe8851c4ff559e43b18b564cbfd6d97e5a5c977753370d3c1026"
+  },
+  "limitations": [
+    "No second kernel or allocator is linked.",
+    "No guest execution, object reads or diagnostic memory sampling is required.",
+    "Memory availability is advisory and may change; this is not a residency or gameplay guarantee."
+  ],
+  "limits": [
+    "single upstream SVC allocator capacity and pool minus exact existing image accounting",
+    "fresh iOS os_proc_available_memory; unsupported query fails",
+    "256 MiB host reserve; 2 MiB alignment; root minimum 512 MiB is an experimental guard"
+  ],
+  "planner_body_sha256": "b651fd9839e9dc9433e90203f92e285ea5195719da18bbd90413c3a5e0743a3c",
+  "planner_source": "native/botw_host/runtime.c:470",
+  "policy_tag": "botw-switch-base-v0-bounded-heap-v1",
+  "schema": 1,
+  "selection_timing": "first actual guest_thread_init before SDK initialization; the initial real SVC growth is admitted again against a fresh limit",
+  "thread_stack_profile": "botw-switch-base-v0-pthread-stack-v4",
+  "values": {
+    "KRES0": "initial SDK heap capacity in bytes",
+    "KRES1": "root arena capacity in bytes; heap minus 32 MiB"
+  }
+}
