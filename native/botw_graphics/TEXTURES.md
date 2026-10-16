@@ -53,13 +53,13 @@ GPU 私有的最新内容建立 `texown` claim。别名纹理、buffer 地址以
 
 BuilderGetStorageClass 与 TextureGetStorageClass 共用纯元数据规则：target 为 BUFFER 或 flags 含 `0x10/0x40` 任一位时返回 `0x100`。这来自原版 base-v0 SDK 的独立分支：raw kind 为 0，最终编码为 `0x100 | rawKind`。Builder 查询允许尚未 SetStorage；该分支与 format、维度、samples、device 和 pool 均无关，不因 Metal 尚不支持该格式而拒绝，也不会调用 Metal。它不代表 GPU 创建能力；BUFFER 的存储尺寸/类别可查，当前 GPU BUFFER texture 创建仍明确拒绝。
 
-非 pitch 路径仅在 `COMPRESSIBLE` 位清除、format 属于原版有效普通颜色集合时返回 `0x1fe`。固定原版 `subsdk0` 的格式记录宽 `0x34`，`+0x30` 的有效字段非零且 `+0xe/+0xf` 的 depth/stencil 位数均为零者，在本桥声明的 `0x01..0x9c` 中恰有 113 项：`01..18`、`22..30`、`37..50`、`6d..9c`。37 个原记录有效字段为零的格式、6 个 depth/stencil 格式和越界枚举不进入普通 color 路径。准入来自原版 traits，独立于 Metal 格式映射，不会因为宿主尚不支持某个格式而改变 storage metadata。
+非 pitch 路径在 `COMPRESSIBLE` 位清除、format 属于原版有效普通颜色集合时返回 `0x1fe`；下文另列请求 COMPRESSIBLE 但原 SDK 有效压缩为 0 的已证子集。固定原版 `subsdk0` 的格式记录宽 `0x34`，`+0x30` 的有效字段非零且 `+0xe/+0xf` 的 depth/stencil 位数均为零者，在本桥声明的 `0x01..0x9c` 中恰有 113 项：`01..18`、`22..30`、`37..50`、`6d..9c`。37 个原记录有效字段为零的格式、6 个 depth/stencil 格式和越界枚举不进入普通 color 路径。准入来自原版 traits，独立于 Metal 格式映射，不会因为宿主尚不支持某个格式而改变 storage metadata。
 
 此值由原调用链证明：`BuilderGetStorageClass` 的非压缩分支向 `b6900` 传压缩请求 0；普通颜色参数经 `NvRmGpuDeviceChooseKind` 到 HAL `31294`，选择 vtable `+0x68`。原版 RTTI 标明 GK100 与 GM200 两套 HAL 均将该槽指向 `316c0`，其完整函数只返回 `0xfe`；Builder 最后编码 `0x100 | rawKind`。该路径仍要求有效的 device provider；本桥先核 raw 地址精确对应 registry 中的 live BWDevice，再检查 header 可读且 serial 身份一致。null、未初始化、已 finalize、外来地址、不可读内存或复制了存活 serial 的伪对象均明确拒绝。pool 和 SetStorage 不属于此前置条件，getter 不调用 Metal。
 
 该普通颜色结果不随 samples、尺寸、其余 target 或不相关 flags 改变；samples 和 fast-clear 虽先构造参数，最终常量槽不消费它们。BUFFER 和 linear 仍先走 pitch 规则；`DEPTH16_PREFER_FAST_CLEAR` 的类别选择作用属于 depth 路径。metadata 查询因此不会限制 GPU 创建范围：不支持的 MSAA、3D、BC 解码和 sparse 等仍由原 Initialize/映射入口独立拒绝。这里的未压缩指未请求 GPU 硬件压缩，和 BC/ASTC 数据块压缩格式不同。
 
-Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。硬件压缩请求、下述已证子域之外的 depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
+Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。未证明有效 kind 的硬件压缩请求、下述已证子域之外的 depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
 
 两个现代 RawStorageClass、sparse 和 ZCull 仍未开放；后续 physical/virtual pool 与 MapVirtual 的有限接入范围见 [MEMORY_POOLS.md](MEMORY_POOLS.md)。公开固定上游的 RawStorageClass=1 没有本目标 ABI 证明；其 ordinary-pool `0x100` adapter 也明确属于实验策略。本桥不采用这些未经证明的替代答案。原字节合成 oracle 验证 288 组 pitch Builder、256 组 Texture 已保存 raw byte，以及 4 个需要原生 ChooseKind 的分支边界；这些仅证明元数据，不证明 driver 映射或游戏运行。
 
@@ -77,3 +77,16 @@ BUFFER 或 flags `0x50` 的 pitch 分支仍优先，不读取 provider。其余�
 metadata class `0x101` 等不会开放 MapVirtual、vendor 或 GPU resolver 的 raw kind 集合。本批这些路径仍只接受已证 `0x100/0x1fe`。MapVirtual 正常 policy 拒绝信息追加已快照请求的 index 和 storageClass，失败不发布映射或代际。每轮图形生命周期前四个已成功 publish 的 physical pool 输出 `physical_pool_initialized=true kind=... flags=... bytes=... segments=...`，不含地址或内容、不追加 VM 查询；失败不计数，完整 shutdown/init 后重置。此 trace 才能独立证明对应 pool 的发布成功，旧错误消失本身不足以作此结论。
 
 测试对五格式分别验证 class/alignment/size、真实只读 Builder/canary、raw samples/压缩边界、大小和多层/mip rounding、64 位 Builder size 与 int getter 的位投影、普通 DEPTH16/DEPTH32F 对象快照及 stale pool；真实 Metal NoCopy 的销毁 ACK 与图形重建验证 trace 上限和 reset。它们不证明原游戏首帧、当前手机已跨过下一停点或可玩。
+
+
+## COMPRESSIBLE 请求与实际压缩资格
+
+原 base-v0 的 `COMPRESSIBLE` 是请求资格，不能直接当作实际压缩布局。原 Builder Class、Alignment、Size 都先检查 provider 的压缩入口，再区分 depth/stencil 和普通 color；对原有效 color，blockWidth 大于 1 或 bytes/block 小于 4 时，无论 provider 内部字段取何值，都将有效 compression 参数设为 0。原 flags 保留不改。R8 是 bw1/bpb1 的合法 color，因此经两 HAL 共同的普通 color 槽得到 raw FE/class1FE，Alignment512，Size 不增加特殊 kind 页 rounding。这是原指令和记录可证的路径，未采用固定上游实验100 token或统一替代kind。
+
+完整原113色彩记录中有65项满足该条件：`01..09`、`0d..10`、`39..3c`、`41..50`、`79..98`。`texture_storage_policy.h` 保存这份固定资格，Class/Align 与 Size/GPU 共用；Class/Align 的原 FE/512 结果不消费 samples 或其它非 pitch flags，并仍要求精确 live provider。其余48项依赖 provider 或压缩 HAL 的 pixel/sample 参数及 fallback，不能统称已实际压缩，也不能统一返回FE。本批它们的 Class 继续拒绝，旧 Size/Alignment 行为未新增原 SDK 完整性承诺。D16 在 color 字节条件之前进入 depth 分支，不能因 bpb2 套用这份资格；depth COMPRESSIBLE 仍不支持。
+
+新增 flags8 的 Size/GPU 子域限定原始 samples0，以及 flags8 与 DISPLAY1/IMAGE4 的组合；VIDEO_DECODE2、SPARSE20、MINIMAL_LAYOUT200、fast-clear 和未知位不借此开放布局或创建。无 COMPRESSIBLE 的旧域保持原行为。Size 保留原 GOB 算法、维度/mip/array/packaged-layout 边界；GL name 非0先返回0，再考虑 provider 或 geometry，packagedData 对 metadata 始终只是不解引用的 opaque 指针。Class/Align 各守原 provider 条件。Texture 仍保存64位大小快照，getter显式投影为signed low32；Builder/Texture/descriptor 的原 flags8 均可读回，不会被归一操作清除。
+
+virtual 纹理只对这个已证有效 compression0 的新布局子域请求现有 FE kind；vendor Map 类、resolver、canonical/alias/generation、authority、整批提交前检查及 NoCopy segment/ACK 合同不变。ordinary Initialize 原先可直接接受 flags8，现在对未证明的 color 余域、depth 压缩或未支持的 flags/samples，在对象写入和实际 Metal 创建前明确拒绝。R8、ASTC 等创建继续独立核原 Metal 格式、设备能力和 target；BC/转换解码、GL/packaged 导入、MSAA及其它未验证语义保留原拒绝。ASTC/BC 的数据块压缩与这里的 NVN 硬件压缩资格是不同合同。
+
+回归使用固定原记录的65正集和48余集、真实只读 Builder/canary、live/伪造/过期 provider、GL早0及受限Size/GPU域。真实 Metal fixture 保留 flags8，验证 virtual R8/已有ASTC的非零图案采样、重映后另一图案、别名、wrong-kind/跨segment整批零写、R8私有GPU权威拒绝重映并保留结果，以及物理pool Finalize真实资源清退和已录旧消费拒绝。这些兼容层证据不表示原游戏已可玩。

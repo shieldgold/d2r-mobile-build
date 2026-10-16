@@ -50,6 +50,41 @@ static int vtDescriptorAttachment(const char *mode,NVNdevice *device,NVNtexture 
      * occurs between the rejection and this independent safe target draw. */
     vt_nvnCommandBufferBeginRecording(command);vt_nvnCommandBufferSetRenderTargets(command,1,cleanTarget,NULL,NULL,NULL);vt_nvnCommandBufferBindProgram(command,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);vt_nvnCommandBufferSetTexturePool(command,&descriptors);vt_nvnCommandBufferBindTexture(command,NVN_SHADER_STAGE_FRAGMENT,0,handle);vt_nvnCommandBufferDrawArrays(command,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);NVNcommandHandle clean=vt_nvnCommandBufferEndRecording(command);vt_nvnQueueSubmitCommands(queue,1,&clean);vt_nvnQueueFinish(queue);const unsigned char expected[]={7,19,31,255};VT_CHECK(vtPixels(&safe,5,3,expected));return 0;
 }
+
+/* COMPRESSIBLE is retained in the request. Synthetic R8 / ASTC bytes use the
+ * existing ordinary FE layout proven by the original format eligibility gate. */
+static int vtCompressionScenario(const char *mode,NVNdevice *device,NVNmemoryPool *physical,NVNmemoryPool *other,NVNmemoryPool *virt,NVNmemoryPool *alias,NVNmemoryPool *host,unsigned char *p,unsigned char *q,unsigned char *ordinary){
+ const size_t page=65536;BOOL astc=!strcmp(mode,"compression-astc"),cross=!strcmp(mode,"compression-cross"),wrong=!strcmp(mode,"compression-wrong-kind"),authority=!strcmp(mode,"compression-authority"),finalize=!strcmp(mode,"compression-finalize");
+ if(astc){NVNT_nvnDeviceGetInteger query=(NVNT_nvnDeviceGetInteger)botw_nvn_bootstrap_loader("nvnDeviceGetInteger");int available=0;query(device,NVN_DEVICE_INFO_SUPPORTS_ASTC_FORMATS,&available);if(!available)return 77;}
+ unsigned width=cross?256:5,height=cross?128:3;int format=astc?NVN_FORMAT_RGBA_ASTC_4x4:NVN_FORMAT_R8;VT_CHECK(vtMap(virt,physical,0,0,2*page,0x1fe));
+ NVNtextureBuilder b;memset(&b,0,sizeof b);vt_nvnTextureBuilderSetDefaults(&b);vt_nvnTextureBuilderSetDevice(&b,device);vt_nvnTextureBuilderSetSize2D(&b,(int)width,(int)height);vt_nvnTextureBuilderSetFormat(&b,(NVNformat)format);vt_nvnTextureBuilderSetFlags(&b,8);vt_nvnTextureBuilderSetStorage(&b,virt,0);NVNtexture texture;VT_CHECK(vt_nvnTextureInitialize(&texture,&b));
+ NVNT_nvnTextureGetFlags flags=(NVNT_nvnTextureGetFlags)botw_nvn_bootstrap_loader("nvnTextureGetFlags");NVNT_nvnTextureGetStorageClass storageClass=(NVNT_nvnTextureGetStorageClass)botw_nvn_bootstrap_loader("nvnTextureGetStorageClass");VT_CHECK(flags(&texture)==8&&storageClass(&texture)==0x1fe);vt_nvnTextureBuilderSetFlags(&b,0);VT_CHECK(flags(&texture)==8);
+ BWTexture *internal=get(&texture,[BWTexture class]);nvn_texdesc descriptor=internal.descriptor;NVNcopyRegion region={0,0,0,(int)width,(int)height,1};nvn_texwrite_plan plan;const char *reason=NULL;VT_CHECK(nvn_texwrite_plan_make(&descriptor,0,0,-1,0,&region,0,0,&plan,&reason)==NVN_TEXWRITE_OK);
+ NSMutableData *first=[NSMutableData dataWithLength:plan.src_bytes],*second=[NSMutableData dataWithLength:plan.src_bytes];VT_CHECK(first&&second);
+ if(astc){/* Same independently documented LDR void-extent encoding as probe_astc.m. */
+  const unsigned char header[]={0xfc,0xfd,0xff,0xff,0xff,0xff,0xff,0xff};const unsigned char rgba[2][4]={{64,128,192,255},{17,34,51,255}};
+  for(unsigned pass=0;pass<2;pass++){unsigned char *bytes=pass?second.mutableBytes:first.mutableBytes;for(size_t i=0;i<plan.src_bytes;i+=16){memcpy(bytes+i,header,8);for(unsigned c=0;c<4;c++)bytes[i+8+c*2]=bytes[i+9+c*2]=rgba[pass][c];}}
+ }else{memset(first.mutableBytes,81,plan.src_bytes);memset(second.mutableBytes,179,plan.src_bytes);}
+ nvn_texwrite_apply(&descriptor,&plan,first.bytes,p);nvn_texwrite_apply(&descriptor,&plan,second.bytes,q);
+ NVNtexture output;VT_CHECK(vtTexture(&output,device,host,1,5,3,1));NVNqueueBuilder qb;NVNqueue queue;vt_nvnQueueBuilderSetDefaults(&qb);vt_nvnQueueBuilderSetDevice(&qb,device);VT_CHECK(vt_nvnQueueInitialize(&queue,&qb));NVNcommandBuffer command;VT_CHECK(vt_nvnCommandBufferInitialize(&command,device));
+ unsigned char controls[2][64]={{0}},codes[2][128]={{0}};for(unsigned i=0;i<2;i++){uint32_t cm=0x98761234,dm=0x12345678;memcpy(controls[i],&cm,4);memcpy(codes[i],&dm,4);controls[i][8]=codes[i][8]=(unsigned char)(0x81+i);vtControls[i]=controls[i];memcpy(ordinary+page+i*128,codes[i],128);}
+ const char *msl="#include <metal_stdlib>\nusing namespace metal;vertex float4 vs(uint v [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[v],0,1);}fragment float4 fs(texture2d<float> t [[texture(0)]]){return t.read(uint2(0));}";
+ botw_graphics_shader_binding sample={BOTW_GRAPHICS_TEXTURE,0,0};VT_CHECK(botw_graphics_register_shader_with_bindings(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,msl,"vs",NULL,0)&&botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,msl,"fs",&sample,1));
+ NVNprogram program;VT_CHECK(vt_nvnProgramInitialize(&program,device));NVNshaderData shader[]={{(uintptr_t)ordinary+page,controls[0]},{(uintptr_t)ordinary+page+128,controls[1]}};VT_CHECK(vt_nvnProgramSetShaders(&program,2,shader));
+ NVNtexturePool descriptors;VT_CHECK(vt_nvnTexturePoolInitialize(&descriptors,host,page+1024,16));vt_nvnTexturePoolRegisterTexture(&descriptors,3,&texture,NULL);const NVNtexture *targets[]={&output};
+ vt_nvnCommandBufferBeginRecording(&command);vt_nvnCommandBufferSetRenderTargets(&command,1,targets,NULL,NULL,NULL);vt_nvnCommandBufferBindProgram(&command,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);vt_nvnCommandBufferSetTexturePool(&command,&descriptors);vt_nvnCommandBufferBindTexture(&command,NVN_SHADER_STAGE_FRAGMENT,0,vt_nvnDeviceGetTextureHandle(device,3,0));vt_nvnCommandBufferDrawArrays(&command,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);NVNcommandHandle draw=vt_nvnCommandBufferEndRecording(&command);
+ if(wrong||cross){
+  if(wrong)VT_CHECK(vtMap(virt,physical,0,0,2*page,0x100));const float green[]={0,1,0,1};NVNcommandHandle clear=vtClear(&command,&output,green),batch[]={clear,draw};BWQueue *queueObject=get(&queue,[BWQueue class]);NSData *arena=digest(queueObject.arena,queueObject.arenaBytes);
+  if(!sigsetjmp(vtJump,1)){vt_nvnQueueSubmitCommands(&queue,2,batch);VT_CHECK(0);}vt_nvnQueueFinish(&queue);poolDrainGPU();VT_CHECK(strstr(botw_graphics_last_error(),wrong?"kind":"crosses Metal backing segments")&&[arena isEqual:digest(queueObject.arena,queueObject.arenaBytes)]);for(unsigned i=0;i<384;i++)VT_CHECK(ordinary[i]==0x23);return 0;
+ }
+ const unsigned char expected[2][4]={{astc?64:81,astc?128:0,astc?192:0,255},{astc?17:179,astc?34:0,astc?51:0,255}};
+ vt_nvnQueueSubmitCommands(&queue,1,&draw);vt_nvnQueueFinish(&queue);VT_CHECK(vtPixels(&output,5,3,expected[0]));
+ if(authority){const float red[]={1,0,0,1};NVNcommandHandle clear=vtClear(&command,&texture,red);vt_nvnQueueSubmitCommands(&queue,1,&clear);vt_nvnQueueFinish(&queue);uint64_t generation=nvn_vpool_generation();int accepted=0;if(!sigsetjmp(vtJump,1))accepted=vtMap(virt,other,0,0,2*page,0x1fe);VT_CHECK(!accepted&&strstr(botw_graphics_last_error(),"authority")&&nvn_vpool_generation()==generation);vt_nvnQueueSubmitCommands(&queue,1,&draw);vt_nvnQueueFinish(&queue);const unsigned char redBytes[]={255,0,0,255};VT_CHECK(vtPixels(&output,5,3,redBytes));return 0;}
+ VT_CHECK(vtMap(virt,other,0,0,2*page,0x1fe));vt_nvnQueueSubmitCommands(&queue,1,&draw);vt_nvnQueueFinish(&queue);VT_CHECK(vtPixels(&output,5,3,expected[1])&&flags(&texture)==8&&storageClass(&texture)==0x1fe);
+ VT_CHECK(vtMap(alias,physical,0,0,2*page,0x1fe));vt_nvnTextureBuilderSetFlags(&b,8);vt_nvnTextureBuilderSetStorage(&b,alias,0);NVNtexture otherTexture;VT_CHECK(vt_nvnTextureInitialize(&otherTexture,&b));vt_nvnTexturePoolRegisterTexture(&descriptors,3,&otherTexture,NULL);vt_nvnQueueSubmitCommands(&queue,1,&draw);vt_nvnQueueFinish(&queue);VT_CHECK(vtPixels(&output,5,3,expected[0]));
+ if(finalize){BWPool *backing=get(physical,[BWPool class]);__weak id resource=backing.buffer?:((BWPoolSegment*)backing.segments[0]).buffer;VT_CHECK(resource);vt_nvnMemoryPoolFinalize(physical);VT_CHECK(!resource);if(!sigsetjmp(vtJump,1)){vt_nvnQueueSubmitCommands(&queue,1,&draw);VT_CHECK(0);}vt_nvnQueueFinish(&queue);poolDrainGPU();VT_CHECK(strstr(botw_graphics_last_error(),"unmapped")&&vtPixels(&output,5,3,expected[0]));}
+ return 0;
+}
 int main(int argc,char **argv){
     VT_CHECK(argc==2);const char *mode=argv[1];if(sigsetjmp(vtJump,1)){fprintf(stderr,"unexpected: %s\n",botw_graphics_last_error());return 92;}
     if(!botw_graphics_init(NULL,vtError,vtControl))return 77;
@@ -63,10 +98,11 @@ int main(int argc,char **argv){
     VT_LOAD(nvnProgramInitialize);VT_LOAD(nvnProgramSetShaders);VT_LOAD(nvnTexturePoolInitialize);VT_LOAD(nvnTexturePoolRegisterTexture);VT_LOAD(nvnDeviceGetTextureHandle);
     size_t page=65536,bytes=page*2;unsigned char *p=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*q=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0),*ordinary=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
     VT_CHECK(p!=MAP_FAILED&&q!=MAP_FAILED&&ordinary!=MAP_FAILED);memset(p,0xa5,bytes);memset(q,0x5a,bytes);memset(ordinary,0x23,bytes);
-    BOOL segmented=!strncmp(mode,"segments-",9);size_t hostPage=(size_t)getpagesize();
+    BOOL segmented=!strncmp(mode,"segments-",9)||!strcmp(mode,"compression-cross");size_t hostPage=(size_t)getpagesize();
     if(segmented)VT_CHECK(vm_inherit(mach_task_self(),(vm_address_t)(p+hostPage),hostPage,VM_INHERIT_NONE)==KERN_SUCCESS);
     NVNdeviceBuilder db;NVNdevice device;vt_nvnDeviceBuilderSetDefaults(&db);VT_CHECK(vt_nvnDeviceInitialize(&device,&db));
     NVNmemoryPool physical,other,virt,alias,host;VT_CHECK(vtPool(&physical,&device,p,bytes,0x189));VT_CHECK(vtPool(&other,&device,q,bytes,0x189));VT_CHECK(vtPool(&virt,&device,NULL,bytes,0x221));VT_CHECK(vtPool(&alias,&device,NULL,bytes,0x221));VT_CHECK(vtPool(&host,&device,ordinary,bytes,0x22));
+    if(!strncmp(mode,"compression-",12)){int result=vtCompressionScenario(mode,&device,&physical,&other,&virt,&alias,&host,p,q,ordinary);botw_graphics_shutdown();VT_CHECK(!munmap(p,bytes)&&!munmap(q,bytes)&&!munmap(ordinary,bytes));if(!result)printf("VIRTUAL_TEXTURE_%s_OK\n",mode);return result;}
     int privateCounter=!strcmp(mode,"private-alias-counter")||!strcmp(mode,"private-copy-counter");int fe=!strcmp(mode,"fe-sample")||!strcmp(mode,"nonoverlap-private")||!strcmp(mode,"private-remap")||privateCounter||!strcmp(mode,"segments-private")||!strcmp(mode,"segments-authority")||!strcmp(mode,"segments-private-cross");int unmapped=!strcmp(mode,"unmapped-init");
     if(!unmapped)VT_CHECK(vtMap(&virt,&physical,0,0,bytes,fe?0x1fe:0x100));
     NVNtexture texture;VT_CHECK(vtTexture(&texture,&device,&virt,!fe,(!strcmp(mode,"fragmented")||!strcmp(mode,"segments-private-cross"))?256:5,(!strcmp(mode,"fragmented")||!strcmp(mode,"segments-private-cross"))?128:3,1));

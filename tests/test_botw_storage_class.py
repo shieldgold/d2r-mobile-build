@@ -24,6 +24,15 @@ int main(void) {
         const int samples[]={-1,1,2,4,8,16,INT32_MAX};
         for(unsigned j=0;j<sizeof samples/sizeof *samples;j++) {kind=0xdead;CHECK(!bw_texture_depth_storage_kind(formats[i],0,samples[j],&kind)&&kind==0xdead);}
     }
+    const unsigned noCompression[]={1,2,3,4,5,6,7,8,9,13,14,15,16,57,58,59,60,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152};
+    for(unsigned format=0;format<0x100;format++) {
+        unsigned known=0;for(unsigned i=0;i<sizeof noCompression/sizeof *noCompression;i++)known|=format==noCompression[i];
+        CHECK(bw_texture_color_disables_compression(format)==(int)known);
+        CHECK(bw_texture_color_compression_layout(format,8,0)==(int)known);
+        CHECK(bw_texture_color_compression_layout(format,13,0)==(int)known);
+        CHECK(!bw_texture_color_compression_layout(format,8,1));CHECK(!bw_texture_color_compression_layout(format,0xa,0));
+    }
+    CHECK(!bw_texture_color_disables_compression(UINT32_MAX));
     unsigned kind=0xdead;CHECK(!bw_texture_depth_storage_kind(0x31,0,0,&kind)&&kind==0xdead);
     CHECK(!bw_texture_depth_storage_kind(0xffffffff,0,0,&kind));CHECK(!bw_texture_depth_storage_kind(0x32,0x50,0,&kind));CHECK(!bw_texture_depth_storage_kind(0x32,0,0,0));
     size_t value=17;CHECK(bw_texture_storage_round_size(512,65536,&value)&&value==65536);
@@ -77,6 +86,30 @@ class StorageClassTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn(expected, run.stdout)
         self.assertNotIn('failed assertion', run.stderr)
+
+    def test_compressible_request_preserves_flags_for_all_65_original_ineligible_colors(self):
+        for mode in ('compression-query', 'compression-query-readonly'):
+            with self.subTest(mode=mode):
+                self.probe(mode, 'COMPRESSIBLE_COLOR_METADATA65_IMMUTABLE_OK cases=260')
+
+    def test_new_compressible_size_scope_does_not_expand_other_metadata_or_msaa(self):
+        self.probe('compression-size-domain', 'COMPRESSIBLE_COLOR_SIZE_SCOPE_IS_NOT_CLASS_SCOPE_OK')
+
+    def test_new_compressible_color_size_keeps_original_gl_early_zero(self):
+        self.probe('compression-gl-size', 'COMPRESSIBLE_COLOR_GL_EARLY_ZERO_OPAQUE_POINTER_OK')
+
+    def test_new_compressible_color_alignment_and_size_require_live_provider(self):
+        for mode in ('compression-live-align', 'compression-live-size'):
+            with self.subTest(mode=mode):
+                self.probe(mode, 'COMPRESSIBLE_COLOR_LIVE_QUERY_REQUIRED_OK')
+
+    def test_compressible_color_class_uses_exact_live_provider_not_copied_or_stale_headers(self):
+        for state in ('null', 'garbage', 'finalized', 'foreign', 'inaccessible', 'copy'):
+            with self.subTest(state=state):
+                self.probe('compression-invalid-device-' + state, 'STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK')
+
+    def test_unknown_color_and_depth_compression_cannot_create_ordinary_texture(self):
+        self.probe('compression-unknown-create', 'COMPRESSIBLE_UNKNOWN_CREATION_REJECTED_BEFORE_PUBLICATION_OK')
 
     def test_builder_pitch_class_is_pure_metadata_independent_of_gpu_creation(self):
         for mode in ('builder', 'builder-readonly'):

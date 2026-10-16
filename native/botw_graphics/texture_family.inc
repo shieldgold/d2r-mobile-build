@@ -77,6 +77,11 @@ static size_t textureBytes(const TextureBuilder *b){
     unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
     if(!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)&&!depthStorage)return 0;
     if(depthStorage&&b->glName)return 0; /* Original Builder Size bf1d4..bf1e0. */
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_color_disables_compression(b->format)){
+        if(b->glName)return 0; /* Original Builder Size short-circuits GL before provider/layout. */
+        if(!bw_texture_color_compression_layout(b->format,b->flags,b->samples))return 0;
+        textureStorageDevice(b->device);
+    }
     BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
     if((b->target!=NVN_TEXTURE_TARGET_2D&&!array)||b->width<1||b->height<1||b->width>16384||b->height>16384||b->depth<1||b->depth>(array?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
     unsigned dimension=MAX(b->width,b->height),levels=1;while(dimension>1){dimension>>=1;levels++;}if((unsigned)b->levels>levels)return 0;
@@ -112,13 +117,14 @@ static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
     unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)){
         textureStorageDevice(b->device);return 0x100|depthKind;
     }
-    if(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&textureOrdinaryStorageFormat(b->format)){
+    if(textureOrdinaryStorageFormat(b->format)&&(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)||bw_texture_color_disables_compression(b->format))){
         textureStorageDevice(b->device);return 0x1fe;
     }
     char detail[256];snprintf(detail,sizeof detail,"texture storage class requires unimplemented native ChooseKind target=%u flags=0x%x format=0x%x samples=%d source=base-v0-storage-metadata",b->target,b->flags,b->format,b->samples);fatal(detail);
 }
 NVN(nvnTextureBuilderGetStorageClass,NVNstorageClass,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);return textureMetadataStorageClass(&b);}
 NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}
+    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_color_disables_compression(b.format)){textureStorageDevice(b.device);return 512;}
     if(bw_texture_depth_storage_format(b.format)){(void)textureMetadataStorageClass(&b);return bw_pool_policy().mappingPageBytes;}
     if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureViewSetDefaults,void,NVNtextureView *raw){memset(textureViewWrite(raw),0,sizeof(TextureView));}
@@ -139,7 +145,7 @@ NVN(nvnTextureViewCompare,NVNboolean,const NVNtextureView *a,const NVNtextureVie
 static int textureMappingKind(TextureBuilder b,BWPool *pool){
     if(pool.kind==BW_POOL_PHYSICAL)fatal("physical pool cannot be a direct texture GPU resource");
     if(pool.kind!=BW_POOL_VIRTUAL)return -1;
-    if(b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)fatal("virtual texture hardware compressed kind is not implemented");
+    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!bw_texture_color_compression_layout(b.format,b.flags,b.samples))fatal("virtual texture hardware compressed kind is not implemented");
     if(!(b.flags&0x50)&&!textureOrdinaryStorageFormat(b.format))fatal("virtual texture depth/non-color kind is not implemented");
     return (b.flags&0x50)?0:0xfe;
 }
@@ -208,6 +214,7 @@ static void textureRetirePoolReferences(BWPool *pool){
 }
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
     TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;BWDevice *device=get(b->device,[BWDevice class]);
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!bw_texture_color_compression_layout(b->format,b->flags,b->samples))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
     if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
     if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");

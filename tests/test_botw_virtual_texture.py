@@ -44,6 +44,22 @@ class VirtualTextureTests(unittest.TestCase):
                         'failed assertion'):
             self.assertNotIn(failure, result.stderr)
 
+    def test_compressible_r8_and_astc_preserve_flags_while_sampling_real_fe_aliases_and_remaps(self):
+        for mode in ('compression-r8', 'compression-astc'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_compressible_effective_zero_still_checks_kind_and_segment_before_any_submission(self):
+        for mode in ('compression-wrong-kind', 'compression-cross'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_compressible_r8_private_authority_prevents_remap_without_losing_gpu_content(self):
+        self.mode('compression-authority')
+
+    def test_compressible_r8_finalize_releases_real_backing_and_rejects_recorded_alias(self):
+        self.mode('compression-finalize')
+
     def test_segmented_private_sampling_and_cross_segment_descriptor_pool_slots(self):
         self.mode('segments-private')
         self.mode('segments-descriptor')

@@ -113,6 +113,10 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 
 该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38826490640) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38826490659)，在当前手机保留数据更新并启动为 PID **1033**；可执行路径与本次安装一致，完整 boot.log 保留原前缀并恰好新增一次 bootstrap。手机独立复现上述 DEPTH16 查询停止点，`host_return=1`；SDK 堆、根堆、线程数和最大读取均与前版一致，26.8 秒的系统查询仍见该 PID。RomFS 大小及修改时间、UID 原字节与权限、shader manifest 均保持，完整报告位于 `outputs/botw-ios-4d9ff08-iphone12/device-run-report.json`。尚需补齐深度纹理存储查询及后续真实 GPU 路径；全部可玩验收保持 false。
 
+`b5d60eb` 补齐五种已证深度格式在原 samples=0、COMPRESSIBLE 标志清除子域中的 storage class、64KiB alignment、allocation size 及初始化对象的 64 位 size 快照；texel/GOB 范围与 allocation padding 分开，MapVirtual 和 GPU kind 准入未放宽。相关定点验证 **205 项，204 通过、1 项原有硬件条件跳过**，独立公开查询及真实 NoCopy 回执验证 **22 项通过**，固定全回归 **840 项，839 通过、1 项硬件条件跳过**，632 个 tracked 文件的源码快照保持一致。普通 Mac 原游戏首次直接记录 `physical_pool_initialized=true kind=1 flags=0x189 bytes=125829120 segments=2`，独立证明该 120 MiB physical pool 已成功发布。随后首个图形停止点为 `nvnTextureBuilderGetStorageClass` 的 `target=1 flags=0x8 format=0x1 samples=0`，即请求压缩的 R8；`mac_host_return=1`，仍有十三个线程、原堆参数及 143,743,378 字节最大读取，没有游戏绘制呈现日志。完整报告位于 `outputs/botw-host39-mac-b5d60eb/ordinary-admission-evidence.json`；该记录不构成首帧、输入、音频或可玩验收。
+
+该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38829115589) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38829115510)，94 个通用 native 源文件含新增 policy header 均通过来源校验。在当前手机保留数据更新并普通启动为 PID **1037**，本次安装路径与启动收据一致，完整 boot.log 保留前缀且恰好新增一次 bootstrap。真机也记录上述 120 MiB pool 的两段成功发布，随后独立复现同一 R8 `flags=0x8` 查询停止点，`host_return=1`；24.0 秒的系统查询仍见该 PID。原堆参数、线程数和最大读取与前版一致，RomFS 大小及修改时间、UID 字节与权限、shader manifest 全部保留。动态报告位于 `outputs/botw-ios-b5d60eb-iphone12/device-run-report.json`；全部可玩验收保持 false。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

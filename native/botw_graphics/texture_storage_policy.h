@@ -7,6 +7,20 @@
 #include <stddef.h>
 #include <limits.h>
 #include "nvn.h"
+/* Original base-v0 valid color records: no depth/stencil, and blockWidth>1
+ * or bytesPerBlock<4. Every original provider configuration selects effective
+ * compression=0 for these 65 formats, even with request flag COMPRESSIBLE. */
+static inline int bw_texture_color_disables_compression(uint32_t format){
+    return (format>=0x01&&format<=0x09)||(format>=0x0d&&format<=0x10)||
+        (format>=0x39&&format<=0x3c)||(format>=0x41&&format<=0x50)||
+        (format>=0x79&&format<=0x98);
+}
+/* New flags8 layout/GPU scope. Raw samples1/2 have original multisample layout;
+ * the existing upstream layout's samples1 convention is not reused here. */
+static inline int bw_texture_color_compression_layout(uint32_t format,uint32_t flags,int32_t samples){
+    return (flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_color_disables_compression(format)&&
+        samples==0&&!(flags&~(uint32_t)(NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_IMAGE));
+}
 static inline int bw_texture_depth_storage_format(uint32_t format){
     return format>=NVN_FORMAT_DEPTH16&&format<=NVN_FORMAT_DEPTH32F_STENCIL8;
 }
