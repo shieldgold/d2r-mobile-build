@@ -1,0 +1,44 @@
+{
+  "policy": "botw-whole-transfer-single-kernel-v1",
+  "original_alias_body_sha256": "175ab510f6d9069d537e57c4cf765b449b6e700820bcf789b6468a521b489059",
+  "reused_sources": {
+    "native/botw_host/kernel.c": "2b8a8b3642b22f0fd2a46dd9816060dad5d9e7155a7302f464051483d610c665",
+    "native/botw_host/protected_copy.h": "23ac1867254adcbfe353530eeea64e95d92fe8cd61c492588836567a73bdc3e2",
+    "experiments/botw_upstream_host/upstream/dm/host/hle_svc.c": "e08082382946c763f00a85815accb94a0737d230f9cfc4ace2cd34137384550e",
+    "experiments/botw_upstream_host/upstream/dm/host/hle_thread.c": "94193947139cab87946059c44eb473e7fa1539f3ef80fc913c818dedc345698f",
+    "experiments/botw_upstream_host/patches/base-v0-heap.patch": "025e42085568a8cc399465cb98c78d7fab4ab529d380cb75d244963a2ff0fd46",
+    "experiments/botw_upstream_host/patches/kernel-services.patch": "a8d3b35d201062152e9c16124b7c0497b01fdcf4a03565f38d90f95e6be3969b",
+    "experiments/botw_upstream_host/patches/ipc-services.patch": "61adaf7da26ab5c0814638f7a8e39fdb239dfdac919d4cef04fb55ff5800ca02",
+    "experiments/botw_upstream_host/adapter/whole_thread_memory.h": "6ee8f09d894cd8b9a1cd2b1238fe959d743f703bb7ea1808168702b7d104c471",
+    "experiments/botw_upstream_host/patches/current-thread-ownership.patch": "f5518684e85b083e7bbf58ddd1f0d865245de430e9ea3604cb684106abc2a4a8"
+  },
+  "sole_handle_registry": "hle_thread.c:G/g_h/h_new",
+  "sole_range_registry": "hle_svc.c:g_map/g_nmap/g_map_lock",
+  "lock_order": [
+    "G",
+    "g_heap_resize_lock",
+    "g_map_lock"
+  ],
+  "source_admission": "currently successful g_heap_cur, full exact host pages, no g_map borrow or original active synchronization word",
+  "owner_permissions": [
+    0,
+    1,
+    3
+  ],
+  "privileged_alias": "actual vm_remap(copy=FALSE), RW before owner protection; never memcpy/snapshot",
+  "provenance": "one process-lifetime real g_heap metadata slot identity + source minus actual g_heap; never alias VA",
+  "svcs": [
+    21,
+    22
+  ],
+  "unsupported": [
+    "SVC0x51 MapTransferMemory",
+    "SVC0x52 UnmapTransferMemory",
+    "partial host-page TransferMemory",
+    "transfer creation outside committed heap"
+  ],
+  "strong_lease": "typed actual object retained under original G; final source-RW restore and alias-unmap must both ACK before owner clears",
+  "cleanup_failure": "existing g_map retains actual backing/object; unpublished failed rollback can retry via reap_pending; no second registry",
+  "normal_memory_provider": "kernel classify tri-state rejects known borrowed/uncommitted operands before module/current stack/original g_keyown allocation fallback; never infer allocation extent from overwritten TLS/TLR keys; protected physical VM copy still required",
+  "platform_validation": "real Darwin CPU tests and complete consumer compile only; iPhoneOS availability still requires real CI; no gameplay claim"
+}

@@ -1,0 +1,41 @@
+--- a/dm/host/thread.c
++++ b/dm/host/thread.c
+@@ -1,6 +1,7 @@
+ // Guest thread environment: gate slot = host gate entry; x18 slot cleared; tpidr_el0 slot = ELF TLS block; tpidrro_el0 slot = Horizon ThreadLocalRegion (0x200).
+ // The SDK's internal critical section takes the current thread object pointer from TLR[0x1f8]; here each thread gets a zero-initialized object allocated and written in.
+ #include "dm.h"
++#include "whole_thread_memory.h"
+ #include "base_v0_heap.h"
+ #define TLS_SIZE 8192
+ #define TLR_SIZE 0x200
+@@ -18,8 +19,9 @@
+     g_guest_thread_params = base_v0_thread_params;
+ }
+ static pthread_key_t g_keyown;   // Raw pointers of the TLS block / thread-local region allocated by this thread (see the end of the function)
++static _Thread_local int g_own_ready;
+ static pthread_once_t g_keyown_once = PTHREAD_ONCE_INIT;
+-static void own_free(void *p) { void **own = p; free(own[0]); free(own[1]); free(own); }
++static void own_free(void *p) { g_own_ready = 0; void **own = p; free(own[0]); free(own[1]); free(own); }
+ static void own_key_init(void) { if (pthread_key_create(&g_keyown, own_free)) die("failed to create the TLS-block release key"); }
+ void guest_thread_init(void) {
+     if (pthread_setspecific(g_keygate, (void *)dm_gate)) die("failed to install thread gate TSD");
+@@ -38,4 +40,19 @@
+     if (pthread_once(&g_keyown_once, own_key_init) || pthread_setspecific(g_keytls, own[0]) ||
+             pthread_setspecific(g_keytlr, tlr) || pthread_setspecific(g_keyown, own))
+         die("failed to install guest thread TLS/TLR ownership TSD");
++    g_own_ready = 1;
+ }
++
++// Normal current-thread ownership only. Rewritten current TLS/TLR keys may
++// change; only original private allocations certify native ownership here.
++int botw_whole_current_thread_memory(uint64_t address, size_t length) {
++    if (!g_own_ready || !address || !length || length > UINT64_MAX - address) return 0;
++    void **own = pthread_getspecific(g_keyown);
++    if (!own) return 0;
++    const size_t sizes[2] = {TLS_SIZE, TLR_SIZE + THREAD_OBJ_SIZE};
++    for (unsigned i = 0; i < 2; ++i) {
++        uint64_t base = (uint64_t)(uintptr_t)own[i];
++        if (base && address >= base && length <= sizes[i] && address - base <= sizes[i] - length) return 1;
++    }
++    return 0;
++}

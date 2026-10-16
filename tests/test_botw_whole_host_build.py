@@ -120,6 +120,19 @@ class WholeHostBuildTests(unittest.TestCase):
                 build.classify_dependencies({prepared}, staged, component, sdk,
                     {}, {}, root, {}, mapping)
 
+    def test_normal_shared_backing_and_ipc_copiers_have_only_their_exact_vm_exception(self):
+        for relative in ("adapter/whole_transfer_vm.c", "adapter/whole_guest_memory.c"):
+            lock = {"forbidden_external_references": ["_vm_region_recurse_64", "_task_threads"],
+                    "normal_operand_validation_references": {relative: ["_vm_region_recurse_64"]}}
+            with self.subTest(relative=relative):
+                self.assertEqual(build.audit_external_references(
+                    {"_vm_region_recurse_64", "_vm_remap"}, relative, lock), {"_vm_region_recurse_64"})
+                with self.assertRaisesRegex(ValueError, "diagnostic"):
+                    build.audit_external_references({"_task_threads"}, relative, lock)
+                lock["normal_operand_validation_references"][relative].append("_task_threads")
+                with self.assertRaisesRegex(ValueError, "reviewed"):
+                    build.audit_external_references({"_task_threads"}, relative, lock)
+
     def test_lock_rejects_changed_added_missing_and_symlinked_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             component = Path(directory)

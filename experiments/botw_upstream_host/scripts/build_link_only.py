@@ -103,7 +103,8 @@ def verify_staged(staged: Path, before: dict, patched: dict) -> None:
 
 def audit_external_references(symbols: set[str], relative: str, lock: dict) -> set[str]:
     approved = set(lock.get("normal_operand_validation_references", {}).get(relative, []))
-    reviewed = {"adapter/whole_pool_builder.c", "adapter/whole_pool_backing_memory.m"}
+    reviewed = {"adapter/whole_pool_builder.c", "adapter/whole_pool_backing_memory.m",
+                "adapter/whole_transfer_vm.c", "adapter/whole_guest_memory.c"}
     if approved and (relative not in reviewed or
                      approved != {"_vm_region_recurse_64"}):
         raise ValueError("normal VM exception is outside the reviewed operand copier")
