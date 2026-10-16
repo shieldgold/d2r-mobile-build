@@ -1,0 +1,178 @@
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -29,7 +29,7 @@
+ #define WAITERS_BIT   0x40000000u
+ #define H_CUR_THREAD  0xFFFF8000u
+ 
+-enum { O_FREE, O_THREAD, O_EVENT_R, O_EVENT_W };
++enum { O_FREE, O_THREAD, O_EVENT_R, O_EVENT_W, O_TRANSPORT };
+ typedef struct event { int signaled; int refs; } event_t;
+ typedef struct thr {
+     uint32_t handle; uint64_t id;
+@@ -674,3 +674,166 @@
+     e->signaled = 1; wake_sync_waiters();
+     pthread_mutex_unlock(&G);
+ }
++
++// ---------- Checked native service kernel bridge ----------
++#include "whole_kernel.h"
++#include <limits.h>
++
++struct botw_whole_event_producer { event_t *event; };
++static int whole_kernel_problem(char *error, size_t capacity, const char *message) {
++    if (error && capacity) snprintf(error, capacity, "%s", message);
++    return -1;
++}
++static int whole_kernel_free_slots(void) { // G held; no reservation or second table.
++    int count = 0;
++    for (unsigned i = 1; i < MAX_H; ++i) count += g_h[i].type == O_FREE;
++    return count;
++}
++enum botw_whole_handle_kind botw_whole_kernel_handle_kind(uint32_t handle) {
++    unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    int type = i && i < MAX_H ? g_h[i].type : O_FREE;
++    pthread_mutex_unlock(&G);
++    switch (type) {
++    case O_THREAD: return BOTW_WHOLE_HANDLE_THREAD;
++    case O_EVENT_R: return BOTW_WHOLE_HANDLE_EVENT_READ;
++    case O_EVENT_W: return BOTW_WHOLE_HANDLE_EVENT_WRITE;
++    case O_TRANSPORT: return BOTW_WHOLE_HANDLE_TRANSPORT;
++    default: return BOTW_WHOLE_HANDLE_NONE;
++    }
++}
++int botw_whole_kernel_transport_allocate(void *opaque, const void *owner, uint32_t *out,
++                                        char *error, size_t capacity) {
++    (void)opaque;
++    if (!owner || !out) return whole_kernel_problem(error, capacity, "transport allocation requires owner and output");
++    pthread_mutex_lock(&G);
++    for (unsigned i = 1; i < MAX_H; ++i) {
++        if (g_h[i].type == O_TRANSPORT && g_h[i].obj == owner) {
++            pthread_mutex_unlock(&G);
++            return whole_kernel_problem(error, capacity, "transport owner is already borrowed");
++        }
++    }
++    if (!whole_kernel_free_slots()) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "kernel handle capacity exhausted");
++    }
++    *out = h_new(O_TRANSPORT, (void *)owner);
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_transport_release(void *opaque, const void *owner, uint32_t handle,
++                                       char *error, size_t capacity) {
++    (void)opaque; unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    if (!owner || !i || i >= MAX_H || g_h[i].type != O_TRANSPORT || g_h[i].obj != owner) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "transport handle and owner do not match");
++    }
++    g_h[i].type = O_FREE; g_h[i].obj = NULL;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_create_event(void *opaque, int signaled, uint32_t *write_handle,
++                                  uint32_t *read_handle, char *error, size_t capacity) {
++    (void)opaque;
++    if (!write_handle || !read_handle || write_handle == read_handle || (signaled != 0 && signaled != 1))
++        return whole_kernel_problem(error, capacity, "event creation requires distinct outputs and boolean state");
++    event_t *event = calloc(1, sizeof *event);
++    if (!event) return whole_kernel_problem(error, capacity, "event allocation failed");
++    event->signaled = signaled; event->refs = 2;
++    pthread_mutex_lock(&G);
++    if (whole_kernel_free_slots() < 2) {
++        pthread_mutex_unlock(&G); free(event);
++        return whole_kernel_problem(error, capacity, "event requires two free kernel handle slots");
++    }
++    uint32_t write = h_new(O_EVENT_W, event), read = h_new(O_EVENT_R, event);
++    *write_handle = write; *read_handle = read;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_duplicate_event(void *opaque, uint32_t source, uint32_t *out,
++                                     char *error, size_t capacity) {
++    (void)opaque; unsigned i = source - 0x1000;
++    if (!out) return whole_kernel_problem(error, capacity, "event duplicate requires output");
++    pthread_mutex_lock(&G);
++    if (!i || i >= MAX_H || (g_h[i].type != O_EVENT_R && g_h[i].type != O_EVENT_W)) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event duplicate requires a live endpoint");
++    }
++    event_t *event = g_h[i].obj;
++    if (event->refs == INT_MAX || !whole_kernel_free_slots()) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event duplicate capacity exhausted");
++    }
++    uint32_t handle = h_new(g_h[i].type, event); ++event->refs; *out = handle;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++static int whole_kernel_event_action(uint32_t handle, int signal, char *error, size_t capacity) {
++    pthread_mutex_lock(&G);
++    event_t *event = h_peek(handle, O_EVENT_W);
++    if (!event && !signal) event = h_peek(handle, O_EVENT_R);
++    if (!event) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event action requires the correct live endpoint");
++    }
++    event->signaled = signal;
++    if (signal) wake_sync_waiters();
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_signal_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; return whole_kernel_event_action(handle, 1, error, capacity);
++}
++int botw_whole_kernel_clear_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; return whole_kernel_event_action(handle, 0, error, capacity);
++}
++int botw_whole_kernel_close_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    if (!i || i >= MAX_H || (g_h[i].type != O_EVENT_R && g_h[i].type != O_EVENT_W)) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event close requires a live endpoint");
++    }
++    event_t *event = g_h[i].obj;
++    g_h[i].type = O_FREE; g_h[i].obj = NULL;
++    if (--event->refs == 0) free(event);
++    wake_sync_waiters(); // Existing waits must revalidate a closed endpoint.
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_retain_event_producer(uint32_t write_handle,
++        botw_whole_event_producer **out, char *error, size_t capacity) {
++    if (!out) return whole_kernel_problem(error, capacity, "event producer requires output");
++    botw_whole_event_producer *producer = calloc(1, sizeof *producer);
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer allocation failed");
++    pthread_mutex_lock(&G);
++    event_t *event = h_peek(write_handle, O_EVENT_W);
++    if (!event || event->refs == INT_MAX) {
++        pthread_mutex_unlock(&G); free(producer);
++        return whole_kernel_problem(error, capacity, "event producer requires a retainable write endpoint");
++    }
++    ++event->refs; producer->event = event; *out = producer;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_signal(botw_whole_event_producer *producer, char *error, size_t capacity) {
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G);
++    producer->event->signaled = 1; wake_sync_waiters();
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_clear(botw_whole_event_producer *producer, char *error, size_t capacity) {
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G); producer->event->signaled = 0; pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_release(botw_whole_event_producer **producer, char *error, size_t capacity) {
++    if (!producer || !*producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G);
++    if (--(*producer)->event->refs == 0) free((*producer)->event);
++    free(*producer); *producer = NULL;
++    pthread_mutex_unlock(&G);
++    return 0;
++}

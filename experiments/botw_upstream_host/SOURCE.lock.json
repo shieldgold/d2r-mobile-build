@@ -4,8 +4,8 @@
   "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
   "files": {
     "README.zh-CN.md": {
-      "sha256": "de2abd0b28969b64296d7ac701b2d2ec354bf94f9f0998c35c62f09ac18f7649",
-      "bytes": 4513,
+      "sha256": "c5cfb261f48eb294d8c270d7365bfb17c5e8b174a9ac9dbfeda3e1679034d14c",
+      "bytes": 4925,
       "role": "thin-adapter-or-verification"
     },
     "UPSTREAM_UNITS.json": {
@@ -101,6 +101,11 @@
     "adapter/whole_identity.h": {
       "sha256": "419284c551b045dc36461641f2de4e00ea286e26e875aac640dc0f7111807c42",
       "bytes": 446,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_kernel.h": {
+      "sha256": "bc0a1a79fc1fc7d52d9b1195f852660d55cd79d4034aae261c64b4405164bf1a",
+      "bytes": 2699,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
@@ -223,6 +228,11 @@
       "bytes": 1246,
       "role": "thin-adapter-or-verification"
     },
+    "patches/kernel-services.patch": {
+      "sha256": "a8d3b35d201062152e9c16124b7c0497b01fdcf4a03565f38d90f95e6be3969b",
+      "bytes": 8325,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/persistent-identity.patch": {
       "sha256": "81a38fb274e2e9433c69e9c54ac006ecf8b35b8dcde8e66224e6f2e630084ce6",
       "bytes": 1571,
@@ -301,6 +311,11 @@
     "tests/whole_front_state_probe.c": {
       "sha256": "b8fe07d441f96f17762fffb328c36ef9862114bec2be5acfdfea4ae2532c1c91",
       "bytes": 8577,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_kernel_services_probe.c": {
+      "sha256": "41f286421373554584cd3bfd946cda50f0aecb41124326496a515280aa4db5ed",
+      "bytes": 11831,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pool_builder_probe.c": {
@@ -1050,7 +1065,8 @@
     "patches/base-v0-heap.patch",
     "patches/checked-dirty-write.patch",
     "patches/base-v0-pool-builder.patch",
-    "patches/audio-write-observed.patch"
+    "patches/audio-write-observed.patch",
+    "patches/kernel-services.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1077,7 +1093,7 @@
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
     "dm/host/hle_svc.c": "96af03c24278cf47edbd90bdfb2ffdbe98b2c887641dace70a780be1a8658c91",
-    "dm/host/hle_thread.c": "a5df84f5130950cef765b4c2162f39834a06ff5da439d6ee1d8c83747ff5c806",
+    "dm/host/hle_thread.c": "99c269f77d6275fcbe134969a4c6ac6362e76ec8e8531fc968db1094bf83a6a2",
     "dm/host/loader.c": "04d34bc3d42c95f1a1f49dee102bbc608bfc25da32e777ec4fdc5e1e6327b455",
     "dm/host/main.c": "13ff3e987b525e7c6d31351b59659702712517d3b24262db0f57d52d6b25fc1d",
     "dm/host/thread.c": "5e71a3501e17e8aefcfa7ea37ec33109479e411834e94fc4a06914755046168b",
