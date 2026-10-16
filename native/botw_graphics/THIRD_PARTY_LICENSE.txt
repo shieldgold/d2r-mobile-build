@@ -198,20 +198,28 @@ arrayLength documentation supply platform/type/no-mip constraints, not an
 assertion of untested A14 game rendering. No original executable bytes appear
 in these tests or this source adaptation.
 
-The first 3D adapter reuses those same complete pinned nvn_tex, nvn_deswizzle,
+The 3D adapter reuses the same complete pinned MIT nvn_tex, nvn_deswizzle,
 nvn_texwrite and nvn_texflush modules; their source algorithms are unchanged.
-The two fixed Metal families select native Type3D, arrayLength1 and descriptor
-depth, with 3D blits using slice0 and spatial z origin/extent. The bridge only
-materializes the proven one-slice/one-level ordinary-color intersection; it
-retains its existing exception-safe blit, checked-copy and authority handling
-rather than importing upstream nil-resource/readback fallbacks. Original
-base-v0 static layout evidence separately establishes volume mip geometry.
-Packaged 3D H is not consumed by the pinned vendor layout, so packaged layout
-is explicitly excluded. Complete existing public writer/readback and sampler
-fixtures are adapted to 3D grids without importing a new layout or codec.
-Apple MSL section6.13.5, official Type3D/depth/view/blit APIs and feature tables
-supply native type, depth1, dimensions and view constraints; they do not prove
-A14 game rendering or extend the GPU domain to multiple slices or mips.
+Both fixed Metal modules (5f673ae dm/gfx/nvn/nvn_mtl.m tex_desc/pkg_upload_/
+texels_encode and the corresponding 9de307e module) supply native Type3D,
+arrayLength1, full descriptor depth, whole-volume staging and slice0 plus
+spatial z-origin transfer structure. Their nil-resource/readback fallbacks
+are not imported. The bridge retains checked copy, lifetime, mapping,
+whole-allocation certificates and private authority. Its single-mip CPU
+transfer adapter reuses the complete planner; metadata z offsets call the
+complete vendor address function, not a new plane layout.
+
+Original base-v0 static ABI evidence separately proves that normal/rawFE
+Initialize and pool callbacks do not read Builder PackagedTextureData: that
+pointer is retained as opaque metadata and is not an upload source. Explicit
+packaged layout remains excluded because the pinned vendor does not consume
+3D packaged H. IMAGE usage is distinct from implemented shader access: the
+bridge checks an evidenced Metal format/device domain and rejects 3D typed
+write/read_write in the shared pre-submit reflection validator. Apple MSL
+section6.13.5 and official Type3D/depth/view/blit APIs and feature tables
+supply platform contracts, not original-game or A14 rendering acceptance.
+Public transfer fixtures retain independent GOB/padding oracles; synthetic
+volume shader fixtures adapt existing complete descriptor/array probes.
 
 BufferBuilder storage adaptation retains the complete pinned MIT botw-buffer
 module and its field setters. Base-v0 static ABI evidence independently gives

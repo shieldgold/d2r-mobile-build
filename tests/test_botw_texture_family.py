@@ -11,6 +11,198 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class TextureFamilyTests(unittest.TestCase):
+    def test_volume_3d_public_xyz_transfer_cache_mips_padding_and_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            graphics=ROOT/'native/botw_graphics';exe=Path(directory)/'volume-public'
+            command=['xcrun','clang','-std=c11','-fobjc-arc','-fobjc-arc-exceptions','-fblocks',
+                     '-Wall','-Wextra','-Werror','-I',str(graphics),str(graphics/'graphics.m'),
+                     str(graphics/'tools/probe_texture_family.c'),'-framework','Foundation',
+                     '-framework','Metal','-framework','QuartzCore','-o',str(exe)]
+            built=subprocess.run(command,capture_output=True,text=True,timeout=120)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            for mode in ('volume-write','volume-cached','volume-mips','volume-empty'):
+                with self.subTest(mode=mode):
+                    run=subprocess.run([str(exe),mode],capture_output=True,text=True,timeout=60,
+                                       env={**os.environ,'MTL_DEBUG_LAYER':'1'})
+                    if run.returncode==77:self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode,0,run.stdout+run.stderr)
+                    self.assertIn('TEXTURE_VOLUME_PUBLIC_FULL_MIPS_PARTIAL_GOB_PADDING_CACHE_AND_EMPTY_OK',run.stdout)
+                    self.assertIn('Metal API Validation Enabled',run.stderr)
+                    self.assertNotIn('failed assertion',run.stderr)
+                    self.assertNotIn('MTLReportFailure',run.stderr)
+
+    def _volume_descriptor_probe(self, modes):
+        """Exercise native volumes; the 32-cube importer uses an independent GOB oracle."""
+        import test_botw_graphics as baseline
+        feature = r'''
+    API(nvnTextureBuilderSetTarget);API(nvnTextureBuilderSetSize3D);API(nvnTextureBuilderSetLevels);
+    API(nvnTextureBuilderGetStorageSize);API(nvnTextureBuilderSetPackagedTextureData);API(nvnTextureBuilderGetPackagedTextureData);
+    API(nvnTextureWriteTexels);API(nvnTextureFinalize);
+    API(nvnTextureViewSetDefaults);API(nvnTextureViewSetTarget);API(nvnTextureViewSetFormat);API(nvnTextureViewSetLevels);API(nvnTextureViewSetLayers);
+    API(nvnTexturePoolInitialize);API(nvnTexturePoolRegisterTexture);API(nvnSamplerPoolInitialize);API(nvnSamplerPoolRegisterSampler);
+    API(nvnSamplerBuilderSetDefaults);API(nvnSamplerBuilderSetDevice);API(nvnSamplerBuilderSetMinMagFilter);API(nvnSamplerInitialize);
+    API(nvnDeviceGetTextureHandle);API(nvnCommandBufferSetTexturePool);API(nvnCommandBufferSetSamplerPool);API(nvnCommandBufferBindTexture);
+    API(nvnMemoryPoolMapVirtual);API(nvnCommandBufferReportCounter);
+    const char *mode=argc>1?argv[1]:"volume-sample";int npot=!strcmp(mode,"volume-npot");
+    unsigned width=npot?17:32,height=npot?9:32,depth=npot?5:32;
+    unsigned levels=npot?5:(!strcmp(mode,"volume-mips")||!strcmp(mode,"volume-view"))?6:1;
+    int selected=!strcmp(mode,"volume-view"),virt=strstr(mode,"remap")||strstr(mode,"authority");
+    int writeOnly=!strcmp(mode,"volume-write")||!strcmp(mode,"volume-write-noimage"),readWrite=!strcmp(mode,"volume-readwrite"),wrong=!strcmp(mode,"volume-wrong-type"),badView=!strcmp(mode,"volume-invalid-view");
+    int image=strcmp(mode,"volume-read")&&strcmp(mode,"volume-write-noimage");size_t backingBytes=1024*1024;
+    unsigned char *volumeMemory=mmap(NULL,backingBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    unsigned char *secondMemory=virt?mmap(NULL,backingBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0):NULL;
+    CHECK(volumeMemory!=MAP_FAILED&&(!virt||secondMemory!=MAP_FAILED));memset(volumeMemory,0xa5,backingBytes);if(virt)memset(secondMemory,0xa5,backingBytes);
+    NVNmemoryPool volumePool,physicalA,physicalB;nvnMemoryPoolBuilderSetStorage(&mb,volumeMemory,backingBytes);
+    if(virt){
+      nvnMemoryPoolBuilderSetFlags(&mb,0x189);CHECK(nvnMemoryPoolInitialize(&physicalA,&mb));
+      nvnMemoryPoolBuilderSetStorage(&mb,secondMemory,backingBytes);CHECK(nvnMemoryPoolInitialize(&physicalB,&mb));
+      nvnMemoryPoolBuilderSetFlags(&mb,0x221);nvnMemoryPoolBuilderSetStorage(&mb,NULL,backingBytes);CHECK(nvnMemoryPoolInitialize(&volumePool,&mb));
+      NVNmappingRequest map={.physicalPool=&physicalA,.size=backingBytes,.storageClass=0x1fe};CHECK(nvnMemoryPoolMapVirtual(&volumePool,1,&map));
+    }else CHECK(nvnMemoryPoolInitialize(&volumePool,&mb));
+    /* Fixed 32^3 RGBA8 block-linear reference: 2 GOBs across X, four rows,
+       16 slices per block. z15 and z16 land in different 64KiB blocks. */
+    if(levels==1)for(unsigned z=0;z<32;z++)for(unsigned y=0;y<32;y++)for(unsigned x=0;x<32;x++){
+      unsigned xb=x*4;size_t offset=(z/16)*65536+(y/8)*16384+(xb/64)*8192+(z%16)*512+
+        (xb%64/32)*256+(y%8/2)*64+(xb%32/16)*32+(y%2)*16+xb%16;
+      volumeColor(volumeMemory+offset,x,y,z,0,0);if(virt)volumeColor(secondMemory+offset,x,y,z,0,61);
+    }
+    NVNtexture volume;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);
+    nvnTextureBuilderSetTarget(&tb,NVN_TEXTURE_TARGET_3D);nvnTextureBuilderSetSize3D(&tb,width,height,depth);nvnTextureBuilderSetLevels(&tb,levels);
+    nvnTextureBuilderSetFlags(&tb,image?NVN_TEXTURE_FLAGS_IMAGE:0);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);
+    nvnTextureBuilderSetPackagedTextureData(&tb,(const void*)1);nvnTextureBuilderSetStorage(&tb,&volumePool,0);
+    CHECK(nvnTextureBuilderGetPackagedTextureData(&tb)==(const void*)1);CHECK(nvnTextureBuilderGetStorageSize(&tb)>0);
+    if(levels==1)CHECK(nvnTextureBuilderGetStorageSize(&tb)==131072);CHECK(nvnTextureInitialize(&volume,&tb));
+    if(!virt){CHECK(textureObject(&volume).texture.textureType==MTLTextureType3D);
+      CHECK(textureObject(&volume).texture.depth==depth&&textureObject(&volume).texture.mipmapLevelCount==levels);
+      CHECK((textureObject(&volume).texture.usage&MTLTextureUsageShaderWrite)==(image?MTLTextureUsageShaderWrite:0));}
+    if(levels>1)for(unsigned level=0;level<levels;level++){
+      unsigned w=width>>level?:1,h=height>>level?:1,d=depth>>level?:1;size_t count=(size_t)w*h*d*4;
+      unsigned char *linear=malloc(count);CHECK(linear);for(unsigned z=0;z<d;z++)for(unsigned y=0;y<h;y++)for(unsigned x=0;x<w;x++)volumeColor(linear+((z*h+y)*w+x)*4,x,y,z,level,0);
+      NVNtextureView uploadView;nvnTextureViewSetDefaults(&uploadView);nvnTextureViewSetLevels(&uploadView,level,1);
+      NVNcopyRegion region={0,0,0,(int)w,(int)h,(int)d};nvnTextureWriteTexels(&volume,&uploadView,&region,linear);free(linear);
+    }
+    NVNtexturePool tp;NVNsamplerPool sp;CHECK(nvnTexturePoolInitialize(&tp,&pool,0,16));CHECK(nvnSamplerPoolInitialize(&sp,&pool,1024,16));
+    NVNtextureView view;nvnTextureViewSetDefaults(&view);nvnTextureViewSetTarget(&view,NVN_TEXTURE_TARGET_3D);nvnTextureViewSetFormat(&view,NVN_FORMAT_RGBA8);
+    if(selected)nvnTextureViewSetLevels(&view,1,0);if(badView)nvnTextureViewSetLayers(&view,1,1);
+    if(badView){
+      volumeEscaping=1;if(!sigsetjmp(volumeRecovery,1)){nvnTexturePoolRegisterTexture(&tp,3,&volume,&view);CHECK(0);}volumeEscaping=0;
+      CHECK(volumeCallbacks==1&&strstr(botw_graphics_last_error(),"view"));
+      char error[512];CHECK(botw_graphics_shutdown_checked(error,sizeof error));CHECK(!munmap(volumeMemory,backingBytes));free(memory);puts("VOLUME_INVALID_VIEW_REJECTED_OK");return 0;
+    }
+    nvnTexturePoolRegisterTexture(&tp,3,&volume,&view);nvnTextureViewSetLevels(&view,levels-1,1);nvnTextureViewSetTarget(&view,NVN_TEXTURE_TARGET_2D);
+    NVNsamplerBuilder sb;NVNsampler sampler;nvnSamplerBuilderSetDefaults(&sb);nvnSamplerBuilderSetDevice(&sb,&device);
+    nvnSamplerBuilderSetMinMagFilter(&sb,NVN_MIN_FILTER_NEAREST_MIPMAP_NEAREST,NVN_MAG_FILTER_NEAREST);CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&sampler);
+    uint64_t textureHandle=nvnDeviceGetTextureHandle(&device,3,4);controls[0][8]=84;controls[1][8]=85;codes[0][8]=84;codes[1][8]=85;
+    memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    const char *readBody="return t.read(q,lod);";
+    const char *sampleBody="return t.sample(s,(float3(q)+.5f)/float3(w,h,d),level(float(lod)));";
+    const char *writeBody="t.write(float4(.8f,.1f,.6f,1),q);return float4(.8f,.1f,.6f,1);";
+    const char *readWriteBody="float4 old=t.read(q);t.write(float4(.8f,.1f,.6f,1),q);return old;";
+    const char *wrongBody="return t.sample(s,float2(.5f));";
+    char volumeMSL[2400];snprintf(volumeMSL,sizeof volumeMSL,
+      "#include <metal_stdlib>\nusing namespace metal;vertex float4 vv(uint v [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[v],0,1);}"
+      "fragment float4 vf(float4 p [[position]],%s t [[texture(3)]],sampler s [[sampler(0)]]){"
+      "uint px=min(uint(p.x),7u),py=min(uint(p.y),7u),lod=min(py,%uu);uint w=max(%uu>>lod,1u),h=max(%uu>>lod,1u),d=max(%uu>>lod,1u);"
+      "uint zs[8]={0u,1u,7u,8u,15u,16u,30u,31u};uint3 q=uint3(px*(w-1u)/7u,py*(h-1u)/7u,zs[(px+py)%%8u]*(d-1u)/31u);%s}",
+      wrong?"texture2d<float>":writeOnly?"texture3d<float,access::write>":readWrite?"texture3d<float,access::read_write>":!strcmp(mode,"volume-read")?"texture3d<float,access::read>":"texture3d<float>",
+      levels-1-selected,width>>selected,height>>selected,depth>>selected,
+      wrong?wrongBody:writeOnly?writeBody:readWrite?readWriteBody:!strcmp(mode,"volume-read")?readBody:sampleBody);
+    botw_graphics_shader_binding bindings[]={{BOTW_GRAPHICS_TEXTURE,0,3},{BOTW_GRAPHICS_SAMPLER,0,0}};
+    CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,volumeMSL,"vv"));
+    CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,volumeMSL,"vf",bindings,2));CHECK(nvnProgramSetShaders(&program,2,sd));
+    /* Establish that this actual GPU copy/counter path can modify the canaries,
+       then reset them so a rejected mixed batch must have no prefix effects. */
+    if(writeOnly||readWrite||wrong){
+      memset(memory+16384,0x3c,32);memset(memory+16448,0xa5,32);memset(memory+16512,0xa5,16);
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferCopyBufferToBuffer(&cb,gpu+16384,gpu+16448,32,0);nvnCommandBufferReportCounter(&cb,NVN_COUNTER_TYPE_TIMESTAMP_TOP,gpu+16512);
+      handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(dispatch_group_wait(allGPU,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0);
+      CHECK(!memcmp(memory+16384,memory+16448,32));unsigned changed=0;for(unsigned i=0;i<16;i++)changed|=memory[16512+i]!=0xa5;CHECK(changed);
+      memset(memory+16448,0xa5,32);memset(memory+16512,0xa5,16);fprintf(stderr,"VOLUME_COPY_COUNTER_POSITIVE_CONTROL_OK\n");
+    }
+    for(unsigned pass=0;pass<(virt?2u:1u);pass++){
+      if(pass){NVNmappingRequest map={.physicalPool=&physicalB,.size=backingBytes,.storageClass=0x1fe};CHECK(nvnMemoryPoolMapVirtual(&volumePool,1,&map));}
+      if(pass&&strstr(mode,"authority")){
+        NVNtexture alias;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetSize2D(&tb,32,32);nvnTextureBuilderSetStorage(&tb,&volumePool,0);CHECK(nvnTextureInitialize(&alias,&tb));
+        const NVNtexture *aliasTarget[]={&alias};float aliasColor[]={.2f,.4f,.6f,1};nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,aliasTarget,NULL,NULL,NULL);nvnCommandBufferSetScissor(&cb,0,0,32,32);nvnCommandBufferClearColor(&cb,0,aliasColor,15);
+        handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);if(strstr(mode,"retired"))nvnTextureFinalize(&alias);
+      }
+      unsigned char priorPixels[sizeof pixels];CHECK(botw_graphics_read_texture(&texture,priorPixels,sizeof priorPixels));
+      nvnCommandBufferBeginRecording(&cb);
+      if(writeOnly||readWrite||wrong){nvnCommandBufferCopyBufferToBuffer(&cb,gpu+16384,gpu+16448,32,0);nvnCommandBufferReportCounter(&cb,NVN_COUNTER_TYPE_TIMESTAMP_TOP,gpu+16512);}
+      nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferSetScissor(&cb,0,0,8,8);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);
+      nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,textureHandle);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);
+      int rejection=writeOnly||readWrite||wrong||(pass&&strstr(mode,"authority"));
+      if(rejection){
+        BWQueue *owned=get(&queue,[BWQueue class]);NSData *arenaBefore=digest(owned.arena,owned.arenaBytes);volumeEscaping=1;
+        if(!sigsetjmp(volumeRecovery,1)){
+          nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+          CHECK(dispatch_group_wait(allGPU,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0);
+          CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+          fprintf(stderr,"VOLUME_UNGUARDED_SHADER_EXECUTED access=%s pixel=%u,%u,%u,%u\n",writeOnly?"write":readWrite?"read_write":"other",pixels[0],pixels[1],pixels[2],pixels[3]);
+          return 91;
+        }volumeEscaping=0;
+        const char *expected=wrong?"shader texture type differs":writeOnly||readWrite?"3D texture shader access requires read-only bindings":"texture storage authority";
+        CHECK(volumeCallbacks==1&&strstr(botw_graphics_last_error(),expected));nvnQueueFinish(&queue);CHECK(dispatch_group_wait(allGPU,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0);
+        CHECK([arenaBefore isEqual:digest(owned.arena,owned.arenaBytes)]);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels)&&!memcmp(priorPixels,pixels,sizeof pixels));
+        if(writeOnly||readWrite||wrong){for(unsigned i=0;i<32;i++)CHECK(memory[16448+i]==0xa5);for(unsigned i=0;i<16;i++)CHECK(memory[16512+i]==0xa5);}
+        CHECK(!graphicsDepth&&!pendingError&&!pendingFatal);char error[512];CHECK(botw_graphics_shutdown_checked(error,sizeof error));
+        CHECK(!munmap(volumeMemory,backingBytes));if(virt)CHECK(!munmap(secondMemory,backingBytes));free(memory);puts("VOLUME_SHADER_REJECTED_BEFORE_COPY_COUNTER_ARENA_PIXELS_AND_AUTHORITY_OK");return 0;
+      }
+      nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+      for(unsigned py=0;py<8;py++)for(unsigned px=0;px<8;px++){
+        unsigned level=(py<levels-selected?py:levels-1-selected)+selected,w=width>>level?:1,h=height>>level?:1,d=depth>>level?:1;
+        unsigned zs[]={0,1,7,8,15,16,30,31},x=px*(w-1)/7,y=py*(h-1)/7,z=zs[(px+py)%8]*(d-1)/31;unsigned char expected[4];volumeColor(expected,x,y,z,level,pass?61:0);
+        for(unsigned c=0;c<4;c++)CHECK(abs((int)pixels[(py*8+px)*4+c]-(int)expected[c])<=1);
+      }
+      CHECK(textureObject(&volume).texture.textureType==MTLTextureType3D&&textureObject(&volume).texture.depth==depth);
+      fprintf(stderr,"VOLUME_NATIVE_GPU_OK mode=%s pass=%u type3D=true dims=%ux%ux%u levels=%u xyz15_16_31=true\n",mode,pass,width,height,depth,levels);
+    }
+    nvnTextureFinalize(&volume);nvnMemoryPoolFinalize(&volumePool);if(virt){nvnMemoryPoolFinalize(&physicalA);nvnMemoryPoolFinalize(&physicalB);}
+    CHECK(!munmap(volumeMemory,backingBytes));if(virt)CHECK(!munmap(secondMemory,backingBytes));puts("VOLUME_NATIVE_XYZ_MIPS_OPAQUE_REMAP_OK");
+'''
+        helpers = r'''
+#include <sys/mman.h>
+#include <setjmp.h>
+static sigjmp_buf volumeRecovery;static int volumeEscaping,volumeCallbacks;
+static void volumeError(const char *message){if(volumeEscaping){volumeCallbacks++;siglongjmp(volumeRecovery,1);}fprintf(stderr,"VOLUME_UNHANDLED %s\n",message);}
+static void volumeColor(unsigned char *out,unsigned x,unsigned y,unsigned z,unsigned level,unsigned bias){
+ out[0]=(unsigned char)(17+(x*5+level*9+bias)%200);out[1]=(unsigned char)(19+(y*7+level*11+bias)%200);out[2]=(unsigned char)(23+(z*11+level*13+bias)%200);out[3]=255;
+}
+'''
+        source = baseline.METAL_SMOKE.replace('#include <unistd.h>', '#include <unistd.h>\n'+helpers)
+        source = source.replace('botw_graphics_init(NULL, NULL, valid)', 'botw_graphics_init(NULL, volumeError, valid)')
+        source = source.replace('page*2', 'page*16').replace('nvnTextureBuilderSetSize2D(&tb,4,4);', 'nvnTextureBuilderSetSize2D(&tb,8,8);')
+        source = source.replace('unsigned char pixels[64];', 'unsigned char pixels[8*8*4];')
+        source = source.replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        graphics = ROOT / 'native/botw_graphics'
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory);harness=path/'volume.m';exe=path/'volume'
+            harness.write_text('#include "graphics.m"\n'+source)
+            command=['xcrun','clang','-fobjc-arc','-fobjc-arc-exceptions','-fblocks','-Wall','-Wextra','-Werror',
+                     '-Wno-unused-function','-I',str(graphics),str(harness),'-framework','Foundation','-framework','Metal','-framework','QuartzCore','-o',str(exe)]
+            build=subprocess.run(command,capture_output=True,text=True,timeout=120)
+            self.assertEqual(build.returncode,0,build.stdout+build.stderr)
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    run=subprocess.run([str(exe),mode],capture_output=True,text=True,timeout=30,env={**os.environ,'MTL_DEBUG_LAYER':'1'})
+                    if run.returncode==77:self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode,0,run.stdout+run.stderr)
+                    self.assertIn('VOLUME_',run.stdout)
+                    self.assertIn('Metal API Validation Enabled',run.stderr)
+                    self.assertNotIn('failed assertion',run.stderr)
+                    self.assertNotIn('MTLReportFailure',run.stderr)
+
+    def test_volume_3d_native_xyz_mips_selected_view_and_opaque_payload(self):
+        self._volume_descriptor_probe(('volume-sample','volume-read','volume-mips','volume-npot','volume-view'))
+
+    def test_volume_3d_image_access_is_rejected_before_counter_copy_arena_and_pixels(self):
+        from botw_metal_counter_capability import require_counter_sampling
+        require_counter_sampling()
+        self._volume_descriptor_probe(('volume-write','volume-readwrite','volume-write-noimage','volume-wrong-type','volume-invalid-view'))
+
+    def test_volume_3d_fe_remap_refreshes_snapshot_and_preserves_private_alias_authority(self):
+        self._volume_descriptor_probe(('volume-remap','volume-live-authority','volume-retired-authority'))
+
     def _cube_descriptor_probe(self, cases):
         import test_botw_graphics as baseline
         from unittest.mock import patch

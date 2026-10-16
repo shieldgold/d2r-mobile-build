@@ -24,6 +24,7 @@ static void textureOut(void *p,size_t n){if(!p||(memoryAccessValidator&&!memoryA
 #include "../botw_host/protected_copy.h"
 #include "texture_storage_policy.h"
 static void textureEnsureMapping(BWTexture *t,const char *reason);
+static void textureVolumeStaging(BWTexture *t);
 static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView view,BOOL attachment);
 static BWDevice *textureStorageDevice(const NVNdevice *raw);
 static BOOL textureColorSelected(const TextureBuilder *b);
@@ -88,7 +89,7 @@ static size_t textureBytes(const TextureBuilder *b){
     if(threeD){if(b->glName)return 0;int bw,bh;int bytes=nvn_fmt_bpb(b->format,&bw,&bh);
         /* Original 3D packaged H/D can differ from this complete vendor
          * layout. Materialize only the ordinary, automatically tiled domain. */
-        if(b->packagedData||b->packaged||b->flags||b->samples||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
+        if(b->packaged||(b->flags&~NVN_TEXTURE_FLAGS_IMAGE)||b->samples||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
     if(cube){if(b->glName)return 0;int bw,bh;int bytes=nvn_fmt_bpb(b->format,&bw,&bh);
         if(b->packagedData||b->packaged||b->flags||b->samples||b->width!=b->height||!bw_texture_ordinary_color_format(b->format)||!bytes||bw!=1||bh!=1)return 0;}
     unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
@@ -227,15 +228,60 @@ static void textureCheckStorageAlias(BWTexture *t,BWPoolRange *mapping){
         if(current&&memoryOverlap(mapping.canonical,t.layout.size,current.canonical,other.layout.size))fatal("linear texture storage overlaps another live texture base");
     }
 }
+/* Apple Feature Set Tables (2026-05-21), pp11..14 Write columns for
+ * Apple7/9. The remaining formats are outside this bridge's IMAGE domain;
+ * this conservative list does not assert their hardware lacks Write. */
+static BOOL textureVolumeImageFormat(MTLPixelFormat format){switch(format){
+    case MTLPixelFormatR8Unorm:
+    case MTLPixelFormatR8Snorm:
+    case MTLPixelFormatR8Uint:
+    case MTLPixelFormatR8Sint:
+    case MTLPixelFormatRG8Unorm:
+    case MTLPixelFormatRG8Snorm:
+    case MTLPixelFormatRG8Uint:
+    case MTLPixelFormatRG8Sint:
+    case MTLPixelFormatRGBA8Unorm:
+    case MTLPixelFormatRGBA8Snorm:
+    case MTLPixelFormatRGBA8Uint:
+    case MTLPixelFormatRGBA8Sint:
+    case MTLPixelFormatR16Unorm:
+    case MTLPixelFormatR16Snorm:
+    case MTLPixelFormatR16Uint:
+    case MTLPixelFormatR16Sint:
+    case MTLPixelFormatR16Float:
+    case MTLPixelFormatRG16Unorm:
+    case MTLPixelFormatRG16Snorm:
+    case MTLPixelFormatRG16Uint:
+    case MTLPixelFormatRG16Sint:
+    case MTLPixelFormatRG16Float:
+    case MTLPixelFormatRGBA16Unorm:
+    case MTLPixelFormatRGBA16Snorm:
+    case MTLPixelFormatRGBA16Uint:
+    case MTLPixelFormatRGBA16Sint:
+    case MTLPixelFormatRGBA16Float:
+    case MTLPixelFormatR32Uint:
+    case MTLPixelFormatR32Sint:
+    case MTLPixelFormatR32Float:
+    case MTLPixelFormatRG32Uint:
+    case MTLPixelFormatRG32Sint:
+    case MTLPixelFormatRG32Float:
+    case MTLPixelFormatRGBA32Uint:
+    case MTLPixelFormatRGBA32Sint:
+    case MTLPixelFormatRGBA32Float:
+        return YES;default:return NO;}}
+static BOOL textureVolumeImage(BWTexture *t){return t.metadata.target==NVN_TEXTURE_TARGET_3D&&(t.metadata.flags&NVN_TEXTURE_FLAGS_IMAGE);}
 static id<MTLTexture> textureMakeBase(BWTexture *t,BWPoolRange *mapping){
     uint32_t format;uint8_t swizzle[4];if(nvn_fmt_to_mtl(t.format,&format,swizzle)!=1)fatal("texture format conversion changed");
+    if(textureVolumeImage(t)&&(!textureVolumeImageFormat((MTLPixelFormat)format)||![gpu supportsFamily:MTLGPUFamilyApple7]))fatal("3D IMAGE Metal write format/device capability is not implemented");
+    textureVolumeStaging(t);
     MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)format width:t.width height:t.height mipmapped:t.descriptor.levels>1];desc.mipmapLevelCount=t.descriptor.levels;
     if(t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP){desc.textureType=MTLTextureTypeCube;desc.arrayLength=1;}
-    if(t.metadata.target==NVN_TEXTURE_TARGET_3D){desc.textureType=MTLTextureType3D;desc.depth=t.metadata.depth;}
+    if(t.metadata.target==NVN_TEXTURE_TARGET_3D){desc.textureType=MTLTextureType3D;desc.depth=t.metadata.depth;desc.arrayLength=1;}
     if(t.metadata.target==NVN_TEXTURE_TARGET_1D)desc.textureType=MTLTextureType1D;
     if(t.metadata.target==NVN_TEXTURE_TARGET_1D_ARRAY){desc.textureType=MTLTextureType1DArray;desc.arrayLength=t.metadata.height;desc.height=1;}
     if(t.metadata.target==NVN_TEXTURE_TARGET_2D_ARRAY){desc.textureType=MTLTextureType2DArray;desc.arrayLength=t.metadata.depth;}
     desc.storageMode=t.blockLinear?MTLStorageModePrivate:mapping.buffer.storageMode;desc.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
+    if(t.metadata.target==NVN_TEXTURE_TARGET_3D&&(t.metadata.flags&NVN_TEXTURE_FLAGS_IMAGE))desc.usage|=MTLTextureUsageShaderWrite;
     if(t.metadata.target!=NVN_TEXTURE_TARGET_CUBEMAP&&t.metadata.target!=NVN_TEXTURE_TARGET_3D&&!textureOneDimensionalTarget(t.metadata.target)&&((t.blockLinear&&!(t.format>=0x79&&t.format<=0x94))||(t.metadata.flags&0x40)))desc.usage|=MTLTextureUsageRenderTarget;
     if(t.blockLinear)return [gpu newTextureWithDescriptor:desc];
     if(!mapping.physical.coherent)fatal("linear textures require coherent no-copy pool storage");
@@ -287,13 +333,15 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     textureInitEntry();TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;BWTextureInitToken attempt=textureInitAttempt(raw,b);
     if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return textureInitializeRejected(attempt,b,"Texture hardware compression/layout request is not implemented for this format/flags/samples");
     BWDevice *device=get(b->device,[BWDevice class]);
-    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return textureInitReturnedFalse(attempt,report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data target=%u flags=0x%x format=0x%x width=%d height=%d depth=%d levels=%d samples=%d stride=%u pool_present=%s gl_name_nonzero=%s packaged_data_nonnull=%s packaged_layout_set=%s packaged_layout_bits=0x%x",(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->width,b->height,b->depth,b->levels,b->samples,b->stride,b->pool?"true":"false",b->glName?"true":"false",b->packagedData?"true":"false",(b->packaged&1)?"true":"false",(b->packaged>>4)&0xfffu));
+    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||(b->packagedData&&b->target!=NVN_TEXTURE_TARGET_3D))return textureInitReturnedFalse(attempt,report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data target=%u flags=0x%x format=0x%x width=%d height=%d depth=%d levels=%d samples=%d stride=%u pool_present=%s gl_name_nonzero=%s packaged_data_nonnull=%s packaged_layout_set=%s packaged_layout_bits=0x%x",(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->width,b->height,b->depth,b->levels,b->samples,b->stride,b->pool?"true":"false",b->glName?"true":"false",b->packagedData?"true":"false",(b->packaged&1)?"true":"false",(b->packaged>>4)&0xfffu));
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return textureInitializeRejected(attempt,b,"Texture format requires an unimplemented conversion/BC decoder");
     if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return textureInitReturnedFalse(attempt,report("ASTC textures require Metal Apple2 family support"));
     for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return textureInitReturnedFalse(attempt,report("Texture component conversion is not implemented"));
+    if(b->target==NVN_TEXTURE_TARGET_3D&&(b->flags&NVN_TEXTURE_FLAGS_IMAGE)&&!textureVolumeImageFormat((MTLPixelFormat)format))return textureInitReturnedFalse(attempt,report("3D IMAGE Metal write format is not implemented format=0x%x",b->format));
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return textureInitReturnedFalse(attempt,report("texture device/pool mismatch"));
     if(textureOneDimensionalTarget(b->target)){if(b->target==NVN_TEXTURE_TARGET_1D_ARRAY&&b->height!=1)return textureInitReturnedFalse(attempt,report("1D array Metal textures require one layer"));if(b->levels!=1)return textureInitReturnedFalse(attempt,report("1D Metal textures require one level"));if(pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("1D textures require ordinary pool storage"));}
-    if(b->target==NVN_TEXTURE_TARGET_3D){if(b->depth!=1)return textureInitReturnedFalse(attempt,report("3D Metal textures require one depth slice"));if(b->levels!=1)return textureInitReturnedFalse(attempt,report("3D Metal textures require one level"));if(pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("3D textures require ordinary pool storage"));}
+    if(b->target==NVN_TEXTURE_TARGET_3D&&pool.kind!=BW_POOL_ORDINARY&&pool.kind!=BW_POOL_VIRTUAL)return textureInitReturnedFalse(attempt,report("3D textures require ordinary or virtual pool storage"));
+    if(b->target==NVN_TEXTURE_TARGET_3D&&(b->flags&NVN_TEXTURE_FLAGS_IMAGE)&&pool.kind==BW_POOL_ORDINARY&&![gpu supportsFamily:MTLGPUFamilyApple7])return textureInitReturnedFalse(attempt,report("3D IMAGE requires Metal Apple7 family write capability"));
     if(b->target==NVN_TEXTURE_TARGET_CUBEMAP&&pool.kind!=BW_POOL_ORDINARY)return textureInitReturnedFalse(attempt,report("Cube textures require ordinary pool storage"));
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return textureInitReturnedFalse(attempt,report("Texture storage bounds"));
     unsigned depthKind=0;if((bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)||
@@ -352,8 +400,21 @@ static void texturePublishCommitted(id<MTLCommandBuffer> cb){
     }
     objc_setAssociatedObject(cb,&texturePendingKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
+/* A staging allocation is a complete volume, not an array of independent
+ * ownership units. Refuse device capacity before any payload snapshot/write. */
+static void textureStagingLayout(BWTexture *t,size_t row,size_t rows,size_t slices,size_t *pitch,size_t *imagePitch,size_t *total){
+    if(row>SIZE_MAX-255)fatal("texture transfer staging size overflow");*pitch=(row+255)&~255ull;
+    if(__builtin_mul_overflow(*pitch,rows,imagePitch)||__builtin_mul_overflow(*imagePitch,slices,total))fatal("texture transfer staging size overflow");
+    if(t.metadata.target==NVN_TEXTURE_TARGET_3D&&(!*total||*total>gpu.maxBufferLength))fatal("3D texture staging exceeds Metal maxBufferLength");
+}
+static void textureVolumeStaging(BWTexture *t){
+    if(t.metadata.target!=NVN_TEXTURE_TARGET_3D)return;nvn_texdesc d=t.descriptor;
+    for(unsigned level=0;level<d.levels;level++){uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;size_t pitch,imagePitch,total;
+        if(nvn_deswizzle_geom(&d,level,0,&row,&rows,&slices,&base,&th,&td,&bpb))fatal("block-linear texture geometry");textureStagingLayout(t,row,rows,slices,&pitch,&imagePitch,&total);}
+}
 static void uploadTexture(BWTexture *input,id<MTLCommandBuffer> cb){
     textureEnsureMapping(input,"texture upload");BWTexture *t=input.base?:input;poolRetainForGPU(cb,t.mapping,NO);textureAuthority(t,cb);if(!t.blockLinear)return;
+    textureVolumeStaging(t);
     const void *poolStorage=t.mapping.canonical;
     NSArray *bufferWrites=objc_getAssociatedObject(cb,&textureBufferWritesKey);for(NSValue *value in bufferWrites){NSRange r=value.rangeValue;if(memoryOverlap(poolStorage,t.layout.size,(const void*)r.location,r.length))fatal("private texture import aliases pending buffer writes");}
     NSMutableData *snapshot=[NSMutableData dataWithLength:t.layout.size];if(!snapshot)fatal("texture pool snapshot allocation failed");
@@ -364,10 +425,10 @@ static void uploadTexture(BWTexture *input,id<MTLCommandBuffer> cb){
     if([hash isEqual:expected])return;
     for(unsigned layer=0;layer<t.layout.layers;layer++)for(unsigned level=0;level<t.descriptor.levels;level++){
         uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;nvn_texdesc d=t.descriptor;
-        if(nvn_deswizzle_geom(&d,level,layer,&row,&rows,&slices,&base,&th,&td,&bpb)||slices!=1)fatal("block-linear texture geometry");
-        size_t pitch=(row+255)&~255u;id<MTLBuffer> staging=[gpu newBufferWithLength:pitch*rows options:MTLResourceStorageModeShared];if(!staging||nvn_deswizzle(&d,level,layer,source,staging.contents,pitch))fatal("block-linear texture decode");
+        if(nvn_deswizzle_geom(&d,level,layer,&row,&rows,&slices,&base,&th,&td,&bpb))fatal("block-linear texture geometry");
+        size_t pitch,imagePitch,total;textureStagingLayout(t,row,rows,slices,&pitch,&imagePitch,&total);id<MTLBuffer> staging=[gpu newBufferWithLength:total options:MTLResourceStorageModeShared];if(!staging||nvn_deswizzle(&d,level,layer,source,staging.contents,pitch))fatal("block-linear texture decode");
         id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];if(!blit)fatal("block-linear texture upload encoder allocation failed");
-        @try{[blit copyFromBuffer:staging sourceOffset:0 sourceBytesPerRow:pitch sourceBytesPerImage:pitch*rows sourceSize:MTLSizeMake(MAX(1,t.width>>level),MAX(1,t.height>>level),1) toTexture:t.texture destinationSlice:layer destinationLevel:level destinationOrigin:MTLOriginMake(0,0,0)];}@finally{[blit endEncoding];}
+        @try{[blit copyFromBuffer:staging sourceOffset:0 sourceBytesPerRow:pitch sourceBytesPerImage:imagePitch sourceSize:MTLSizeMake(MAX(1,t.width>>level),MAX(1,t.height>>level),slices) toTexture:t.texture destinationSlice:t.metadata.target==NVN_TEXTURE_TARGET_3D?0:layer destinationLevel:level destinationOrigin:MTLOriginMake(0,0,0)];}@finally{[blit endEncoding];}
     }
     texturePendingRecord(t,cb,YES)[@"hash"]=hash;
 }
@@ -456,7 +517,12 @@ static BWTexture *textureSelected(BWTexture *base,TextureView v,BOOL attachment)
     BWTexture *t=[BWTexture new];t.base=base;t.texture=resource;t.mapping=base.mapping;t.selection=v;t.selectedAttachment=attachment;t.pool=base.pool;t.poolGeneration=base.poolGeneration;t.device=base.device;t.kindPolicy=base.kindPolicy;t.metadata=base.metadata;t.storageSize=base.storageSize;t.format=format;t.width=MAX(1,base.width>>level);t.height=MAX(1,base.height>>level);t.depth=base.depth;t.descriptor=base.descriptor;t.layout=base.layout;
     textureRememberReference(t);return t;
 }
-NVN(nvnTextureGetViewOffset,ptrdiff_t,const NVNtexture *raw,const NVNtextureView *view){BWTexture *t=textureObject(raw);TextureView v=textureView(view);unsigned level=(v.flags&1)?v.baseLevel:0,layer=(v.flags&2)?v.minLayer:0;if(level>=t.descriptor.levels||layer>=t.layout.layers)fatal("texture view offset bounds");nvn_texdesc d=t.descriptor;return nvn_tex_level_offset(&d,level)+layer*t.layout.layer_size;}
+NVN(nvnTextureGetViewOffset,ptrdiff_t,const NVNtexture *raw,const NVNtextureView *view){BWTexture *t=textureObject(raw);TextureView v=textureView(view);unsigned level=(v.flags&1)?v.baseLevel:0,layer=(v.flags&2)?v.minLayer:0;nvn_texdesc d=t.descriptor;
+    if(t.metadata.target==NVN_TEXTURE_TARGET_3D){uint32_t row,rows,slices,bpb;uint64_t base;unsigned th,td;
+        /* Base-v0 query uses baseLevel/minLayer, not the view counts or
+         * format/target override. This metadata permission is not a GPU view. */
+        if(nvn_deswizzle_geom(&d,level,0,&row,&rows,&slices,&base,&th,&td,&bpb)||layer>=slices)fatal("texture view offset bounds");uint64_t offset=nvn_bl_offset(0,0,layer,row,rows,th,td);if(offset>UINT64_MAX-base||base+offset>=t.layout.size||base+offset>PTRDIFF_MAX)fatal("texture view offset bounds");return (ptrdiff_t)(base+offset);}
+    if(level>=t.descriptor.levels||layer>=t.layout.layers)fatal("texture view offset bounds");return nvn_tex_level_offset(&d,level)+layer*t.layout.layer_size;}
 static void textureDrain(void){for(id o in objects.allValues)if([o isKindOfClass:[BWQueue class]])finishBuffer(((BWQueue*)o).latest);}
 static void textureReadBytes(const void *src,void *dst,size_t bytes,const char *reason){
     if(!src||bytes>UINTPTR_MAX-(uintptr_t)src||(memoryAccessValidator&&!memoryAccessValidator(src,bytes,0)))fatal(reason);
@@ -466,7 +532,10 @@ static void texturePrepareWrite(void *dst,size_t bytes){if(memoryAccessValidator
 static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyRegion *raw,ptrdiff_t row,ptrdiff_t image){
     if((v.flags&32)&&(textureOneDimensionalTarget(t.metadata.target)||textureOneDimensionalTarget(v.target))&&v.target!=t.metadata.target)fatal("1D texture views cannot change dimension");
     if((v.flags&32)&&(t.metadata.target==NVN_TEXTURE_TARGET_3D||v.target==NVN_TEXTURE_TARGET_3D)&&v.target!=t.metadata.target)fatal("3D texture views cannot change dimension");
-    BOOL cube=t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP;
+    BOOL cube=t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP,volume=t.metadata.target==NVN_TEXTURE_TARGET_3D;
+    if(volume&&(v.flags&4)&&v.format!=(uint32_t)t.format)fatal("3D CPU view format reinterpretation is not implemented");
+    unsigned volumeLevel=(v.flags&1)?v.baseLevel:0;
+    if(volume&&(volumeLevel>=t.descriptor.levels||((v.flags&1)?(v.numLevels?v.numLevels:t.descriptor.levels-volumeLevel):t.descriptor.levels)!=1||((v.flags&2)&&(v.minLayer||v.numLayers>1))))fatal("3D CPU transfer requires one mip and allocation layer0");
     if((v.flags&32)&&(cube||v.target==NVN_TEXTURE_TARGET_CUBEMAP)&&v.target!=t.metadata.target)fatal("Cube texture views cannot change dimension");
     if(cube&&((v.flags&4)&&v.format!=(uint32_t)t.format))fatal("Cube CPU view format reinterpretation is not implemented");
     unsigned cubeLevel=(v.flags&1)?v.baseLevel:0;
@@ -476,7 +545,8 @@ static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyReg
     if(cube&&!raw){
         if((v.flags&2)&&(v.minLayer||(v.numLayers&&v.numLayers!=6)))fatal("Cube default region requires all six faces");
         region=(NVNcopyRegion){0,0,0,MAX(1,t.width>>cubeLevel),MAX(1,t.height>>cubeLevel),6};
-    }else textureReadBytes(raw,&region,sizeof region,"texture copy region is not readable");
+    }else if(volume&&!raw)region=(NVNcopyRegion){0,0,0,MAX(1,t.width>>volumeLevel),MAX(1,t.height>>volumeLevel),MAX(1,t.metadata.depth>>volumeLevel)};
+    else textureReadBytes(raw,&region,sizeof region,"texture copy region is not readable");
     if(cube&&(region.xoffset<0||region.yoffset<0||region.zoffset<0||region.width<0||region.height<0||region.depth<0||row<0||image<0||
         (uint64_t)region.xoffset+region.width>(unsigned)MAX(1,t.width>>cubeLevel)||(uint64_t)region.yoffset+region.height>(unsigned)MAX(1,t.height>>cubeLevel)||
         (uint64_t)region.zoffset+region.depth>6-((v.flags&2)?v.minLayer:0)))fatal("Cube region exceeds the selected mip/face extent");
@@ -486,13 +556,12 @@ static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyReg
         if(region.yoffset||region.zoffset||region.height<0||region.height>1||region.depth<0||region.depth>1)fatal("1D array region requires y=z=0 and height/depth in 0..1");
         emptyArray=!region.height||!region.depth;region.height=region.depth=1;
     }
-    BOOL emptyVolume=NO;if(t.metadata.target==NVN_TEXTURE_TARGET_3D){
-        if(((v.flags&1)&&(v.baseLevel||v.numLevels>1))||((v.flags&2)&&(v.minLayer||v.numLayers>1)))fatal("3D CPU view requires level0 and layer0");
-        if(region.zoffset||region.depth<0||region.depth>1)fatal("3D region requires z=0 and depth in 0..1");
-        if(region.xoffset<0||region.yoffset<0||region.width<0||region.height<0||(uint64_t)region.xoffset+region.width>(unsigned)t.width||(uint64_t)region.yoffset+region.height>(unsigned)t.height)fatal("3D region exceeds the level extent");
+    BOOL emptyVolume=NO;if(volume){
+        if(region.xoffset<0||region.yoffset<0||region.zoffset<0||region.width<0||region.height<0||region.depth<0||
+            (uint64_t)region.xoffset+region.width>(unsigned)MAX(1,t.width>>volumeLevel)||(uint64_t)region.yoffset+region.height>(unsigned)MAX(1,t.height>>volumeLevel)||
+            (uint64_t)region.zoffset+region.depth>(unsigned)MAX(1,t.metadata.depth>>volumeLevel))fatal("3D region exceeds the selected mip extent");
         if(row<0||image<0)fatal("negative source stride");
-        /* Normalize only after validating the original coordinates. The
-         * complete planner still validates format/layout before EMPTY. */
+        /* Preserve validation before a no-payload result. */
         emptyVolume=!region.width||!region.height||!region.depth;
         if(emptyVolume)region=(NVNcopyRegion){0,0,0,1,1,1};
     }
@@ -500,7 +569,7 @@ static nvn_texwrite_plan texturePlan(BWTexture *t,TextureView v,const NVNcopyReg
     nvn_texwrite_plan plan;const char *why=NULL;int status=nvn_texwrite_plan_make(&d,(v.flags&1)?v.baseLevel:0,(v.flags&2)?v.minLayer:0,(v.flags&32)?(int)v.target:-1,(v.flags&4)?v.format:0,&region,row,image,&plan,&why);
     if(status<0)fatal(why);if(status==NVN_TEXWRITE_EMPTY){plan.width=0;return plan;}
     unsigned availableLayers=(v.flags&2)&&v.numLayers?v.numLayers:t.layout.layers-((v.flags&2)?v.minLayer:0);
-    if((uint64_t)region.zoffset+plan.depth>availableLayers)fatal("texture copy exceeds view layers");
+    if(!volume&&(uint64_t)region.zoffset+plan.depth>availableLayers)fatal("texture copy exceeds view layers");
     if(emptyArray||emptyVolume)plan.width=0; /* A depth0 base-v0 copy must not become a 1.9 image. */
     if(!t.blockLinear){plan.span_lo=(uint64_t)plan.y0*t.stride+plan.xb;plan.span_hi=(uint64_t)(plan.y0+plan.hb-1)*t.stride+plan.xb+plan.wb;if(plan.span_hi>t.layout.size)fatal("linear texture copy storage bounds");}
     return plan;
@@ -521,30 +590,31 @@ static int textureWriteRun(void *opaque,uint64_t offset,const void *source,size_
 static void textureCPUWrite(const NVNtexture *raw,const NVNtextureView *view,const NVNcopyRegion *region,const void *source,ptrdiff_t row,ptrdiff_t image){
     BWTexture *t=textureObject(raw);TextureView v=textureView(view);nvn_texwrite_plan p=texturePlan(t,v,region,row,image);if(!p.width)return;
     if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS)fatal("texture storage has no CPU mapping");
+    textureVolumeStaging(t);size_t pitch,imagePitch,total;textureStagingLayout(t,p.wb,p.hb,p.depth,&pitch,&imagePitch,&total);
     NSMutableData *copy=textureSourceSnapshot(source,&p);void *storage=textureCanonical(t);
-    int priorCoherence=nvn_texflush_verify(t.identity,storage,t.layout.layer_size,t.layout.layers,p.layer,p.depth);
+    unsigned first=p.is3d?0:p.layer,count=p.is3d?1:p.depth;int priorCoherence=nvn_texflush_verify(t.identity,storage,t.layout.layer_size,t.layout.layers,first,count);
     if(t.gpuWritten&&priorCoherence==NVN_TEXFLUSH_CHANGED)fatal("texture CPU storage changed outside host writes before region write");
     textureDrain();id<MTLCommandBuffer> cb=[commandQueue commandBuffer];if(!cb)fatal("texture write command allocation failed");uploadTexture(t,cb);
     /* All allocation, source reads and geometry checks precede pool mutation.
      * Import every untouched mip/layer before a first partial write. */
-    size_t pitch=(p.wb+255ull)&~255ull,imagePitch=pitch*p.hb;
-    id<MTLBuffer> staging=[gpu newBufferWithLength:imagePitch*p.depth options:MTLResourceStorageModeShared];if(!staging)fatal("texture write staging allocation failed");
+    id<MTLBuffer> staging=[gpu newBufferWithLength:total options:MTLResourceStorageModeShared];if(!staging)fatal("texture write staging allocation failed");
     for(unsigned z=0;z<p.depth;z++)for(unsigned y=0;y<p.hb;y++)memcpy((char*)staging.contents+z*imagePitch+y*pitch,(const char*)copy.bytes+z*p.src_img+y*p.src_row,p.wb);
     id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];if(!blit)fatal("texture write blit allocation failed");
-    @try{for(unsigned z=0;z<p.depth;z++)[blit copyFromBuffer:staging sourceOffset:z*imagePitch sourceBytesPerRow:pitch sourceBytesPerImage:imagePitch sourceSize:MTLSizeMake(p.width,p.height,1) toTexture:t.texture destinationSlice:p.layer+z destinationLevel:p.level destinationOrigin:MTLOriginMake(p.x0,p.y0,0)];}@finally{[blit endEncoding];}
+    @try{for(unsigned z=0;z<p.depth;z++)[blit copyFromBuffer:staging sourceOffset:z*imagePitch sourceBytesPerRow:pitch sourceBytesPerImage:imagePitch sourceSize:MTLSizeMake(p.width,p.height,1) toTexture:t.texture destinationSlice:p.is3d?0:p.layer+z destinationLevel:p.level destinationOrigin:MTLOriginMake(p.x0,p.y0,p.is3d?p.z0+z:0)];}@finally{[blit endEncoding];}
     texturePrepareWrite((char*)storage+p.span_lo,p.span_hi-p.span_lo);
     if(t.blockLinear){nvn_texdesc d=t.descriptor;if(nvn_texwrite_apply_checked(&d,&p,copy.bytes,textureWriteRun,storage))fatal("texture write destination copy failed");}else for(unsigned y=0;y<p.hb;y++)textureWriteBytes((char*)storage+(p.y0+y)*t.stride+p.xb,(const char*)copy.bytes+y*p.src_row,p.wb,"texture write destination copy failed");
     commitBuffer(cb);finishBuffer(cb);t.uploadHash=digest(storage,t.layout.size);
-    if(nvn_texflush_note_checked(t.identity,storage,t.layout.layer_size,t.layout.layers,p.layer,p.depth,!t.gpuWritten||priorCoherence==NVN_TEXFLUSH_CLEAN))fatal("texture write coherence certificate allocation failed");
+    if(nvn_texflush_note_checked(t.identity,storage,t.layout.layer_size,t.layout.layers,first,count,!t.gpuWritten||priorCoherence==NVN_TEXFLUSH_CLEAN))fatal("texture write coherence certificate allocation failed");
 }
 static void textureCPURead(const NVNtexture *raw,const NVNtextureView *view,const NVNcopyRegion *region,void *destination,ptrdiff_t row,ptrdiff_t image){
     BWTexture *t=textureObject(raw);nvn_texwrite_plan p=texturePlan(t,textureView(view),region,row,image);if(!p.width)return;
+    textureVolumeStaging(t);size_t pitch,imagePitch,total;textureStagingLayout(t,p.wb,p.hb,p.depth,&pitch,&imagePitch,&total);
     if(!destination||p.src_bytes>UINTPTR_MAX-(uintptr_t)destination)fatal("texture read destination bounds");
     for(unsigned z=0;z<p.depth;z++)for(unsigned y=0;y<p.hb;y++)texturePrepareWrite((char*)destination+z*p.src_img+y*p.src_row,p.wb);
-    textureDrain();size_t pitch=(p.wb+255ull)&~255ull,imagePitch=pitch*p.hb;
-    id<MTLBuffer> buffer=[gpu newBufferWithLength:imagePitch*p.depth options:MTLResourceStorageModeShared];if(!buffer)fatal("texture read staging allocation failed");
+    textureDrain();
+    id<MTLBuffer> buffer=[gpu newBufferWithLength:total options:MTLResourceStorageModeShared];if(!buffer)fatal("texture read staging allocation failed");
     id<MTLCommandBuffer> cb=[commandQueue commandBuffer];if(!cb)fatal("texture read command allocation failed");uploadTexture(t,cb);id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];if(!blit)fatal("texture read blit allocation failed");
-    @try{for(unsigned z=0;z<p.depth;z++)[blit copyFromTexture:t.texture sourceSlice:p.layer+z sourceLevel:p.level sourceOrigin:MTLOriginMake(p.x0,p.y0,0) sourceSize:MTLSizeMake(p.width,p.height,1) toBuffer:buffer destinationOffset:z*imagePitch destinationBytesPerRow:pitch destinationBytesPerImage:imagePitch];}@finally{[blit endEncoding];}
+    @try{for(unsigned z=0;z<p.depth;z++)[blit copyFromTexture:t.texture sourceSlice:p.is3d?0:p.layer+z sourceLevel:p.level sourceOrigin:MTLOriginMake(p.x0,p.y0,p.is3d?p.z0+z:0) sourceSize:MTLSizeMake(p.width,p.height,1) toBuffer:buffer destinationOffset:z*imagePitch destinationBytesPerRow:pitch destinationBytesPerImage:imagePitch];}@finally{[blit endEncoding];}
     commitBuffer(cb);finishBuffer(cb);
     for(unsigned z=0;z<p.depth;z++)for(unsigned y=0;y<p.hb;y++)textureWriteBytes((char*)destination+z*p.src_img+y*p.src_row,(char*)buffer.contents+z*imagePitch+y*pitch,p.wb,"texture read destination copy failed");
 }
@@ -569,13 +639,14 @@ static void textureInvalidate(const NVNtexture *raw,const NVNtextureView *view){
     BWTexture *t=textureObject(raw);if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS)return;
     TextureView v={0};if(t.pool.flags&NVN_MEMORY_POOL_FLAGS_CPU_CACHED)v=textureView(view);
     uint32_t first,count;const char *why=NULL;nvn_texdesc d=t.descriptor;int status=nvn_texflush_layers(&d,!!(v.flags&2),v.minLayer,v.numLayers,&first,&count,&why);if(status<0)fatal(why);if(status==NVN_TEXFLUSH_EMPTY)return;
+    textureVolumeStaging(t);
     textureDrain();uint8_t *storage=textureCanonical(t);texturePrepareWrite(storage+first*t.layout.layer_size,count*t.layout.layer_size);
     if(!t.blockLinear){if(!t.mapping.physical.coherent)textureWriteBytes(storage,(char*)t.mapping.buffer.contents+t.mapping.metalOffset,t.layout.size,"texture invalidate destination copy failed");return;}
     /* Gather every selected level before mutating any pool byte; a failed GPU
      * read never publishes a partially reconstructed texture. Padding survives. */
     NSMutableData *image=[NSMutableData dataWithLength:t.layout.size];if(!image)fatal("texture invalidate snapshot allocation failed");textureReadBytes(storage,image.mutableBytes,t.layout.size,"texture invalidate pool snapshot failed");
     for(unsigned level=0;level<d.levels;level++){
-        NVNcopyRegion r={0,0,0,MAX(1,t.width>>level),MAX(1,t.height>>level),(int)count};TextureView selected={0};selected.flags=3;if(t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP)selected.numLevels=1;selected.baseLevel=level;selected.minLayer=first;selected.numLayers=count;
+        NVNcopyRegion r={0,0,0,MAX(1,t.width>>level),MAX(1,t.height>>level),t.metadata.target==NVN_TEXTURE_TARGET_3D?MAX(1,t.metadata.depth>>level):(int)count};TextureView selected={0};selected.flags=3;if(t.metadata.target==NVN_TEXTURE_TARGET_CUBEMAP||t.metadata.target==NVN_TEXTURE_TARGET_3D)selected.numLevels=1;selected.baseLevel=level;selected.minLayer=first;selected.numLayers=count;
         nvn_texwrite_plan p=texturePlan(t,selected,&r,0,0);NSMutableData *linear=[NSMutableData dataWithLength:p.src_bytes];if(!linear)fatal("texture invalidate staging allocation failed");
         NVNtextureView native;memset(&native,0,sizeof native);memcpy(&native,&selected,sizeof selected);textureCPURead(raw,&native,&r,linear.mutableBytes,0,0);nvn_texwrite_apply(&d,&p,linear.bytes,image.mutableBytes);
     }

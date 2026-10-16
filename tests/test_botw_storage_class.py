@@ -95,9 +95,11 @@ class TextureLifecycleContextCPUTests(unittest.TestCase):
 @implementation LifecycleThrowReferences
 - (void)addObject:(id)object{(void)object;@throw [NSException exceptionWithName:@"LifecycleReferenceFailure" reason:@"owned reference fixture" userInfo:nil];}
 @end
+static NSUInteger volumeStagingLimit=NSUIntegerMax;
 @interface LifecycleCPUDevice:NSObject @end
 @implementation LifecycleCPUDevice
 - (id<MTLCommandQueue>)newCommandQueue{return (id<MTLCommandQueue>)[NSObject new];}
+- (NSUInteger)maxBufferLength{return volumeStagingLimit;}
 @end
 static id<MTLDevice> lifecycleCPUDevice(void){return (id<MTLDevice>)[LifecycleCPUDevice new];}
 #define MTLCreateSystemDefaultDevice lifecycleCPUDevice
@@ -105,11 +107,11 @@ static id<MTLDevice> lifecycleCPUDevice(void){return (id<MTLDevice>)[LifecycleCP
 #undef MTLCreateSystemDefaultDevice
 #include <setjmp.h>
 static sigjmp_buf recovery;
-static unsigned notifications,accessCalls;
+static unsigned notifications,accessCalls,deniedCalls;
 static BOOL recoverNow;
 static const void *deniedAddress;
 static void captureError(const char *error){(void)error;notifications++;if(recoverNow)siglongjmp(recovery,1);}
-static int accessMetadata(const void *address,size_t bytes,int write){(void)bytes;(void)write;accessCalls++;return address!=deniedAddress;}
+static int accessMetadata(const void *address,size_t bytes,int write){(void)bytes;(void)write;accessCalls++;if(address==deniedAddress)deniedCalls++;return address!=deniedAddress;}
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"LIFECYCLE_CPU_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
 static NVNdevice rawDevice;
 static NVNmemoryPool rawPool;
@@ -220,20 +222,48 @@ int main(int argc,char **argv){@autoreleasepool{
   if(!strcmp(mode,"alignment-cube"))CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);
   else{CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==3072);b->depth=1;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==3072);b->depth=2048;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==3072);b->width=b->height=16;b->levels=3;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==12288);b->width=b->height=4;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==9216);b->depth=0;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->depth=-1;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->depth=6;b->height=3;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->height=4;b->levels=4;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->levels=1;b->target=NVN_TEXTURE_TARGET_CUBEMAP_ARRAY;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));}
   CHECK(!notifications);
+ }else if(!strcmp(mode,"volume-size")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=b->depth=32;b->flags=NVN_TEXTURE_FLAGS_IMAGE;b->packagedData=(const void*)(uintptr_t)1;
+  CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==131072);CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);CHECK(w_nvnTextureBuilderGetStorageClass(&builder)==0x1fe);CHECK(w_nvnTextureBuilderGetPackagedTextureData(&builder)==(const void*)(uintptr_t)1);
+  for(unsigned depth=1;depth<=33;depth+=8){b->width=33;b->height=17;b->depth=depth;b->levels=6;nvn_texdesc d=textureDescriptor(b);nvn_texlayout layout;nvn_tex_layout(&d,&layout);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==layout.size&&layout.layers==1);}
+  CHECK(!notifications);
+ }else if(!strcmp(mode,"volume-init")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=b->depth=32;b->flags=NVN_TEXTURE_FLAGS_IMAGE;b->packagedData=(const void*)(uintptr_t)1;
+  BWPool *pool=get(&rawPool,[BWPool class]);pool.size=1u<<20;CHECK(w_nvnTextureInitialize(&raw,&builder));BWTexture *t=textureObject(&raw);CHECK(!t.texture&&t.layout.layers==1&&t.layout.size==131072&&t.metadata.depth==32&&t.metadata.packagedData==(const void*)(uintptr_t)1&&t.metadata.flags==4);CHECK(w_nvnTextureGetDepth(&raw)==32&&!notifications);
+ }else if(!strcmp(mode,"volume-plan")){
+  CHECK(w_nvnTextureInitialize(&raw,&builder));BWTexture *t=textureObject(&raw);TextureBuilder b=t.metadata;b.target=NVN_TEXTURE_TARGET_3D;b.width=b.height=b.depth=32;b.levels=6;t.metadata=b;t.descriptor=textureDescriptor(&b);nvn_texlayout layout;nvn_texdesc d=t.descriptor;nvn_tex_layout(&d,&layout);t.layout=layout;t.width=t.height=32;
+  NVNcopyRegion r={3,2,14,7,5,5};nvn_texwrite_plan p={0};TextureView first={0};first.flags=1;first.numLevels=1;BOOL planned=NO;@try{p=texturePlan(t,first,&r,48,256);planned=YES;}@catch(BWGraphicsFailure *failure){(void)failure;}CHECK(planned);CHECK(p.is3d&&p.layer==0&&p.z0==14&&p.depth==5&&p.src_row==48&&p.src_img==256&&p.src_bytes==1244);
+  NVNtextureView view;w_nvnTextureViewSetDefaults(&view);w_nvnTextureViewSetLevels(&view,2,1);r=(NVNcopyRegion){1,2,3,2,3,4};p=texturePlan(t,textureView(&view),&r,0,0);CHECK(p.level==2&&p.z0==3&&p.depth==4&&p.src_bytes==96);CHECK(w_nvnTextureGetViewOffset(&raw,&view)==(ptrdiff_t)nvn_tex_level_offset(&d,2));
+  r=(NVNcopyRegion){0};w_nvnTextureReadTexels(&raw,&view,&r,(void*)(uintptr_t)1);CHECK(!notifications);
+ }else if(!strcmp(mode,"volume-offset")){
+  CHECK(w_nvnTextureInitialize(&raw,&builder));BWTexture *t=textureObject(&raw);TextureBuilder b=t.metadata;b.target=NVN_TEXTURE_TARGET_3D;b.width=b.height=b.depth=32;b.levels=6;t.metadata=b;t.descriptor=textureDescriptor(&b);nvn_texdesc d=t.descriptor;nvn_texlayout layout;nvn_tex_layout(&d,&layout);t.layout=layout;t.width=t.height=32;
+  static const uint64_t offsets[]={0,512,1024,1536,2048,2560,3072,3584,4096,4608,5120,5632,6144,6656,7168,7680,65536,66048,66560,67072,67584,68096,68608,69120,69632,70144,70656,71168,71680,72192,72704,73216,131072,131584,132096,132608,133120,133632,134144,134656,135168,135680,136192,136704,137216,137728,138240,138752,147456,147968,148480,148992,149504,150016,150528,151040,151552,152064,152576,153088,153600,154112,154624};unsigned ordinal=0;NVNtextureView view={0};
+  int counts[]={0,1,-1};w_nvnTextureViewSetTarget(&view,NVN_TEXTURE_TARGET_2D);w_nvnTextureViewSetFormat(&view,NVN_FORMAT_DEPTH16);w_nvnTextureViewSetDepthStencilMode(&view,(NVNtextureDepthStencilMode)1);w_nvnTextureViewSetSwizzle(&view,(NVNtextureSwizzle)0,(NVNtextureSwizzle)1,(NVNtextureSwizzle)0,(NVNtextureSwizzle)1);
+  for(unsigned level=0;level<6;level++)for(unsigned z=0;z<MAX(1,32>>level);z++){for(unsigned a=0;a<3;a++)for(unsigned c=0;c<3;c++){w_nvnTextureViewSetLevels(&view,level,counts[a]);w_nvnTextureViewSetLayers(&view,z,counts[c]);ptrdiff_t got=-1;recoverNow=YES;if(sigsetjmp(recovery,1)){recoverNow=NO;CHECK(0);}got=w_nvnTextureGetViewOffset(&raw,&view);recoverNow=NO;CHECK(got==(ptrdiff_t)offsets[ordinal]);}ordinal++;}CHECK(ordinal==63);
+ }else if(!strcmp(mode,"volume-image-formats")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=b->depth=4;b->flags=4;b->format=NVN_FORMAT_RGBA8_SRGB;unsigned char before[sizeof raw];memset(&raw,0xa5,sizeof raw);memcpy(before,&raw,sizeof raw);NSUInteger count=objects.count;uint64_t nextSerial=serial;CHECK(!w_nvnTextureInitialize(&raw,&builder));CHECK(notifications==1&&strstr(lastError,"3D IMAGE Metal write format is not implemented")&&!memcmp(before,&raw,sizeof raw)&&objects.count==count&&serial==nextSerial);
+ }else if(!strcmp(mode,"volume-capacity")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=b->depth=32;BWPool *pool=get(&rawPool,[BWPool class]);pool.size=1u<<20;pool.flags=NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED|NVN_MEMORY_POOL_FLAGS_GPU_CACHED;CHECK(w_nvnTextureInitialize(&raw,&builder));volumeStagingLimit=1024;NVNcopyRegion region={0,0,0,32,32,32};deniedAddress=(void*)(uintptr_t)1;
+  for(unsigned read=0;read<3;read++){unsigned before=notifications,deniedBefore=deniedCalls;recoverNow=YES;if(!sigsetjmp(recovery,1)){if(read==2)w_nvnTextureInvalidateTexels(&raw,NULL,NULL);else if(read)w_nvnTextureReadTexels(&raw,NULL,&region,(void*)(uintptr_t)1);else w_nvnTextureWriteTexels(&raw,NULL,&region,(void*)(uintptr_t)1);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"3D texture staging exceeds Metal maxBufferLength")&&deniedCalls==deniedBefore);}deniedAddress=NULL;
+  BWTexture *t=textureObject(&raw);size_t pitch,image,total;volumeStagingLimit=262144;textureStagingLayout(t,128,32,32,&pitch,&image,&total);CHECK(pitch==256&&image==8192&&total==262144);BOOL overflow=NO;@try{textureStagingLayout(t,SIZE_MAX,1,1,&pitch,&image,&total);}@catch(BWGraphicsFailure *failure){(void)failure;overflow=YES;}CHECK(overflow&&strstr(lastError,"staging size overflow"));pendingError=pendingFatal=NO;
+ }else if(!strcmp(mode,"volume-opaque")){
+  size_t page=getpagesize();void *inaccessible=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(inaccessible!=MAP_FAILED);deniedAddress=inaccessible;
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=b->depth=32;b->flags=4;b->packagedData=inaccessible;BWPool *pool=get(&rawPool,[BWPool class]);pool.size=1u<<20;
+  CHECK(w_nvnTextureBuilderGetPackagedTextureData(&builder)==inaccessible);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==131072&&w_nvnTextureInitialize(&raw,&builder));CHECK(textureObject(&raw).metadata.packagedData==inaccessible&&!notifications);deniedAddress=NULL;CHECK(!munmap(inaccessible,page));
  }else if(!strcmp(mode,"size-3d")||!strcmp(mode,"alignment-3d")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;
   if(!strcmp(mode,"alignment-3d")){CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);}
-  else{CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);for(unsigned z=1;z<=17;z+=4){b->depth=z;b->levels=3;nvn_texdesc d=textureDescriptor(b);nvn_texlayout layout;nvn_tex_layout(&d,&layout);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==layout.size&&layout.layers==1);}b->levels=7;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->levels=1;b->depth=1;b->width=2049;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->width=4;b->packaged=1;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->packaged=0;b->packagedData=(const void*)(uintptr_t)UINTPTR_MAX;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->packagedData=NULL;b->glName=1;b->device=NULL;b->width=-4;unsigned reads=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==reads+1);}
+  else{CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);for(unsigned z=1;z<=17;z+=4){b->depth=z;b->levels=3;nvn_texdesc d=textureDescriptor(b);nvn_texlayout layout;nvn_tex_layout(&d,&layout);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==layout.size&&layout.layers==1);}b->levels=7;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->levels=1;b->depth=1;b->width=2049;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->width=4;b->packaged=1;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->packaged=0;b->flags=NVN_TEXTURE_FLAGS_DISPLAY;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->flags=0;b->glName=1;b->device=NULL;b->width=-4;unsigned reads=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==reads+1);}
   CHECK(!notifications);
  }else if(!strcmp(mode,"3d-init-boundaries")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;BWPool *pool=get(&rawPool,[BWPool class]);NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
-  for(unsigned i=0;i<3;i++){pool.kind=i?BW_POOL_ORDINARY:BW_POOL_VIRTUAL;b->depth=i==2?2:1;b->levels=i==1?2:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i==2?"3D Metal textures require one depth slice":i==1?"3D Metal textures require one level":"3D textures require ordinary pool storage"));}
+  for(unsigned i=0;i<3;i++){pool.kind=i?BW_POOL_VIRTUAL:BW_POOL_PHYSICAL;b->depth=i==2?2049:1;b->levels=i==1?4:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i?"Unsupported texture dimension":"3D textures require ordinary or virtual pool storage"));}
  }else if(!strcmp(mode,"3d-view-counts")){
   CHECK(w_nvnTextureInitialize(&raw,&builder));BWTexture *t=textureObject(&raw);TextureBuilder b=t.metadata;b.target=NVN_TEXTURE_TARGET_3D;b.width=b.height=4;t.metadata=b;t.descriptor=textureDescriptor(&b);nvn_texlayout layout;nvn_texdesc descriptor=t.descriptor;nvn_tex_layout(&descriptor,&layout);t.layout=layout;t.width=t.height=4;
-  for(unsigned layers=0;layers<2;layers++)for(unsigned empty=0;empty<2;empty++)for(unsigned read=0;read<2;read++){NVNtextureView view={0};w_nvnTextureViewSetDefaults(&view);if(layers)w_nvnTextureViewSetLayers(&view,0,-1);else w_nvnTextureViewSetLevels(&view,0,-1);TextureView snapshot=textureView(&view);CHECK(layers?snapshot.numLayers==UINT16_MAX:snapshot.numLevels==UINT8_MAX);NVNcopyRegion region={0,0,0,empty?0:4,4,1};unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){if(read)w_nvnTextureReadTexels(&raw,&view,&region,(void*)(uintptr_t)1);else w_nvnTextureWriteTexels(&raw,&view,&region,(const void*)(uintptr_t)1);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"3D CPU view requires level0 and layer0")&&!pendingError&&!pendingFatal&&!graphicsDepth);}
+  for(unsigned layers=0;layers<2;layers++)for(unsigned empty=0;empty<2;empty++)for(unsigned read=0;read<2;read++){NVNtextureView view={0};w_nvnTextureViewSetDefaults(&view);if(layers)w_nvnTextureViewSetLayers(&view,0,-1);else w_nvnTextureViewSetLevels(&view,0,-1);TextureView snapshot=textureView(&view);CHECK(layers?snapshot.numLayers==UINT16_MAX:snapshot.numLevels==UINT8_MAX);NVNcopyRegion region={0,0,0,empty?0:4,4,1};unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){if(read)w_nvnTextureReadTexels(&raw,&view,&region,(void*)(uintptr_t)1);else w_nvnTextureWriteTexels(&raw,&view,&region,(const void*)(uintptr_t)1);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"3D CPU transfer requires one mip and allocation layer0")&&!pendingError&&!pendingFatal&&!graphicsDepth);}
  }else if(!strcmp(mode,"3d-input-boundaries")){
   TextureBuilder *b=(TextureBuilder*)&builder;BWPool *pool=get(&rawPool,[BWPool class]);pool.kind=BW_POOL_ORDINARY;NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
-  for(unsigned i=0;i<10;i++){builder=ownedBuilder();b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;if(i==0)b->flags=8;if(i==1)b->flags=4;if(i==2)b->samples=1;if(i==3)b->format=NVN_FORMAT_DEPTH16;if(i==4)b->format=NVN_FORMAT_RGBA_ASTC_4x4;if(i==5)b->glName=1;if(i==6)b->packagedData=(const void*)(uintptr_t)UINTPTR_MAX;if(i==7)b->packaged=1;if(i==8)b->height=2049;if(i==9)b->depth=-1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);}
+  for(unsigned i=0;i<10;i++){builder=ownedBuilder();b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;if(i==0)b->flags=8;if(i==1)b->flags=NVN_TEXTURE_FLAGS_DISPLAY;if(i==2)b->samples=1;if(i==3)b->format=NVN_FORMAT_DEPTH16;if(i==4)b->format=NVN_FORMAT_RGBA_ASTC_4x4;if(i==5)b->glName=1;if(i==6)b->packaged=0x101;if(i==7)b->packaged=1;if(i==8)b->height=2049;if(i==9)b->depth=-1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);}
  }else if(!strcmp(mode,"1d-array-init-boundaries")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_1D_ARRAY;b->width=4;BWPool *pool=get(&rawPool,[BWPool class]);NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
   for(unsigned i=0;i<3;i++){pool.kind=i?BW_POOL_ORDINARY:BW_POOL_VIRTUAL;b->height=i==2?2:1;b->levels=i==1?2:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i==2?"1D array Metal textures require one layer":i==1?"1D Metal textures require one level":"1D textures require ordinary pool storage"));}
@@ -389,6 +419,27 @@ int main(int argc,char **argv){@autoreleasepool{
 
     def test_3d_size_reuses_complete_volume_layout_and_explicit_metadata_boundaries(self):
         self.mode('size-3d')
+
+    def test_volume_image_actual_metadata_reuses_complete_gob_and_keeps_opaque_pointer(self):
+        self.mode('volume-size')
+
+    def test_volume_virtual_initialization_publishes_metadata_without_gpu_materialization(self):
+        self.mode('volume-init')
+
+    def test_volume_partial_xyz_strides_selected_mip_and_empty_region_use_complete_planner(self):
+        self.mode('volume-plan')
+
+    def test_volume_slice_offset_uses_nonlinear_gob_and_ignores_query_counts(self):
+        self.mode('volume-offset')
+
+    def test_volume_image_unproven_write_format_refuses_before_publication(self):
+        self.mode('volume-image-formats')
+
+    def test_volume_staging_device_capacity_refuses_before_payload_or_destination_access(self):
+        self.mode('volume-capacity')
+
+    def test_volume_opaque_prot_none_pointer_is_stored_without_payload_access(self):
+        self.mode('volume-opaque')
 
     def test_3d_alignment_reuses_original_gob_alignment(self):
         self.mode('alignment-3d')

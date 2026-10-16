@@ -11,14 +11,14 @@
 
 ## Task 1：原合同和完整模块可复用性
 
-- [ ] kernel核固定原SDK flags4的准确含义及其对size/layout/kind的实际影响，32³Size/Align/ViewOffset和深度GOB参数。
+- [x] kernel核固定原SDK flags4的准确含义及其对size/layout/kind的实际影响，32³Size/Align/ViewOffset和深度GOB参数。
 - [x] 固定base0 actual normal/rawFE路径已闭合：Setter/Get只保留opaque pointer；原Initialize及完整layout helper不读Builder+50、不拷此pointer入Texture，池回调取pool base+Texture.offset，没有payload上传。布局另在+58，不能混用。此结论不扩大到未证GL/packaged-layout等其它路径。
-- [ ] owner/linear对照两个钉住的完整上游3D创建、上传、反向读取与writer，列出可薄接域及真实差异；不以自写平面算法冒称完整3D。
+- [x] owner/linear对照两个钉住的完整上游3D创建、上传、反向读取与writer，列出可薄接域及真实差异；不以自写平面算法冒称完整3D。
 
 ## Task 2：在证据域内实施和验证
 
-- [ ] 合同闭合后root定最小通用域/影响面，owner先自有CPU真实RED再薄接；保builder原metadata、正确volume/mip/region边界、权限/溢出/empty及失败状态。
-- [ ] 独立真实MTLType3D多深度采样/CPU反向读写与padding canary，覆盖跨GOB的z变化；所需IMAGE/packaged语义按原合同验收，未支持消费者仍受控拒绝。
+- [x] 合同闭合后root定最小通用域/影响面，owner先自有CPU真实RED再薄接；保builder原metadata、正确volume/mip/region边界、权限/溢出/empty及失败状态。
+- [x] 独立真实MTLType3D多深度采样/CPU反向读写与padding canary，覆盖跨GOB的z变化；所需IMAGE/packaged语义按原合同验收，未支持消费者仍受控拒绝。
 - [ ] 默认旧2D/array/Cube/单slice3D与private authority/descriptor生命周期必要回归，双独审冻结后精确commit并push。
 
 ## Task 3：完整候选与真机
@@ -26,4 +26,20 @@
 - [ ] 固定连贯提交完整测试、精确head双CI与官方无游戏工件核后本机签名，保数据更新当前iPhone12，继续核UID/RomFS/shader。
 - [ ] 独立普通运行取得下一实际停止点或真实画面；通过操作、音频、存档及重开才可称可玩。
 
-已核flag4为IMAGE，32³format25自动布局size131072/align512；精确GOB/offset及whole-volume fixture仍待独立闭合。既有完整vendor已有is3d/z0和volume apply/extract；桥当前upload硬拒slices!=1、CPU按arraySlice/availableLayers处理depth、Invalidate只读首slice，必须统一成真正3D z-volume与单allocation authority/certificate，不能只删Init拒绝。后端资源ShaderWrite与IMAGE消费者执行的支持需明确分界；未支持命令保持受控拒绝。
+## Root 实施域决定（合同闭合后）
+
+owner/kernel/linear三份只读收据已闭合。flag4为IMAGE；32³format25自动布局size131072/align512、tileH0/D4，z切片相对起点为floor(z/16)*65536+(z%16)*512。kernel用自有数据证明完整vendor体积地址双射、往返及局部写canary；此证据不冒充原游戏执行。
+
+本批实施真正target3D、W/H/D各1..2048、合法完整mip链、rawsamples0、flags0或IMAGE4、exact且identity的普通非压缩color、无GL/无显式packagedLayout。普通池与既有FE虚拟解析域可复用；physical direct、未知kind、跨不支持的mapping/别名域继续拒绝。非NULL packagedData只按已证normal合同保存/返回opaque值，不访问其内容；不能扩大到其它target或layout/GL域。
+
+完整vendor算法不改。桥薄接每mip完整volume staging、slice0/origin.z、CPU选中单mip的xyz区域、Invalidate全mipDepth，以及完整allocation (0,1)的coherence/authority。NULLregion沿已证完整单mip语义；多mip整笔CPU transfer、正3D layer view、跨维/异格式view、3D attachment/呈现等未证操作仍受控拒绝。保原对象/provider/边界验证顺序、empty无写、checked溢出及失败不半发布。
+
+GetViewOffset纯metadata查询与创建GPU view分开：本批包含已独证的合法selected mip、z<mipDepth的正z查询，复用完整vendor非线性GOB地址；kernel六级63个offset黄金值独审。numLevels/numLayers等字段是否影响原query按固定原合同核准，不沿用GPU view的array-layer上界。GPU/descriptor与CPU transfer的View.minLayer>0继续拒绝；CPU region.zoffset仍可在选中mip的volume内取正值。
+
+IMAGE资源可申请真实ShaderWrite usage；本批消费者只支持只读/采样。通过现有shared applyResources及wholebatch validateRenderSubmission，在counter/arena写入前拒绝3D typed write/read_write/未知access；实际encode复用同门。不能以usage或已成功Initialize宣称GPU image写入已实现。写消费者需要独立完整GPU写authority/别名/Invalidate闭合。
+
+IMAGE真实资源域已按Apple官方Write表限定为Apple7及以上和36个标准R/RG/RGBA normalized/integer/float格式；sRGB/BGRA/packed等排除是桥的保守域，不是声称硬件全部不支持。新增whole-volume staging要求checked尺寸且不超过device.maxBufferLength。独审补核该已知容量资格须在MakeBase物化工厂前以及任何upload/Read/Write/Invalidate的大snapshot或dirty prepare前完成；虚拟首次draw的整批preflight由同物化门覆盖，不能先执行counter再在upload拒绝。空操作仍先按原对象/view/region验证并无payload返回，不借容量门改成额外内存访问。
+
+测试必须先有新行为真实CPU RED，再覆盖真实Type3D、多z（跨z15/16与z31）、多mip、非2幂体积、局部xyz读写、GOB与staging padding、缓存Flush/Invalidate、opaque address1/自有PROT_NONE不解引用、虚拟映射epoch/别名/retirement，以及typed write整批前拒counter/copy/arena canary。旧2D/array/Cube/单slice3D必要回归；测试域改变须逐项解释负例迁移，不能删除保护。
+
+owner持有graphics.m/texture_family.inc及既有相关test/probe/许可纹理说明；root持有主文档/计划/集成。kernel和linear独立审查/自有fixtures；原游戏和GPU运行由root串行分配。诊断c31使用固定提交，owner可在它之后实施3D，不混入诊断构建。
