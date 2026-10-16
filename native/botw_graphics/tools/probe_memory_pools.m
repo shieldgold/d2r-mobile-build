@@ -30,13 +30,13 @@ static NSMutableDictionary<NSNumber*,id> *objects;static NSMutableDictionary<NSN
 static uint64_t serial;static id<MTLDevice> gpu;static BOOL textureTrackingAvailable;
 static int (*memoryValidator)(const void*,size_t);static int (*memoryAccessValidator)(const void*,size_t,int);
 static char lastError[512];static int dirtyFail,writePreparations,guardCalls,retireReferences;static id consumerBuffer;
-static unsigned snapshotAllocations,noCopyCreated,noCopyReleased;static BOOL rejectOversizedSnapshot,dirtyAddFail;
+static unsigned snapshotAllocations,noCopyCreated,noCopyReleased,allocationReports,poolGroupCalls;static BOOL failPoolGroup;static BOOL rejectOversizedSnapshot,dirtyAddFail;
 static int admissionVMMode;static unsigned admissionVMQueries,admissionLogicalCalls,admissionWriteCalls;
 static char admissionOrder[32];static unsigned admissionOrderLength;
 static void admissionEvent(char event){if(admissionOrderLength+1<sizeof admissionOrder){admissionOrder[admissionOrderLength++]=event;admissionOrder[admissionOrderLength]=0;}}
 static BOOL holdNewNoCopy;static id heldNoCopy;
 static unsigned char *allocation;static size_t allocationBytes;static NVNdevice rawDevice;static NVNmemoryPool rawPools[12];
-static int report(const char *fmt,...){va_list a;va_start(a,fmt);vsnprintf(lastError,sizeof lastError,fmt,a);va_end(a);return 0;}
+static int report(const char *fmt,...){allocationReports++;va_list a;va_start(a,fmt);vsnprintf(lastError,sizeof lastError,fmt,a);va_end(a);return 0;}
 __attribute__((noreturn))static void fatal(const char *why){report("%s",why);@throw [NSException exceptionWithName:@"PoolFixtureFailure" reason:@(why) userInfo:nil];}
 static BOOL range(size_t off,size_t n,size_t size){return off<=size&&n<=size-off;}
 static BOOL memoryOverlap(const void *a,size_t n,const void *b,size_t m){uintptr_t x=(uintptr_t)a,y=(uintptr_t)b;if(n>UINTPTR_MAX-x||m>UINTPTR_MAX-y)return YES;return n&&m&&(x<=y?y-x<n:x-y<m);}
@@ -63,9 +63,11 @@ static int fixtureDirtyRemove(const void *p,char *error,size_t cap){(void)p;if(d
 - (void)dealloc{if(_released)_released(_contents,_length);free(_owned);}
 @end
 @interface PoolFixtureDevice:NSObject
-@property NSUInteger maxBufferLength,allocationCalls,failAllocationAt,holdAllocationAt,throwAllocationAt;@property BOOL failAllocation;
+@property(nonatomic) NSUInteger maxBufferLength;@property NSUInteger maxQueries,secondMax,allocationCalls,failAllocationAt,holdAllocationAt,throwAllocationAt;@property BOOL failAllocation;
 @end
 @implementation PoolFixtureDevice
+@synthesize maxBufferLength=_maxBufferLength;
+- (NSUInteger)maxBufferLength{self.maxQueries++;return self.maxQueries==2&&self.secondMax?self.secondMax:_maxBufferLength;}
 - (id<MTLBuffer>)newBufferWithBytesNoCopy:(void*)p length:(NSUInteger)n options:(MTLResourceOptions)o deallocator:(void(^)(void*,NSUInteger))d{(void)o;self.allocationCalls++;if(self.failAllocation||self.failAllocationAt==self.allocationCalls)return nil;PoolFixtureBuffer *b=[PoolFixtureBuffer new];b.contents=p;b.length=n;noCopyCreated++;b.released=^(void *address,NSUInteger bytes){noCopyReleased++;if(d)d(address,bytes);};if(holdNewNoCopy||self.holdAllocationAt==self.allocationCalls)heldNoCopy=b;if(self.throwAllocationAt==self.allocationCalls)@throw [NSException exceptionWithName:@"PoolFixtureAllocation" reason:@"synthetic allocation throw after resource retention" userInfo:nil];return (id<MTLBuffer>)b;}
 - (id<MTLBuffer>)newBufferWithBytes:(const void*)p length:(NSUInteger)n options:(MTLResourceOptions)o{(void)o;self.allocationCalls++;if(self.failAllocation)return nil;PoolFixtureBuffer *b=[PoolFixtureBuffer new];b.owned=malloc(n);memcpy(b.owned,p,n);b.contents=b.owned;b.length=n;return (id<MTLBuffer>)b;}
 @end
@@ -120,7 +122,10 @@ static kern_return_t admissionVMQuery(vm_map_t task,vm_address_t *address,vm_siz
 }
 #define vm_region_recurse_64 admissionVMQuery
 #define NSMutableData PoolFixtureData
+static dispatch_group_t fixturePoolGroup(void){poolGroupCalls++;return failPoolGroup?nil:dispatch_group_create();}
+#define dispatch_group_create fixturePoolGroup
 #include "../memory_pool_family.inc"
+#undef dispatch_group_create
 #undef NSMutableData
 #undef vm_region_recurse_64
 #undef nvn_dirty_remove_range_checked
@@ -330,7 +335,79 @@ static int testPhysicalSuccessTrace(void){
  CHECK(create(6,0x22,allocation,PG)&&poolPhysicalSuccessTraceCount==4);h_nvnMemoryPoolFinalize(&rawPools[6]);
  CHECK(!pools.count&&!poolUnpublishedPools.count&&noCopyCreated==noCopyReleased);return 0;
 }
+
+static int allocationFailureCommon(unsigned expectedCalls,unsigned expectedCreated,unsigned expectedReleased){
+ CHECK(allocationReports==1&&!pools.count&&!poolUnpublishedPools.count);
+ CHECK(objects.count==1&&objectSpans.count==1&&serial==1&&!((BWObject*)&rawPools[0])->serial);
+ CHECK(((PoolFixtureDevice*)gpu).allocationCalls==expectedCalls&&noCopyCreated==expectedCreated&&noCopyReleased==expectedReleased);
+ CHECK(strncmp(lastError,"Metal memory pool allocation failed",33)==0);return 0;
+}
+static int testAllocationContextNoCopy(BOOL partial,BOOL groupNil){
+ PoolFixtureDevice *d=(PoolFixtureDevice*)gpu;admissionVMMode=12;d.failAllocationAt=partial?2:1;failPoolGroup=groupNil;
+ size_t page=(size_t)getpagesize(),bias=4096%page,span=(bias+PG+page-1)&~(page-1),count=span/page;
+ CHECK(!create(0,0x189,allocation+4096,PG));CHECK(!allocationFailureCommon(groupNil?0:partial?2:1,partial?1:0,partial?1:0));
+ CHECK(d.maxQueries==1&&poolGroupCalls==1&&admissionVMQueries==count);
+ CHECK(strstr(lastError,"path=borrowedsegments")&&strstr(lastError,groupNil?"stage=group_nil":"stage=segment_buffer_nil"));
+ char field[80];snprintf(field,sizeof field,"kind=1 flags=0x189 bytes=%zu",PG);CHECK(strstr(lastError,field));
+ snprintf(field,sizeof field,"span=%zu bias=%zu segments=%zu",span,bias,count);CHECK(strstr(lastError,field));
+ snprintf(field,sizeof field,"segment_index=%d segment_length=%zu",groupNil?-1:partial?1:0,groupNil?0:page);CHECK(strstr(lastError,field));
+ snprintf(field,sizeof field,"cap_fields=0x2 request_max=0 span_max=%zu",8*PG);CHECK(strstr(lastError,field));return 0;
+}
+static int testAllocationContextCopy(void){
+ PoolFixtureDevice *d=(PoolFixtureDevice*)gpu;admissionVMMode=1;d.failAllocation=YES;
+ CHECK(!create(0,0x24,allocation,PG));CHECK(!allocationFailureCommon(1,0,0));
+ CHECK(d.maxQueries==1&&!poolGroupCalls&&admissionVMQueries==1&&snapshotAllocations==1);
+ CHECK(strstr(lastError,"path=snapshot-copy stage=buffer_nil kind=0 flags=0x24 bytes=65536"));
+ CHECK(strstr(lastError,"span=0 bias=0 segments=0 segment_index=-1 segment_length=0"));
+ char field[80];snprintf(field,sizeof field,"cap_fields=0x1 request_max=%zu span_max=0",8*PG);CHECK(strstr(lastError,field));return 0;
+}
+
+
+static int testAllocationContextCaps(void){
+ PoolFixtureDevice *d=(PoolFixtureDevice*)gpu;d.failAllocation=YES;d.secondMax=7*PG;
+ CHECK(!create(0,0x22,allocation,PG));CHECK(!allocationFailureCommon(1,0,0));
+ CHECK(d.maxQueries==2&&poolGroupCalls==1);
+ char field[96];snprintf(field,sizeof field,"cap_fields=0x3 request_max=%zu span_max=%zu",8*PG,7*PG);CHECK(strstr(lastError,field));
+ unsigned queries=admissionVMQueries,calls=(unsigned)d.allocationCalls;d.maxQueries=0;
+ CHECK(!create(0,0x22,NULL,PG)&&!d.maxQueries&&admissionVMQueries==queries&&d.allocationCalls==calls);
+ gpu=nil;CHECK(!create(0,0x22,allocation,PG)&&!d.maxQueries&&admissionVMQueries==queries);
+ CHECK(!create(0,0x189,allocation,PG)&&!d.maxQueries&&strstr(lastError,"span exceeds maxBufferLength"));
+ gpu=(id<MTLDevice>)d;d.maxBufferLength=PG/2;d.secondMax=0;queries=admissionVMQueries;
+ CHECK(!create(0,0x22,allocation,PG)&&d.maxQueries==1&&admissionVMQueries==queries&&d.allocationCalls==calls);
+ d.maxQueries=0;CHECK(!create(0,0x189,allocation,PG)&&d.maxQueries==1&&d.allocationCalls==calls);
+ d.maxQueries=0;gpu=nil;CHECK(create(1,0x221,NULL,PG)&&!d.maxQueries&&d.allocationCalls==calls);h_nvnMemoryPoolFinalize(&rawPools[1]);
+ gpu=(id<MTLDevice>)d;CHECK(!pools.count&&!poolUnpublishedPools.count&&noCopyCreated==noCopyReleased);return 0;
+}
+static int testAllocationContextBudget(void){
+ PoolBuilder b={.size=SIZE_MAX,.flags=-1};BWPoolAllocationFailure failure={"segment_buffer_nil",INT_MAX,SIZE_MAX};
+ CHECK(!poolReportAllocationFailure(&b,(BWPoolKind)UINT_MAX,"borrowedsegments",&failure,SIZE_MAX,SIZE_MAX,SIZE_MAX,UINT_MAX,SIZE_MAX,SIZE_MAX));
+ CHECK(strlen(lastError)==371&&allocationReports==1&&!((PoolFixtureDevice*)gpu).allocationCalls&&!((PoolFixtureDevice*)gpu).maxQueries);
+ char callback[528];memset(callback,0xa5,sizeof callback);
+ int length=snprintf(callback,512,"error=NVN: entry=nvnMemoryPoolInitialize: %s",lastError);
+ CHECK(length==413&&callback[length]==0&&strstr(callback,"span_max=18446744073709551615"));
+ for(unsigned i=512;i<sizeof callback;i++)CHECK((unsigned char)callback[i]==0xa5);return 0;
+}
+static int testAllocationContextHelper(void){
+ PoolFixtureDevice *d=(PoolFixtureDevice*)gpu;BWPool *p=[BWPool new];BWPoolSegment *segment=[BWPoolSegment new];segment.base=allocation;segment.length=PG;
+ BWPoolAllocationFailure failure;memset(&failure,0xa5,sizeof failure);unsigned char before[sizeof failure];memcpy(before,&failure,sizeof before);
+ CHECK(poolCreateNoCopySegments(p,@[segment],0,&failure));CHECK(!memcmp(before,&failure,sizeof failure)&&!allocationReports&&!d.maxQueries);
+ poolDropBorrowedBuffers(p);poolWaitBorrowedRelease(p);CHECK(noCopyCreated==1&&noCopyReleased==1);
+ failPoolGroup=YES;CHECK(!poolCreateNoCopySegments([BWPool new],@[segment],0,NULL)&&!allocationReports&&d.allocationCalls==1);failPoolGroup=NO;
+ CHECK(!mprotect(allocation,PG,PROT_READ));CHECK(create(0,0x22,allocation,PG));BWPool *deferred=host(0);CHECK(deferred.noCopyDeferred);
+ CHECK(!mprotect(allocation,PG,PROT_READ|PROT_WRITE));d.failAllocation=YES;const char *why=NULL;strcpy(lastError,"unchanged");
+ CHECK(!poolEnsureOrdinaryBacking(deferred,&why)&&strstr(why,"Metal deferred ordinary pool allocation failed"));
+ CHECK(!strcmp(lastError,"unchanged")&&!allocationReports&&deferred.noCopyDeferred&&!deferred.retiring&&d.maxQueries==1);
+ CHECK(noCopyCreated==1&&noCopyReleased==1);return 0;
+}
+
 int main(int argc,char **argv){@autoreleasepool{alarm(25);if(argc!=2)return 2;setup();int result=0;@try{
+ if(!strcmp(argv[1],"allocation-context-caps"))result=testAllocationContextCaps();else
+ if(!strcmp(argv[1],"allocation-context-budget"))result=testAllocationContextBudget();else
+ if(!strcmp(argv[1],"allocation-context-helper"))result=testAllocationContextHelper();else
+ if(!strcmp(argv[1],"allocation-context-nocopy"))result=testAllocationContextNoCopy(NO,NO);else
+ if(!strcmp(argv[1],"allocation-context-partial"))result=testAllocationContextNoCopy(YES,NO);else
+ if(!strcmp(argv[1],"allocation-context-group"))result=testAllocationContextNoCopy(NO,YES);else
+ if(!strcmp(argv[1],"allocation-context-copy"))result=testAllocationContextCopy();else
  if(!strcmp(argv[1],"physical-trace"))result=testPhysicalSuccessTrace();else
  if(!strcmp(argv[1],"segments-real"))result=testSegmentReal();else if(!strcmp(argv[1],"segments-metadata"))result=testSegmentMetadata();else if(!strcmp(argv[1],"segments-pinned"))result=testSegmentPinned(NO,NO);else if(!strcmp(argv[1],"segments-partial"))result=testSegmentPinned(YES,NO);else if(!strcmp(argv[1],"segments-dirty"))result=testSegmentPinned(NO,YES);else if(!strcmp(argv[1],"ordinary-deferred"))result=testOrdinaryDeferred();else if(!strcmp(argv[1],"deferred-quarantine-reentry"))result=testDeferredQuarantineReentry();else if(!strcmp(argv[1],"submap-no-progress"))result=testSubmapNoProgress();else
  if(!strcmp(argv[1],"cpu-only-depth-identity"))result=testCPUOnlyDepthIdentity();else if(!strcmp(argv[1],"cpu-only-depth-gpu-refusal"))result=testCPUOnlyDepthGPURefusal();else if(!strcmp(argv[1],"depth-kinds"))result=testDepthKinds();else if(!strcmp(argv[1],"resolve"))result=testResolve();else if(!strcmp(argv[1],"resolve-negative"))result=testResolveNegative();else if(!strcmp(argv[1],"batch"))result=testBatch();else if(!strcmp(argv[1],"family"))result=testFamily();else if(!strcmp(argv[1],"mapping"))result=testMapping();else if(!strcmp(argv[1],"mapping-negative"))result=testMappingNegative();else if(!strcmp(argv[1],"initialize-negative"))result=testInitializeNegative();else if(!strcmp(argv[1],"finalize"))result=testFinalize();else if(!strcmp(argv[1],"provenance"))result=testProvenance();else if(!strcmp(argv[1],"cpu-access"))result=testCPUAccess();else if(!strcmp(argv[1],"gpu-records"))result=testGPURecords();else if(!strcmp(argv[1],"bounded-records"))result=testBoundedRecords();else if(!strcmp(argv[1],"retire-references"))result=testRetireReferences();else if(!strcmp(argv[1],"ordinary-protection"))result=testOrdinaryProtection();else if(!strcmp(argv[1],"borrowed-pinned"))result=testBorrowedPinned();else if(!strcmp(argv[1],"mapping-allocation-bounds"))result=testMappingAllocationBounds();else if(!strcmp(argv[1],"unpublished-cleanup"))result=testUnpublishedCleanup();else if(!strcmp(argv[1],"unpublished-pinned"))result=testUnpublishedPinned();else if(!strcmp(argv[1],"unpublished-retry"))result=testUnpublishedRetry(NO);else if(!strcmp(argv[1],"unpublished-register-failure"))result=testUnpublishedRetry(YES);else if(!strcmp(argv[1],"admission-logical"))result=testAdmissionLogical();else if(!strcmp(argv[1],"admission-write"))result=testAdmissionWrite();else if(!strcmp(argv[1],"admission-vm-query"))result=testAdmissionVMQuery();else if(!strcmp(argv[1],"admission-vm-region"))result=testAdmissionVMRegion();else if(!strcmp(argv[1],"admission-vm-protection"))result=testAdmissionVMProtection();else if(!strcmp(argv[1],"admission-vm-span"))result=testAdmissionVMSpan();else if(!strcmp(argv[1],"admission-rounding"))result=testAdmissionRounding();else return 2;

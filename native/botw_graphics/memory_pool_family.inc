@@ -106,16 +106,21 @@ static BOOL poolNoCopyGeometry(void *memory,size_t bytes,BOOL strict,void **base
     if(!strict&&!exact&&(admission->vmProtection&3)!=3){admission->stage="vm_protection";return NO;}
     admission->stage="admitted";*base=(void*)aligned;*span=length;*bias=begin-aligned;*segments=regions;return YES;
 }
-static BOOL poolCreateNoCopySegments(BWPool *p,NSArray<BWPoolSegment*> *segments,size_t bias){
-    dispatch_group_t group=dispatch_group_create();if(!group)return NO;
+/* Optional failure-only host scalars; NULL preserves the deferred caller's
+ * original resource/report contract. Recording these fields makes no extra
+ * allocator or validator call. */
+typedef struct {const char *stage;int segmentIndex;size_t segmentLength;} BWPoolAllocationFailure;
+static BOOL poolCreateNoCopySegments(BWPool *p,NSArray<BWPoolSegment*> *segments,size_t bias,BWPoolAllocationFailure *failure){
+    dispatch_group_t group=dispatch_group_create();if(!group){if(failure)*failure=(BWPoolAllocationFailure){"group_nil",-1,0};return NO;}
     objc_setAssociatedObject(p,&poolBorrowedLifetimeKey,group,OBJC_ASSOCIATION_RETAIN_NONATOMIC);p.segments=segments;
-    for(BWPoolSegment *segment in segments){
+    int index=0;for(BWPoolSegment *segment in segments){
         BWPoolBorrowedLifetime *lifetime=[[BWPoolBorrowedLifetime alloc]initWithGroup:group];
         segment.buffer=[gpu newBufferWithBytesNoCopy:segment.base length:segment.length options:MTLResourceStorageModeShared
             deallocator:^(void *address,NSUInteger length){(void)address;(void)length;poolBorrowedReleased(lifetime);}];
         /* A returned nil created no resource. A thrown exception cannot provide
          * that guarantee, so its outstanding token remains quarantined. */
-        if(!segment.buffer){poolBorrowedReleased(lifetime);return NO;}
+        if(!segment.buffer){poolBorrowedReleased(lifetime);if(failure)*failure=(BWPoolAllocationFailure){"segment_buffer_nil",index,segment.length};return NO;}
+        index++;
     }
     p.buffer=segments.count==1?segments.firstObject.buffer:nil;p.bufferOffset=bias;p.coherent=YES;return YES;
 }
@@ -125,13 +130,19 @@ static BOOL poolEnsureOrdinaryBacking(BWPool *p,const char **failure){
     BWPoolNoCopyAdmission admission={0};NSArray *segments=poolVMRegions(p.memory,p.size,NO,YES,&admission);
     if(!segments||(memoryAccessValidator&&!memoryAccessValidator(p.memory,p.size,1))){if(failure)*failure="deferred ordinary backing requires accessible RW single-VM-region storage";return NO;}
     BOOL completed=NO;
-    @try{completed=poolCreateNoCopySegments(p,segments,0);if(completed)p.noCopyDeferred=NO;}
+    @try{completed=poolCreateNoCopySegments(p,segments,0,NULL);if(completed)p.noCopyDeferred=NO;}
     @finally{if(!completed){p.retiring=YES;@autoreleasepool{poolDropBorrowedBuffers(p);}poolWaitBorrowedRelease(p);p.retiring=NO;}}
     if(!completed&&failure)*failure="Metal deferred ordinary pool allocation failed";return completed;
 }
 static int poolReportNoCopyAdmission(const PoolBuilder *builder,BWPoolKind kind,const BWPoolNoCopyAdmission *a){
     return report("Physical/uncached pool requires coherent host-page-aligned single-VM-region backing: stage=%s flags=0x%x kind=%u strict=%d bytes=%zu page=%zu mod=%zu bias=%zu span=%zu geom=%d exact=%d logical=%s access=%s vm_queries=%u vm_fields=0x%x vm_result=%d vm_count=%u vm_depth=%u vm_prot=0x%x vm_remaining=%llu",
         a->stage,(unsigned)builder->flags,(unsigned)kind,a->strict,builder->size,a->page,a->mod,a->bias,a->span,a->geometryValid,a->exact,a->logical,a->access,a->vmQueries,a->vmFields,a->vmResult,a->vmCount,a->vmDepth,(unsigned)a->vmProtection,(unsigned long long)a->vmRemaining);
+}
+/* cap_fields: bit0 is the original ordinary-size query, bit1 the original
+ * NoCopy-span query. Unknown slots remain zero; reporting never queries gpu. */
+static int poolReportAllocationFailure(const PoolBuilder *b,BWPoolKind kind,const char *path,const BWPoolAllocationFailure *failure,size_t span,size_t bias,size_t segments,unsigned capFields,size_t requestMax,size_t spanMax){
+    return report("Metal memory pool allocation failed: path=%s stage=%s kind=%u flags=0x%x bytes=%zu span=%zu bias=%zu segments=%zu segment_index=%d segment_length=%zu cap_fields=0x%x request_max=%zu span_max=%zu",
+        path,failure?failure->stage:"buffer_nil",(unsigned)kind,(unsigned)b->flags,b->size,span,bias,segments,failure?failure->segmentIndex:-1,failure?failure->segmentLength:0,capFields,requestMax,spanMax);
 }
 static void poolRemoveRegistration(BWPool *p){
     if(!p.registered)return;
@@ -187,7 +198,8 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
     }
     if(kind==BW_POOL_INVALID)return report("Unsupported/invalid memory pool kind");
     if(kind!=BW_POOL_ORDINARY&&!bw_pool_initialization_valid(&policy,(unsigned)b.flags,b.memory,b.size))return report("physical/virtual memory pool flags/size/backing alignment");
-    if(kind==BW_POOL_ORDINARY&&(!b.memory||!gpu||b.size>gpu.maxBufferLength))return report("Unsupported/invalid memory pool backing/size");
+    size_t requestMax=0,spanMax=0;unsigned capFields=0;
+    if(kind==BW_POOL_ORDINARY&&(!b.memory||!gpu||b.size>(requestMax=gpu.maxBufferLength,capFields|=1,requestMax)))return report("Unsupported/invalid memory pool backing/size");
     if(kind!=BW_POOL_VIRTUAL){
         if(b.size>UINTPTR_MAX-(uintptr_t)b.memory)return report("Memory pool address overflow");
         if(overlapsQueueArena(b.memory,b.size)||overlapsCommandMemory(b.memory,b.size))return report("Memory pool overlaps live CPU queue arena/recording memory");
@@ -206,13 +218,14 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
         BOOL noCopy=poolNoCopyGeometry(b.memory,b.size,kind==BW_POOL_PHYSICAL,&base,&span,&bias,&segments,&admission);
         BOOL ordinaryProtected=noCopy&&kind==BW_POOL_ORDINARY&&(admission.vmProtection&3)!=3;
         if(noCopy&&!ordinaryProtected){
-            if(!gpu||span>gpu.maxBufferLength)return report("Metal physical buffer span exceeds maxBufferLength");
-            if(!poolCreateNoCopySegments(p,segments,bias))return report("Metal memory pool allocation failed");
+            if(!gpu||span>(spanMax=gpu.maxBufferLength,capFields|=2,spanMax))return report("Metal physical buffer span exceeds maxBufferLength");
+            BWPoolAllocationFailure failure={0};
+            if(!poolCreateNoCopySegments(p,segments,bias,&failure))return poolReportAllocationFailure(&b,kind,"borrowedsegments",&failure,span,bias,segments.count,capFields,requestMax,spanMax);
         }else if(kind==BW_POOL_ORDINARY&&(b.flags&NVN_MEMORY_POOL_FLAGS_CPU_CACHED)&&(!ordinaryProtected||(admission.vmProtection&VM_PROT_READ))){
             NSMutableData *snapshot=[NSMutableData dataWithLength:b.size];if(!snapshot)return report("Memory pool CPU snapshot allocation failed");
             textureReadBytes(b.memory,snapshot.mutableBytes,b.size,"Memory pool CPU snapshot is unreadable");
             p.buffer=[gpu newBufferWithBytes:snapshot.bytes length:b.size options:MTLResourceStorageModeShared];
-            if(!p.buffer)return report("Metal memory pool allocation failed");
+            if(!p.buffer)return poolReportAllocationFailure(&b,kind,"snapshot-copy",NULL,0,0,0,capFields,requestMax,spanMax);
         }else if(ordinaryProtected&&admission.exact){p.noCopyDeferred=YES;p.coherent=YES;}
         else return poolReportNoCopyAdmission(&b,kind,&admission);
     }

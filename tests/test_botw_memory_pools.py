@@ -40,6 +40,13 @@ class MemoryPoolAdapterCPUTests(unittest.TestCase):
             self.assertEqual(result.stderr.splitlines(), [
                 '[botw graphics] physical_pool_initialized=true kind=1 flags=0x189 bytes=65536 segments=1'
             ] * 4)
+    def test_original_cap_getter_queries_short_circuit_and_separate_values_are_preserved(self): self.run_mode('allocation-context-caps')
+    def test_allocation_message_maximum_scalar_width_fits_runtime_512_with_canary(self): self.run_mode('allocation-context-budget')
+    def test_helper_success_does_not_write_failure_out_and_null_out_keeps_deferred_semantics(self): self.run_mode('allocation-context-helper')
+    def test_nocopy_allocation_failure_names_first_segment_and_existing_caps(self): self.run_mode('allocation-context-nocopy')
+    def test_nocopy_partial_failure_names_segment_and_waits_for_prior_ack(self): self.run_mode('allocation-context-partial')
+    def test_dispatch_group_nil_is_not_reported_as_a_metal_factory_nil(self): self.run_mode('allocation-context-group')
+    def test_snapshot_copy_failure_names_its_distinct_path_and_captured_cap(self): self.run_mode('allocation-context-copy')
     def test_physical_success_trace_is_published_only_and_capped_without_extra_vm_queries(self): self.run_mode('physical-trace')
     def test_completed_synthetic_record_bookkeeping_is_bounded(self): self.run_mode('bounded-records')
     def test_real_adjacent_rw_leaves_get_distinct_legal_buffers(self): self.run_mode('segments-real')
