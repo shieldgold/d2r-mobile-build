@@ -1,0 +1,27 @@
+--- a/dm/gfx/nvn/botw_shader.c
++++ b/dm/gfx/nvn/botw_shader.c
+@@ -4 +4 @@
+-#include <mach/mach_vm.h>
++#include "public_vm_read.h"
+@@ -71 +71 @@
+-    return mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)in,
++    return botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)in,
+--- a/dm/gfx/nvn/nvn_cmd_audit.c
++++ b/dm/gfx/nvn/nvn_cmd_audit.c
+@@ -17 +17 @@
+-#include <mach/mach_vm.h>
++#include "public_vm_read.h"
+@@ -34 +34 @@
+-        if (mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)src, (mach_vm_size_t)chunk,
++        if (botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)src, (mach_vm_size_t)chunk,
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -38 +38 @@
+-#include <mach/mach_vm.h>
++#include "public_vm_read.h"
+@@ -581 +581 @@
+-        if (mach_vm_read_overwrite(mach_task_self(), address, p->wb,
++        if (botw_backend_vm_read_overwrite(mach_task_self(), address, p->wb,
+@@ -607 +607 @@
+-    if (copy && (mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)o->mem, (mach_vm_size_t)o->L.size,
++    if (copy && (botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)o->mem, (mach_vm_size_t)o->L.size,

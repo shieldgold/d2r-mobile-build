@@ -1,6 +1,6 @@
 # 完整 BOTW21f 后端实验组件
 
-这是可复现的源码、编译和宿主适配归档。它尚未接入普通前端，没有执行此完整后端，没有 iOS、GPU、原游戏或可玩验收。当前生产后端保持原样；本组件不是第二套活跃 registry。
+这是可复现的源码、编译和宿主适配归档。它尚未接入普通前端，没有执行此完整后端，没有 GPU、原游戏或可玩验收；iPhoneOS编译结果单独以精确head CI收据核定。当前生产后端保持原样；本组件不是第二套活跃 registry。
 
 `upstream/` 保留 TommyLau/botw-mobile 固定提交 `21f026e0c7fd9fee575a1bfa8d925553bb4db88e` 的58文件完整图形闭包、3个外部宿主声明头和2份许可证，全部原字节保存。MIT、bcdec 许可和 nvn_tex 的原 deko/zlib 声明保留。SOURCE.lock.json 绑定文件、编译单元、宿主外部声明、诊断补丁的前后 SHA 以及完整编译配置。
 
@@ -27,3 +27,5 @@ python3 experiments/botw_upstream_backend/scripts/build_compile_only.py
 旧5f的69文件基线及完整编译/link-only/CPU收据已保存在 ignored 历史归档；本次升级逐个核对官方 exact Git-tree blob，并重新生成补丁基准与98个环境调用条件。变更范围见 UPSTREAM_DIFF.zh-CN.md，不仅修改提交字符串。
 
 在已安装 iPhoneOS SDK 的 CI 主机另执行 `python3 experiments/botw_upstream_backend/scripts/build_compile_only.py --sdk iphoneos --output outputs/botw-upstream-iphoneos`。该路径以arm64/iOS18.0部署目标、M3完整分支编译并链接，未保护的较新API可用性诊断按错误处理；不会执行任何生成的程序，也不会运行CPU探针。这个步骤不生成IPA，不替代真机或游戏验证。本地没有iPhoneOS SDK时须明确失败，不能当平台跳过成功。
+
+首次真实iPhoneOS构建在第三个TU失败：其公共SDK明确拒绝`mach/mach_vm.h`。独立平台补丁仅在副本中替换三个原文件的该include和四处正常资源读取调用；`public_vm_read.h`在iOS使用公开`vm_read_overwrite`，Mac保原`mach_vm_read_overwrite`。转换/源目标区间溢出在调用前拒绝，真实状态和copied值透传，各原调用方的精确长度检查、分块与清理保原样；不增加扫描、诊断入口或权限变化。自有整数回调夹具核32/64位公开类型及Mac分支，不读取运行游戏或GPU资源。该补丁与诊断门补丁分别锁定、顺序应用；上游63原文件仍保持原字节。

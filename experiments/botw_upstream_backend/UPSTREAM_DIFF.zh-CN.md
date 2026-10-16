@@ -2,7 +2,7 @@
 
 旧 pin：5f673ae2ea4f90ad46403aa6fbe13537fb557271。新 pin：21f026e0c7fd9fee575a1bfa8d925553bb4db88e。全部新来源按官方 exact git-tree 的每文件 Git blob SHA1 校验，再绑定本组件 SHA256；未执行下载源码。
 
-旧69文件组件、原59文件及初/最终真实编译/link-only/CPU收据均在 ignored 历史中保留。新组件75文件：58 backend、3原宿主声明头、2许可证、4 adapter、1诊断补丁、3自有测试、1 driver、1 source lock、README和本差异说明。当前生产98来源与普通前端未改变。
+旧69文件组件、原59文件及初/最终真实编译/link-only/CPU收据均在 ignored 历史中保留。新组件78文件：58 backend、3原宿主声明头、2许可证、5 adapter、2补丁、4自有测试、1 driver、1 source lock、README和本差异说明。当前生产98来源与普通前端未改变。
 
 新增完整 nvn_cmd_audit.c/h 和 nvn_dtex.c/h，生产TU由23到25。前者同时包含正常record/header校验与可选provenance诊断；后者保持延迟纹理句柄在提交时读取、每submit immutable overlay。对象和回放同组更新，包含 DrawArraysInstanced、DepthClamp、LineWidth、PointSize、Deferred texture records 等，不能把新payload交旧replay。
 
@@ -14,4 +14,6 @@
 
 新pin仍是55.15及1.9对象ABI，textureBuilder80、View16，与当前base-v0 baseline不一致。优先核对用户合法1.9资源匹配，匹配尚未证明；保留base52访问器作为备用路线，不把重写旧版本适配当唯一方向。dirty仍旧void注册，普通pool仍整span NoCopy，故既有checked tracking、分段NoCopy/ACK、virtual rawkind/authority和wholebatch拒绝合同依然必须整接。新AudioRenderer是明确1.9/SDK20.5.22 native-CPU/manual+hostPCM桥；其20固定export/REV15并不是本base0的已证实现，本组件不把它纳入图形生产闭包或假称已接音频。
 
-本组件只做编译、链接而不运行后端；自有CPU不创建Metal设备。没有iOS/原游戏/可玩验证，不能独立切换生产。真正激活时继续完整替换旧图形模型与整组shader链。
+真实iPhone SDK首次编译发现三处源依赖Mac的mach_vm头。另列平台补丁只将include及四处正常read-overwrite调用接到薄头；iOS使用公开vm_read_overwrite，Mac保持原入口；上游算法、范围/精确读判定及诊断关闭不变。转换与区间溢出前拒，状态和短读数不伪造。原始失败CI及修复后CI分别留证，不能用Mac或mock替代iOS编译结论。
+
+本组件只做编译、链接而不运行后端；自有CPU不创建Metal设备。iOS编译不等同原游戏/可玩验证，不能独立切换生产。真正激活时继续完整替换旧图形模型与整组shader链。

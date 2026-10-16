@@ -70,13 +70,16 @@ def main() -> int:
     shutil.copytree(component / "upstream", staged)
     run("diagnostic-routing-patch", ["/usr/bin/patch", "--batch", "--forward", "-p1",
                                     "-d", str(staged), "-i", str(component / "patches" / "diagnostic-routing.patch")])
+    run("ios-vm-interface-patch", ["/usr/bin/patch", "--batch", "--forward", "-p1",
+                                  "-d", str(staged), "-i", str(component / "patches" / "ios-vm-interface.patch")])
     for relative, expected in lock["patched_source_sha256"].items():
         if sha(staged / relative) != expected:
             raise RuntimeError("diagnostic routing patch result mismatch: " + relative)
     objdir = output / "objects"
     objdir.mkdir()
     objects = []
-    includes = ["-I", str(staged / "dm/host"), "-I", str(staged / "dm/gfx/nvn/include")]
+    includes = ["-I", str(staged / "dm/host"), "-I", str(staged / "dm/gfx/nvn/include"),
+                "-I", str(component / "adapter")]
     for relative in lock["translation_units"]:
         name = relative.replace("/", "__")
         obj = objdir / (name + ".o")

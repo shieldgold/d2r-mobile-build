@@ -4,16 +4,16 @@
   "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
   "upstream_file_count": 63,
   "complete_backend_closure_count": 58,
-  "component_file_count_including_lock": 75,
+  "component_file_count_including_lock": 78,
   "files": {
     "README.zh-CN.md": {
-      "sha256": "80479f83fced814324b63fc7546085f317efc7d327eaff969dee0f047e49f48c",
-      "bytes": 5061,
+      "sha256": "ca4624a1473c2320a87d3bfb6dd8812b6975daf702c32c4421e915b96fd0378d",
+      "bytes": 6298,
       "role": "reproducibility documentation or driver"
     },
     "UPSTREAM_DIFF.zh-CN.md": {
-      "sha256": "08964f4eb991580165a8b190c43adf1b8c28593021aa2e52f499f62fb1873c7f",
-      "bytes": 2875,
+      "sha256": "c98ca5a9f26591b398e470464e1de1bb41557c360d1c98f81d147f4051eb7f42",
+      "bytes": 3291,
       "role": "new 21f CPU diagnostic gate test or upgrade provenance documentation"
     },
     "adapter/compat_policy.h": {
@@ -28,7 +28,7 @@
     },
     "adapter/host_adapter.h": {
       "sha256": "6df013b88f445656fa6f0165d876959bc6ee51dc495026b33950e40f385fb174",
-      "bytes": 2235,
+      "bytes": 2234,
       "role": "thin host service or compatibility policy, not renderer core"
     },
     "adapter/runtime_binding.c": {
@@ -42,8 +42,8 @@
       "role": "four diagnostic-entry guards, applied only in build output"
     },
     "scripts/build_compile_only.py": {
-      "sha256": "60e0848381b1d0a98e37fd12bbdfc944cfa188bd318435ebb9b65c4e9903c8e2",
-      "bytes": 8458,
+      "sha256": "b1bab14ba832301903e24d8a01876c02dcdc3f8e64673f0d00cefa5933c8b352",
+      "bytes": 9281,
       "role": "reproducibility documentation or driver"
     },
     "tests/cmd_audit_disabled_probe.c": {
@@ -501,6 +501,21 @@
       "role": "complete_backend_closure",
       "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
       "git_blob_sha1": "553c3ec5a8b99082956f6b2118d508ae384feb23"
+    },
+    "adapter/public_vm_read.h": {
+      "role": "thin public iPhoneOS VM-copy API adapter; no diagnostics or renderer algorithm",
+      "sha256": "6403c785cb8e83888e2c8c3334ba6f2ce7cf78961a3f29b5af5502ec89ed3db6",
+      "bytes": 1480
+    },
+    "patches/ios-vm-interface.patch": {
+      "role": "three include and four normal VM-call replacements applied only in build output",
+      "sha256": "dc0ac2bd7ac733516dd6aeecbbd0e4ecb691e80b3d6763335c94893259c0450f",
+      "bytes": 1246
+    },
+    "tests/public_vm_read_probe.c": {
+      "role": "owned integer-only public/Mach VM-width contract fixture; no actual VM read",
+      "sha256": "a50e3bea9532c56134222756fca11023ec292ff8b9716eac5010a72cb486b199",
+      "bytes": 4853
     }
   },
   "translation_units": [
@@ -543,14 +558,18 @@
     "CoreGraphics"
   ],
   "patched_source_sha256": {
-    "dm/gfx/nvn/nvn_mtl.m": "2b488b7e48b9c059026e856558fad1bf729845894d2bc1f5ee3302d0ae180233",
+    "dm/gfx/nvn/botw_shader.c": "c73778ad89dce42a2ad427095b818fed263b09073ca477e25e060ba0c72f1f47",
     "dm/gfx/nvn/botw_shader_observation.c": "59c34fafd8c18787d20eeefa3b669e87dd7707e9f8954c79b109c649beae8871",
-    "dm/gfx/nvn/nvn_cmd_audit.c": "ba698cf49d2ee40f3b44b7133cf8ccc80d185694585936ab2d4e232d040afa13"
+    "dm/gfx/nvn/hle_nvn.c": "591e9b58e811c7c544c681f12d341083766352e92a3f118099c65d92bd6a07e0",
+    "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
+    "dm/gfx/nvn/nvn_mtl.m": "2b488b7e48b9c059026e856558fad1bf729845894d2bc1f5ee3302d0ae180233"
   },
   "patch_base_sha256": {
-    "dm/gfx/nvn/nvn_mtl.m": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb",
+    "dm/gfx/nvn/botw_shader.c": "537645f13f04110ad7a443e8da7b6f2567a8be99663b16f28b8f91eed4c8bc34",
     "dm/gfx/nvn/botw_shader_observation.c": "e595385ed464f89ff7b614685146cd52b4d9923afe71927ac36850a7efe66ea9",
-    "dm/gfx/nvn/nvn_cmd_audit.c": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9"
+    "dm/gfx/nvn/hle_nvn.c": "25dee0ce39ce821eac537a88cf80d2b1b5bf31a90fdfcab0317f529791b85e9f",
+    "dm/gfx/nvn/nvn_cmd_audit.c": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9",
+    "dm/gfx/nvn/nvn_mtl.m": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb"
   },
   "external_compile_declarations": {
     "native/botw_host/runtime.h": {
@@ -2017,5 +2036,15 @@
     "backend_executed": false,
     "CPU_probes_executed": false,
     "scope": "compile/link only; no IPA or device execution"
+  },
+  "patch_application_order": [
+    "diagnostic-routing.patch",
+    "ios-vm-interface.patch"
+  ],
+  "platform_vm_policy": {
+    "iphoneos": "public vm_read_overwrite with checked width/range conversion; actual result and copied preserved",
+    "macosx": "original mach_vm_read_overwrite; checked address interval only",
+    "upstream_algorithms_changed": false,
+    "diagnostic_policy_changed": false
   }
 }

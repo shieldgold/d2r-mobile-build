@@ -59,6 +59,8 @@
 
 本地1.9 NSP已核PFS0与四个加密NCA，但未取得可用自有密钥或已导出目录，尚未解密CNMT、确认版本和生成新版程序。正规解包工具已从固定源码编译，仅处理私有新输出；不改原包、不输出密钥、不获取第三方密钥。现root上游setup/extract仍含D2R固定TitleID，不能直接运行当BOTW安装脚本。
 
+`c94f800`已提交推送，固定本机1070测试（1069通过、1条件跳过）及Linux完整CI成功。首轮真实iPhoneOS CI在第三个TU因Mac专属`mach_vm.h`失败，前两TU成功，未链接、未执行后续测试；原始日志与官方工件保留。后继平台补丁只替换三个原文件的include与四处正常VM调用，iOS走公开`vm_read_overwrite`，Mac保原入口，转换/区间溢出、错误与短读由自有CPU夹具核定。该扩展使隔离组件为78文件，仍不改变上游63原件和当前生产98项；iOS通过与否继续以修正提交的真实SDK CI为准。
+
 旧5f实验69文件已完成23TU编译/链接和11自有CPU模式，阶段源码冻结；这些是旧基线证据，不冒称最新生产或可玩完成。
 
 3a真机observation-4已完整返回host_return=1，实际首错在CPU_CACHED内存池snapshot分配（NSMutableData，尚未进入该分支Metal factory），没有真实frame；其后focus边界错误正常保存。报告SHA `7eaeb1ecfbddd358e3c2b2e958118b803287b3a365d3b019f3a5ae96580897df`，资源fresh再核保全。该记录只定位此次分支，不推请求bytes/连续VM或OOM，也不认定b7的Metal nil已解决。继续完整pool-provider和后端接入，不再为每个近邻失败增设诊断安装轮次。
