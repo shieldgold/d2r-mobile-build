@@ -8,7 +8,7 @@
 #include <execinfo.h>
 
 #define BOTW_WHOLE_HOST_POLICY 1
-/* Only normal, identified host APIs with a Horizon Result or NVNboolean belong here.
+/* Only normal, identified host APIs with a Horizon/NVN Result or NVNboolean belong here.
  * Callers pass no guest frame, address, raw Result or diagnostic context. */
 typedef enum {
     BOTW_HOST_API_SET_HEAP_SIZE,
@@ -26,6 +26,8 @@ typedef enum {
     BOTW_HOST_API_CONNECT_TO_NAMED_PORT,
     BOTW_HOST_API_SEND_SYNC_REQUEST,
     BOTW_HOST_API_NVN_MEMORY_POOL_INITIALIZE,
+    BOTW_HOST_API_NVN_QUEUE_ACQUIRE_TEXTURE,
+    BOTW_HOST_API_NVN_COMMAND_BUFFER_INITIALIZE,
     BOTW_HOST_API_COUNT
 } botw_whole_host_api;
 typedef enum {

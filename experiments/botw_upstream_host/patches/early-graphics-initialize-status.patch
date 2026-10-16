@@ -1,0 +1,44 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -1044,8 +1044,16 @@
+ #define CB(c) ((cmd_t *)(c))
+ #define OP_RESERVE 24                             //Always keep enough room at the segment end for one JUMP / END
+ 
++static NVNboolean botw_nvn_command_buffer_initialize_impl(NVNcommandBuffer *c, NVNdevice *d) {
++    memset(c, 0, sizeof(cmd_t)); CB(c)->magic = MAGIC('C', 'M', 'D', 'B'); CB(c)->dev = d; cmda_cb_init(c); return 1;
++}
+ NVN(nvnCommandBufferInitialize, NVNboolean, NVNcommandBuffer *c, NVNdevice *d) {
+-    memset(c, 0, sizeof(cmd_t)); CB(c)->magic = MAGIC('C', 'M', 'D', 'B'); CB(c)->dev = d; cmda_cb_init(c); return 1;
++    NVNboolean result = botw_nvn_command_buffer_initialize_impl(c, d);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_NVN_COMMAND_BUFFER_INITIALIZE,
++                              result != 0 ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
+ }
+ NVN(nvnCommandBufferFinalize, void, NVNcommandBuffer *c) { cmda_cb_final(c); CB(c)->magic = 0; }
+ NVN(nvnCommandBufferSetMemoryCallback, void, NVNcommandBuffer *c, PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC cb) { CB(c)->cb = cb; }
+@@ -1743,7 +1751,7 @@
+     return NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS;
+ }
+ 
+-NVN(nvnQueueAcquireTexture, NVNqueueAcquireTextureResult, NVNqueue *q, NVNwindow *w, int *idx) {
++static NVNqueueAcquireTextureResult botw_nvn_queue_acquire_texture_impl(NVNqueue *q, NVNwindow *w, int *idx) {
+     if (!q || !w || !idx) return NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_NATIVE_ERROR;
+     const queue_t *queue = (const queue_t *)q;
+     const win_t *window = (const win_t *)w;
+@@ -1761,6 +1769,14 @@
+     return result == NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS
+         ? NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_SUCCESS
+         : NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_NATIVE_ERROR;
++}
++NVN(nvnQueueAcquireTexture, NVNqueueAcquireTextureResult, NVNqueue *q, NVNwindow *w, int *idx) {
++    NVNqueueAcquireTextureResult result = botw_nvn_queue_acquire_texture_impl(q, w, idx);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_NVN_QUEUE_ACQUIRE_TEXTURE,
++                              result == NVN_QUEUE_ACQUIRE_TEXTURE_RESULT_SUCCESS ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
+ }
+ 
+ 

@@ -249,13 +249,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "3a6b578f14b5e3f69be0c84e30fed10609139ed0d22c3c873ec1af2bc15f0b38",
-      "bytes": 6563,
+      "sha256": "79d030f7757bd6845fbe63015a76954280bc4a79a8a2163c0b1621568a5b7b61",
+      "bytes": 6659,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "bba50397ec2184893508a9e392ebc5626d4c4842026c3c44a8f4640a0ed348dc",
-      "bytes": 2286,
+      "sha256": "b593055cc5200d6f4e3a19f416e022d978dfa2271fa3f61fad241e7026a49f28",
+      "bytes": 2384,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -548,6 +548,11 @@
       "bytes": 3832,
       "role": "thin-adapter-or-verification"
     },
+    "patches/early-graphics-initialize-status.patch": {
+      "sha256": "54c9aa7002af788edc052622ec932a3f76e8e3b4bdd25f45993ab9f2fa9b22d9",
+      "bytes": 2320,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/graphics-bootstrap-status.patch": {
       "sha256": "a15a568d13beca601f796a02775e55998bce5fae626628be30712c3bcbb72ac7",
       "bytes": 1369,
@@ -748,6 +753,11 @@
       "bytes": 11740,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_early_graphics_status_probe.c": {
+      "sha256": "9dceb5267436363106407184311b77eeb958caf92c7f213eb8f5805c8d89ab3a",
+      "bytes": 3811,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_front_state_probe.c": {
       "sha256": "b8fe07d441f96f17762fffb328c36ef9862114bec2be5acfdfea4ae2532c1c91",
       "bytes": 8577,
@@ -814,8 +824,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_normal_api_status_probe.c": {
-      "sha256": "9baabd502454470caa068b63e8d2680ea1196235a5472174a1c53a1a92c4c41f",
-      "bytes": 9018,
+      "sha256": "fe127315b0ddd20da80481b36904a2a4e857f27275bc4e5a807d356a7801b820",
+      "bytes": 10589,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_nvn_version_probe.c": {
@@ -1675,7 +1685,8 @@
     "patches/base-v0-vi-layer.patch",
     "patches/base-v0-queue-acquire.patch",
     "patches/pool-initialize-status.patch",
-    "patches/base-v0-sync-wait.patch"
+    "patches/base-v0-sync-wait.patch",
+    "patches/early-graphics-initialize-status.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1683,7 +1694,7 @@
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
-    "dm/gfx/nvn/hle_nvn.c": "85829fbee1f60dba7c5ec8ea6954d0644d06956b743000000db842e6c6e17ff2",
+    "dm/gfx/nvn/hle_nvn.c": "8fee859bb9cea33319ebdfed8379381229b792c2cc0f86cd0bdc8d1dbd2b6b8b",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",

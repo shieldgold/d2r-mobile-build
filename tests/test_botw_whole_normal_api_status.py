@@ -12,7 +12,7 @@ EXP=ROOT/'experiments/botw_upstream_host'
 BASELINE=os.environ.get('BOTW_NORMAL_API_STATUS_BASELINE')=='1'
 NAMES=('SetHeapSize','SetMemoryPermission','SetMemoryAttribute','MapMemory','UnmapMemory','QueryMemory','CreateThread','StartThread',
        'CreateTransferMemory','CloseHandle','WaitSynchronization','GetInfo','ConnectToNamedPort','SendSyncRequest',
-       'NvnMemoryPoolInitialize')
+       'NvnMemoryPoolInitialize','NvnQueueAcquireTexture','NvnCommandBufferInitialize')
 CAPACITY='[botw whole-host] heap_plan heap_bytes=671088640 root_bytes=637534208\n'
 
 
@@ -59,6 +59,13 @@ class NormalApiStatus(OwnedRunner,unittest.TestCase):
         self.assertEqual(self.run_owned(self.logger,'appended-api'),
             '[botw whole-host] api=NvnMemoryPoolInitialize result=ok\n'
             '[botw whole-host] api=NvnMemoryPoolInitialize result=error\n')
+
+    def test_appended_graphics_apis_preserve_all_fifteen_original_enum_values(self):
+        self.assertEqual(self.run_owned(self.logger,'early-graphics-apis'),
+            '[botw whole-host] api=NvnQueueAcquireTexture result=ok\n'
+            '[botw whole-host] api=NvnQueueAcquireTexture result=error\n'
+            '[botw whole-host] api=NvnCommandBufferInitialize result=ok\n'
+            '[botw whole-host] api=NvnCommandBufferInitialize result=error\n')
 
     def test_invalid_api_or_outcome_never_logs(self):self.assertEqual(self.run_owned(self.logger,'invalid'),'')
     def test_failed_write_and_duplicate_preserve_errno(self):self.assertEqual(self.run_owned(self.logger,'write-failure'),'')

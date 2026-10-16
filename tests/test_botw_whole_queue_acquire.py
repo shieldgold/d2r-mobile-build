@@ -10,6 +10,7 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 EXP=ROOT/'experiments/botw_upstream_host'
 PATCH='patches/base-v0-queue-acquire.patch'
+STATUS_PATCH='patches/early-graphics-initialize-status.patch'
 BASELINE=os.environ.get('BOTW_WHOLE_QUEUE_ACQUIRE_BASELINE')=='1'
 
 
@@ -31,6 +32,17 @@ def definition(text,anchor):
     raise AssertionError('actual NVN definition is incomplete')
 
 
+def queue_definitions(source):
+    declarations = '#include <errno.h>\n#define BOTW_WHOLE_POLICY_IMPLEMENTATION\n#include "whole_policy.h"\n#undef BOTW_WHOLE_POLICY_IMPLEMENTATION\n'
+    result = declarations + definition(source,'NVN(nvnWindowAcquireTexture,') + '\n'
+    private = 'static NVNqueueAcquireTextureResult botw_nvn_queue_acquire_texture_impl('
+    if private in source:
+        result += definition(source,private) + '\n'
+    if 'NVN(nvnQueueAcquireTexture,' in source:
+        result += definition(source,'NVN(nvnQueueAcquireTexture,') + '\n'
+    return result
+
+
 @unittest.skipUnless(shutil.which('clang'),'owned actual C bodies require clang')
 class WholeQueueAcquire(unittest.TestCase):
     @classmethod
@@ -38,16 +50,20 @@ class WholeQueueAcquire(unittest.TestCase):
         cls.temp=tempfile.TemporaryDirectory(prefix='botw-queue-acquire-');cls.addClassCleanup(cls.temp.cleanup)
         cls.work=Path(cls.temp.name);cls.source=cls.work/'source';shutil.copytree(EXP/'upstream',cls.source)
         patches=json.loads((EXP/'SOURCE.lock.json').read_text())['patches']
+        cls.applied_patches=[]
+        if BASELINE and (STATUS_PATCH in patches or (EXP/STATUS_PATCH).is_file()):
+            raise AssertionError('historical QueueAcquire-absent baseline requires its earlier commit; the locked status wrapper depends on QueueAcquire and cannot be skipped')
         for name in patches:
-            if name==PATCH:continue
+            if BASELINE and name==PATCH:continue
             cls.apply(name)
-        if not BASELINE and (EXP/PATCH).exists():cls.apply(PATCH)
+        if not BASELINE and PATCH not in patches and (EXP/PATCH).exists():cls.apply(PATCH)
+        if STATUS_PATCH not in patches and (EXP/STATUS_PATCH).is_file():cls.apply(STATUS_PATCH)
         source=(cls.source/'dm/gfx/nvn/hle_nvn.c').read_text()
         cls.window=definition(source,'NVN(nvnWindowAcquireTexture,')
         cls.original_window=definition((EXP/'upstream/dm/gfx/nvn/hle_nvn.c').read_text(),'NVN(nvnWindowAcquireTexture,')
         cls.has_queue='NVN(nvnQueueAcquireTexture,' in source
         cls.queue=definition(source,'NVN(nvnQueueAcquireTexture,') if cls.has_queue else ''
-        (cls.work/'normal_queue_functions.inc').write_text(cls.window+'\n'+cls.queue+'\n')
+        (cls.work/'normal_queue_functions.inc').write_text(queue_definitions(source))
         objects=(cls.source/'dm/gfx/nvn/nvn_obj.h').read_text();lines=objects.splitlines()
         types=[next(line for line in lines if line.startswith('#define MAGIC(')),next(line for line in lines if line.startswith('#define FITS('))]
         for name in ('queue_t','sync_t','win_t'):
@@ -57,7 +73,7 @@ class WholeQueueAcquire(unittest.TestCase):
         types.append(next(line for line in source.splitlines() if '} rt_decl;' in line))
         (cls.work/'normal_queue_types.inc').write_text('\n'.join(types)+'\n')
         cls.binary=cls.work/'probe'
-        command=['clang','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-pthread','-fsanitize=address,undefined','-fno-sanitize-recover=all','-DBOTW_HAS_QUEUE_ACQUIRE='+str(int(cls.has_queue)),'-I',str(cls.work),'-I',str(cls.source/'dm/gfx/nvn'),'-I',str(cls.source/'dm/gfx/nvn/include'),str(EXP/'tests/whole_queue_acquire_probe.c'),'-o',str(cls.binary)]
+        command=['clang','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-pthread','-fsanitize=address,undefined','-fno-sanitize-recover=all','-DBOTW_HAS_QUEUE_ACQUIRE='+str(int(cls.has_queue)),'-I',str(cls.work),'-I',str(cls.source/'dm/gfx/nvn'),'-I',str(cls.source/'dm/gfx/nvn/include'),'-I',str(EXP/'adapter'),str(EXP/'tests/whole_queue_acquire_probe.c'),str(EXP/'adapter/whole_policy.c'),'-o',str(cls.binary)]
         result=subprocess.run(command,capture_output=True,text=True)
         if result.returncode:raise AssertionError(result.stdout+result.stderr)
 
@@ -65,6 +81,7 @@ class WholeQueueAcquire(unittest.TestCase):
     def apply(cls,name):
         result=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(EXP/name)],cwd=cls.source,capture_output=True,text=True)
         if result.returncode:raise AssertionError(result.stdout+result.stderr)
+        cls.applied_patches.append(name)
 
     def case(self,mode,queue=True):
         if queue and not self.has_queue:self.skipTest('actual QueueAcquire body absent; dedicated implementation review must fail')

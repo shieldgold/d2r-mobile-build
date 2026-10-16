@@ -140,16 +140,41 @@ int main(int argc,char **argv) {
             BOTW_HOST_API_WAIT_SYNCHRONIZATION,BOTW_HOST_API_GET_INFO,
             BOTW_HOST_API_CONNECT_TO_NAMED_PORT,BOTW_HOST_API_SEND_SYNC_REQUEST};
         for(unsigned i=0;i<sizeof original/sizeof *original;i++)assert((unsigned)original[i]==i);
-        assert(BOTW_HOST_API_COUNT==15);
+        assert((unsigned)BOTW_HOST_API_NVN_MEMORY_POOL_INITIALIZE==14);
         for(unsigned i=0;i<3;i++) {
             errno=ENOTTY;
             botw_whole_host_api_result((botw_whole_host_api)14,BOTW_HOST_API_OK);
             botw_whole_host_api_result((botw_whole_host_api)14,BOTW_HOST_API_ERROR);
-            botw_whole_host_api_result((botw_whole_host_api)15,BOTW_HOST_API_OK);
+            botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
             botw_whole_host_api_result((botw_whole_host_api)14,(botw_whole_host_api_outcome)2);
             assert(errno==ENOTTY);
         }
         assert(atomic_load(&writes)==2);
+    } else if(!strcmp(argv[1],"early-graphics-apis")) {
+        const botw_whole_host_api original[]={
+            BOTW_HOST_API_SET_HEAP_SIZE,BOTW_HOST_API_SET_MEMORY_PERMISSION,
+            BOTW_HOST_API_SET_MEMORY_ATTRIBUTE,BOTW_HOST_API_MAP_MEMORY,
+            BOTW_HOST_API_UNMAP_MEMORY,BOTW_HOST_API_QUERY_MEMORY,
+            BOTW_HOST_API_CREATE_THREAD,BOTW_HOST_API_START_THREAD,
+            BOTW_HOST_API_CREATE_TRANSFER_MEMORY,BOTW_HOST_API_CLOSE_HANDLE,
+            BOTW_HOST_API_WAIT_SYNCHRONIZATION,BOTW_HOST_API_GET_INFO,
+            BOTW_HOST_API_CONNECT_TO_NAMED_PORT,BOTW_HOST_API_SEND_SYNC_REQUEST,
+            BOTW_HOST_API_NVN_MEMORY_POOL_INITIALIZE};
+        for(unsigned i=0;i<sizeof original/sizeof *original;i++)assert((unsigned)original[i]==i);
+        const botw_whole_host_api appended[]={
+            BOTW_HOST_API_NVN_QUEUE_ACQUIRE_TEXTURE,
+            BOTW_HOST_API_NVN_COMMAND_BUFFER_INITIALIZE};
+        assert((unsigned)appended[0]==15&&(unsigned)appended[1]==16);
+        assert(BOTW_HOST_API_COUNT==17);
+        for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)for(unsigned n=0;n<3;n++) {
+            errno=ENOTTY;
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_OK);
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_ERROR);
+            botw_whole_host_api_result(appended[i],(botw_whole_host_api_outcome)2);
+            assert(errno==ENOTTY);
+        }
+        botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
+        assert(atomic_load(&writes)==4);
     } else if(!strcmp(argv[1],"invalid")) {
         errno=ENOTTY;botw_whole_host_api_result((botw_whole_host_api)-1,BOTW_HOST_API_OK);
         botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_ERROR);
