@@ -1,0 +1,21 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -1,6 +1,7 @@
+ // Horizon kernel system calls (triggered by the SDK runtime once the SDK is loaded). Only what the P1 boot chain needs is implemented: memory layout + heap + query + debug output + timing.
+ // Register convention: inputs w1.. / outputs w0=Result, x1=value (GetInfo / SetHeapSize), consistent with the public Horizon ABI.
+ #include "dm.h"
++#include "whole_ipc.h"
+ #include "hle.h"
+ #include "dm_title.h"
+ #include "hle_thread_core.h"
+@@ -143,6 +144,10 @@
+ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+     { void hlecount_svc(int); hlecount_svc(num); }   // DM_HLECOUNT: svc counts by number
+     mem_init();
++    { char ipc_error[256];
++      int ipc_handled = botw_whole_ipc_dispatch(num, regs, ipc_error, sizeof ipc_error);
++      if (ipc_handled < 0) die("host IPC service failed: %s", ipc_error);
++      if (ipc_handled) return regs[0]; }
+     if (svc_thread(num, regs)) return regs[0];
+     if (num >= 0x80) { const dm_title_desc *T = dm_title(); if (T->svc_host_call && T->svc_host_call(num, regs)) return regs[0]; }   // from 0x80: the title's own cut host calls (Diablo II: hle_tact.c); titles without them fall through to the unknown SVC below
+     switch (num) {

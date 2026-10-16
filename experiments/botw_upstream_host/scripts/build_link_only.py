@@ -177,7 +177,8 @@ def main() -> int:
                   "-Werror=unguarded-availability", "-Werror=unguarded-availability-new",
                   "-I", str(staged / "dm/host"), "-I", str(staged / "dm/gfx/nvn/include"),
                   "-I", str(adapter), "-I", str(frontend),
-                  "-I", str(repository / "native/botw_resources")]
+                  "-I", str(repository / "native/botw_resources"),
+                  "-I", str(repository / "native/botw_host")]
         if args.sdk == "iphoneos":
             common += ["-DDM_SHELL=1"]
         objects = []
