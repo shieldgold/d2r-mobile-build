@@ -125,6 +125,12 @@ static int badWrite(NVNtexture *raw){
  CHECK(notifications==before+1&&strstr(lastError,"entry=nvnTextureWriteTexels: Unsupported or invalid NVN operation: object lifetime/type expected=BWTexture"));
  CHECK(!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(pthread_mutex_trylock(&graphicsLock)==0);pthread_mutex_unlock(&graphicsLock);return 0;
 }
+static int compareExpected(const NVNtexture *a,const NVNtexture *b,int expected){
+ unsigned before=notifications;recoverNow=YES;if(sigsetjmp(recovery,1)){recoverNow=NO;CHECK(0);}int value=w_nvnTextureCompare(a,b);recoverNow=NO;CHECK(value==expected&&notifications==before&&!graphicsDepth&&!pendingError&&!pendingFatal);return 0;
+}
+static int compareRejected(const NVNtexture *a,const NVNtexture *b,const char *reason){
+ unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureCompare(a,b);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,reason)&&!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(!pthread_mutex_trylock(&graphicsLock));pthread_mutex_unlock(&graphicsLock);return 0;
+}
 int main(int argc,char **argv){@autoreleasepool{
  CHECK(argc==2);CHECK(!beginHost());const char *mode=argv[1];NVNtexture raw={0},other={0};NVNtextureBuilder builder=ownedBuilder();
  memoryAccessValidator=accessMetadata;
@@ -156,6 +162,23 @@ int main(int argc,char **argv){@autoreleasepool{
 #else
   CHECK(!badWrite(&raw));
 #endif
+ }else if(!strncmp(mode,"compare-",8)){
+  NVNtexture empty={0},second={0};NSUInteger count=objects.count;uint64_t nextSerial=serial;
+  if(!strcmp(mode,"compare-empty")){unsigned reads=accessCalls;CHECK(!compareExpected(&empty,&second,1));CHECK(accessCalls==reads+4);CHECK(!compareExpected(&empty,&empty,1));CHECK(objects.count==count&&serial==nextSerial&&!notifications);}
+  else if(!strcmp(mode,"compare-mixed")){CHECK(w_nvnTextureInitialize(&raw,&builder));count=objects.count;nextSerial=serial;unsigned reads=accessCalls;CHECK(!compareExpected(&raw,&empty,0));CHECK(accessCalls==reads+4);reads=accessCalls;CHECK(!compareExpected(&empty,&raw,0));CHECK(accessCalls==reads+4);CHECK(objects.count==count&&serial==nextSerial);}
+  else if(!strcmp(mode,"compare-valid")){CHECK(w_nvnTextureInitialize(&raw,&builder));other=raw;unsigned reads=accessCalls;CHECK(!compareExpected(&raw,&other,1));CHECK(accessCalls==reads+4);size_t page=getpagesize();unsigned char *mapping=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(mapping!=MAP_FAILED&&!mprotect(mapping+page,page,PROT_NONE));NVNtexture *header=(NVNtexture*)(mapping+page-8);memcpy(header,&raw,8);CHECK(!compareExpected(header,&raw,1));CHECK(!munmap(mapping,page*2));}
+  else if(!strcmp(mode,"compare-semantic-fields")){
+   ((unsigned char*)&empty)[0x54]=0xfc;memset((char*)&empty+0x55,0xa5,3);memset((char*)&empty+0x98,0xa5,sizeof empty-0x98);CHECK(!compareExpected(&empty,&second,1));
+   for(unsigned offset=8;offset<0x98;offset++){if(offset>=0x54&&offset<0x58)continue;memset(&other,0,sizeof other);((unsigned char*)&other)[offset]=1;CHECK(!compareRejected(&other,&second,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(&second,&other,"object lifetime/type expected=BWTexture"));}
+   for(unsigned bit=0;bit<2;bit++){memset(&other,0,sizeof other);((unsigned char*)&other)[0x54]=1u<<bit;CHECK(!compareRejected(&other,&second,"object lifetime/type expected=BWTexture"));}CHECK(objects.count==count&&serial==nextSerial);
+  }else if(!strcmp(mode,"compare-invalid-operands")){
+   ((BWObject*)&other)->serial=UINT64_C(0xdeadbeef);CHECK(!compareRejected(&empty,&other,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(&other,&empty,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(&empty,(NVNtexture*)&rawDevice,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected((NVNtexture*)&rawDevice,&empty,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(NULL,&empty,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(&empty,NULL,"object lifetime/type expected=BWTexture"));
+   CHECK(w_nvnTextureInitialize(&raw,&builder));other=raw;w_nvnTextureFinalize(&raw);CHECK(!compareRejected(&empty,&other,"object lifetime/type expected=BWTexture"));CHECK(!compareRejected(&other,&empty,"object lifetime/type expected=BWTexture"));CHECK(w_nvnTextureInitialize(&raw,&builder));BWPool *pool=get(&rawPool,[BWPool class]);pool.live=NO;CHECK(!compareRejected(&empty,&raw,"stale texture pool"));CHECK(!compareRejected(&raw,&empty,"stale texture pool"));pool.live=YES;
+  }else if(!strcmp(mode,"compare-readable-prefix")){
+   size_t page=getpagesize();unsigned char *mapping=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(mapping!=MAP_FAILED&&!mprotect(mapping+page,page,PROT_NONE));NVNtexture *prefix=(NVNtexture*)(mapping+page-0x98);CHECK(!mprotect(mapping,page,PROT_READ));CHECK(!compareExpected(prefix,&empty,1));CHECK(!compareExpected(&empty,prefix,1));NVNtexture *shortPrefix=(NVNtexture*)(mapping+page-0x90);CHECK(!compareRejected(shortPrefix,&empty,"texture compare empty candidate is not fully readable"));CHECK(!compareRejected(&empty,shortPrefix,"texture compare empty candidate is not fully readable"));deniedAddress=mapping+page;CHECK(!compareRejected((NVNtexture*)(mapping+page),&empty,"texture compare object header is not readable"));CHECK(!compareRejected(&empty,(NVNtexture*)(mapping+page),"texture compare object header is not readable"));deniedAddress=NULL;CHECK(!compareRejected((NVNtexture*)(uintptr_t)(UINTPTR_MAX-3),&empty,"texture compare object header is not readable"));CHECK(!compareRejected(&empty,(NVNtexture*)(uintptr_t)(UINTPTR_MAX-3),"texture compare object header is not readable"));CHECK(!munmap(mapping,page*2));
+  }else if(!strcmp(mode,"compare-query-only")){
+   CHECK(!compareExpected(&empty,&second,1));CHECK(objects.count==count&&serial==nextSerial);CHECK(!badWrite(&empty));unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureFinalize(&empty);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"object lifetime/type expected=BWTexture")&&objects.count==count&&serial==nextSerial);
+  }else CHECK(0);
  }else if(!strcmp(mode,"size-zero")||!strcmp(mode,"size-zero-gl")||!strcmp(mode,"size-zero-buffer")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->format=NVN_FORMAT_R8;b->width=7;b->height=9;b->depth=11;b->levels=3;b->stride=177;b->packagedData=(const void*)(uintptr_t)0xdeadbeef;
   if(!strcmp(mode,"size-zero-gl")){b->target=NVN_TEXTURE_TARGET_2D;b->flags=8;b->format=NVN_FORMAT_R32UI;b->glName=9;b->device=NULL;b->width=-7;}
@@ -311,6 +334,27 @@ int main(int argc,char **argv){@autoreleasepool{
         lines, _ = self.size_mode('size-reset')
         self.assertEqual(len(lines), 5)
         self.assertIn('ordinal=1 ', lines[-1])
+
+    def test_compare_exact_empty_values_follow_original_value_semantics_without_publication(self):
+        self.mode('compare-empty')
+
+    def test_compare_empty_and_registered_values_are_false_in_both_orders(self):
+        self.mode('compare-mixed')
+
+    def test_compare_registered_value_copies_keep_original_live_lookup(self):
+        self.mode('compare-valid')
+
+    def test_compare_empty_candidate_checks_every_original_semantic_field_and_ignored_bits(self):
+        self.mode('compare-semantic-fields')
+
+    def test_compare_empty_does_not_bypass_other_operand_type_unknown_or_stale_checks(self):
+        self.mode('compare-invalid-operands')
+
+    def test_compare_only_requires_original_native_prefix_and_refuses_unreadable_candidates(self):
+        self.mode('compare-readable-prefix')
+
+    def test_compare_empty_value_gains_no_write_finalize_or_registry_capability(self):
+        self.mode('compare-query-only')
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal host objects')

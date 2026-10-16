@@ -27,6 +27,10 @@ View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode
 
 每个纹理固定原 pool 指针、宿主 pool generation 和 device。pool finalize/同地址重新 initialize 后，旧纹理、描述符、render target、CPU 读写及实际提交拒绝 stale generation。Finalize 先检查 guest 对象可写，再撤销资源归属；失败时保留原对象和 GPU 数据。
 
+`TextureCompare` 另有受限的纯值空态，不授予对象生命周期。原 base-v0 `C2C38..C2DC0` 不检查 serial 或解引用 provider/pool；主模块的 `A374B8` 清零 0xC0 字节，再由 `A37700` 在检查目标 state=-1 前比较这个占位值。桥只在正常 Compare 的 key=0 输入中，安全读取原比较实际覆盖的 `+0x08..+0x97`：provider/pool/offset、`+0x20..+0x53`、`+0x54` 的低两位及 `+0x58..+0x97` 必须全部为零；`+0x54` 高位、`+0x55..+0x57` 与 `+0x98` 后的未比较字节不参与。没有额外读取 0xC0 尾部、诊断扫描或内容日志。两个这样的语义空值为 true，一个空值与一个有效登记纹理为 false；两边均分类完成后才决定结果，所以空值不能旁路另一边的类型、未知 serial 或 stale pool 检查。
+
+非零 key 仍交原 `textureObject/get/textureLive`；本地分类先安全读取一次 8 字节 key，因此有效 operand 随后的原 get 会再校验/读取一次 8 字节，CPU 用例明确核对计数。两个有效纹理的既有 metadata 比较算法保持；本批不声称实现任意未登记 native 非空布局或完整原 computed-layout 比较。NULL、不可读、非空未登记、错误类型、未知和过期非零 key 继续受控拒绝。空态不创建 BWTexture、serial、registry、映射或 authority；Write/Read、getter、Finalize 和 GPU 消费继续走原严格对象检查。原游戏仅观察到 first word 为 0，是否实际符合这组空态字段仍须普通运行验证。
+
 block-linear 导入先通过公开 `vm_read_overwrite` 快照完整存储，再解排布上传。提交前的 hash、GPU-written 状态和 flush 证书保存在该 Metal command buffer 的独立 pending 表；只有真实 commit 后才发布。中途拒绝不会把未执行的上传缓存为完成。分配可能失败的归属准备发生在 completion group enter 之前，避免 shutdown 永等一个从未提交的 buffer。
 
 CPU WriteTexels 使用完整上游 region/stride/block 检查和精确 GOB run 遍历。先快照全部源行，再预检整个目标跨度；通过公开 `vm_write` 写精确字节段，保留 padding、其他 texel、mip 和 layer。部分首次写入先导入未修改子资源。CPU ReadTexels 从实际 Metal 存储读回，行间填充保持不变。CPU_CACHED 非 coherent pool 的 flush/invalidate 也走受控 VM 拷贝。读写共用 `botw_host/protected_copy.h`：实际复制前校验完整 source READ 和 destination WRITE VM 范围，每次 Mach 调用同时受 4095 字节和两侧宿主页边界限制，保留数字 VA 重叠方向、Mach 错误及短读取检查；该策略不提供并发 remap 事务或跨版本 VM 不分裂保证。

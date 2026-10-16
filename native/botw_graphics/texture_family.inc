@@ -31,6 +31,7 @@ static BOOL textureColorLayout(const TextureBuilder *b);
 static BOOL textureDepthSelected(const TextureBuilder *b,unsigned *kind);
 static BOOL textureDepthLayout(const TextureBuilder *b);
 static BOOL textureCompressionGPU(const TextureBuilder *b);
+static void textureReadBytes(const void *src,void *dst,size_t bytes,const char *reason);
 /* Selected views can outlive their descriptor entry or object-table record in
  * recorded commands. Weak tracking finds all wrappers without extending them. */
 static NSHashTable<BWTexture *> *textureReferences;
@@ -380,7 +381,23 @@ NVN(nvnTextureGetMemoryOffset,ptrdiff_t,const NVNtexture *raw){return textureObj
 NVN(nvnTextureGetStorageSize,int,const NVNtexture *raw){return bw_texture_storage_size32(textureObject(raw).storageSize);}
 NVN(nvnTextureGetTextureAddress,NVNtextureAddress,const NVNtexture *raw){BWTexture *t=textureObject(raw);return t.pool.gpuBase+t.offset;}
 NVN(nvnTextureGetDebugID,uint64_t,const NVNtexture *raw){BWTexture *t=textureObject(raw);return (t.pool.device.flags&NVN_DEVICE_FLAG_DEBUG_ENABLE)?t.identity:0;}
-NVN(nvnTextureCompare,NVNboolean,const NVNtexture *a,const NVNtexture *b){BWTexture *x=textureObject(a),*y=textureObject(b);TextureBuilder p=x.metadata,q=y.metadata;return x.pool==y.pool&&x.offset==y.offset&&!memcmp(&p.flags,&q.flags,0x34)&&p.stride==q.stride&&p.packaged==q.packaged;}
+/* Original C2C38 compares values without requiring an initialized object. Main's
+ * A374B8/A37700 uses an empty native value before publishing its first copy.
+ * Only that exact semantic empty is accepted outside the live host registry;
+ * it never becomes a texture, serial, mapping or GPU authority. */
+static BWTexture *textureCompareOperand(const NVNtexture *raw,BOOL *empty){
+    *empty=NO;if(!raw)return textureObject(raw);
+    uint64_t key=0;textureReadBytes(raw,&key,sizeof key,"texture compare object header is not readable");
+    if(key)return textureObject(raw); /* Keep the original strict live lookup. */
+    if(UINTPTR_MAX-(uintptr_t)raw<0x98)fatal("texture compare empty candidate address overflow");
+    unsigned char fields[0x90];textureReadBytes((const void*)((uintptr_t)raw+8),fields,sizeof fields,"texture compare empty candidate is not fully readable");
+    unsigned value=fields[0x54-8]&3u;
+    for(unsigned i=0;i<0x54-8;i++)value|=fields[i];
+    for(unsigned i=0x58-8;i<sizeof fields;i++)value|=fields[i];
+    if(value)return textureObject(raw); /* A zero key alone is not an empty. */
+    *empty=YES;return nil;
+}
+NVN(nvnTextureCompare,NVNboolean,const NVNtexture *a,const NVNtexture *b){BOOL emptyA,emptyB;BWTexture *x=textureCompareOperand(a,&emptyA),*y=textureCompareOperand(b,&emptyB);if(emptyA||emptyB)return emptyA&&emptyB;TextureBuilder p=x.metadata,q=y.metadata;return x.pool==y.pool&&x.offset==y.offset&&!memcmp(&p.flags,&q.flags,0x34)&&p.stride==q.stride&&p.packaged==q.packaged;}
 /* A selected view owns its Metal view and base storage. Descriptor and command
  * capture copy all guest view bytes, so later guest mutations cannot retarget it. */
 static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView v,BOOL attachment){

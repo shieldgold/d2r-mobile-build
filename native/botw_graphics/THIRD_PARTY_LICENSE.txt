@@ -129,3 +129,11 @@ ordinary pools, supported identity color formats and flags=0; it does not copy
 the upstream descriptor's unvalidated multi-mip 1D behavior or its broader
 target/format fallback. Apple primary type/view/mipmap constraints and the
 independently checked base-v0 layout are documented in TEXTURES.md.
+
+TextureCompare's query-only semantic-empty adapter follows the independently
+audited base-v0 C2C38 value-comparison fields and main's cleared native-value
+construction/assignment path. The complete 5f673ae and 9de307e hle_nvn.c
+TextureCompare implementations also separate value equality from serial/cache
+lifetime, but their private 1.9 tex_t layout is not imported or applied to the
+base-v0 opaque object. Existing registered-value comparison is retained; this
+adapter does not create a fallback texture or import upstream rendering stubs.
