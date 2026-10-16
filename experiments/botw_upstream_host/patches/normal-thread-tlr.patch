@@ -1,0 +1,24 @@
+--- a/dm/host/thread.c
++++ b/dm/host/thread.c
+@@ -2,6 +2,7 @@
+ // The SDK's internal critical section takes the current thread object pointer from TLR[0x1f8]; here each thread gets a zero-initialized object allocated and written in.
+ #include "dm.h"
+ #include "whole_thread_memory.h"
++#include "whole_host_memory.h"
+ #include "base_v0_heap.h"
+ #define TLS_SIZE 8192
+ #define TLR_SIZE 0x200
+@@ -56,3 +57,13 @@
+     }
+     return 0;
+ }
++
++// Normal IPC obtains the actual current Horizon TLR key, only after this
++// thread successfully published its original private TLS/TLR ownership.
++int botw_whole_current_tlr(void **out, size_t *size) {
++    if (!out || !size || !g_own_ready) return -1;
++    void *current = pthread_getspecific(g_keytlr);
++    uint64_t address = (uint64_t)(uintptr_t)current;
++    if (!address || TLR_SIZE > UINT64_MAX - address) return -1;
++    *out = current; *size = TLR_SIZE; return 0;
++}

@@ -113,6 +113,61 @@
       "bytes": 1817,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_heap_dirty_exclusion.inc": {
+      "sha256": "b709240f01612b9d604ae4389a6c370dc477111a97de306405d1d92bf375f664",
+      "bytes": 778,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease.c": {
+      "sha256": "2a2e74debcfb398e049147f31861c7bcd3ca17c2010c3e2f6f6630f121294181",
+      "bytes": 1266,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease.h": {
+      "sha256": "fb53ec3fc0ca14d1d815fb1938dbb5b1e1a4fccbbb00b04d1d3211c2f59142c4",
+      "bytes": 1399,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease.json": {
+      "sha256": "83defcfd02288bb6e7fa565665f67e65e2b2a7321fedb8c5bf91cf1c6988e4a2",
+      "bytes": 2801,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease_handles.inc": {
+      "sha256": "4b929277b6f4795fd7761268cfb95a670e9f16fe779f881d91dd64065b33d91a",
+      "bytes": 3748,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease_internal.h": {
+      "sha256": "d4f212a52e1fea1d4d7852382c09709a8be6158ed85ecf58f2236ac33a3be102",
+      "bytes": 1292,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_lease_memory.inc": {
+      "sha256": "d07197f48a7af4976649eed84b69232a87c490dd75647c56b6b832680ab1cc82",
+      "bytes": 4321,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_provider.c": {
+      "sha256": "66b1541c35034f34d63af6d506805c9161e433e702e4323893d4688e2c341512",
+      "bytes": 5199,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_heap_provider.h": {
+      "sha256": "9b8c87d257c00fca2bc048c2e3afca4cf5394a93fb05718d0049600d26db2ad3",
+      "bytes": 938,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_host_memory.c": {
+      "sha256": "36de39bcbe551d2e04d5a2ac50377bb48b9862f205e0d585e9fc05e2abe4ce6a",
+      "bytes": 3830,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_host_memory.h": {
+      "sha256": "d1d4e55557b1ce39665d5896e0c7f7d329247487de03292dbf8fc0cb5c17fa39",
+      "bytes": 1456,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/whole_identity.c": {
       "sha256": "6d2e60a6a7344b76b492fbd5fac500611a6246d94f33b5c1a6afdb91ab65e963",
       "bytes": 3530,
@@ -338,6 +393,16 @@
       "bytes": 8325,
       "role": "thin-adapter-or-verification"
     },
+    "patches/normal-heap-lease.patch": {
+      "sha256": "bfe4fa29eb1c9cc5e19e0ad6a38cd783f42fa52facc21a3a59b699e6774ae2af",
+      "bytes": 2462,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/normal-thread-tlr.patch": {
+      "sha256": "5001c69a5cb212cbf798feef7c0cad70d17a8a51ece6d44ea6008c6e12dc0986",
+      "bytes": 915,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/ordinary-pool-backing.patch": {
       "sha256": "4bcba6be7e5b90e3e27fdaebc5c8ea4cd6d3fdca9234fec10f97dd27ae1a81a4",
       "bytes": 54622,
@@ -466,6 +531,16 @@
     "tests/whole_guest_memory_probe.c": {
       "sha256": "1a8dbf9711b01dbe79adedbbef1cc3c5602a2d0b4e0c3f358419593513689537",
       "bytes": 4220,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_heap_lease_probe.c": {
+      "sha256": "c0fcbd1cedc96b4b74aadd206120380f1f9d905fffd8ecdbc4d8b10fa19c6f0f",
+      "bytes": 13027,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_host_memory_probe.c": {
+      "sha256": "3aec644a01173441703a582afb150b0d0ff3c0829a8fcd08ff2dcdea0e098da7",
+      "bytes": 10565,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_ipc_probe.c": {
@@ -1254,6 +1329,7 @@
     "patches/base-v0-force.patch",
     "patches/base-v0-heap.patch",
     "patches/current-thread-ownership.patch",
+    "patches/normal-thread-tlr.patch",
     "patches/checked-dirty-write.patch",
     "patches/base-v0-pool-builder.patch",
     "patches/ordinary-pool-backing.patch",
@@ -1263,7 +1339,8 @@
     "patches/pcm-stress-frontier.patch",
     "patches/kernel-services.patch",
     "patches/ipc-services.patch",
-    "patches/transfer-memory.patch"
+    "patches/transfer-memory.patch",
+    "patches/normal-heap-lease.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1271,7 +1348,7 @@
     "dm/gfx/nvn/hle_nvn.c": "aeddf6dfa7a2892b8e073c6759f873b7d7957df9f94b816d4b15f3ea4cc60db4",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
-    "dm/gfx/nvn/nvn_dirty.c": "b3291449a40aab1809a97573faef3c2b57381499e52dbe73e418dcc31038ed0f",
+    "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
     "dm/gfx/nvn/nvn_mtl.h": "18a45e5f00a93f16959697407c0e810029e591071947463a759804f8bd58790d",
     "dm/gfx/nvn/nvn_mtl.m": "86be71942830f3e0f67de89807e454730e9a44de261c0e060c73f9314c4e0cb0",
@@ -1290,12 +1367,12 @@
     "dm/host/hle.c": "5b1be568e3bf9eabb3c7e130fe6e25d6ce84ee0f73922f4923578ebe9576bf82",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
-    "dm/host/hle_svc.c": "6f671d237e7677876c49a775667cc27efebf04752de17ed3a57a03ad977752ba",
-    "dm/host/hle_thread.c": "f45c3f5dfe3921087403630b137cd78dea3a3e34dde6bd21ef457f2eb4940d50",
+    "dm/host/hle_svc.c": "c4cc59f13b3840a458b902416cf27c3816466cb8a9cb8f8bab4d17b14108ca54",
+    "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
     "dm/host/loader.c": "04d34bc3d42c95f1a1f49dee102bbc608bfc25da32e777ec4fdc5e1e6327b455",
     "dm/host/main.c": "13ff3e987b525e7c6d31351b59659702712517d3b24262db0f57d52d6b25fc1d",
     "dm/host/tests/t_botw_pcm.c": "eedde76aead52c05888f3541a7529e30d6febdb16e2683bb56bff254ef7f09c6",
-    "dm/host/thread.c": "10a9b377150140775f55710070cfc7268c0355038265b375ff090068e0f63ef8",
+    "dm/host/thread.c": "554d07f4f1028fa771a00080c741bfaf5646ed3a8aa46304846f82922dc1828a",
     "dm/host/title_botw.c": "6cba0eecdd217ebfa2b44a5e603f027db834ef4c852aacc04dac2374057f7e30"
   },
   "targets": {
@@ -1357,7 +1434,10 @@
     "adapter/whole_pool_backing_memory.m",
     "adapter/whole_transfer_vm.c",
     "adapter/whole_guest_memory.c",
-    "adapter/whole_audren.c"
+    "adapter/whole_audren.c",
+    "adapter/whole_host_memory.c",
+    "adapter/whole_heap_lease.c",
+    "adapter/whole_heap_provider.c"
   ],
   "swforce_record_count": 127,
   "swforce_metadata_sha256": "df5207fef17b2bcae2a98d9f76c009bb2ea27040c383fd30aad8ff6618444932",

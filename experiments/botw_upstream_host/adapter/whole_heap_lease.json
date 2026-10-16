@@ -1,0 +1,36 @@
+{
+  "policy": "botw-whole-normal-heap-shared-lease-v1",
+  "reused_sources": {
+    "experiments/botw_upstream_host/patches/transfer-memory.patch": "f7cc530a43520c4d414d4e90507597d4559c5e9c862cb2b2c0c82b2ad8cc7934",
+    "experiments/botw_upstream_host/patches/checked-dirty-write.patch": "dab2a0616f11bc035ee0ba3c6faacdacb1d31ac5a15307c8cc207b42cc2b99b3",
+    "experiments/botw_upstream_host/adapter/whole_transfer_vm.c": "797f5a3d3cf5e1d2999ab77b2ce2276a4c971d8be489348e9c5614a545d833be",
+    "experiments/botw_upstream_host/adapter/whole_transfer_memory.inc": "614340252229bf46c3d1134c5ddb674b8266823d432fbb77bcdd7ed0b4f74fb1",
+    "experiments/botw_upstream_host/adapter/whole_transfer_handles.inc": "4b70334486695293186188848fee4d0d3f81d53da2ed0e3be60024a6f9725a04",
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/nvn_dirty.c": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75",
+    "experiments/botw_audio_renderer/platform/memory_provider.h": "34bdda8edab56834ecb44d75e6314af703acee855794f9797e2d174dbc3afe85",
+    "experiments/botw_audio_renderer/native/audren_host.h": "bb4b5227b8dbad95321895d485d56e74ce7092203dedca5229a3158ad4d9ac98"
+  },
+  "canonical_registry": "sole original hle_svc.c g_map, normal_pin distinguishes same real kernel backing owner",
+  "locks": [
+    "G",
+    "nvn_dirty.c:g_slot_mu",
+    "g_heap_resize_lock",
+    "g_map_lock"
+  ],
+  "dirty_admission": "atomic two-way overlap refusal under original slot lock, including preparing/quarantined normal pins and retiring dirty rows; signal/protect/since algorithms unchanged",
+  "normal_access": 3,
+  "horizon_alignment": 4096,
+  "alias": "complete real vm_remap(copy=FALSE) via frozen whole_transfer_vm.c; source permissions never change; exact requested view of validated entire host-page envelope",
+  "strong_owner": "original G/actual backing refs; last actual unmap ACK before owner clears; prepare callbacks outside all locks",
+  "provenance": "same unique g_heap incarnation token plus exact requested source offset as frozen TransferMemory",
+  "typed_bridge": "verified nonzero process owner is supplied by actual identity provider; callbacks strictly compare it; raw kernel serves only its one current heap",
+  "context": "base ref1, real atomic CAPI refs and active leases; checked destruction after refs1/active0 and pending cleanup ACK",
+  "unsupported": [
+    "normal writable alias overlapping actual dirty registration",
+    "later dirty registration overlapping any live/preparing/pending normal writable alias",
+    "source transfer/move/readonly/noaccess/quarantine hole",
+    "non-RW access or non-Horizon-page request",
+    "heap not currently committed"
+  ],
+  "execution": "owned CPU VM/registry/mock callbacks only; no guest/wholehost/GPU; iPhoneOS still requires actual CI"
+}

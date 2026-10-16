@@ -1,0 +1,58 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -112,7 +112,7 @@
+ 
+ // Registry of mapped ranges (MapMemory stacks, MapPhysicalMemory alias pages), QueryMemory reports from it; the SDK relies on it to find free space
+ #define MAX_MAP 4096
+-static struct { uint64_t base, size, src; uint32_t state; botw_whole_transfer_object *transfer; } g_map[MAX_MAP];
++static struct { uint64_t base, size, src; uint32_t state; botw_whole_transfer_object *transfer; unsigned normal_pin; } g_map[MAX_MAP];
+ static int g_nmap;
+ static pthread_mutex_t g_map_lock = PTHREAD_MUTEX_INITIALIZER;
+ static int map_find(uint64_t a, uint64_t n) {       // Returns a 1-based index, 0 = no overlap
+@@ -120,6 +120,7 @@
+     return 0;
+ }
+ #include "whole_transfer_memory.inc"
++#include "whole_heap_lease_memory.inc"
+ 
+ int svc_thread(int num, uint64_t *regs);   // hle_thread.c: thread and synchronization kind
+ 
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -852,3 +852,5 @@
+ }
+ 
+ #include "whole_transfer_handles.inc"
++
++#include "whole_heap_lease_handles.inc"
+--- a/dm/gfx/nvn/nvn_dirty.c
++++ b/dm/gfx/nvn/nvn_dirty.c
+@@ -18,6 +18,7 @@
+ //    readers are drained again before page records, chunks or arrays are freed.
+ // Signal readers pin immutable registration metadata through the epoch banks.
+ #include "nvn_dirty.h"
++#include "whole_heap_lease_internal.h"
+ #include "../../host/dm.h"
+ #include <stdatomic.h>
+ #include <pthread.h>
+@@ -270,6 +271,14 @@
+     if (!mem || !size || size > UINTPTR_MAX - a || a + size > UINTPTR_MAX - (g_pg - 1)) return 0;
+     atomic_fetch_add(&g_adds_total, 1);
+     pthread_mutex_lock(&g_slot_mu);
++    /* One original admission lock covers both catalogs. Normal aliases are
++     * writable at another VA, so canonical write-fault tracking cannot cover
++     * them. Reject real overlap instead of publishing an unsafe certificate. */
++    uintptr_t normal_base=a&~(g_pg-1),normal_end=(a+size+g_pg-1)&~(g_pg-1);
++    if(botw_whole_heap_pin_overlap(normal_base,normal_end-normal_base)){
++        pthread_mutex_unlock(&g_slot_mu);return 0;
++    }
++
+     int n = atomic_load(&g_nr), slot = -1;
+     for (int i = 0; i < n; i++) if (!atomic_load(&g_r[i])) { slot = i; break; }
+     if (slot < 0) {
+@@ -409,3 +418,5 @@
+     *calls = atomic_load(&g_mp_calls); *pages = atomic_load(&g_mp_pages);
+     *ns = g_tb.denom ? dt / g_tb.denom * g_tb.numer + dt % g_tb.denom * g_tb.numer / g_tb.denom : 0;
+ }
++
++#include "whole_heap_dirty_exclusion.inc"
