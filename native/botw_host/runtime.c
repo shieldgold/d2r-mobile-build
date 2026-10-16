@@ -49,12 +49,32 @@
 #if defined(BOTW_WITH_GRAPHICS)
 #include "../botw_graphics/shader_bundle.h"
 #include "../botw_graphics/graphics.h"
+#include "texture_move_profile.h"
 extern int botw_graphics_init(void *, void (*)(const char *), int (*)(const void *, size_t));
 extern int botw_graphics_shutdown_checked(char *, size_t);
 extern void *botw_nvn_bootstrap_loader(const char *);
 static int (*graphics_backend_init)(void *, void (*)(const char *), int (*)(const void *, size_t)) = botw_graphics_init;
 static int (*graphics_backend_shutdown)(char *, size_t) = botw_graphics_shutdown_checked;
 static void *(*graphics_backend_loader)(const char *) = botw_nvn_bootstrap_loader;
+/* Optional only for old headless linkage fixtures. A matching transfer must
+ * have all three real providers; absence is a controlled failure, never a
+ * successful copy without its ownership transition. */
+extern int botw_graphics_texture_move_preflight(const void *, void *, size_t,
+    botw_graphics_texture_move_token *, char *, size_t) __attribute__((weak_import));
+extern int botw_graphics_texture_move_commit(const botw_graphics_texture_move_token *,
+    char *, size_t) __attribute__((weak_import));
+extern int botw_graphics_texture_move_abort(const botw_graphics_texture_move_token *,
+    char *, size_t) __attribute__((weak_import));
+extern int botw_texture_move_no_preflight(const void *, void *, size_t,
+    botw_graphics_texture_move_token *, char *, size_t);
+extern int botw_texture_move_no_commit(const botw_graphics_texture_move_token *, char *, size_t);
+extern int botw_texture_move_no_abort(const botw_graphics_texture_move_token *, char *, size_t);
+/* Volatile loads intentionally prevent folding two differently named symbols
+ * to unequal addresses: Mach-O weak definitions alias the fallback labels. */
+static int (*volatile graphics_move_preflight)(const void *, void *, size_t,
+    botw_graphics_texture_move_token *, char *, size_t) = botw_graphics_texture_move_preflight;
+static int (*volatile graphics_move_commit)(const botw_graphics_texture_move_token *, char *, size_t) = botw_graphics_texture_move_commit;
+static int (*volatile graphics_move_abort)(const botw_graphics_texture_move_token *, char *, size_t) = botw_graphics_texture_move_abort;
 #else
 static int (*graphics_backend_init)(void *, void (*)(const char *), int (*)(const void *, size_t));
 static int (*graphics_backend_shutdown)(char *, size_t);
@@ -188,6 +208,9 @@ static struct {
     void *graphics_workspace;
     size_t graphics_workspace_size;
     int host39_transport_audited;
+    uint64_t texture_move_memcpy;
+    int texture_move_audited;
+    _Atomic unsigned texture_move_reports;
     int heap_policy_active, heap_initial_sized;
     int thread_stack_policy_active;
     size_t heap_size, root_size, image_bytes;
@@ -242,6 +265,7 @@ static int invoke_guest_callback(uint64_t target, const char *entry, const char 
     void (*invoke)(uint64_t, void *), void *arguments, char *error, size_t capacity);
 #endif
 extern void botw_gate(void);
+extern void *botw_texture_move_memcpy_entry(void *, const void *, size_t);
 extern unsigned char botw_unimplemented_stubs[];
 static const int caught_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGTRAP};
 
@@ -750,11 +774,104 @@ static uint64_t find_vi_symbol(const char *name) {
     return 0;
 }
 #endif
+/* This audit is a host interposition profile, not guest-image rewriting.
+ * Its caller supplies only the immutable built-in profile in production;
+ * independent CPU fixtures can audit their own synthetic executable bytes. */
+#if defined(BOTW_WITH_GRAPHICS)
+static uint64_t audit_texture_move_import(const botw_texture_move_profile *profile) {
+    Module *main = &state.modules[0], *sdk = &state.modules[5], *definition = NULL;
+    const Sym *symbol = NULL;
+    if (state.address_bits != 39 || !state.host39_transport_audited ||
+            !main->name || strcmp(main->name,"main") || !sdk->name || strcmp(sdk->name,"sdk") ||
+            !profile || profile->copy_bytes != sizeof(NVNtexture) ||
+            profile->return_offset < profile->main_function.offset ||
+            profile->return_offset-profile->main_function.offset >= profile->main_function.bytes ||
+            (profile->return_offset & 3)) fail("texture move import requires the fixed base-v0 Host39 profile");
+    if (!botw_texture_move_context_matches(main->base,main->size,0,main->text_end,&profile->main_function) ||
+            !botw_texture_move_context_matches(main->base,main->size,0,main->text_end,&profile->main_memcpy_plt))
+        fail("texture move import: unknown loaded main ownership-transfer context");
+    uint64_t original = find_raw_definition("memcpy",&definition,&symbol);
+    if (!original || definition != sdk || !symbol || symbol->section != 1 || symbol->info != 0x12 ||
+            (symbol->other & 3) || symbol->value != profile->sdk_memcpy.offset ||
+            symbol->size != profile->sdk_memcpy.bytes ||
+            !botw_texture_move_context_matches(sdk->base,sdk->size,0,sdk->text_end,&profile->sdk_memcpy) ||
+            !botw_texture_move_context_matches(sdk->base,sdk->size,sdk->patch_off,sdk->size,&profile->sdk_thunks))
+        fail("texture move import: unknown loaded original SDK memcpy definition/body/thunks");
+    return original;
+}
+#endif
+
+typedef struct { void *destination; const void *source; size_t bytes; void *result; } TextureMoveCopy;
+#if defined(BOTW_WITH_GRAPHICS)
+static void texture_move_call_original(uint64_t original, void *opaque) {
+    TextureMoveCopy *copy = opaque;
+    copy->result = ((void *(*)(void *,const void *,size_t))(uintptr_t)original)(
+        copy->destination,copy->source,copy->bytes);
+}
+#endif
+/* entry.S captures these last two arguments from normal LR/x23 registers
+ * before any C prologue; no caller frame or opaque guest object is read. */
+void *botw_texture_move_memcpy_dispatch(void *destination,const void *source,size_t bytes,
+        uintptr_t return_address,uint64_t ownership) {
+#if defined(BOTW_WITH_GRAPHICS)
+    uint64_t original = state.texture_move_memcpy;
+    if (!state.texture_move_audited || !original) fail("texture move memcpy bridge is not audited");
+    uintptr_t main = (uintptr_t)state.modules[0].base;
+    if (return_address < main || return_address-main != botw_texture_move_base_v0.return_offset ||
+            bytes != botw_texture_move_base_v0.copy_bytes || !(ownership & 1))
+        return ((void *(*)(void *,const void *,size_t))(uintptr_t)original)(destination,source,bytes);
+    int (*preflight)(const void *,void *,size_t,botw_graphics_texture_move_token *,char *,size_t) = graphics_move_preflight;
+    int (*commit)(const botw_graphics_texture_move_token *,char *,size_t) = graphics_move_commit;
+    int (*abort_move)(const botw_graphics_texture_move_token *,char *,size_t) = graphics_move_abort;
+    if (!preflight || !commit || !abort_move || preflight == botw_texture_move_no_preflight ||
+            commit == botw_texture_move_no_commit || abort_move == botw_texture_move_no_abort)
+        fail("texture move memcpy requires preflight, commit and abort providers");
+    botw_graphics_texture_move_token token = {{0}}; char error[512] = {0};
+    int prepared = preflight(source,destination,bytes,&token,error,sizeof error);
+    error[sizeof error-1] = 0;
+    if (prepared != 1) fail("texture move preflight: %s",*error?error:"provider did not confirm success");
+    TextureMoveCopy copy = {destination,source,bytes,NULL};
+    /* No graphics/lifecycle mutex is held across original guest code. This
+     * existing local recovery catches a copy fault before abandoning token.
+     * Shutdown joins workers before checked graphics retirement and unmap. */
+    int copied = invoke_guest_callback(original,"texture ownership memcpy","texture move copy ",
+        texture_move_call_original,&copy,error,sizeof error);
+    if (!copied || copy.result != destination) {
+        char aborted_error[512] = {0};
+        int aborted = abort_move(&token,aborted_error,sizeof aborted_error);
+        aborted_error[sizeof aborted_error-1] = 0;
+        if (aborted != 1) fail("texture move abort incomplete: %s",*aborted_error?aborted_error:"provider did not confirm success");
+        fail("texture move copy: %s",*error?error:"original memcpy did not return destination");
+    }
+    int committed = commit(&token,error,sizeof error);
+    error[sizeof error-1] = 0;
+    if (committed != 1) fail("texture move commit after copy: %s",*error?error:"provider did not confirm success; bytes are not rolled back");
+    unsigned report_index = atomic_load_explicit(&state.texture_move_reports,memory_order_relaxed);
+    while (report_index < 4) {
+        if (atomic_compare_exchange_weak_explicit(&state.texture_move_reports,&report_index,report_index+1,
+                memory_order_relaxed,memory_order_relaxed)) {
+            report("texture_value_storage_transferred=true bytes=%zu index=%u",bytes,report_index+1);break;
+        }
+    }
+    return copy.result;
+#else
+    (void)destination; (void)source; (void)bytes; (void)return_address; (void)ownership;
+    fail("texture move memcpy bridge requires graphics");
+#endif
+}
+
 static uint64_t find_symbol(const char *name) {
     if (!strcmp(name, "nvnBootstrapLoader") && graphics_backend_loader)
         return (uint64_t)graphics_backend_loader;
     if (state.address_bits == 39) {
 #if defined(BOTW_WITH_GRAPHICS)
+        if (!strcmp(name,"memcpy")) {
+            if (!state.texture_move_audited) {
+                state.texture_move_memcpy = audit_texture_move_import(&botw_texture_move_base_v0);
+                state.texture_move_audited = 1;
+            }
+            return (uint64_t)botw_texture_move_memcpy_entry;
+        }
         if (!strcmp(name, graphics_platform_initialize)) {
             audit_graphics_platform(); return (uint64_t)host_initialize_graphics;
         }
@@ -1830,6 +1947,8 @@ static int cleanup(void) {
     pthread_mutex_lock(&lifecycle_lock);
     state.graphics_started = 0; state.graphics_workspace = NULL; state.graphics_workspace_size = 0;
     state.host39_transport_audited = 0;
+    state.texture_move_audited = 0; state.texture_move_memcpy = 0;
+    atomic_store_explicit(&state.texture_move_reports,0,memory_order_relaxed);
     state.thread_stack_policy_active = 0;
     state.vi_initialized = 0; state.vi_display = state.vi_layer = NULL; state.vi_last_target_timestamp = 0;
     pthread_mutex_unlock(&lifecycle_lock);

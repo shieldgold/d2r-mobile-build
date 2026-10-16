@@ -201,6 +201,22 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 本次25项 CPU 回归在 ea 基线上编译成功后有8项真实失败，修复后25项全部通过（4.663秒，ASan/UBSan、fake Metal）；最窄真实 GPU 链通过（0.897秒），覆盖按值副本、源 Finalize、同槽重用、从旧副本注册 descriptor，以及副本 Finalize 后仍采到原 mip2。独立 CPU 8项通过（4.292秒）；独立 public GPU 两项方法/两个模式通过（1.783秒，均实际 Metal validation banner，无 GPU sanitizer），包含新 value-copy 链和旧 retained-snapshot。双独审 CLOSED，四个修改来源 SHA 前后稳定，manifest SHA256 为 `cf37b5f0a8579a4ffb26d1b3e4eb1b5b41793b1d44ec1f8ca885cbddcdb1152b`，native95与schema100保持。固定提交后的原游戏验证另行记录，不把合成像素当成游戏画面。
 
+提交 `ca3cea3` 的普通 Mac 原游戏仍停在 `nvnSamplerInitialize`。该版既有 guard 的有限 host-owned 元数据明确冲突为 `BWTexture`、span192字节、`exact_base=false`，因此不能把本次现场归因为同址 sampler 重建；未读取冲突对象的客体内容。binary SHA256 为 `a83ac4d5960b42442124c76c8fe34170cc7a2c9b052af1387f0201bd74ac09f7`，证据位于 `outputs/botw-host39-mac-ca3cea3/ordinary-admission-evidence.json`。下一步需核对原纹理复制与临时存储复用，保持其他重叠拒绝，不靠全局忽略 span 继续。host_return=1，仍无游戏呈现或可玩验收。
+
+`ea7fc87` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38843884880) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38843884894) 均成功，精确 head 已核验。该版已保数据更新到 iPhone 12 / iOS18.1 并普通启动 PID1083，executable 匹配本次安装；启动标记29→30，旧日志前缀逐字节保持。首个 fatal 同该版 Mac 为 SamplerInitialize 的通用重叠检查，该版本没有记录实际冲突类型或 bias bits，不能将后续 ca 的 Mac 元数据当成此次手机观测。签名 IPA 19,146,084字节，SHA256 为 `e77fc2b7e528ef3cb2116a205a4d62ed9d49cf34c2aaaa8f60bcd1fe42429305`；RomFS 大小/mtime、UID、shader清单和权限均核验保留，未重传 RomFS。累计日志34,189,788字节使用流式校验，不截断原日志；仍 host_return=1，无游戏呈现或可玩验收，报告位于 `outputs/botw-ios-ea7fc87-iphone12/device-run-report.json`。
+
+`ca3cea3` 固定全套 **933项，932通过、1个原硬件条件跳过**，208.894秒；634个来源文件前后逐项SHA稳定，source manifest SHA256 为 `19594495c9fe6efff4d7002a34c0220ea817e85acf3ffd6e6b179034fcdc7038`。手机此时已验证版本仍为ea，后续构建和安装结果另记。
+
+`ca3cea3` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38844647775) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38844647763) 均成功，精确 head 已核验。该版已保数据更新到 iPhone12 / iOS18.1 并普通启动 PID1085，executable 匹配本次安装；启动标记30→31，旧日志逐字节保持。手机同样具名记录 SamplerInitialize 与 BWTexture、span192、非同址的冲突；未读取现场对象内容、地址或调用者栈，未记录 bias bits。签名 IPA 19,147,027字节，SHA256 为 `8e4f9e59fd261d84fe56505e6a0b1a2ed66a168eb3dc6effb20b717602aff94e`。RomFS 大小/mtime、UID、shader清单和权限均保留，未重传资源；累计日志36,361,246字节采用完整流式前缀及 SHA 校验。仍 host_return=1，无游戏呈现或可玩验收，证据位于 `outputs/botw-ios-ca3cea3-iphone12/device-run-report.json`。
+
+固定 main 的纹理转移路径另已静态闭合：`A37700` 在 `A37824` 通过普通 memcpy PLT 复制0xC0，返回点 `A37828`，w23 bit0保存 ownership；成功调用者跳过临时 TextureFinalize 并退栈。原 TextureFinalize 可调用 NvRmGpuMappingClose，不能改为空函数。两固定上游没有可直接接入并保当前严格 raw-span 的迁移模块，因此本批采用已版本限定的薄适配：独立 ARM64 入口从正常 LR/w23 传参，运行时核对实际加载的完整0x140字节 main 上下文、PLT、原 SDK memcpy 定义及其6处既有 x18 thunk 摘要。仅精确返回点、0xC0长度及 ownership 匹配才进入迁移协议，其他调用仍执行原 SDK memcpy；未改 Guest 重写、报告或框架。
+
+图形 host-only preflight/commit/abort 不读 guest 字节或查询 VM，不注册任意副本，也不放宽全局 get、对象写入或 Finalize。64个有界 pending 记录强持原 BWTexture，并绑定生命周期、线程、原 primary span epoch 与目的范围；原 SDK copy 在图形锁外执行，正常返回后才重核并提交 span 迁移。纹理 identity、pool generation、descriptor/GPU 引用及 private authority 不变，目的地仍负责真实 Finalize。错误不迁移登记、不释放纹理资源；copy 字节本身保持原非原子合同，不回滚。匹配复制通过既有局部故障恢复先 abort token 再停止；pending 时 checked shutdown 保留资源，guest workers 未停止时原 SDK 映射不解除。旧无图形 fixture 的不可用 provider 标记明确返回0，真实强定义覆盖；匹配调用缺任一真实 provider 即拒绝，不能用标记制造成功。
+
+本批运行时先复现编译成功后的真实行为失败，修复后13项 CPU 测试通过（2.508秒），包括自有 ARM64 的 LR/ownership 与 ABI、原函数旁路、优化后的缺 provider 链接、复制故障 abort、单次 token、pending worker 映射保留和最多4条标量成功记录。图形先复现8项真实行为失败，最终9项 CPU 与2项 GPU 方法全部通过（合计6.282秒）；4个实际 Metal validation 模式验证复制前登记的 array descriptor 多层 mip、源槽 sampler 重用、private GPU 内容保持和 live/retired canonical alias 拒绝。旧存储/descriptor 的3项定点回归通过（10.268秒）；两个类名拼错的初始命令另存，不算行为 RED。两个新增生产 include/header 使联合 native97，既有100上限和来源 schema 不变；新增测试的两个 CI 事件路径已核对。冻结来源与独审结果须分别核验，以上合成结果不替代原游戏或手机可玩验收。
+
+独立运行时13项 CPU 通过（2.425秒，O2、无 sanitizer），owner 另以 ASan/UBSan 验证13个模式（编译及运行合计5.879秒），均完整退出；生产 C 摘要函数对固定本地 v4 磁盘映像的4段上下文核验成功，两输入 SHA 前后稳定，此项不是实际游戏执行。独立图形11项通过（6.430秒、零跳过，CPU9 ASan/UBSan与GPU2方法/4模式，均实际 Metal validation）；两组独审 CLOSED，11个来源 SHA 稳定，联合 native97。原游戏实际加载及手机运行结果另记。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

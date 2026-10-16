@@ -97,6 +97,7 @@
 @property BWTextureKindPolicy kindPolicy;
 @property NVNmemoryPool *rawPool;
 @property uint64_t poolGeneration,identity;
+@property uint64_t storageMoveEpoch;
 @property(strong) BWTexture *base;
 @property(strong) BWPoolRange *mapping;
 @property TextureView selection;
@@ -295,6 +296,9 @@ static BOOL textureTrackingAvailable;
 static void texturePrepareWrite(void *dst,size_t bytes);
 static void textureWriteBytes(void *destination,const void *source,size_t bytes,const char *reason);
 static void textureReadBytes(const void *source,void *destination,size_t bytes,const char *reason);
+static void textureTransferBeginLifecycle(void);
+static void textureTransferRequireQuiescent(void);
+static void textureTransferEndLifecycle(void);
 static void counterConfigureDevice(BWDevice *device);
 static void linearConfigureDevice(BWDevice *device);
 static void validateCounterAddress(BWAddressRecord *record,BWDevice *device);
@@ -522,12 +526,13 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
     objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];depthStates=[NSMutableDictionary new];
-    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;textureInitContextReset();
+    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;textureInitContextReset();textureTransferBeginLifecycle();
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
     return 1;
 }
 static void shutdownGraphicsImpl(void) {
+    textureTransferRequireQuiescent();
     BWPresentation *state=presentationSnapshot();[state.lock lock];state.closed=YES;state.latest=nil;[state.lock unlock];
     if(allGPU)dispatch_group_wait(allGPU,DISPATCH_TIME_FOREVER);
     poolShutdownPools();
@@ -535,7 +540,7 @@ static void shutdownGraphicsImpl(void) {
     nvn_texown_reset_quiescent();nvn_texflush_reset_quiescent();
     objects=nil;objectSpans=nil;handles=nil;pipelines=nil;depthStates=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
-    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);textureInitContextReset();
+    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);textureInitContextReset();textureTransferEndLifecycle();
 }
 /* The runtime owns guest output validation and the real kernel event. Keep
  * these failures return-only: its lifecycle mutex must never be bypassed by
@@ -800,6 +805,7 @@ NVN(nvnSyncWait,NVNsyncWaitResult,const NVNsync *raw,uint64_t timeout){BWSync *s
     return s.buffer.status==MTLCommandBufferStatusCompleted?NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED:NVN_SYNC_WAIT_RESULT_FAILED;}
 static id descriptorEntry(BWDescriptors *p,unsigned index);
 #include "texture_family.inc"
+#include "texture_transfer.inc"
 NVN(nvnProgramInitialize,NVNboolean,NVNprogram *p,NVNdevice *d){BWProgram *program=[BWProgram new];program.device=get(d,[BWDevice class]);put(p,program);return 1;}
 NVN(nvnProgramFinalize,void,NVNprogram *p){get(p,[BWProgram class]);removeObject(p);}
 static const void *programCodeBytes(BWPoolRange *mapping){

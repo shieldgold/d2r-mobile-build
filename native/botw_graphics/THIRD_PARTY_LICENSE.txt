@@ -171,3 +171,14 @@ replacement retires old spans only after publication, and Finalize leaves value
 snapshots available until graphics shutdown. Existing host registry/descriptor
 algorithms are retained; no native object-byte fallback, expanded opaque budget,
 guest diagnostic reads, new codec or runtime-wide lifetime change is imported.
+
+The texture primary-storage transfer adapter follows the fixed base-v0 main
+A37700 ownership-copy path and original SDK memcpy call, not a replacement of
+the original byte-copy implementation. Complete fixed BOTW 5f673ae and D2R
+9de307e texture/value/descriptor/texown modules were reviewed: their tex_t value
+copy contract is retained, while texown remains exclusively backing authority.
+Neither upstream supplies this bridge's exact raw-span transfer protocol.
+texture_transfer.inc is a local bounded host-metadata adapter; no game bytes,
+native codec, or upstream fragment is embedded. Its real-GPU regression reuses
+the complete existing ARRAY_FEATURE in test_botw_graphics.py for independent
+two-layer/three-mip pixels, with local storage-transfer and private-target cases.

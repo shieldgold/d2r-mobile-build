@@ -34,6 +34,17 @@ void botw_graphics_shutdown(void);
  * external resource holders release their references. Legacy void shutdown
  * remains available, but is not a safe ownership-release test for the runtime. */
 int botw_graphics_shutdown_checked(char *error, size_t capacity);
+/* Host-only, profile-gated value-storage move. No guest byte reads, copy or
+ * reservations occur here. The caller copies with its original SDK routine
+ * outside the graphics lock, then commits or aborts the single-use token.
+ * Failure never calls an NVN callback; copied bytes are not rolled back. */
+typedef struct { uint64_t opaque[8]; } botw_graphics_texture_move_token;
+int botw_graphics_texture_move_preflight(const void *source, void *destination,
+    size_t bytes, botw_graphics_texture_move_token *token, char *error, size_t capacity);
+int botw_graphics_texture_move_commit(const botw_graphics_texture_move_token *token,
+    char *error, size_t capacity);
+int botw_graphics_texture_move_abort(const botw_graphics_texture_move_token *token,
+    char *error, size_t capacity);
 /* Configure after init and before guest entry. A readable-range validator
  * never authorizes writes. Init/shutdown clear this callback. */
 void botw_graphics_set_memory_access_validator(botw_graphics_memory_access validator);

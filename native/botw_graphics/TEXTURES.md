@@ -140,3 +140,13 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 只有原`get(..., BWTexture)`确实失败时，`texture_lifecycle_context`才输出这些宿主元数据和get已经取得的serial/可读性，每行最多四条、每图形生命周期最多四行。它不再读取对象头、Builder、payload或栈，不新增validator/VM查询，不改变原BOOL、错误文本、fatal、pending flags或回调。成功图形初始化与成功shutdown清空；失败或重入的checked shutdown保留。`match=not_retained`只表示最近四槽没有该raw，不能称从未调用；相同raw曾成功而现serial为0也不自动区分Finalize、主动清零或其它对象传递错误。原游戏根因仍须取实际正常调用证据，不能由后续WriteTexels失败猜定D24或combined格式。
 
 正常 `TextureBuilderGetStorageSize` 返回 0 时，`texture_storage_size_zero` 在每个图形生命周期的前四次输出已有 validated Builder 快照的 target、flags、format、宽高深、levels、samples、stride，以及 GL name 非零、packaged data 非空两个布尔值。它不读取指针所指数据，不重复验证、计算布局或查询 VM；非零结果不输出。原返回值、异常、错误与回调保持，成功图形初始化或 shutdown 重置上限，失败生命周期操作保留。该标量只证明相应 API 返回 0，不能单独证明 pool 为 NULL、跳过 Init 或本次 WriteTexels 的原因，也不新增 3D 支持或改变页策略。
+
+## 已审 main 纹理值转移与原始存储所有权
+
+固定 base-v0 main 的 `A37700` 在 ownership bit 为1时，将完整 `C0` 纹理值经原 SDK memcpy 复制到外层对象；调用者在成功后跳过源 Finalize 并退栈。资源值寿命因此不能永久绑定最初 Initialize 的 raw 地址。完整上游同样明确纹理可按值复制，但没有可直接复用、同时保持本桥 raw storage 保护的转移协议；现有 texown 模块仍只管理 texel backing 权威，不管理 opaque C0 存储。
+
+运行时仅对已审核 loaded-main profile、精确 memcpy 返回点、长度 `C0` 和实际 ownership 位启用薄适配，所有其它 memcpy 保持原 SDK 路径。图形层的 preflight/commit/abort 只检查宿主已登记的 exact BWTexture primary span、identity、生命周期和 span epoch。preflight 产生64-byte令牌，最多保留64条含强引用的宿主记录，并绑定创建线程；篡改、跨线程或已消费令牌拒绝。它不读取源或目标对象字节，不查询 VM，不改全局 get 或放宽跨类重叠。
+
+原 SDK 字节复制在图形锁外运行，commit 重新验证源和目标，再仅将同一 serial 的 primary span 移至目标并增加 epoch；BWTexture、Metal资源、descriptor、canonical texel authority 和引用保持原身份。commit失败保留当前 registry，不回滚已经复制的字节。这不是并发字节写入的事务或存储 reservation，调用者仍须遵守原同步责任。copy失败走局部恢复后abort；尚有pending令牌时checked shutdown在资源清理前返回0，保留资源，abort后可重试。单次提交或abort消费记录，完整shutdown清空记录，跨图形生命周期的旧令牌不能复用。
+
+真实 Metal Validation 夹具验证已登记descriptor在迁移后仍正确采样两层三mip，源存储可被另一个sampler合法复用；私有纹理GPU清除后的逐像素结果在迁移后保持，live和retired的canonical buffer别名仍拒绝。CPU夹具另核无新增validator/VM查询、epoch/目的冲突失败不改registry、容量、错误线程和篡改令牌。它们只验证兼容层合同，原游戏下一停点须由固定版本普通运行确认。

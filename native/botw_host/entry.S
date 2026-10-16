@@ -1,6 +1,39 @@
 /* Gate register preservation derived from d2r-mobile, MIT.
  * See THIRD_PARTY_LICENSE.txt. Static stubs never return a fake success. */
     .text
+    // Normal memcpy ABI plus the fixed caller's live LR/x23 register values.
+    // Tail branch leaves the guest return address intact; the C ABI preserves
+    // Apple callee-saved registers. No guest frame/opaque memory is inspected.
+    .globl _botw_texture_move_memcpy_entry
+    .p2align 2
+_botw_texture_move_memcpy_entry:
+    mov x3, x30
+    mov x4, x23
+    b _botw_texture_move_memcpy_dispatch
+    // ld requires definitions even for absent executable weak_imports.
+    // These are fail-closed capability markers, overridden by the production
+    // graphics strong definitions. Matching copies check all three addresses.
+    .globl _botw_graphics_texture_move_preflight
+    .weak_definition _botw_graphics_texture_move_preflight
+    .globl _botw_texture_move_no_preflight
+_botw_graphics_texture_move_preflight:
+_botw_texture_move_no_preflight:
+    mov w0, #0
+    ret
+    .globl _botw_graphics_texture_move_commit
+    .weak_definition _botw_graphics_texture_move_commit
+    .globl _botw_texture_move_no_commit
+_botw_graphics_texture_move_commit:
+_botw_texture_move_no_commit:
+    mov w0, #0
+    ret
+    .globl _botw_graphics_texture_move_abort
+    .weak_definition _botw_graphics_texture_move_abort
+    .globl _botw_texture_move_no_abort
+_botw_graphics_texture_move_abort:
+_botw_texture_move_no_abort:
+    mov w0, #0
+    ret
     .globl _botw_unimplemented_stubs
     .p2align 3
 _botw_unimplemented_stubs:
