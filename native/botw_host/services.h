@@ -17,6 +17,33 @@ typedef int (*botw_services_memory_fn)(void *opaque, uint64_t address, size_t le
  * output are unsupported until a real corresponding sink is connected. */
 botw_services *botw_services_create(botw_services_log_fn log, botw_services_memory_fn memory, void *opaque);
 void botw_services_destroy(botw_services *services);
+/* Optional delegation to the host's one kernel handle allocator. Configure
+ * once, before the first successful transport allocation. Without it the
+ * existing standalone service namespace is retained. Callbacks run under the
+ * services lock, must not reenter services, and must outlive the context.
+ *
+ * allocate publishes a unique nonzero, non-pseudo handle for this exact owner
+ * token, or fails without retaining the token or publishing a handle. release
+ * verifies both handle and token before retiring it; success certifies that
+ * the token is no longer borrowed, without retiring another owner's handle.
+ * Failure leaves it live. Invalid allocation results are rejected; if their
+ * cleanup fails, the private slot is retained and further allocations stop.
+ * Tokens identify stable private transport slots, never guest pointers or
+ * service sessions. Clones have different tokens even when sharing a session.
+ * The kernel may borrow a token only until its successful release. */
+typedef struct {
+    void *opaque;
+    int (*allocate)(void *, const void *owner_token, uint32_t *, char *, size_t);
+    int (*release)(void *, const void *owner_token, uint32_t, char *, size_t);
+} botw_services_transport_api;
+int botw_services_set_transport_api(botw_services *services,
+    const botw_services_transport_api *api, char *error, size_t error_capacity);
+/* A failed transport release preserves this context and its remaining live
+ * sessions/arenas for retry. Earlier successful retirements stay retired.
+ * The caller must quiesce users before destruction. The legacy void destructor
+ * also retains the context on failure; it never frees a borrowed owner token. */
+int botw_services_destroy_checked(botw_services *services,
+    char *error, size_t error_capacity);
 /* Each transport handle owns a real 16-byte-aligned 0x500-byte pointer arena;
  * QueryPointerBufferSize reports that capacity. X inputs are copied into the
  * arena for this serialized send only. C outputs currently support the fixed

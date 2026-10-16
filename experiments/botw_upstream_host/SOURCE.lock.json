@@ -4,8 +4,8 @@
   "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
   "files": {
     "README.zh-CN.md": {
-      "sha256": "325c1f04bfc8012fa3be621e8ceafb0ce4b5264d7b5fbf88150f0c5a27f74f8f",
-      "bytes": 3993,
+      "sha256": "de2abd0b28969b64296d7ac701b2d2ec354bf94f9f0998c35c62f09ac18f7649",
+      "bytes": 4513,
       "role": "thin-adapter-or-verification"
     },
     "UPSTREAM_UNITS.json": {
@@ -113,6 +113,21 @@
       "bytes": 1270,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_pool_builder.c": {
+      "sha256": "f7790721ed0adceb50d8c83ab5497ccbf1b2626811578a8fa0e5393b6039e41c",
+      "bytes": 3434,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_pool_builder.h": {
+      "sha256": "a37a493b0601d1418483393851b231958004cca8d5a8fb63a838f2b0ff1a56b6",
+      "bytes": 1440,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_pool_builder.json": {
+      "sha256": "2d55b56cf86365311a769b5369420102854c43c9e1d9784d96569bf3b947576e",
+      "bytes": 2735,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/whole_romfs.c": {
       "sha256": "4ba6d333b84da0254a40e9c57b9d87179ef69d07f43fb1d35171cdf2bb4c2953",
       "bytes": 3749,
@@ -158,6 +173,11 @@
       "bytes": 1953,
       "role": "thin-adapter-or-verification"
     },
+    "patches/audio-write-observed.patch": {
+      "sha256": "a0dfa162ae733e3d5892b59a64e66e6e745f66c6ba65fa64ff2ecaef41358327",
+      "bytes": 2030,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/base-v0-abi.patch": {
       "sha256": "3df5bc95e832d5fdab6eff78c545e3074de44be0f23457874c1448e7b3263ff9",
       "bytes": 6410,
@@ -171,6 +191,11 @@
     "patches/base-v0-heap.patch": {
       "sha256": "025e42085568a8cc399465cb98c78d7fab4ab529d380cb75d244963a2ff0fd46",
       "bytes": 11412,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-pool-builder.patch": {
+      "sha256": "6e8124a8facb5f0d4f363d790d59960deb9223df26e79400a5746d1da48487ff",
+      "bytes": 3830,
       "role": "thin-adapter-or-verification"
     },
     "patches/checked-dirty-write.patch": {
@@ -219,8 +244,8 @@
       "role": "thin-adapter-or-verification"
     },
     "scripts/build_link_only.py": {
-      "sha256": "5f523891d69d5715500a2037230fcdfad89bace45baad153393eab52dec94550",
-      "bytes": 14207,
+      "sha256": "4d8e38d71168ca7b21599b205c46b5b13e247e5a5b969024d2f6f69bd69cf6f9",
+      "bytes": 15158,
       "role": "thin-adapter-or-verification"
     },
     "scripts/read_swforce_registry.py": {
@@ -264,8 +289,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_audio_platform_probe.c": {
-      "sha256": "4e89d45142cebec96109cd8af04412b6f8e3984d66a86b63241014568c671b0d",
-      "bytes": 6382,
+      "sha256": "df786c5fc2418f45bc5285b72f14fde077020b14b90714e5f366ac136f7ba026",
+      "bytes": 7458,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_dirty_checked_probe.c": {
@@ -276,6 +301,11 @@
     "tests/whole_front_state_probe.c": {
       "sha256": "b8fe07d441f96f17762fffb328c36ef9862114bec2be5acfdfea4ae2532c1c91",
       "bytes": 8577,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_pool_builder_probe.c": {
+      "sha256": "6788f44a852ad228a107fe2dcde92ecaef2004890c7b175d592672aa7e254af6",
+      "bytes": 7205,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_romfs_probe.c": {
@@ -1018,24 +1048,28 @@
     "patches/applet-lifecycle.patch",
     "patches/base-v0-force.patch",
     "patches/base-v0-heap.patch",
-    "patches/checked-dirty-write.patch"
+    "patches/checked-dirty-write.patch",
+    "patches/base-v0-pool-builder.patch",
+    "patches/audio-write-observed.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
-    "dm/gfx/nvn/hle_nvn.c": "f028b4503f7546b083ec13a108459279be170c388622b934206a8b63cd02e557",
+    "dm/gfx/nvn/hle_nvn.c": "888e682bf37d7ad44812c1d033be3b5832737771480bd0cb1b265b8a50ba03c0",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "b3291449a40aab1809a97573faef3c2b57381499e52dbe73e418dcc31038ed0f",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
     "dm/gfx/nvn/nvn_mtl.m": "b6db3087b4927b185c8b7c8b3bb8de7793d84dd85df4c9073d50cc2da801297a",
-    "dm/gfx/nvn/nvn_obj.h": "0bbeab7a18dfdbd3b3e4ad0cd2637b1de6c51a7f080b9564e810564e9ad8ca90",
+    "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
+    "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
     "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
     "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",
     "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",
     "dm/host/botw_fs.c": "c8c986526bc02ddd396be8d96ca8d93933525dea8babf9d59a8e0e6ec9395881",
     "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
-    "dm/host/botw_pcm.c": "c6cb0a5200830d4d7a13c9fe52a86dbd5a70b1413abdba02d9dcdbe73513e31e",
+    "dm/host/botw_pcm.c": "7b77d126af15ab5015770f823d47cf67ab08e4fdb52b9f167ae8179365e6a17e",
+    "dm/host/botw_pcm.h": "de8e71d559f744a2959d0afb4e768633663aa88590e571ddb417d7db40dc9cd1",
     "dm/host/crash.c": "f3ae211a438aee136ac2f7307fed57d620da204107959f1433aa97b44cf5b311",
     "dm/host/dm.h": "27cbad1e7034cf33726e0328259acf70e2d7b234c50b2e5bdb06c50772c49756",
     "dm/host/dm_title.c": "3967eb6b141445f192bd7bc28d4ced1fcbde021a43ea3bb9282f87c1715a87c9",
@@ -1101,10 +1135,16 @@
     "adapter/whole_identity.c",
     "adapter/whole_applet.c",
     "adapter/base_v0_force.c",
-    "adapter/base_v0_heap.c"
+    "adapter/base_v0_heap.c",
+    "adapter/whole_pool_builder.c"
   ],
   "swforce_record_count": 127,
   "swforce_metadata_sha256": "df5207fef17b2bcae2a98d9f76c009bb2ea27040c383fd30aad8ff6618444932",
+  "normal_operand_validation_references": {
+    "adapter/whole_pool_builder.c": [
+      "_vm_region_recurse_64"
+    ]
+  },
   "external_translation_units": [
     "native/botw_resources/romfs.c",
     "native/botw_resources/local_user.c"
@@ -1128,6 +1168,11 @@
     "native/botw_resources/local_user.h": {
       "sha256": "4f7aa0561f4e2b48d27cd81c10b029ff436f68c7cce7693c9c9a600be7999d9d",
       "bytes": 1951,
+      "role": "existing-complete-resource-provider"
+    },
+    "native/botw_host/protected_copy.h": {
+      "sha256": "23ac1867254adcbfe353530eeea64e95d92fe8cd61c492588836567a73bdc3e2",
+      "bytes": 5182,
       "role": "existing-complete-resource-provider"
     }
   }

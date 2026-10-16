@@ -1,0 +1,36 @@
+--- a/dm/host/botw_pcm.c
++++ b/dm/host/botw_pcm.c
+@@ -441,6 +441,18 @@
+     whole_audio_platform_unlock();
+     return written;
+ }
++// Snapshot old FIFO retirement before publishing new frames. Holding the same
++// producer/lifecycle lock excludes a flush/resume between these two operations;
++// the realtime callback remains lock-free and may still consume old frames.
++size_t botw_pcm_write_observed(botw_pcm_sink *s, const int16_t *samples, size_t frames,
++                                unsigned channels, botw_pcm_counters *before) {
++    if (!before) return 0;
++    whole_audio_platform_lock();
++    pcm_get_counters_impl(s, before);
++    size_t written = pcm_write_impl(s, samples, frames, channels);
++    whole_audio_platform_unlock();
++    return written;
++}
+ int botw_pcm_set_volume(botw_pcm_sink *s, float volume) {
+     whole_audio_platform_lock();
+     int result = pcm_set_volume_impl(s, volume);
+--- a/dm/host/botw_pcm.h
++++ b/dm/host/botw_pcm.h
+@@ -18,6 +18,12 @@
+ // Single producer. Never blocks on the consumer; excess frames are counted as dropped.
+ // A muted active sink consumes accepted frames without opening an audio device.
+ size_t botw_pcm_write(botw_pcm_sink *sink, const int16_t *samples, size_t frames, unsigned channels);
++// As write, with a mandatory counter snapshot BEFORE publishing the new frames,
++// under the same producer/lifecycle lock. The callback can advance consumed in
++// parallel; lifecycle flush/resume cannot interleave snapshot and write. Refused
++// frames remain dropped, never consumed. NULL before rejects without a write.
++size_t botw_pcm_write_observed(botw_pcm_sink *sink, const int16_t *samples, size_t frames,
++                                unsigned channels, botw_pcm_counters *before);
+ // Per-sink output gain, applied when consuming queued PCM (including already queued frames).
+ // Finite values clamp to [0, 128]; non-finite values are rejected without changing gain.
+ // Initially 1.0. Returns 0 on success, -1 for invalid input. Caller serializes API use.

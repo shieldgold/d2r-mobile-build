@@ -91,6 +91,20 @@ def verify_staged(staged: Path, before: dict, patched: dict) -> None:
                 raise ValueError("staged source lock mismatch: " + relative)
 
 
+def audit_external_references(symbols: set[str], relative: str, lock: dict) -> set[str]:
+    approved = set(lock.get("normal_operand_validation_references", {}).get(relative, []))
+    if approved and (relative != "adapter/whole_pool_builder.c" or
+                     approved != {"_vm_region_recurse_64"}):
+        raise ValueError("normal VM exception is outside the reviewed operand copier")
+    # This one source-locked copier checks only its 4..20-byte operands and
+    # reads protection/submap metadata; it never enumerates unrelated addresses
+    # or emits VM state. Original crash/sample/inspection TUs remain forbidden.
+    forbidden = symbols.intersection(lock["forbidden_external_references"]) - approved
+    if forbidden:
+        raise ValueError("unrouted host diagnostic: " + repr(sorted(forbidden)))
+    return symbols.intersection(approved)
+
+
 def main() -> int:
     component = Path(__file__).resolve().parents[1]
     repository = component.parents[1]
@@ -201,12 +215,13 @@ def main() -> int:
         receipt["compiler_dependency_manifest"] = provenance
         receipt["actual_compiler_dependency_count"] = len(provenance)
         receipt["selected_sdk_dependencies"] = sdk_inputs
-        for obj in objects:
+        receipt["normal_operand_validation_references"] = {}
+        for obj, (_, relative) in zip(objects, sources, strict=True):
             undefined = run(obj.stem + "-undefined", ["/usr/bin/nm", "-u", str(obj)]).stdout
             symbols = {line.split()[-1] for line in undefined.splitlines() if line.split()}
-            forbidden = symbols.intersection(lock["forbidden_external_references"])
-            if forbidden:
-                raise ValueError("unrouted host diagnostic: " + repr(sorted(forbidden)))
+            normal = audit_external_references(symbols, relative, lock)
+            if normal:
+                receipt["normal_operand_validation_references"][relative] = sorted(normal)
         executable = output / "whole-host-LINK-ONLY-DO-NOT-RUN"
         argv = common + [str(obj) for obj in objects]
         for framework in lock["frameworks"][args.sdk]:

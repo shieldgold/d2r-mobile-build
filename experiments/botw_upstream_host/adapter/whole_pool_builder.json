@@ -1,0 +1,72 @@
+{
+  "layout": {
+    "default_flags": 33,
+    "defaults_bytes": 20,
+    "defaults_offset": 8,
+    "device": 0,
+    "flags": 24,
+    "memory": 8,
+    "size": 16
+  },
+  "leaves": {
+    "GetFlags": {
+      "bytes": 8,
+      "offset": 740636,
+      "sha256": "50abf56e70bf4ffd353b0c6ed3c4e4880c6169bcd84263b80a4680f2ca7fb9ab"
+    },
+    "GetMemory": {
+      "bytes": 8,
+      "offset": 740620,
+      "sha256": "19647f57f48e23c8730ecfc85bdce80bf67ce4eae56e82f97661432fa2018025"
+    },
+    "GetSize": {
+      "bytes": 8,
+      "offset": 740628,
+      "sha256": "dfb556a413c8bda5332942d0202e8d5f1e52f45158aec3676294cf11ad5909cb"
+    },
+    "SetDefaults": {
+      "bytes": 16,
+      "offset": 740356,
+      "sha256": "0b3adfd67a37ed94d8905845765305d07380d047209d73d236a8fc6fd8c2ec98"
+    },
+    "SetDevice": {
+      "bytes": 8,
+      "offset": 740348,
+      "sha256": "bc7d7bfe1862508f235acee5544afc3a7c13a06c79ca1e67d8ba71c403df8071"
+    },
+    "SetFlags": {
+      "bytes": 8,
+      "offset": 740612,
+      "sha256": "6e9ff5dd14743d62b4c65ceed8cc7444a06b1f6a6df852c7ffa011f059b9080f"
+    },
+    "SetStorage": {
+      "bytes": 8,
+      "offset": 740372,
+      "sha256": "147d7e61ef89d1cd006cfe5d922fcde341655ce34907a053fae8845f25b08898"
+    }
+  },
+  "limitations": [
+    "GetDevice remains the upstream unknown policy; absence of a full prefixed string is not ABI evidence.",
+    "No pool registration, Metal resource, physical/virtual mapping or GPU/guest execution is introduced.",
+    "Operands require caller-owned lifetimes and exclusion of concurrent remapping; protected_copy does not promise rollback after concurrent remapping."
+  ],
+  "profile": "botw-switch-base-v0",
+  "protected_copy": {
+    "path": "native/botw_host/protected_copy.h",
+    "sha256": "23ac1867254adcbfe353530eeea64e95d92fe8cd61c492588836567a73bdc3e2"
+  },
+  "schema": 1,
+  "scope": "seven statically identified MemoryPoolBuilder leaves only",
+  "semantics": [
+    "Defaults preserves device and all bytes outside [8,28).",
+    "SetDevice writes 8B; SetStorage writes 16B; SetFlags writes 4B. No referenced device/backing is inspected.",
+    "GetMemory returns a 64-bit pointer, GetSize returns 64-bit size_t and GetFlags returns the original 32-bit payload. Only each actual field is read.",
+    "Normal writes use the one checked-prep registry and existing protected-copy primitive; no raw CPU fallback."
+  ],
+  "source": {
+    "initialized_image_sha256": "065cfc8fc879b60d0ee4b08f169a64424b62ed57366f97d2ce053dd8b0c8448c",
+    "method": "verified static NSO decompression/disassembly; no guest instruction executes",
+    "nso_sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "path": "outputs/botw-native-base/ExeFS/subsdk0"
+  }
+}

@@ -113,6 +113,22 @@ int main(int argc, char **argv) {
         units[0].fail_dispose = 0;
         botw_pcm_close(a); a = NULL;
         CHECK(!units[0].alive);
+    } else if (!strcmp(argv[1], "observed")) {
+        botw_pcm_counters before = {0}, after = {0};
+        CHECK(botw_pcm_write(a, samples, 2, 2) == 2);
+        CHECK(!whole_audio_platform_set_active(0, error, sizeof error));
+        CHECK(!whole_audio_platform_set_active(1, error, sizeof error));
+        CHECK(botw_pcm_write_observed(a, samples, 1, 2, &before) == 1);
+        CHECK(before.submitted_frames == 2 && before.dropped_frames == 2 && !before.consumed_frames);
+        CHECK(!render(&units[0], out) && out[0] == samples[0] && out[1] == samples[1]);
+        botw_pcm_get_counters(a, &after);
+        CHECK(after.submitted_frames == 3 && after.consumed_frames == 1 && after.dropped_frames == 2);
+    } else if (!strcmp(argv[1], "missing-observation")) {
+        botw_pcm_counters after = {0};
+        CHECK(botw_pcm_write_observed(a, samples, 1, 2, NULL) == 0);
+        CHECK(!render(&units[0], out) && out[0] == 0 && out[1] == 0);
+        botw_pcm_get_counters(a, &after);
+        CHECK(!after.submitted_frames && !after.consumed_frames && !after.dropped_frames);
     } else if (!strcmp(argv[1], "concurrency")) {
         pthread_t writer; CHECK(!pthread_create(&writer, NULL, producer, a));
         for (int i = 0; i < 1000; ++i) CHECK(!whole_audio_platform_set_active(i & 1, error, sizeof error));

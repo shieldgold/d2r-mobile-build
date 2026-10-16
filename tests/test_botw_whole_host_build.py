@@ -13,6 +13,23 @@ spec.loader.exec_module(build)
 
 
 class WholeHostBuildTests(unittest.TestCase):
+    def test_normal_operand_vm_validation_is_confined_to_the_reviewed_copier(self):
+        lock = {"forbidden_external_references": ["_vm_region_recurse_64", "_task_threads"],
+                "normal_operand_validation_references": {
+                    "adapter/whole_pool_builder.c": ["_vm_region_recurse_64"]}}
+        build.audit_external_references({"_vm_region_recurse_64", "_vm_write"},
+                                        "adapter/whole_pool_builder.c", lock)
+        for relative, symbols in (("dm/host/crash.c", {"_vm_region_recurse_64"}),
+                                  ("adapter/whole_pool_builder.c", {"_task_threads"})):
+            with self.subTest(relative=relative), self.assertRaisesRegex(ValueError, "diagnostic"):
+                build.audit_external_references(symbols, relative, lock)
+        lock["normal_operand_validation_references"]["dm/host/crash.c"] = ["_vm_region_recurse_64"]
+        with self.assertRaisesRegex(ValueError, "reviewed"):
+            build.audit_external_references({"_vm_region_recurse_64"}, "dm/host/crash.c", lock)
+        lock["normal_operand_validation_references"]["adapter/whole_pool_builder.c"] = ["_task_threads"]
+        with self.assertRaisesRegex(ValueError, "reviewed"):
+            build.audit_external_references({"_task_threads"}, "adapter/whole_pool_builder.c", lock)
+
     def test_only_selected_sdk_dependencies_may_be_outside_locked_component(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

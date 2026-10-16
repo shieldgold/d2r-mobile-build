@@ -1,0 +1,63 @@
+--- a/dm/gfx/nvn/nvn_obj.h
++++ b/dm/gfx/nvn/nvn_obj.h
+@@ -20,7 +20,8 @@
+ FITS(queue_builder_t, NVNqueueBuilder);
+ typedef struct { uint32_t magic; NVNdevice *dev; uint64_t submits; } queue_t;                 FITS(queue_t, NVNqueue);
+ 
+-typedef struct { NVNdevice *dev; void *mem; uint64_t size; uint32_t flags; } pool_builder_t;  FITS(pool_builder_t, NVNmemoryPoolBuilder);
++#include "whole_pool_builder.h"
++typedef botw_whole_pool_builder_schema pool_builder_t;  FITS(pool_builder_t, NVNmemoryPoolBuilder);
+ typedef struct { uint32_t magic, flags; uint8_t *mem; uint64_t size; } pool_t;                FITS(pool_t, NVNmemoryPool);
+ 
+ typedef struct { const pool_t *pool; int64_t off; int32_t n; } dpool_t;                       //Texture / sampler descriptor pool
+--- a/dm/gfx/nvn/nvn_protos.h
++++ b/dm/gfx/nvn/nvn_protos.h
+@@ -78,7 +78,7 @@
+ typedef void (*NVNT_nvnMemoryPoolBuilderSetDefaults)(NVNmemoryPoolBuilder*);
+ typedef void (*NVNT_nvnMemoryPoolBuilderSetStorage)(NVNmemoryPoolBuilder*, void*, size_t);
+ typedef void (*NVNT_nvnMemoryPoolBuilderSetFlags)(NVNmemoryPoolBuilder*, int);
+-typedef void (*NVNT_nvnMemoryPoolBuilderGetMemory)(const NVNmemoryPoolBuilder*);
++typedef void* (*NVNT_nvnMemoryPoolBuilderGetMemory)(const NVNmemoryPoolBuilder*);
+ typedef size_t (*NVNT_nvnMemoryPoolBuilderGetSize)(const NVNmemoryPoolBuilder*);
+ typedef NVNmemoryPoolFlags (*NVNT_nvnMemoryPoolBuilderGetFlags)(const NVNmemoryPoolBuilder*);
+ typedef NVNboolean (*NVNT_nvnMemoryPoolInitialize)(NVNmemoryPool*, const NVNmemoryPoolBuilder*);
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -235,10 +235,33 @@
+ 
+ 
+ // ---------- Memory pools ----------
+-NVN(nvnMemoryPoolBuilderSetDefaults, void, NVNmemoryPoolBuilder *b) { memset(b, 0, sizeof(pool_builder_t)); }
+-NVN(nvnMemoryPoolBuilderSetDevice, void, NVNmemoryPoolBuilder *b, NVNdevice *d) { ((pool_builder_t *)b)->dev = d; }
+-NVN(nvnMemoryPoolBuilderSetStorage, void, NVNmemoryPoolBuilder *b, void *m, size_t n) { ((pool_builder_t *)b)->mem = m; ((pool_builder_t *)b)->size = n; }
+-NVN(nvnMemoryPoolBuilderSetFlags, void, NVNmemoryPoolBuilder *b, int f) { ((pool_builder_t *)b)->flags = f; }
++NVN(nvnMemoryPoolBuilderSetDefaults, void, NVNmemoryPoolBuilder *b) {
++    char error[192]; if (!botw_whole_pool_builder_defaults(b, error, sizeof error)) die("%s", error);
++}
++NVN(nvnMemoryPoolBuilderSetDevice, void, NVNmemoryPoolBuilder *b, NVNdevice *d) {
++    char error[192]; if (!botw_whole_pool_builder_device(b, d, error, sizeof error)) die("%s", error);
++}
++NVN(nvnMemoryPoolBuilderSetStorage, void, NVNmemoryPoolBuilder *b, void *m, size_t n) {
++    char error[192]; if (!botw_whole_pool_builder_storage(b, m, n, error, sizeof error)) die("%s", error);
++}
++NVN(nvnMemoryPoolBuilderSetFlags, void, NVNmemoryPoolBuilder *b, int f) {
++    char error[192]; if (!botw_whole_pool_builder_flags(b, (uint32_t)f, error, sizeof error)) die("%s", error);
++}
++NVN(nvnMemoryPoolBuilderGetMemory, void *, const NVNmemoryPoolBuilder *b) {
++    char error[192]; void *value;
++    if (!botw_whole_pool_builder_get_memory(b, &value, error, sizeof error)) die("%s", error);
++    return value;
++}
++NVN(nvnMemoryPoolBuilderGetSize, size_t, const NVNmemoryPoolBuilder *b) {
++    char error[192]; size_t value;
++    if (!botw_whole_pool_builder_get_size(b, &value, error, sizeof error)) die("%s", error);
++    return value;
++}
++NVN(nvnMemoryPoolBuilderGetFlags, NVNmemoryPoolFlags, const NVNmemoryPoolBuilder *b) {
++    char error[192]; uint32_t value;
++    if (!botw_whole_pool_builder_get_flags(b, &value, error, sizeof error)) die("%s", error);
++    return (NVNmemoryPoolFlags)value;
++}
+ NVN(nvnMemoryPoolInitialize, NVNboolean, NVNmemoryPool *p, const NVNmemoryPoolBuilder *b) {
+     const pool_builder_t *s = (const pool_builder_t *)b; pool_t *o = (pool_t *)p;
+     char shader_error[192];

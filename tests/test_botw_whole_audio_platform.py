@@ -22,10 +22,11 @@ class WholeAudioPlatformTests(unittest.TestCase):
         (cls.source / 'dm/host/tests').mkdir(parents=True)
         for name in ('botw_pcm.c', 'botw_pcm.h', 'tests/t_botw_pcm.c'):
             shutil.copyfile(source / 'dm/host' / name, cls.source / 'dm/host' / name)
-        patched = subprocess.run(['patch', '-p1', '-i', str(EXPERIMENT / 'patches/ios-audio-output.patch')],
-            cwd=cls.source, text=True, capture_output=True)
-        if patched.returncode:
-            raise AssertionError(patched.stdout + patched.stderr)
+        for patch in ('ios-audio-output.patch', 'audio-write-observed.patch'):
+            patched = subprocess.run(['patch', '--fuzz=0', '-p1', '-i', str(EXPERIMENT / 'patches' / patch)],
+                cwd=cls.source, text=True, capture_output=True)
+            if patched.returncode:
+                raise AssertionError(patched.stdout + patched.stderr)
         cls.binaries = {}
         base = ['xcrun', 'clang', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
             '-Wno-unused-function', '-DBOTW_PCM_MOCK_AU', '-pthread',
@@ -62,6 +63,12 @@ class WholeAudioPlatformTests(unittest.TestCase):
 
     def test_platform_lifecycle_serializes_with_owned_pcm_producer(self):
         self.probe('concurrency')
+
+    def test_observed_write_separates_old_flush_from_new_callback_consumption(self):
+        self.probe('observed')
+
+    def test_missing_observation_rejects_without_publishing_frames(self):
+        self.probe('missing-observation')
 
     def test_original_ring_gain_mapping_and_callback_quiescence_suite(self):
         result = subprocess.run([str(self.binaries['upstream'])], text=True, capture_output=True, timeout=30)

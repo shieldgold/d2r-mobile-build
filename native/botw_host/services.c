@@ -81,7 +81,13 @@ typedef struct Session {
 /* A nonzero id owns a client kernel handle. session == NULL means its server
  * endpoint has closed: SendSyncRequest fails, but CloseHandle still releases
  * that client handle once. This matches the SDK's CMIF-Close/SVC-Close sequence. */
-typedef struct { uint32_t id; Session *session; uint8_t *pointer_memory; } Handle;
+typedef struct {
+    uint32_t id;
+    Session *session;
+    uint8_t *pointer_memory;
+    uint32_t retire_id;
+    int retirement_pending;
+} Handle;
 typedef struct {
     uint64_t ipc_address, output_address;
     uint8_t *arena;
@@ -90,6 +96,8 @@ typedef struct {
 struct botw_services {
     pthread_mutex_t lock;
     Handle handles[HANDLE_LIMIT];
+    botw_services_transport_api transport;
+    int transport_started;
     uint32_t next_handle, log_destination, fs_access_log_mode;
     uint32_t performance_mode, performance_configuration[2];
     unsigned performance_configured[2];
@@ -258,12 +266,38 @@ static Handle *find_handle(botw_services *s, uint32_t handle) {
     return NULL;
 }
 static int assign_handle(botw_services *s, Session *session, uint32_t *out, char *error, size_t cap) {
-    if (s->next_handle < 0x10000 || s->next_handle >= 0x20000) return problem(error, cap, "IPC handle identity space exhausted before kernel namespace");
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (s->handles[i].retirement_pending)
+        return problem(error, cap, "kernel transport allocation cleanup is pending; context must be retired");
+    if (!s->transport.allocate && (s->next_handle < 0x10000 || s->next_handle >= 0x20000))
+        return problem(error, cap, "IPC handle identity space exhausted before kernel namespace");
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) if (!s->handles[i].id) {
         uint8_t *arena = aligned_alloc(16, POINTER_CAPACITY);
         if (!arena) return problem(error, cap, "allocate bounded IPC pointer arena failed");
         memset(arena, 0, POINTER_CAPACITY);
-        s->handles[i].id = s->next_handle++; s->handles[i].session = session; *out = s->handles[i].id;
+        uint32_t identity = 0;
+        if (s->transport.allocate) {
+            if (s->transport.allocate(s->transport.opaque, &s->handles[i], &identity, error, cap)) {
+                free(arena); return -1;
+            }
+            if (!identity || identity == 0xffff8000u || identity == 0xffff8001u || find_handle(s, identity)) {
+                /* The producer violated its allocation contract. Its release
+                 * must still check the new token, so an alien/live ID cannot
+                 * retire another transport or a pseudo process/thread handle. */
+                char release_error[128];
+                if (s->transport.release(s->transport.opaque, &s->handles[i], identity,
+                                          release_error, sizeof release_error)) {
+                    /* Retain the stable token and private arena until its real
+                     * kernel owner acknowledges retirement. No new allocation
+                     * can reuse this slot or proceed on a broken producer. */
+                    s->handles[i].retire_id = identity;
+                    s->handles[i].retirement_pending = 1;
+                    s->handles[i].pointer_memory = arena;
+                } else free(arena);
+                return problem(error, cap, "kernel transport allocator returned an invalid or duplicate handle");
+            }
+        } else identity = s->next_handle++;
+        s->transport_started = 1;
+        s->handles[i].id = identity; s->handles[i].session = session; *out = identity;
         s->handles[i].pointer_memory = arena;
         return 0;
     }
@@ -282,6 +316,18 @@ botw_services *botw_services_create(botw_services_log_fn log, botw_services_memo
     if (s && pthread_mutex_init(&s->lock, NULL)) { free(s); return NULL; }
     if (s) { s->next_handle = 0x10000; s->host_process_id = (uint64_t)getpid(); s->hid_supported_styles = 3; s->hid_npad_ids[0] = 0; s->hid_npad_ids[1] = 0x20; s->hid_npad_count = 2; s->log_destination = 0xffff; s->fs_access_log_mode = FS_ACCESS_LOG_NONE; s->audio_main_gain = 1.0f; s->audio_library_gain = 1.0f; s->audio_transparent_rate = 1.0f; s->log = log; s->memory = memory; s->opaque = opaque; }
     return s;
+}
+int botw_services_set_transport_api(botw_services *s,
+        const botw_services_transport_api *api, char *error, size_t cap) {
+    if (!s || !api || !api->allocate || !api->release)
+        return problem(error, cap, "kernel transport requires complete allocate/release callbacks");
+    pthread_mutex_lock(&s->lock);
+    int result = 0;
+    if (s->transport_started || s->transport.allocate)
+        result = problem(error, cap, "kernel transport namespace was already selected or used");
+    else s->transport = *api;
+    pthread_mutex_unlock(&s->lock);
+    return result;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
     if (s) { pthread_mutex_lock(&s->lock); s->performance_handler = handler; s->performance_opaque = opaque; pthread_mutex_unlock(&s->lock); }
@@ -581,25 +627,36 @@ int botw_services_set_applet_state(botw_services *s, uint64_t user_id, int foreg
     int result = set_applet_state(s, user_id, foreground, focused, operation, error, cap);
     pthread_mutex_unlock(&s->lock); return result;
 }
-void botw_services_destroy(botw_services *s) {
-    if (!s) return;
+int botw_services_destroy_checked(botw_services *s, char *error, size_t cap) {
+    if (!s) return 0;
     pthread_mutex_lock(&s->lock);
     if (s->trace_suppressed) emit(s, "ipc_trace_summary unique_commands=%u repeated_requests=%llu", s->trace_seen_count, (unsigned long long)s->trace_suppressed);
-    for (unsigned i = 0; i < HANDLE_LIMIT; i++) { release_session(s->handles[i].session); free(s->handles[i].pointer_memory); }
+    for (unsigned i = 0; i < HANDLE_LIMIT; i++) {
+        Handle *h = &s->handles[i];
+        if ((h->id || h->retirement_pending) && s->transport.release &&
+                s->transport.release(s->transport.opaque, h,
+                    h->retirement_pending ? h->retire_id : h->id, error, cap)) {
+            pthread_mutex_unlock(&s->lock); return -1;
+        }
+        release_session(h->session); free(h->pointer_memory); memset(h, 0, sizeof *h);
+    }
     for (unsigned i = 0; i < 3; i++) free(s->capture_images[i]);
     free(s->transition_image);
-    char error[128];
-    if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, error, sizeof error);
-    if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, error, sizeof error);
-    if (s->aoc_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_read, error, sizeof error);
-    if (s->aoc_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_write, error, sizeof error);
-    if (s->parental_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_read, error, sizeof error);
-    if (s->parental_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_write, error, sizeof error);
+    char event_error[128];
+    if (s->applet_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_read, event_error, sizeof event_error);
+    if (s->applet_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->applet_event_write, event_error, sizeof event_error);
+    if (s->aoc_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_read, event_error, sizeof event_error);
+    if (s->aoc_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->aoc_event_write, event_error, sizeof event_error);
+    if (s->parental_event_read) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_read, event_error, sizeof event_error);
+    if (s->parental_event_write) (void)s->kernel.close_handle(s->kernel.opaque, s->parental_event_write, event_error, sizeof event_error);
     for (unsigned index = 0; index < 10; index++) {
-        if (s->hid_style_event_read[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_read[index], error, sizeof error);
-        if (s->hid_style_event_write[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_write[index], error, sizeof error);
+        if (s->hid_style_event_read[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_read[index], event_error, sizeof event_error);
+        if (s->hid_style_event_write[index]) (void)s->kernel.close_handle(s->kernel.opaque, s->hid_style_event_write[index], event_error, sizeof event_error);
     }
-    pthread_mutex_unlock(&s->lock); pthread_mutex_destroy(&s->lock); free(s);
+    pthread_mutex_unlock(&s->lock); pthread_mutex_destroy(&s->lock); free(s); return 0;
+}
+void botw_services_destroy(botw_services *s) {
+    (void)botw_services_destroy_checked(s, NULL, 0);
 }
 static int services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
     if (!s || !name || !handle || length != 3 || memcmp(name, "sm:", 3))
@@ -612,6 +669,8 @@ static int services_connect(botw_services *s, const char *name, size_t length, u
 static int services_close(botw_services *s, uint32_t id, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, id) : NULL;
     if (!handle) return problem(error, cap, "CloseHandle invalid or closed IPC handle=0x%x", id);
+    if (s->transport.release &&
+            s->transport.release(s->transport.opaque, handle, id, error, cap)) return -1;
     Session *session = handle->session; handle->id = 0; handle->session = NULL; release_session(session);
     free(handle->pointer_memory); handle->pointer_memory = NULL;
     emit(s, "ipc_close handle=0x%x", id); return 0;
