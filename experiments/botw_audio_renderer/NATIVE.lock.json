@@ -1,0 +1,265 @@
+{
+  "format": 1,
+  "source_lock_sha256": "bf9a925daf4f704cbb994e047c9e66246dedcbac72d6b8cdb69aa388625cf121",
+  "dependencies_lock_sha256": "d03405dfea28cbbd970401894cf4fd576e78145c4d88dbf67b5d01cf3bcbcc79",
+  "upstream_native_tus": {
+    "renderer": 67,
+    "adsp_renderer": 2,
+    "render_manager": 1,
+    "sink_stream": 1
+  },
+  "files": [
+    {
+      "path": "adapter/native_sink_stream.cpp",
+      "bytes": 15272,
+      "sha256": "862a9cc09e756c023b485cff7bf410b8ea09818440653609b783c183f83585c2"
+    },
+    {
+      "path": "adapter/native_sink_stream.h",
+      "bytes": 1155,
+      "sha256": "bc59db65540d49996a108024df600500d3e519e7e20915351e22736f4a1709aa"
+    },
+    {
+      "path": "native/CMakeLists.txt",
+      "bytes": 8513,
+      "sha256": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585"
+    },
+    {
+      "path": "native/README.md",
+      "bytes": 7661,
+      "sha256": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76"
+    },
+    {
+      "path": "native/audren_host.cpp",
+      "bytes": 16667,
+      "sha256": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc"
+    },
+    {
+      "path": "native/audren_host.h",
+      "bytes": 6468,
+      "sha256": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc"
+    },
+    {
+      "path": "native/common_ports.cpp",
+      "bytes": 2697,
+      "sha256": "14eeb8428ccd639dff1ac2e32fc5e8793999d03932a2284913c2752e8c6bf8fa"
+    },
+    {
+      "path": "native/renderer_event.cpp",
+      "bytes": 935,
+      "sha256": "dfcf5cc4a63351f181bd6cb4fdbacd38e132451c1689082d767094b34a8ae621"
+    },
+    {
+      "path": "native/renderer_event.h",
+      "bytes": 811,
+      "sha256": "01213fd876b437a6907fe592df9b75bba10bb5ff70803faed95f3af6564a63a6"
+    },
+    {
+      "path": "native/renderer_host.cpp",
+      "bytes": 6363,
+      "sha256": "597eadac7796883b6937394bdabaf6c9432b93fd41998b21f8442281b445314f"
+    },
+    {
+      "path": "native/renderer_host.h",
+      "bytes": 2413,
+      "sha256": "096cad29d15a1d7014f20993850d531bc5853d7e0e16e6cc3603b2ae434ac35f"
+    },
+    {
+      "path": "native/renderer_memory.cpp",
+      "bytes": 7637,
+      "sha256": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4"
+    },
+    {
+      "path": "native/renderer_memory.h",
+      "bytes": 3171,
+      "sha256": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868"
+    },
+    {
+      "path": "native/wire.cpp",
+      "bytes": 5811,
+      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54"
+    },
+    {
+      "path": "native/wire.h",
+      "bytes": 821,
+      "sha256": "a89673593b6fafab3e51906f9393f441dd58d0071649f06a83b77829ffb12b11"
+    },
+    {
+      "path": "native/worker.h",
+      "bytes": 698,
+      "sha256": "1f687dd228841c01b5ce32ee3561ab70dfca5f6b26547b2fa568f04be0c41423"
+    },
+    {
+      "path": "patches/native-host.patch",
+      "bytes": 56448,
+      "sha256": "79e0a59b1d28c4fb1fab6f31ce7593014f703ffe8ac973136e1632ee220f52d1"
+    },
+    {
+      "path": "patches/native-pcm-sink.patch",
+      "bytes": 8532,
+      "sha256": "8a679f42f43c65220bfaad8b0e199132dc6961edae6517bad449aa16d739083d"
+    },
+    {
+      "path": "patches/pool-memory.patch",
+      "bytes": 11021,
+      "sha256": "4db537387ecacfd28a6440f518a292f50cf23e781b87a171d69b2679a6c74535"
+    },
+    {
+      "path": "platform/platform.cpp",
+      "bytes": 12225,
+      "sha256": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65"
+    },
+    {
+      "path": "platform/platform.h",
+      "bytes": 4431,
+      "sha256": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b"
+    },
+    {
+      "path": "tests/audren_host_probe.cpp",
+      "bytes": 9160,
+      "sha256": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592"
+    },
+    {
+      "path": "tests/native_sink_stream_probe.cpp",
+      "bytes": 17191,
+      "sha256": "f55513466e436c23d5a88e043d2da96ac6817df62448059630c8a6c93ef5e035"
+    },
+    {
+      "path": "tests/pcm_mock_au.c",
+      "bytes": 2566,
+      "sha256": "86165ff9fd0cc85b1b3b403cebefdbcf7031d4657e8cbb1eb30236def33a4cd8"
+    },
+    {
+      "path": "tests/pcm_output_probe.cpp",
+      "bytes": 3419,
+      "sha256": "1cdb3b3e77bf010a39f22641fe2c5827ff96a2d714f45328123a4af08c54dde6"
+    },
+    {
+      "path": "tests/platform_probe.cpp",
+      "bytes": 7191,
+      "sha256": "e24449eb1629cf98a0773b7a05b85a855e577b6b8af8f203eaf4e9e1084f8c38"
+    },
+    {
+      "path": "tests/pool_mapper_probe.cpp",
+      "bytes": 3326,
+      "sha256": "69f8a371ac452c6283ea7725f4ec940b660f17721ac9521f880569d1d813d39d"
+    },
+    {
+      "path": "tests/renderer_adsp_pause_probe.cpp",
+      "bytes": 3718,
+      "sha256": "667a9b718af71f062fc0d4de8f8f79c34b7042049341bdeef2e3c73a79ec1f36"
+    },
+    {
+      "path": "tests/renderer_event_probe.cpp",
+      "bytes": 1904,
+      "sha256": "06bfebb5c4e59e0827f508c8e66a6915a04b4f62ef88251cb9cbfed7209e4aea"
+    },
+    {
+      "path": "tests/renderer_failure_probe.cpp",
+      "bytes": 1120,
+      "sha256": "d47f1ad84720722fab07f1374d70ce449623652d9efa5fbf5eb83b0d7c92e227"
+    },
+    {
+      "path": "tests/renderer_host_probe.cpp",
+      "bytes": 2335,
+      "sha256": "2cbbf6f99bf4eece3f51a6668de1e4c6ff60b170a2bd5b0e811c812307a1ef4b"
+    },
+    {
+      "path": "tests/renderer_memory_probe.cpp",
+      "bytes": 3454,
+      "sha256": "35582deb9c8164123cd9a882eefa12c6a866d62c56ab73ba89af860d73ae970b"
+    },
+    {
+      "path": "tests/renderer_pause_probe.cpp",
+      "bytes": 2198,
+      "sha256": "ad40602c407f78607fcb77febc2829d44ddb5f1bdd480f0a3e61977e2a5c5a23"
+    },
+    {
+      "path": "tests/renderer_pcm_mock.c",
+      "bytes": 2064,
+      "sha256": "842a8804e165f46c797266b4b1e46d3a6c78ddeafa5d5ee0de2aee823ddb9028"
+    },
+    {
+      "path": "tests/renderer_update_probe.cpp",
+      "bytes": 6962,
+      "sha256": "7483d270322df1ca84888c90fa43d11cf9e0767189adde9ccaa0522d79da629d"
+    },
+    {
+      "path": "tests/renderer_worker_probe.cpp",
+      "bytes": 3015,
+      "sha256": "4fceed359344b6209f415efee23b17929024edf7e6308868beda1a3857278fe7"
+    },
+    {
+      "path": "tests/test_native_pcm_sink.py",
+      "bytes": 10630,
+      "sha256": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02"
+    },
+    {
+      "path": "tests/test_native_platform.py",
+      "bytes": 5041,
+      "sha256": "0e260ffaa605d6bbba34e0c2dfb4cc145049de3d35cdba1901347b7e41837c49"
+    },
+    {
+      "path": "tests/test_renderer_memory.py",
+      "bytes": 1526,
+      "sha256": "67025f2f80f29297a34b1c9061e29dec9e7a316c0dfff2208b116e53aaa5f125"
+    },
+    {
+      "path": "tests/test_renderer_module.py",
+      "bytes": 2171,
+      "sha256": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817"
+    },
+    {
+      "path": "tests/test_renderer_ports.py",
+      "bytes": 4322,
+      "sha256": "1dd913c708a2245d9772e679247375da8e8d636158ce98d39223e86dfab686fa"
+    },
+    {
+      "path": "tests/wire_probe.cpp",
+      "bytes": 2411,
+      "sha256": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d"
+    },
+    {
+      "path": "tools/prepare_eden.py",
+      "bytes": 3583,
+      "sha256": "4e7afdc60b8b2f250357e31b4082f632e2bddcff3eb27e56578c4de480072da4"
+    },
+    {
+      "path": "tools/verify_native.py",
+      "bytes": 2327,
+      "sha256": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522"
+    }
+  ],
+  "external_files": [
+    {
+      "path": "../botw_upstream_host/upstream/dm/host/botw_pcm.c",
+      "bytes": 22953,
+      "sha256": "fc270e91ee7ff261f81d11ae122bc60c2980cd5c9c1e172c635edcb778c00de7"
+    },
+    {
+      "path": "../botw_upstream_host/upstream/dm/host/botw_pcm.h",
+      "bytes": 1634,
+      "sha256": "fe88c5d17a110a9fa162e5407ea1c0bf057346baa483035d182e0a7408ccf911"
+    },
+    {
+      "path": "../botw_upstream_host/adapter/whole_audio_platform.h",
+      "bytes": 1756,
+      "sha256": "e610bc07f665f98904160e7eb9d24f538a08217cb8ad05d4ea81250a3df364a0"
+    },
+    {
+      "path": "../botw_upstream_host/adapter/whole_audio_platform.m",
+      "bytes": 3564,
+      "sha256": "b1a74ac4f987acedc1a1a4983289061e82aa0b48f69f71e7be5b59758963fd3b"
+    },
+    {
+      "path": "../botw_upstream_host/patches/ios-audio-output.patch",
+      "bytes": 8076,
+      "sha256": "60aeb3ab02446aacff820cc6b9fe1eb6b39eb9f56efcc6165d2dd0d34036bd5c"
+    },
+    {
+      "path": "../botw_upstream_host/patches/audio-write-observed.patch",
+      "bytes": 2030,
+      "sha256": "a0dfa162ae733e3d5892b59a64e66e6e745f66c6ba65fa64ff2ecaef41358327"
+    }
+  ]
+}

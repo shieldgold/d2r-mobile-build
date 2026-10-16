@@ -1,0 +1,1546 @@
+--- a/src/audio_core/renderer/audio_device.h
++++ b/src/audio_core/renderer/audio_device.h
+@@ -7,9 +7,10 @@
+ 
+ #include "audio_core/audio_render_manager.h"
+ 
+-namespace Core {
+-class System;
+-}
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ namespace Sink {
+@@ -30,7 +31,7 @@
+         }
+     };
+ 
+-    explicit AudioDevice(Core::System& system, u64 applet_resource_user_id, u32 revision);
++    explicit AudioDevice(botw::audio::RendererHost& system, u64 applet_resource_user_id, u32 revision);
+ 
+     /**
+      * Get a list of the available output devices.
+--- a/src/audio_core/renderer/system.h
++++ b/src/audio_core/renderer/system.h
+@@ -20,18 +20,12 @@
+ #include "common/thread.h"
+ #include "core/hle/service/audio/errors.h"
+ 
+-namespace Core {
+-namespace Memory {
+-class Memory;
+-}
+-class System;
+-} // namespace Core
+-
+-namespace Kernel {
+-class KEvent;
+-class KProcess;
+-class KTransferMemory;
+-} // namespace Kernel
++
++
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ struct AudioRendererParameterInternal;
+@@ -56,7 +50,7 @@
+     };
+ 
+ public:
+-    explicit System(Core::System& core, Kernel::KEvent* adsp_rendered_event);
++    explicit System(botw::audio::RendererHost& core, botw::audio::RendererEvent* adsp_rendered_event);
+ 
+     /**
+      * Calculate the total size required for all audio render workbuffers.
+@@ -80,8 +74,8 @@
+      * @return Result code.
+      */
+     Result Initialize(const AudioRendererParameterInternal& params,
+-                      Kernel::KTransferMemory* transfer_memory, u64 transfer_memory_size,
+-                      Kernel::KProcess* process_handle, u64 applet_resource_user_id,
++                      botw::audio::TransferPool* transfer_memory, u64 transfer_memory_size,
++                      botw::audio::RendererMemory* process_handle, u64 applet_resource_user_id,
+                       s32 session_id);
+ 
+     /**
+@@ -218,7 +212,7 @@
+ 
+ private:
+     /// Core system
+-    Core::System& core;
++    botw::audio::RendererHost& core;
+     /// Reference to the ADSP's AudioRenderer for communication
+     ::AudioCore::ADSP::AudioRenderer::AudioRenderer& audio_renderer;
+     /// Is this system initialized?
+@@ -272,13 +266,13 @@
+     /// Number of channels in use by voices
+     s32 voice_channels{};
+     /// Event to be called when the AudioRenderer processes a command list
+-    Kernel::KEvent* adsp_rendered_event{};
++    botw::audio::RendererEvent* adsp_rendered_event{};
+     /// Event signalled on system terminate
+     Common::Event terminate_event{};
+     /// Does what locks do
+-    std::mutex lock{};
++    mutable std::mutex lock{};
+     /// Process this audio render is operating within, used for memory reads/writes.
+-    Kernel::KProcess* process_handle{};
++    botw::audio::RendererMemory* process_handle{};
+     /// Applet resource id for this system, unused
+     u64 applet_resource_user_id{};
+     /// Controls performance input and output
+@@ -286,7 +280,7 @@
+     /// Workbuffer for performance metrics
+     std::span<u8> performance_workbuffer{};
+     /// Main workbuffer, from which all other workbuffers here allocate into
+-    std::unique_ptr<u8[]> workbuffer{};
++    botw::audio::TransferView workbuffer{};
+     /// Size of the main workbuffer
+     u64 workbuffer_size{};
+     /// Unknown buffer/marker
+--- a/src/audio_core/renderer/system_manager.h
++++ b/src/audio_core/renderer/system_manager.h
+@@ -14,12 +14,10 @@
+ 
+ #include "audio_core/renderer/system.h"
+ 
+-namespace Core {
+-namespace Timing {
+-struct EventType;
+-}
+-class System;
+-} // namespace Core
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::ADSP {
+ class ADSP;
+@@ -36,7 +34,7 @@
+  */
+ class SystemManager {
+ public:
+-    explicit SystemManager(Core::System& core);
++    explicit SystemManager(botw::audio::RendererHost& core);
+     ~SystemManager();
+ 
+     /**
+@@ -70,11 +68,13 @@
+ 
+ private:
+     /// Core system
+-    Core::System& core;
++    botw::audio::RendererHost& core;
+     /// List of pointers to managed systems
+     std::list<System*> systems{};
+     /// Main worker thread for generating command lists
+     std::jthread thread;
++    std::mutex pacing_mutex;
++    std::condition_variable_any pacing;
+     /// Mutex for the systems
+     std::mutex mutex1{};
+     /// Mutex for adding/removing systems
+--- a/src/audio_core/renderer/audio_renderer.h
++++ b/src/audio_core/renderer/audio_renderer.h
+@@ -8,14 +8,12 @@
+ #include "audio_core/renderer/system.h"
+ #include "core/hle/service/audio/errors.h"
+ 
+-namespace Core {
+-class System;
+-}
+ 
+-namespace Kernel {
+-class KTransferMemory;
+-class KProcess;
+-} // namespace Kernel
++
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ struct AudioRendererParameterInternal;
+@@ -28,7 +26,7 @@
+  */
+ class Renderer {
+ public:
+-    explicit Renderer(Core::System& system, Manager& manager, Kernel::KEvent* rendered_event);
++    explicit Renderer(botw::audio::RendererHost& system, Manager& manager, botw::audio::RendererEvent* rendered_event);
+ 
+     /**
+      * Initialize the renderer.
+@@ -44,8 +42,8 @@
+      * @return Result code.
+      */
+     Result Initialize(const AudioRendererParameterInternal& params,
+-                      Kernel::KTransferMemory* transfer_memory, u64 transfer_memory_size,
+-                      Kernel::KProcess* process_handle, u64 applet_resource_user_id,
++                      botw::audio::TransferPool* transfer_memory, u64 transfer_memory_size,
++                      botw::audio::RendererMemory* process_handle, u64 applet_resource_user_id,
+                       s32 session_id);
+ 
+     /**
+@@ -84,7 +82,7 @@
+ 
+ private:
+     /// System core
+-    Core::System& core;
++    botw::audio::RendererHost& core;
+     /// Manager this renderer is registered with
+     Manager& manager;
+     /// Is the audio renderer initialized?
+--- a/src/audio_core/renderer/behavior/info_updater.h
++++ b/src/audio_core/renderer/behavior/info_updater.h
+@@ -11,9 +11,10 @@
+ #include "common/common_types.h"
+ #include "core/hle/service/audio/errors.h"
+ 
+-namespace Kernel {
+-class KProcess;
+-}
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ class BehaviorInfo;
+@@ -47,7 +48,7 @@
+ 
+ public:
+     explicit InfoUpdater(std::span<const u8> input, std::span<u8> output,
+-                         Kernel::KProcess* process_handle, BehaviorInfo& behaviour);
++                         botw::audio::RendererMemory* process_handle, BehaviorInfo& behaviour);
+ 
+     /**
+      * Update the voice channel resources.
+@@ -204,7 +205,7 @@
+     /// Expected output size, see CheckConsumedSize
+     u64 expected_output_size;
+     /// Unused
+-    Kernel::KProcess* process_handle;
++    botw::audio::RendererMemory* process_handle;
+     /// Behaviour
+     BehaviorInfo& behaviour;
+ };
+--- a/src/audio_core/renderer/command/data_source/decode.h
++++ b/src/audio_core/renderer/command/data_source/decode.h
+@@ -11,9 +11,10 @@
+ #include "audio_core/renderer/voice/voice_state.h"
+ #include "common/common_types.h"
+ 
+-namespace Core::Memory {
+-class Memory;
+-}
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+@@ -54,6 +55,6 @@
+  * @param memory - Core memory to read data from.
+  * @param args - The wavebuffer data, and information for how to decode it.
+  */
+-void DecodeFromWaveBuffers(Core::Memory::Memory& memory, const DecodeFromWaveBuffersArgs& args);
++void DecodeFromWaveBuffers(botw::audio::RendererMemory& memory, const DecodeFromWaveBuffersArgs& args);
+ 
+ } // namespace AudioCore::Renderer
+--- a/src/audio_core/renderer/system_manager.cpp
++++ b/src/audio_core/renderer/system_manager.cpp
+@@ -5,79 +5,105 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <chrono>
++#include "common/scope_exit.h"
++#include "worker.h"
+ 
+ #include "audio_core/adsp/adsp.h"
+-#include "audio_core/audio_core.h"
+ #include "audio_core/renderer/system_manager.h"
+ #include "common/thread.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+-SystemManager::SystemManager(Core::System& core_)
+-    : core{core_}, audio_renderer{core.AudioCore().ADSP().AudioRenderer()} {}
++SystemManager::SystemManager(botw::audio::RendererHost& core_)
++    : core{core_}, audio_renderer{core.renderer()} {}
+ 
+ SystemManager::~SystemManager() {
+-    Stop();
++    botw::audio::worker_boundary(core, [&] { Stop(); });
+ }
+ 
+ void SystemManager::InitializeUnsafe() {
+-    if (!active) {
++    if (active) return;
++    try {
++        audio_renderer.Start();
+         active = true;
+-        audio_renderer.Start();
+         thread = std::jthread([this](std::stop_token stop_token) {
+-            Common::SetCurrentThreadName("AudioRenderSystemManager");
+-            Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
+-            while (active && !stop_token.stop_requested()) {
+-                {
+-                    std::scoped_lock l{mutex1};
+-                    for (auto system : systems)
+-                        system->SendCommandToDsp();
++            botw::audio::worker_boundary(core, [&] {
++                Common::SetCurrentThreadName("AudioRenderSystemManager");
++                Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
++                while (active && !stop_token.stop_requested()) {
++                    const auto status = core.begin_render(stop_token);
++                    if (status == botw::audio::Status::Closed && stop_token.stop_requested()) break;
++                    botw::audio::require(status);
++                    bool any_active = false;
++                    {
++                        SCOPE_EXIT { core.end_render(); };
++                        {
++                            std::scoped_lock l{mutex1};
++                            for (auto* system : systems) {
++                                system->SendCommandToDsp();
++                                any_active |= system->IsActive();
++                            }
++                        }
++                        audio_renderer.Signal();
++                        audio_renderer.Wait();
++                    }
++                    // Inactive systems have no PCM backpressure. Use a bounded,
++                    // cancelable host wait rather than spinning mailbox rounds.
++                    if (!any_active) {
++                        std::unique_lock wait_lock(pacing_mutex);
++                        pacing.wait_for(wait_lock, stop_token, std::chrono::milliseconds(1), [] { return false; });
++                    }
+                 }
+-                audio_renderer.Signal();
+-                audio_renderer.Wait();
+-            }
++            });
++            active = false;
+         });
++    } catch (...) {
++        active = false;
++        botw::audio::worker_boundary(core, [&] { audio_renderer.Stop(); });
++        throw;
+     }
+ }
+ 
+ void SystemManager::Stop() {
+-    if (active) {
+-        active = false;
+-        thread.request_stop();
+-        thread.join();
+-        audio_renderer.Stop();
+-    }
++    if (!active && !thread.joinable()) { audio_renderer.Stop(); return; }
++    const bool resume = !core.is_paused();
++    (void)core.set_paused(true); // Always waits for the real round ACK, also on fatal failure.
++    active = false;
++    thread.request_stop();
++    pacing.notify_all();
++    if (thread.joinable()) thread.join();
++    SCOPE_EXIT { if (resume && core.failure() == botw::audio::Status::Ok)
++        botw::audio::worker_boundary(core, [&] { botw::audio::require(core.set_paused(false)); }); };
++    audio_renderer.Stop();
+ }
+ 
+ bool SystemManager::Add(System& system_) {
+-    std::scoped_lock l2{mutex2};
+-    if (systems.size() + 1 > MaxRendererSessions) {
+-        LOG_ERROR(Service_Audio, "Maximum AudioRenderer Systems active, cannot add more!");
+-        return false;
+-    }
+-    {
+-        std::scoped_lock l{mutex1};
+-        if (systems.empty())
+-            InitializeUnsafe();
+-    }
++    std::scoped_lock publication{mutex2, mutex1};
++    if (systems.size() >= MaxRendererSessions) return false;
+     systems.push_back(&system_);
++    try { if (systems.size() == 1) InitializeUnsafe(); }
++    catch (...) { systems.remove(&system_); throw; }
+     return true;
+ }
+ 
+ bool SystemManager::Remove(System& system_) {
+-    std::scoped_lock l2{mutex2};
++    const bool resume = !core.is_paused();
++    (void)core.set_paused(true);
++    SCOPE_EXIT { if (resume && core.failure() == botw::audio::Status::Ok)
++        botw::audio::worker_boundary(core, [&] { botw::audio::require(core.set_paused(false)); }); };
++    std::scoped_lock publication{mutex2};
++    bool empty;
+     {
+         std::scoped_lock l{mutex1};
+-        if (systems.remove(&system_) == 0) {
+-            LOG_ERROR(Service_Audio, "Failed to remove a render system, it was not found in the list!");
+-            return false;
+-        }
++        if (!systems.remove(&system_)) return false;
++        empty = systems.empty();
+     }
+-
+-    if (systems.empty())
+-        Stop();
++    // Removal has committed. Stop joins and retires streams even on PCM failure;
++    // latch that failure without falsely reporting that the list still owns it.
++    if (empty) botw::audio::worker_boundary(core, [&] { Stop(); });
+     return true;
+ }
+ 
+--- a/src/audio_core/renderer/system.cpp
++++ b/src/audio_core/renderer/system.cpp
+@@ -9,7 +9,6 @@
+ 
+ #include "audio_core/adsp/apps/audio_renderer/audio_renderer.h"
+ #include "audio_core/adsp/apps/audio_renderer/command_buffer.h"
+-#include "audio_core/audio_core.h"
+ #include "audio_core/common/audio_renderer_parameter.h"
+ #include "audio_core/common/common.h"
+ #include "audio_core/common/feature_support.h"
+@@ -32,12 +31,13 @@
+ #include "audio_core/renderer/voice/voice_info.h"
+ #include "audio_core/renderer/voice/voice_state.h"
+ #include "common/alignment.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
+-#include "core/hle/kernel/k_event.h"
+-#include "core/hle/kernel/k_process.h"
+-#include "core/hle/kernel/k_transfer_memory.h"
+-#include "core/memory.h"
++#include "wire.h"
++#include "worker.h"
++#include "audio_core/sink/sink.h"
++#include "common/scope_exit.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+@@ -99,13 +99,13 @@
+     return size;
+ }
+ 
+-System::System(Core::System& core_, Kernel::KEvent* adsp_rendered_event_)
+-    : core{core_}, audio_renderer{core.AudioCore().ADSP().AudioRenderer()},
++System::System(botw::audio::RendererHost& core_, botw::audio::RendererEvent* adsp_rendered_event_)
++    : core{core_}, audio_renderer{core.renderer()},
+       adsp_rendered_event{adsp_rendered_event_} {}
+ 
+ Result System::Initialize(const AudioRendererParameterInternal& params,
+-                          Kernel::KTransferMemory* transfer_memory, u64 transfer_memory_size,
+-                          Kernel::KProcess* process_handle_, u64 applet_resource_user_id_,
++                          botw::audio::TransferPool* transfer_memory, u64 transfer_memory_size,
++                          botw::audio::RendererMemory* process_handle_, u64 applet_resource_user_id_,
+                           s32 session_id_) {
+     if (!CheckValidRevision(params.revision)) {
+         return Service::Audio::ResultInvalidRevision;
+@@ -134,18 +134,27 @@
+     render_device = params.rendering_device;
+     execution_mode = params.execution_mode;
+ 
+-    process_handle->GetMemory().ZeroBlock(transfer_memory->GetSourceAddress(),
+-                                          transfer_memory_size);
+-
+-    // Note: We're not actually using the transfer memory because it's a pain to code for.
+-    // Allocate the memory normally instead and hope the game doesn't try to read anything back
+-    workbuffer = std::make_unique<u8[]>(transfer_memory_size);
++    if (!transfer_memory || !adsp_rendered_event) return Service::Audio::ResultInvalidHandle;
++    botw::audio::require(transfer_memory->view(0, transfer_memory_size,
++                                              botw::audio::Access::ReadWrite, workbuffer));
+     workbuffer_size = transfer_memory_size;
+-
++    std::memset(workbuffer.writable().data(), 0, workbuffer_size);
+     PoolMapper pool_mapper(process_handle, false);
+-    pool_mapper.InitializeSystemPool(memory_pool_info, workbuffer.get(), workbuffer_size);
+-
+-    WorkbufferAllocator allocator({workbuffer.get(), workbuffer_size}, workbuffer_size);
++    if (!pool_mapper.InitializeSystemPool(memory_pool_info, workbuffer, workbuffer_size)) {
++        workbuffer.reset();
++        return Service::Audio::ResultInvalidAddressInfo;
++    }
++    auto initialization_cleanup = SCOPE_GUARD {
++        if (!initialized) {
++            const auto status = process_handle->unmap(&memory_pool_info);
++            if (status != botw::audio::Status::Ok) core.fail(status);
++            memory_pool_info.SetCpuAddress(0, 0);
++            memory_pool_info.SetDspAddress(0);
++            workbuffer.reset();
++        }
++    };
++
++    WorkbufferAllocator allocator({reinterpret_cast<u8*>(workbuffer.writable().data()), workbuffer_size}, workbuffer_size);
+ 
+     samples_workbuffer =
+         allocator.Allocate<s32>((voice_channels + mix_buffer_count) * sample_count, 0x10);
+@@ -285,7 +294,7 @@
+     allocator.Align(0x40);
+ 
+     unk_2B0 = allocator.GetSize() - allocator.GetCurrentOffset();
+-    unk_2A8 = {&workbuffer[allocator.GetCurrentOffset()], unk_2B0};
++    unk_2A8 = {reinterpret_cast<u8*>(workbuffer.writable().data()) + allocator.GetCurrentOffset(), unk_2B0};
+ 
+     upsampler_infos = allocator.Allocate<UpsamplerInfo>(upsampler_count, 0x40);
+     for (auto& upsampler_info : upsampler_infos) {
+@@ -413,19 +422,22 @@
+     applet_resource_user_id = 0;
+ 
+     PoolMapper pool_mapper(process_handle, false);
+-    pool_mapper.Unmap(memory_pool_info);
++    if (memory_pool_info.IsMapped() && !pool_mapper.Unmap(memory_pool_info))
++        throw botw::audio::PlatformError(botw::audio::Status::Busy);
+ 
+     if (process_handle) {
+         pool_mapper.ClearUseState(memory_pool_workbuffer, memory_pool_count);
+         for (auto& memory_pool : memory_pool_workbuffer) {
+             if (memory_pool.IsMapped()) {
+-                pool_mapper.Unmap(memory_pool);
++                if (!pool_mapper.Unmap(memory_pool))
++                    throw botw::audio::PlatformError(botw::audio::Status::Busy);
+             }
+         }
+ 
+         // dsp::ProcessCleanup
+         // close handle
+     }
++    workbuffer.reset();
+     initialized = false;
+ }
+ 
+@@ -437,21 +449,28 @@
+ }
+ 
+ void System::Stop() {
+-    {
+-        std::scoped_lock l{lock};
+-        state = State::Stopped;
+-        active = false;
+-    }
+-
+-    if (execution_mode == ExecutionMode::Auto) {
+-        terminate_event.Wait();
+-    }
++    const bool resume = !core.is_paused();
++    (void)core.set_paused(true);
++    SCOPE_EXIT { if (resume && core.failure() == botw::audio::Status::Ok)
++        botw::audio::worker_boundary(core, [&] { botw::audio::require(core.set_paused(false)); }); };
++    std::scoped_lock l{lock};
++    state = State::Stopped;
++    active = false;
++    // The manager/ADSP round has actually left the PCM path. Clear remaining
++    // command pins and stop this session's real stream before acknowledging.
++    audio_renderer.StopSession(session_id);
++    terminate_event.Set();
+ }
+ 
+ Result System::Update(std::span<const u8> input, std::span<u8> performance, std::span<u8> output) {
+     std::scoped_lock l{lock};
+ 
+-    const auto start_time{core.CoreTiming().GetGlobalTimeNs().count()};
++    if (botw::audio::validate_rev1_update_layout(
++            {memory_pool_count, voice_context.GetCount(), effect_context.GetCount(),
++             static_cast<u32>(mix_context.GetCount()), sink_context.GetCount()},
++            std::as_bytes(input), std::as_writable_bytes(output)) != botw::audio::Status::Ok)
++        return Service::Audio::ResultInvalidUpdateInfo;
++    const auto start_time{core.clock_ns()};
+     std::memset(output.data(), 0, output.size());
+ 
+     InfoUpdater info_updater(input, output, process_handle, behavior);
+@@ -540,20 +559,22 @@
+         return result;
+     }
+ 
+-    adsp_rendered_event->Clear(core.Kernel());
++    botw::audio::require(adsp_rendered_event->clear());
+     num_times_updated++;
+ 
+-    const auto end_time{core.CoreTiming().GetGlobalTimeNs().count()};
++    const auto end_time{core.clock_ns()};
+     ticks_spent_updating += end_time - start_time;
+ 
+     return ResultSuccess;
+ }
+ 
+ u32 System::GetRenderingTimeLimit() const {
++    std::scoped_lock control{lock};
+     return render_time_limit_percent;
+ }
+ 
+ void System::SetRenderingTimeLimit(u32 limit) {
++    std::scoped_lock control{lock};
+     render_time_limit_percent = limit;
+ }
+ 
+@@ -582,6 +603,7 @@
+ }
+ 
+ bool System::IsActive() const {
++    std::scoped_lock control{lock};
+     return active;
+ }
+ 
+@@ -624,7 +646,7 @@
+             reset_command_buffers = false;
+             command_buffer_size = command_size;
+             if (remaining_command_count == 0) {
+-                adsp_rendered_event->Signal(core.Kernel());
++                botw::audio::require(adsp_rendered_event->signal());
+             }
+         } else {
+             audio_renderer.ClearRemainCommandCount(session_id);
+@@ -636,7 +658,7 @@
+ u64 System::GenerateCommand(std::span<u8> in_command_buffer,
+                             [[maybe_unused]] u64 command_buffer_size_) {
+     PoolMapper::ClearUseState(memory_pool_workbuffer, memory_pool_count);
+-    const auto start_time{core.CoreTiming().GetGlobalTimeNs().count()};
++    const auto start_time{core.clock_ns()};
+ 
+     auto command_list_header{reinterpret_cast<CommandListHeader*>(in_command_buffer.data())};
+ 
+@@ -655,7 +677,7 @@
+ 
+     s8 channel_count{2};
+     if (execution_mode == ExecutionMode::Auto) {
+-        const auto& sink{core.AudioCore().GetOutputSink()};
++        const auto& sink{core.output_sink()};
+         channel_count = static_cast<s8>(sink.GetDeviceChannels());
+     }
+ 
+@@ -735,7 +757,7 @@
+         effect_context.UpdateStateByDspShared();
+     }
+ 
+-    const auto end_time{core.CoreTiming().GetGlobalTimeNs().count()};
++    const auto end_time{core.clock_ns()};
+     total_ticks_elapsed += end_time - start_time;
+     num_command_lists_generated++;
+     render_start_tick = audio_renderer.GetRenderingStartTick(session_id);
+@@ -745,10 +767,12 @@
+ }
+ 
+ f32 System::GetVoiceDropParameter() const {
++    std::scoped_lock control{lock};
+     return drop_voice_param;
+ }
+ 
+ void System::SetVoiceDropParameter(f32 voice_drop_) {
++    std::scoped_lock control{lock};
+     drop_voice_param = voice_drop_;
+ }
+ 
+--- a/src/audio_core/renderer/audio_device.cpp
++++ b/src/audio_core/renderer/audio_device.cpp
+@@ -7,11 +7,12 @@
+ #include <array>
+ #include <span>
+ 
+-#include "audio_core/audio_core.h"
+ #include "audio_core/common/feature_support.h"
+ #include "audio_core/renderer/audio_device.h"
+ #include "audio_core/sink/sink.h"
+-#include "core/core.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+@@ -34,9 +35,9 @@
+     AudioDevice::AudioDeviceName{"AudioExternalOutput"},
+ };
+ 
+-AudioDevice::AudioDevice(Core::System& system, const u64 applet_resource_user_id_,
++AudioDevice::AudioDevice(botw::audio::RendererHost& system, const u64 applet_resource_user_id_,
+                          const u32 revision)
+-    : output_sink{system.AudioCore().GetOutputSink()},
++    : output_sink{system.output_sink()},
+       applet_resource_user_id{applet_resource_user_id_}, user_revision{revision} {}
+ 
+ u32 AudioDevice::ListAudioDeviceName(std::span<AudioDeviceName> out_buffer) const {
+--- a/src/audio_core/renderer/audio_renderer.cpp
++++ b/src/audio_core/renderer/audio_renderer.cpp
+@@ -2,50 +2,53 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "audio_core/audio_render_manager.h"
++#include "common/scope_exit.h"
++#include "worker.h"
+ #include "audio_core/common/audio_renderer_parameter.h"
+ #include "audio_core/renderer/audio_renderer.h"
+ #include "audio_core/renderer/system_manager.h"
+-#include "core/core.h"
+-#include "core/hle/kernel/k_process.h"
+-#include "core/hle/kernel/k_transfer_memory.h"
+ #include "core/hle/service/audio/errors.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+-Renderer::Renderer(Core::System& system_, Manager& manager_, Kernel::KEvent* rendered_event)
++Renderer::Renderer(botw::audio::RendererHost& system_, Manager& manager_, botw::audio::RendererEvent* rendered_event)
+     : core{system_}, manager{manager_}, system{system_, rendered_event} {}
+ 
+ Result Renderer::Initialize(const AudioRendererParameterInternal& params,
+-                            Kernel::KTransferMemory* transfer_memory,
+-                            const u64 transfer_memory_size, Kernel::KProcess* process_handle,
++                            botw::audio::TransferPool* transfer_memory,
++                            const u64 transfer_memory_size, botw::audio::RendererMemory* process_handle,
+                             const u64 applet_resource_user_id, const s32 session_id) {
++    auto result = system.Initialize(params, transfer_memory, transfer_memory_size, process_handle,
++                                    applet_resource_user_id, session_id);
++    if (result.IsError()) return result;
+     if (params.execution_mode == ExecutionMode::Auto) {
+         if (!manager.AddSystem(system)) {
+-            LOG_ERROR(Service_Audio,
+-                      "Both Audio Render sessions are in use, cannot create any more");
++            system.Finalize();
+             return Service::Audio::ResultOutOfSessions;
+         }
+         system_registered = true;
+     }
+-
+     initialized = true;
+-    system.Initialize(params, transfer_memory, transfer_memory_size, process_handle,
+-                      applet_resource_user_id, session_id);
+ 
+     return ResultSuccess;
+ }
+ 
+ void Renderer::Finalize() {
+-    auto session_id{system.GetSessionId()};
+-
+-    system.Finalize();
+-
++    if (!initialized) return;
++    const bool resume = !core.is_paused();
++    (void)core.set_paused(true);
++    SCOPE_EXIT { if (resume && core.failure() == botw::audio::Status::Ok)
++        botw::audio::worker_boundary(core, [&] { botw::audio::require(core.set_paused(false)); }); };
+     if (system_registered) {
+-        manager.RemoveSystem(system);
++        if (!manager.RemoveSystem(system)) throw botw::audio::PlatformError(botw::audio::Status::NotFound);
+         system_registered = false;
+     }
+-
+-    manager.ReleaseSessionId(session_id);
++    system.Finalize();
++    manager.ReleaseSessionId(system.GetSessionId());
++    initialized = false;
+ }
+ 
+ System& Renderer::GetSystem() {
+--- a/src/audio_core/renderer/behavior/info_updater.cpp
++++ b/src/audio_core/renderer/behavior/info_updater.cpp
+@@ -18,10 +18,13 @@
+ #include "audio_core/renderer/splitter/splitter_context.h"
+ #include "audio_core/renderer/voice/voice_context.h"
+ 
++#include "renderer_host.h"
++#include "renderer_event.h"
++
+ namespace AudioCore::Renderer {
+ 
+ InfoUpdater::InfoUpdater(std::span<const u8> input_, std::span<u8> output_,
+-                         Kernel::KProcess* process_handle_, BehaviorInfo& behaviour_)
++                         botw::audio::RendererMemory* process_handle_, BehaviorInfo& behaviour_)
+     : input{input_.data() + sizeof(UpdateDataHeader)},
+       input_origin{input_}, output{output_.data() + sizeof(UpdateDataHeader)},
+       output_origin{output_}, in_header{reinterpret_cast<const UpdateDataHeader*>(
+--- a/src/audio_core/renderer/command/data_source/decode.cpp
++++ b/src/audio_core/renderer/command/data_source/decode.cpp
+@@ -12,8 +12,9 @@
+ #include "common/fixed_point.h"
+ #include "common/logging.h"
+ #include "common/scratch_buffer.h"
+-#include "core/guest_memory.h"
+-#include "core/memory.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+@@ -26,7 +27,7 @@
+ /// @param req        - Information for how to decode.
+ /// @return Number of samples decoded.
+ template <typename T>
+-static u32 DecodePcm(Core::Memory::Memory& memory, std::span<s16> out_buffer, const DecodeArg& req) {
++static u32 DecodePcm(botw::audio::RendererMemory& memory, std::span<s16> out_buffer, const DecodeArg& req) {
+     constexpr s32 min{(std::numeric_limits<s16>::min)()};
+     constexpr s32 max{(std::numeric_limits<s16>::max)()};
+ 
+@@ -48,7 +49,7 @@
+                            (((req.start_offset + req.offset) * channel_count) * sizeof(T))};
+         const u64 size{channel_count * samples_to_decode};
+ 
+-        Core::Memory::CpuGuestMemory<T, Core::Memory::GuestMemoryFlags::UnsafeRead> samples(
++        botw::audio::ReadSamples<T> samples(
+             memory, source, size);
+         if constexpr (std::is_floating_point_v<T>) {
+             for (u32 i = 0; i < samples_to_decode; i++) {
+@@ -71,7 +72,7 @@
+         }
+ 
+         const VAddr source{req.buffer + ((req.start_offset + req.offset) * sizeof(T))};
+-        Core::Memory::CpuGuestMemory<T, Core::Memory::GuestMemoryFlags::UnsafeRead> samples(
++        botw::audio::ReadSamples<T> samples(
+             memory, source, samples_to_decode);
+ 
+         if constexpr (std::is_floating_point_v<T>) {
+@@ -94,7 +95,7 @@
+ /// @param out_buffer - Output mix buffer to receive the samples.
+ /// @param req        - Information for how to decode.
+ /// @return Number of samples decoded.
+-static u32 DecodeAdpcm(Core::Memory::Memory& memory, std::span<s16> out_buffer, const DecodeArg& req) {
++static u32 DecodeAdpcm(botw::audio::RendererMemory& memory, std::span<s16> out_buffer, const DecodeArg& req) {
+     constexpr u32 SamplesPerFrame{14};
+     constexpr u32 NibblesPerFrame{16};
+ 
+@@ -131,7 +132,7 @@
+     }
+ 
+     const auto size{(std::max)((samples_to_process / 8U) * SamplesPerFrame, 8U)};
+-    Core::Memory::CpuGuestMemory<u8, Core::Memory::GuestMemoryFlags::UnsafeRead> wavebuffer(memory, req.buffer + position_in_frame / 2, size);
++    botw::audio::ReadSamples<u8> wavebuffer(memory, req.buffer + position_in_frame / 2, size);
+ 
+     auto context = req.adpcm_context;
+     auto header = context->header;
+@@ -211,7 +212,7 @@
+ ///
+ /// @param memory - Core memory to read data from.
+ /// @param args   - The wavebuffer data, and information for how to decode it.
+-void DecodeFromWaveBuffers(Core::Memory::Memory& memory, const DecodeFromWaveBuffersArgs& args) {
++void DecodeFromWaveBuffers(botw::audio::RendererMemory& memory, const DecodeFromWaveBuffersArgs& args) {
+     constexpr auto EndWaveBuffer = [](auto& voice_state, auto& wavebuffer, auto& index, auto& played_samples, auto& consumed) -> void {
+         voice_state.wave_buffer_valid[index] = false;
+         voice_state.loop_count = 0;
+--- a/src/audio_core/renderer/command/effect/capture.cpp
++++ b/src/audio_core/renderer/command/effect/capture.cpp
+@@ -7,7 +7,9 @@
+ #include "audio_core/adsp/apps/audio_renderer/command_list_processor.h"
+ #include "audio_core/renderer/command/effect/capture.h"
+ #include "audio_core/renderer/effect/aux_.h"
+-#include "core/memory.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ /**
+@@ -16,7 +18,7 @@
+  * @param memory   - Core memory for writing.
+  * @param aux_info - Memory address pointing to the AuxInfo to reset.
+  */
+-static void ResetAuxBufferDsp(Core::Memory::Memory& memory, const CpuAddr aux_info) {
++static void ResetAuxBufferDsp(botw::audio::RendererMemory& memory, const CpuAddr aux_info) {
+     if (aux_info == 0) {
+         LOG_ERROR(Service_Audio, "Aux info is 0!");
+         return;
+@@ -41,7 +43,7 @@
+  * @param update_count - If non-zero, send_info_ will be updated.
+  * @return Number of samples written.
+  */
+-static u32 WriteAuxBufferDsp(Core::Memory::Memory& memory, const CpuAddr send_info_,
++static u32 WriteAuxBufferDsp(botw::audio::RendererMemory& memory, const CpuAddr send_info_,
+                              const CpuAddr send_buffer, u32 count_max, std::span<const s32> input,
+                              const u32 write_count_, const u32 write_offset,
+                              const u32 update_count) {
+--- a/src/audio_core/renderer/command/effect/aux_.cpp
++++ b/src/audio_core/renderer/command/effect/aux_.cpp
+@@ -7,8 +7,9 @@
+ #include "audio_core/adsp/apps/audio_renderer/command_list_processor.h"
+ #include "audio_core/renderer/command/effect/aux_.h"
+ #include "audio_core/renderer/effect/aux_.h"
+-#include "core/core.h"
+-#include "core/memory.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ /**
+@@ -17,7 +18,7 @@
+  * @param memory   - Core memory for writing.
+  * @param aux_info - Memory address pointing to the AuxInfo to reset.
+  */
+-static void ResetAuxBufferDsp(Core::Memory::Memory& memory, const CpuAddr aux_info) {
++static void ResetAuxBufferDsp(botw::audio::RendererMemory& memory, const CpuAddr aux_info) {
+     if (aux_info == 0) {
+         LOG_ERROR(Service_Audio, "Aux info is 0!");
+         return;
+@@ -48,7 +49,7 @@
+  * @param update_count - If non-zero, send_info_ will be updated.
+  * @return Number of samples written.
+  */
+-static u32 WriteAuxBufferDsp(Core::Memory::Memory& memory, CpuAddr send_info_,
++static u32 WriteAuxBufferDsp(botw::audio::RendererMemory& memory, CpuAddr send_info_,
+                              [[maybe_unused]] u32 sample_count, CpuAddr send_buffer, u32 count_max,
+                              std::span<const s32> input, u32 write_count_, u32 write_offset,
+                              u32 update_count) {
+@@ -121,7 +122,7 @@
+  * @param update_count  - If non-zero, send_info_ will be updated.
+  * @return Number of samples read.
+  */
+-static u32 ReadAuxBufferDsp(Core::Memory::Memory& memory, CpuAddr return_info_,
++static u32 ReadAuxBufferDsp(botw::audio::RendererMemory& memory, CpuAddr return_info_,
+                             CpuAddr return_buffer, u32 count_max, std::span<s32> output,
+                             u32 read_count_, u32 read_offset, u32 update_count) {
+     if (count_max == 0) {
+--- a/src/audio_core/renderer/command/sink/circular_buffer.cpp
++++ b/src/audio_core/renderer/command/sink/circular_buffer.cpp
+@@ -8,7 +8,9 @@
+ 
+ #include "audio_core/adsp/apps/audio_renderer/command_list_processor.h"
+ #include "audio_core/renderer/command/sink/circular_buffer.h"
+-#include "core/memory.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+--- a/src/audio_core/renderer/command/performance/performance.cpp
++++ b/src/audio_core/renderer/command/performance/performance.cpp
+@@ -3,8 +3,9 @@
+ 
+ #include "audio_core/adsp/apps/audio_renderer/command_list_processor.h"
+ #include "audio_core/renderer/command/performance/performance.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+@@ -18,7 +19,7 @@
+     if (state == PerformanceState::Start) {
+         auto start_time_ptr{reinterpret_cast<u32*>(base + entry_address.entry_start_time_offset)};
+         *start_time_ptr =
+-            static_cast<u32>(processor.system->CoreTiming().GetGlobalTimeUs().count() -
++            static_cast<u32>(processor.system->clock_us() -
+                              processor.start_time - processor.current_processing_time);
+     } else if (state == PerformanceState::Stop) {
+         auto processed_time_ptr{
+@@ -27,7 +28,7 @@
+             reinterpret_cast<u32*>(base + entry_address.header_entry_count_offset)};
+ 
+         *processed_time_ptr =
+-            static_cast<u32>(processor.system->CoreTiming().GetGlobalTimeUs().count() -
++            static_cast<u32>(processor.system->clock_us() -
+                              processor.start_time - processor.current_processing_time);
+         (*entry_count_ptr)++;
+     }
+--- a/src/audio_core/adsp/apps/audio_renderer/command_list_processor.h
++++ b/src/audio_core/adsp/apps/audio_renderer/command_list_processor.h
+@@ -4,21 +4,18 @@
+ #pragma once
+ 
+ #include <span>
++#include <vector>
+ 
+ #include "audio_core/common/common.h"
+ #include "audio_core/renderer/command/command_list_header.h"
+ #include "common/common_types.h"
+ 
+-namespace Core {
+-namespace Memory {
+-class Memory;
+-}
+-class System;
+-} // namespace Core
+ 
+-namespace Kernel {
+-class KProcess;
+-}
++
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ namespace Sink {
+@@ -44,7 +41,7 @@
+      * @param size   - The size of the buffer.
+      * @param stream - The stream to be used for sending the samples.
+      */
+-    void Initialize(Core::System& system, Kernel::KProcess& process, CpuAddr buffer, u64 size,
++    void Initialize(botw::audio::RendererHost& system, botw::audio::RendererMemory& process, CpuAddr buffer, u64 size,
+                     Sink::SinkStream* stream);
+ 
+     /**
+@@ -52,6 +49,7 @@
+      *
+      * @param time - The maximum process time.
+      */
++    void Reset() noexcept;
+     void SetProcessTimeMax(u64 time);
+ 
+     /**
+@@ -78,9 +76,9 @@
+     u64 Process(u32 session_id);
+ 
+     /// Core system
+-    Core::System* system{};
++    botw::audio::RendererHost* system{};
+     /// Core memory
+-    Core::Memory::Memory* memory{};
++    botw::audio::RendererMemory* memory{};
+     /// Stream for the processed samples
+     Sink::SinkStream* stream{};
+     /// Header info for this command list
+@@ -110,7 +108,9 @@
+     /// The end processing time for this list
+     u64 end_time{};
+     /// Last command list string generated, used for dumping audio commands to console
+-    std::string last_dump{};
++    std::vector<botw::audio::MappedView> command_leases;
++    botw::audio::MappedView command_pin;
++    u8* commands_end{};
+ };
+ 
+ } // namespace ADSP::AudioRenderer
+--- a/src/audio_core/adsp/apps/audio_renderer/command_buffer.h
++++ b/src/audio_core/adsp/apps/audio_renderer/command_buffer.h
+@@ -6,9 +6,10 @@
+ #include "audio_core/common/common.h"
+ #include "common/common_types.h"
+ 
+-namespace Kernel {
+-class KProcess;
+-}
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::ADSP::AudioRenderer {
+ 
+@@ -18,7 +19,7 @@
+     u64 size{};
+     u64 time_limit{};
+     u64 applet_resource_user_id{};
+-    Kernel::KProcess* process{};
++    botw::audio::RendererMemory* process{};
+     bool reset_buffer{};
+     // Set by the DSP
+     u32 remaining_command_count{};
+--- a/src/audio_core/adsp/apps/audio_renderer/command_list_processor.cpp
++++ b/src/audio_core/adsp/apps/audio_renderer/command_list_processor.cpp
+@@ -2,22 +2,31 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <string>
++#include "common/scope_exit.h"
+ 
+ #include "audio_core/adsp/apps/audio_renderer/command_list_processor.h"
+ #include "audio_core/renderer/command/command_list_header.h"
+ #include "audio_core/renderer/command/commands.h"
+-#include "common/settings.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
+-#include "core/hle/kernel/k_process.h"
+-#include "core/memory.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::ADSP::AudioRenderer {
+ 
+-void CommandListProcessor::Initialize(Core::System& system_, Kernel::KProcess& process,
++void CommandListProcessor::Initialize(botw::audio::RendererHost& system_, botw::audio::RendererMemory& process,
+                                       CpuAddr buffer, u64 size, Sink::SinkStream* stream_) {
+     system = &system_;
+-    memory = &process.GetMemory();
++    Reset();
++    memory = &process;
++    std::vector<botw::audio::MappedView> leases;
++    botw::audio::MappedView pin;
++    botw::audio::require(memory->lease_all(leases));
++    botw::audio::require(memory->view(buffer, size, botw::audio::Access::ReadWrite, pin));
++    if (size < sizeof(Renderer::CommandListHeader))
++        throw botw::audio::PlatformError(botw::audio::Status::OutOfBounds);
++    command_leases = std::move(leases);
++    command_pin = std::move(pin);
++    commands_end = reinterpret_cast<u8*>(buffer) + size;
+     stream = stream_;
+     header = reinterpret_cast<Renderer::CommandListHeader*>(buffer);
+     commands = reinterpret_cast<u8*>(buffer + sizeof(Renderer::CommandListHeader));
+@@ -28,6 +37,13 @@
+     mix_buffers = header->samples_buffer;
+     buffer_count = header->buffer_count;
+     processed_command_count = 0;
++}
++
++void CommandListProcessor::Reset() noexcept {
++    command_pin.reset();
++    command_leases.clear();
++    commands = commands_end = nullptr;
++    command_count = processed_command_count = 0;
+ }
+ 
+ void CommandListProcessor::SetProcessTimeMax(const u64 time) {
+@@ -43,7 +59,9 @@
+ }
+ 
+ u64 CommandListProcessor::Process(u32 session_id) {
+-    const auto start_time_{system->CoreTiming().GetGlobalTimeUs().count()};
++    bool completed = false;
++    SCOPE_EXIT { if (!completed) Reset(); };
++    const auto start_time_{system->clock_us()};
+     const auto command_base{CpuAddr(commands)};
+ 
+     if (processed_command_count > 0) {
+@@ -53,15 +71,19 @@
+         current_processing_time = 0;
+     }
+ 
+-    std::string dump{fmt::format("\nSession {}\n", session_id)};
++    (void)session_id;
+ 
+     for (u32 index = 0; index < command_count; index++) {
++        if (commands > commands_end || static_cast<u64>(commands_end - commands) < sizeof(Renderer::ICommand))
++            throw botw::audio::PlatformError(botw::audio::Status::OutOfBounds);
+         auto& command{*reinterpret_cast<Renderer::ICommand*>(commands)};
++        if (command.size < sizeof(Renderer::ICommand) || command.size > static_cast<u64>(commands_end - commands))
++            throw botw::audio::PlatformError(botw::audio::Status::OutOfBounds);
+ 
+         if (command.magic != 0xCAFEBABE) {
+             LOG_ERROR(Service_Audio, "Command has invalid magic! Expected 0xCAFEBABE, got {:08X}",
+                       command.magic);
+-            return system->CoreTiming().GetGlobalTimeUs().count() - start_time_;
++            throw botw::audio::PlatformError(botw::audio::Status::InvalidArgument);
+         }
+ 
+         auto current_offset{CpuAddr(commands) - command_base};
+@@ -71,33 +93,26 @@
+                       "Command exceeded command buffer, buffer size {:08X}, command ends at {:08X}",
+                       commands_buffer_size,
+                       CpuAddr(commands) + command.size - sizeof(Renderer::CommandListHeader));
+-            return system->CoreTiming().GetGlobalTimeUs().count() - start_time_;
++            throw botw::audio::PlatformError(botw::audio::Status::InvalidArgument);
+         }
+ 
+-        if (Settings::values.dump_audio_commands) {
+-            command.Dump(*this, dump);
+-        }
+ 
+-        if (!command.Verify(*this)) {
+-            break;
+-        }
++        if (!command.Verify(*this))
++            throw botw::audio::PlatformError(botw::audio::Status::InvalidArgument);
+ 
+         if (command.enabled) {
+             command.Process(*this);
+-        } else {
+-            dump += fmt::format("\tDisabled!\n");
+         }
+ 
+         processed_command_count++;
+         commands += command.size;
+     }
+ 
+-    if (Settings::values.dump_audio_commands && dump != last_dump) {
+-        LOG_WARNING(Service_Audio, "{}", dump);
+-        last_dump = dump;
+-    }
+ 
+-    end_time = system->CoreTiming().GetGlobalTimeUs().count();
++    command_pin.reset();
++    command_leases.clear();
++    end_time = system->clock_us();
++    completed = true;
+     return end_time - start_time_;
+ }
+ 
+--- a/src/audio_core/adsp/apps/audio_renderer/audio_renderer.h
++++ b/src/audio_core/adsp/apps/audio_renderer/audio_renderer.h
+@@ -17,13 +17,12 @@
+ #include "common/polyfill_thread.h"
+ #include "common/thread.h"
+ 
+-namespace Core {
+-class System;
+-} // namespace Core
+ 
+-namespace Kernel {
+-class KProcess;
+-}
++
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ namespace Sink {
+@@ -53,7 +52,7 @@
+  */
+ class AudioRenderer {
+ public:
+-    explicit AudioRenderer(Core::System& system, Sink::Sink& sink);
++    explicit AudioRenderer(botw::audio::RendererHost& system, Sink::Sink& sink);
+     ~AudioRenderer();
+ 
+     /**
+@@ -67,6 +66,7 @@
+      * Stop the AudioRenderer.
+      */
+     void Stop();
++    void StopSession(s32 session_id);
+ 
+     void Signal();
+     void Wait();
+@@ -75,7 +75,7 @@
+     u32 Receive(Direction dir);
+ 
+     void SetCommandBuffer(s32 session_id, CpuAddr buffer, u64 size, u64 time_limit,
+-                          u64 applet_resource_user_id, Kernel::KProcess* process,
++                          u64 applet_resource_user_id, botw::audio::RendererMemory* process,
+                           bool reset) noexcept;
+     u32 GetRemainCommandCount(s32 session_id) const noexcept;
+     void ClearRemainCommandCount(s32 session_id) noexcept;
+@@ -95,7 +95,7 @@
+     void PostDSPClearCommandBuffer() noexcept;
+ 
+     /// Core system
+-    Core::System& system;
++    botw::audio::RendererHost& system;
+     /// The output sink the AudioRenderer will send samples to
+     Sink::Sink& sink;
+     /// The active mailbox
+--- a/src/audio_core/adsp/apps/audio_renderer/audio_renderer.cpp
++++ b/src/audio_core/adsp/apps/audio_renderer/audio_renderer.cpp
+@@ -6,66 +6,82 @@
+ 
+ #include <array>
+ #include <chrono>
++#include <utility>
++#include "worker.h"
+ 
+ #include "audio_core/adsp/apps/audio_renderer/audio_renderer.h"
+-#include "audio_core/audio_core.h"
+ #include "audio_core/common/common.h"
+ #include "audio_core/sink/sink.h"
+ #include "common/logging.h"
+ #include "common/thread.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::ADSP::AudioRenderer {
+ 
+-AudioRenderer::AudioRenderer(Core::System& system_, Sink::Sink& sink_)
++AudioRenderer::AudioRenderer(botw::audio::RendererHost& system_, Sink::Sink& sink_)
+     : system{system_}, sink{sink_} {}
+ 
+ AudioRenderer::~AudioRenderer() {
+-    Stop();
++    botw::audio::worker_boundary(system, [&] { Stop(); });
+ }
+ 
+ void AudioRenderer::Start() {
+-    CreateSinkStreams();
+-
+-    mailbox.Initialize(AppMailboxId::AudioRenderer);
+-
+-    main_thread = std::jthread([this](std::stop_token stop_token) { Main(stop_token); });
+-
+-    mailbox.Send(Direction::DSP, Message::InitializeOK);
+-    if (mailbox.Receive(Direction::Host) != Message::InitializeOK) {
+-        LOG_ERROR(Service_Audio, "Host Audio Renderer -- Failed to receive shutdown "
+-                                 "message response from ADSP!");
+-        return;
+-    }
+-    running = true;
++    if (running || main_thread.joinable()) throw botw::audio::PlatformError(botw::audio::Status::Busy);
++    try {
++        CreateSinkStreams();
++        mailbox.Initialize(AppMailboxId::AudioRenderer);
++        main_thread = std::jthread([this](std::stop_token stop_token) {
++            botw::audio::worker_boundary(system, [&] { Main(stop_token); });
++        });
++        mailbox.Send(Direction::DSP, Message::InitializeOK);
++        if (Receive(Direction::Host) != Message::InitializeOK)
++            throw botw::audio::PlatformError(botw::audio::Status::SystemError);
++        running = true;
++    } catch (...) {
++        system.fail(botw::audio::exception_status(std::current_exception()));
++        botw::audio::worker_boundary(system, [&] { Stop(); });
++        throw;
++    }
+ }
+ 
+ void AudioRenderer::Stop() {
+-    if (!running) {
+-        return;
+-    }
+-
+-    mailbox.Send(Direction::DSP, Message::Shutdown);
+-    if (mailbox.Receive(Direction::Host) != Message::Shutdown) {
+-        LOG_ERROR(Service_Audio, "Host Audio Renderer -- Failed to receive shutdown "
+-                                 "message response from ADSP!");
+-    }
+-    main_thread.request_stop();
+-    main_thread.join();
+-
++    botw::audio::Status first = botw::audio::Status::Ok;
++    if (main_thread.joinable()) {
++        if (system.failure() == botw::audio::Status::Ok) {
++            try {
++                mailbox.Send(Direction::DSP, Message::Shutdown);
++                if (Receive(Direction::Host) != Message::Shutdown)
++                    throw botw::audio::PlatformError(botw::audio::Status::SystemError);
++            } catch (...) { first = botw::audio::exception_status(std::current_exception()); system.fail(first); }
++        }
++        main_thread.request_stop();
++        main_thread.join();
++    }
++    running = false;
++    for (auto& processor : command_list_processors) processor.Reset();
++    PostDSPClearCommandBuffer();
+     for (auto& stream : streams) {
+-        if (stream) {
+-            stream->Stop();
+-            sink.CloseStream(stream);
+-            stream = nullptr;
+-        }
+-    }
+-    running = false;
++        auto* retired = std::exchange(stream, nullptr);
++        if (!retired) continue;
++        try { retired->Stop(); }
++        catch (...) { if (first == botw::audio::Status::Ok) first = botw::audio::exception_status(std::current_exception()); }
++        try { sink.CloseStream(retired); }
++        catch (...) { if (first == botw::audio::Status::Ok) first = botw::audio::exception_status(std::current_exception()); }
++    }
++    botw::audio::require(first);
++}
++
++void AudioRenderer::StopSession(s32 session_id) {
++    if (session_id < 0 || session_id >= MaxRendererSessions)
++        throw botw::audio::PlatformError(botw::audio::Status::InvalidArgument);
++    ClearRemainCommandCount(session_id);
++    if (streams[session_id]) streams[session_id]->Stop();
+ }
+ 
+ void AudioRenderer::Signal() {
+-    signalled_tick = system.CoreTiming().GetGlobalTimeNs().count();
++    signalled_tick = system.clock_ns();
+     Send(Direction::DSP, Message::Render);
+ }
+ 
+@@ -77,6 +93,8 @@
+                   "{}, got {}",
+                   Message::RenderResponse, msg);
+     }
++    botw::audio::require(system.failure());
++    if (msg != Message::RenderResponse) throw botw::audio::PlatformError(botw::audio::Status::SystemError);
+     PostDSPClearCommandBuffer();
+ }
+ 
+@@ -85,11 +103,14 @@
+ }
+ 
+ u32 AudioRenderer::Receive(Direction dir) {
+-    return mailbox.Receive(dir);
++    const auto message = mailbox.Receive(dir, system.failure_token());
++    botw::audio::require(system.failure());
++    if (!message) throw botw::audio::PlatformError(botw::audio::Status::Closed);
++    return message;
+ }
+ 
+ void AudioRenderer::SetCommandBuffer(s32 session_id, CpuAddr buffer, u64 size, u64 time_limit,
+-                                     u64 applet_resource_user_id, Kernel::KProcess* process,
++                                     u64 applet_resource_user_id, botw::audio::RendererMemory* process,
+                                      bool reset) noexcept {
+     command_buffers[session_id].buffer = buffer;
+     command_buffers[session_id].size = size;
+@@ -113,6 +134,7 @@
+ 
+ void AudioRenderer::ClearRemainCommandCount(s32 session_id) noexcept {
+     command_buffers[session_id].remaining_command_count = 0;
++    command_list_processors[session_id].Reset();
+ }
+ 
+ u64 AudioRenderer::GetRenderingStartTick(s32 session_id) const noexcept {
+@@ -136,7 +158,7 @@
+     // TODO: Create buffer map/unmap thread + mailbox
+     // TODO: Create gMix devices, initialize them here
+ 
+-    if (mailbox.Receive(Direction::DSP) != Message::InitializeOK) {
++    if (Receive(Direction::DSP) != Message::InitializeOK) {
+         LOG_ERROR(Service_Audio, "ADSP Audio Renderer -- Failed to receive initialize message from host!");
+         return;
+     }
+@@ -147,21 +169,17 @@
+     constexpr u64 max_process_time{2'304'000ULL};
+ 
+     while (!stop_token.stop_requested()) {
+-        auto msg{mailbox.Receive(Direction::DSP)};
++        auto msg{Receive(Direction::DSP)};
+         switch (msg) {
+         case Message::Shutdown:
+             mailbox.Send(Direction::Host, Message::Shutdown);
+             return;
+ 
+         case Message::Render: {
+-            if (system.IsShuttingDown()) {
+-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+-                mailbox.Send(Direction::Host, Message::RenderResponse);
+-                continue;
+-            }
++            botw::audio::require(system.failure());
+             std::array<bool, MaxRendererSessions> buffers_reset{};
+             std::array<u64, MaxRendererSessions> render_times_taken{};
+-            const auto start_time{system.CoreTiming().GetGlobalTimeUs().count()};
++            const auto start_time{system.clock_us()};
+ 
+             for (u32 index = 0; index < MaxRendererSessions; index++) {
+                 auto& command_buffer{command_buffers[index]};
+@@ -194,8 +212,11 @@
+                     max_time = (std::min)(command_buffer.time_limit, max_time);
+                     command_list_processor.SetProcessTimeMax(max_time);
+ 
+-                    if (index == 0) {
+-                        streams[index]->WaitFreeSpace(stop_token);
++                    const auto round_token = system.render_token();
++                    if (index == 0) streams[index]->WaitFreeSpace(round_token);
++                    if (round_token.stop_requested()) {
++                        command_buffer.remaining_command_count = command_list_processor.GetRemainingCommandCount();
++                        continue; // Real pause cancellation: preserve, do not consume this command list.
+                     }
+ 
+                     // Process the command list
+@@ -204,7 +225,7 @@
+                             command_list_processor.Process(index) - start_time;
+                     }
+ 
+-                    const auto end_time{system.CoreTiming().GetGlobalTimeUs().count()};
++                    const auto end_time{system.clock_us()};
+ 
+                     command_buffer.remaining_command_count =
+                         command_list_processor.GetRemainingCommandCount();
+--- a/src/audio_core/audio_render_manager.h
++++ b/src/audio_core/audio_render_manager.h
+@@ -13,9 +13,10 @@
+ #include "audio_core/renderer/system_manager.h"
+ #include "core/hle/service/audio/errors.h"
+ 
+-namespace Core {
+-class System;
+-}
++
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore {
+ struct AudioRendererParameterInternal;
+@@ -26,7 +27,7 @@
+  */
+ class Manager {
+ public:
+-    explicit Manager(Core::System& system);
++    explicit Manager(botw::audio::RendererHost& system);
+     ~Manager();
+ 
+     /**
+@@ -90,11 +91,12 @@
+ 
+ private:
+     /// Core system
+-    Core::System& system;
++    botw::audio::RendererHost& system;
+     /// Session ids, -1 when in use
+     std::array<s32, MaxRendererSessions> session_ids{};
+     /// Number of active renderers
+     u32 session_count{};
++    std::array<bool, MaxRendererSessions> live_ids{};
+     /// Lock for interacting with the sessions
+     mutable std::mutex session_lock{};
+     /// Regularly generates commands from the registered systems for the AudioRenderer
+--- a/src/audio_core/audio_render_manager.cpp
++++ b/src/audio_core/audio_render_manager.cpp
+@@ -5,13 +5,16 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "audio_core/audio_render_manager.h"
++#include "worker.h"
+ #include "audio_core/common/audio_renderer_parameter.h"
+ #include "audio_core/common/feature_support.h"
+-#include "core/core.h"
++
++#include "renderer_host.h"
++#include "renderer_event.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+-Manager::Manager(Core::System& system_)
++Manager::Manager(botw::audio::RendererHost& system_)
+     : system{system_}
+     , system_manager{std::make_unique<SystemManager>(system)}
+ {
+@@ -19,7 +22,7 @@
+ }
+ 
+ Manager::~Manager() {
+-    Stop();
++    botw::audio::worker_boundary(system, [&] { Stop(); });
+ }
+ 
+ void Manager::Stop() {
+@@ -43,17 +46,20 @@
+ 
+ s32 Manager::GetSessionId() {
+     std::scoped_lock l{session_lock};
+-    ASSERT(session_count <= session_ids.size());
+-    auto const session_id = session_ids[session_count];
+-    if (session_id >= 0) {
+-        session_ids[session_count] = -1;
+-        session_count++;
+-    }
+-    return session_id;
++    if (session_count >= session_ids.size()) return -1;
++    const auto id = session_ids[session_count];
++    if (id < 0 || static_cast<std::size_t>(id) >= live_ids.size() || live_ids[id])
++        throw botw::audio::PlatformError(botw::audio::Status::SystemError);
++    session_ids[session_count++] = -1;
++    live_ids[id] = true;
++    return id;
+ }
+ 
+ void Manager::ReleaseSessionId(const s32 session_id) {
+     std::scoped_lock l{session_lock};
++    if (!session_count || session_id < 0 || static_cast<std::size_t>(session_id) >= live_ids.size() ||
++        !live_ids[session_id]) throw botw::audio::PlatformError(botw::audio::Status::InvalidArgument);
++    live_ids[session_id] = false;
+     session_ids[--session_count] = session_id;
+ }
+ 

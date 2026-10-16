@@ -46,12 +46,22 @@ def parse_dependencies(path: Path) -> list[Path]:
 
 def classify_dependencies(dependencies: set[Path], staged: Path, component: Path,
                           sdk: Path, locked: dict, patched: dict,
-                          repository: Path | None = None, external: dict | None = None) -> tuple[list, list]:
+                          repository: Path | None = None, external: dict | None = None,
+                          additional: dict | None = None) -> tuple[list, list]:
     provenance, sdk_inputs = [], []
     staged, component, sdk = staged.resolve(), component.resolve(), sdk.resolve()
     for recorded in sorted(dependencies):
         path = recorded.resolve()
-        if staged in path.parents:
+        if additional and path in additional:
+            record = additional[path]
+            relative = record["repository_path"]
+            if not external or relative not in external:
+                raise ValueError("prepared source original absent from external lock: " + relative)
+            if sha(path) != record["compiled_sha256"]:
+                raise ValueError("prepared source lock mismatch: " + relative)
+            provenance.append(dict(record))
+            continue
+        elif staged in path.parents:
             original = "upstream/" + str(path.relative_to(staged))
             role = "patched-upstream" if str(path.relative_to(staged)) in patched else "original-upstream"
         elif component in path.parents:
@@ -160,6 +170,11 @@ def main() -> int:
         sdk_version = run("sdk-version", ["xcrun", "--sdk", args.sdk, "--show-sdk-version"]).stdout.strip()
         target = lock["targets"][args.sdk]
         receipt.update({"target": target, "actual_sdk_version": sdk_version})
+        audio_plan = None
+        if "audio_renderer" in lock:
+            from audio_sources import prepare as prepare_audio
+            audio_plan = prepare_audio(repository, output, lock["audio_renderer"], run)
+            receipt["audio_renderer"] = lock["audio_renderer"]
         staged = output / "staged"
         shutil.copytree(component / "upstream", staged)
         for patch in lock["patches"]:
@@ -183,6 +198,10 @@ def main() -> int:
                   "-I", str(repository / "native/botw_host")]
         if args.sdk == "iphoneos":
             common += ["-DDM_SHELL=1"]
+        if audio_plan:
+            clangxx = run("find-clangxx", ["xcrun", "--find", "clang++"]).stdout.strip()
+            for include in audio_plan["includes"]:
+                common += ["-I", str(include)]
         objects = []
         dependencies: set[Path] = set()
         object_dir = output / "objects"
@@ -190,6 +209,8 @@ def main() -> int:
         sources = [(str(staged / p), p) for p in upstream]
         sources += [(str(component / p), p) for p in lock["adapter_translation_units"]]
         sources += [(str(repository / p), p) for p in lock["external_translation_units"]]
+        if audio_plan:
+            sources += audio_plan["sources"]
         if args.sdk == "iphoneos":
             sources += [(str(frontend / p), "frontend/" + p) for p in
                         ("whole_main.m", "whole_frontend.m", "whole_front_state.c")]
@@ -202,9 +223,12 @@ def main() -> int:
             argv = common.copy()
             if relative.endswith(".m"):
                 argv += ["-fobjc-arc", "-fobjc-arc-exceptions"]
+            elif relative.endswith(".cpp"):
+                argv[0] = clangxx
+                argv += ["-std=gnu++23", "-DFMT_HEADER_ONLY=1"]
             elif relative.endswith(".c"):
                 argv += ["-std=gnu11"]
-            if not relative.endswith(".S"):
+            if not relative.endswith((".S", ".cpp")):
                 argv += ["-include", str(adapter / "whole_policy.h")]
             if relative == "dm/host/main.c" and args.sdk == "iphoneos":
                 argv += ["-Dmain=botw_whole_host_main"]
@@ -214,7 +238,8 @@ def main() -> int:
             receipt["compiled_translation_units"] = len(objects)
         receipt["compile_exit"] = 0
         provenance, sdk_inputs = classify_dependencies(dependencies, staged, component,
-                                                       Path(sdk), before, patched, repository, external)
+            Path(sdk), before, patched, repository, external,
+            audio_plan["dependencies"] if audio_plan else None)
         receipt["compiler_dependency_manifest"] = provenance
         receipt["actual_compiler_dependency_count"] = len(provenance)
         receipt["selected_sdk_dependencies"] = sdk_inputs
@@ -227,6 +252,8 @@ def main() -> int:
                 receipt["normal_operand_validation_references"][relative] = sorted(normal)
         executable = output / "whole-host-LINK-ONLY-DO-NOT-RUN"
         argv = common + [str(obj) for obj in objects]
+        if audio_plan:
+            argv[0] = clangxx
         for framework in lock["frameworks"][args.sdk]:
             argv += ["-framework", framework]
         run("whole-host-link-only", argv + ["-o", str(executable)])
@@ -256,6 +283,10 @@ def main() -> int:
                for p, row in external.items()):
             raise ValueError("external source changed during build")
         verify_staged(staged, before, patched)
+        if audio_plan:
+            from audio_sources import verify_inventory, verify_prepared
+            verify_inventory(repository, lock["audio_renderer"])
+            verify_prepared(audio_plan, lock["audio_renderer"])
         receipt["source_stable"] = True
     except Exception as error:
         receipt["error"] = str(error)
@@ -267,6 +298,10 @@ def main() -> int:
                               for p, row in external.items()))
                 if "staged" in locals() and staged.exists() and "patched" in locals():
                     verify_staged(staged, before, patched)
+                if "audio_plan" in locals() and audio_plan:
+                    from audio_sources import verify_inventory, verify_prepared
+                    verify_inventory(repository, lock["audio_renderer"])
+                    verify_prepared(audio_plan, lock["audio_renderer"])
                 receipt["source_stable"] = stable
             except (OSError, ValueError, KeyError):
                 receipt["source_stable"] = False

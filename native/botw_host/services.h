@@ -5,6 +5,7 @@
 #define BOTW_HOST_SERVICES_H
 #include <stddef.h>
 #include <stdint.h>
+#include "../../experiments/botw_audio_renderer/native/audren_host.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -100,6 +101,38 @@ typedef struct {
     int (*is_process_handle)(void *, uint32_t);
 } botw_services_kernel_api;
 void botw_services_set_kernel_api(botw_services *services, const botw_services_kernel_api *api);
+/* Real audren backend, registered once before audren:u is requested. Every
+ * callback runs outside the services/kernel registry locks. The table/context
+ * and canonical C ABI must outlive destroy_checked's successful acknowledgement.
+ * Callbacks must not reenter services. open validates the two actual kernel
+ * resources, pins/registers their backing, and creates a real event producer.
+ * Its owner contains all native/kernel resources; event_read is borrowed until
+ * close succeeds. Failed open normally leaves owner NULL. If cleanup cannot
+ * finish, return its owner so services can retain it for checked destruction.
+ * close succeeds only with host_status==0, valid==0, and *owner==NULL; failure
+ * keeps the owner and transport/domain reference available for retry.
+ * Work-size/open/update return the renderer's actual valid Nintendo Result.
+ * Controls/queries wrap original void/value methods: successful host completion
+ * has valid==0 and services constructs that method's documented Result 0.
+ * No callback may substitute silence, an invented event or unsupported success.
+ * Same-handle/session concurrent sends and borrowed cross-clone objects reject
+ * Busy explicitly; no pointer arena, backend, or owner token is freed in flight. */
+typedef struct {
+    void *context;
+    botw_audren_result (*get_work_buffer_size)(void *, const void *, size_t,
+        uint64_t *, char *, size_t);
+    botw_audren_result (*open)(void *, const void *, size_t, uint32_t, uint32_t,
+        uint64_t, uint64_t, void **, uint32_t *, char *, size_t);
+    botw_audren_result (*get_info)(void *, void *, botw_audren_session_info *, char *, size_t);
+    botw_audren_result (*start)(void *, void *, char *, size_t);
+    botw_audren_result (*stop)(void *, void *, char *, size_t);
+    botw_audren_result (*update)(void *, void *, const void *, size_t,
+        void *, size_t, void *, size_t, char *, size_t);
+    botw_audren_result (*set_rendering_time_limit)(void *, void *, uint32_t, char *, size_t);
+    botw_audren_result (*close)(void *, void **, char *, size_t);
+} botw_services_audren_api;
+int botw_services_set_audren_api(botw_services *services,
+    const botw_services_audren_api *api, char *error, size_t error_capacity);
 typedef struct botw_input botw_input;
 typedef struct botw_romfs botw_romfs;
 typedef struct botw_savefs botw_savefs;

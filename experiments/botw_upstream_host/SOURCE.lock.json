@@ -4,8 +4,8 @@
   "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
   "files": {
     "README.zh-CN.md": {
-      "sha256": "90d4048324e416e6c4fdb6133076366661fc8e5ea2271dd272ba6ccfc0648201",
-      "bytes": 6007,
+      "sha256": "95fe202ae723961c13c5209fcf8683d4c25e39af7553bca2b5cba05672b50170",
+      "bytes": 6837,
       "role": "thin-adapter-or-verification"
     },
     "UPSTREAM_UNITS.json": {
@@ -318,9 +318,14 @@
       "bytes": 1368,
       "role": "thin-adapter-or-verification"
     },
+    "scripts/audio_sources.py": {
+      "sha256": "8ab4191e135b7c3ae747640ab534e929bc41d066dcc61954a0ae8535c42b20df",
+      "bytes": 4126,
+      "role": "thin-adapter-or-verification"
+    },
     "scripts/build_link_only.py": {
-      "sha256": "1fbadc85b29d60ca60b8db78f74632e6d00c0a6cb00224222faded037ad83021",
-      "bytes": 15337,
+      "sha256": "b322ed622c97a68e31f399e41f4aff610185c032ae242e5c9e80a55178c773ef",
+      "bytes": 17176,
       "role": "thin-adapter-or-verification"
     },
     "scripts/read_swforce_registry.py": {
@@ -346,6 +351,11 @@
     "tests/host_policy_probe.c": {
       "sha256": "160190c621c05aecdd098ce0705eae9cd8060430870ebae5062c12e0840fcd4c",
       "bytes": 4008,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/services_audren_probe.cpp": {
+      "sha256": "95d0d21d3106a7d1675bbde17e471ddc4d806d10bc21b9881a8275c7342b39cd",
+      "bytes": 20957,
       "role": "thin-adapter-or-verification"
     },
     "tests/shader_v8_control_probe.c": {
@@ -1298,13 +1308,13 @@
       "role": "existing-complete-resource-provider"
     },
     "native/botw_host/services.c": {
-      "sha256": "4f5ff6b04e2b1c0c7f221da57204f2f7a47a5f7caa1c65a88019c68e68cd65fe",
-      "bytes": 135727,
+      "sha256": "272ddf08be9f4f953b19904be8a7c287425e21c151e58b43e28daf5581ee3b8e",
+      "bytes": 154138,
       "role": "existing-complete-resource-provider"
     },
     "native/botw_host/services.h": {
-      "sha256": "ee6f277975ea31a0385a02fef2b7af1736dc245f664d1e444a537dc6b9e8650b",
-      "bytes": 13608,
+      "sha256": "4ab7b0946c19b11475cc3ce8f82307c4041d0ae5ec49275732355cbb7d35fe96",
+      "bytes": 15911,
       "role": "existing-complete-resource-provider"
     },
     "native/botw_resources/savefs.c": {
@@ -1326,6 +1336,2103 @@
       "sha256": "56f50a0597497eb5a1860ad7d58e517b0d01e6955001d02bafaf4eb5a4d06b2e",
       "bytes": 5015,
       "role": "existing-complete-resource-provider"
+    },
+    "experiments/botw_audio_renderer/CMakeLists.txt": {
+      "sha256": "45c2dfa6e2b14db6f5360ffab811e8bec8cdec496732de459a3ef52efb4fba3e",
+      "bytes": 2389,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/DEPENDENCIES.lock.json": {
+      "sha256": "d03405dfea28cbbd970401894cf4fd576e78145c4d88dbf67b5d01cf3bcbcc79",
+      "bytes": 5207,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/NATIVE.lock.json": {
+      "sha256": "e3b41a3de1e1fc125160b199df43dedc516997b869a5e91d78585ca9a0374367",
+      "bytes": 8541,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/README.md": {
+      "sha256": "165ecfbe922d4fec62b5a58cccb67d2a5982cfbf2d57a090679713d9c74b91f3",
+      "bytes": 4982,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/SOURCE.lock.json": {
+      "sha256": "bf9a925daf4f704cbb994e047c9e66246dedcbac72d6b8cdb69aa388625cf121",
+      "bytes": 57352,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/adapter/native_sink_stream.cpp": {
+      "sha256": "862a9cc09e756c023b485cff7bf410b8ea09818440653609b783c183f83585c2",
+      "bytes": 15272,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/adapter/native_sink_stream.h": {
+      "sha256": "bc59db65540d49996a108024df600500d3e519e7e20915351e22736f4a1709aa",
+      "bytes": 1155,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/licenses/eden/GPL-2.0-or-later.txt": {
+      "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+      "bytes": 17337,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/licenses/eden/GPL-3.0-or-later.txt": {
+      "sha256": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e",
+      "bytes": 34670,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/CMakeLists.txt": {
+      "sha256": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585",
+      "bytes": 8513,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/README.md": {
+      "sha256": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76",
+      "bytes": 7661,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/audren_host.cpp": {
+      "sha256": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc",
+      "bytes": 16667,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/audren_host.h": {
+      "sha256": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc",
+      "bytes": 6468,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/common_ports.cpp": {
+      "sha256": "14eeb8428ccd639dff1ac2e32fc5e8793999d03932a2284913c2752e8c6bf8fa",
+      "bytes": 2697,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_event.cpp": {
+      "sha256": "dfcf5cc4a63351f181bd6cb4fdbacd38e132451c1689082d767094b34a8ae621",
+      "bytes": 935,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_event.h": {
+      "sha256": "01213fd876b437a6907fe592df9b75bba10bb5ff70803faed95f3af6564a63a6",
+      "bytes": 811,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_host.cpp": {
+      "sha256": "597eadac7796883b6937394bdabaf6c9432b93fd41998b21f8442281b445314f",
+      "bytes": 6363,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_host.h": {
+      "sha256": "096cad29d15a1d7014f20993850d531bc5853d7e0e16e6cc3603b2ae434ac35f",
+      "bytes": 2413,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_memory.cpp": {
+      "sha256": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4",
+      "bytes": 7637,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/renderer_memory.h": {
+      "sha256": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868",
+      "bytes": 3171,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/wire.cpp": {
+      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
+      "bytes": 5811,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/wire.h": {
+      "sha256": "a89673593b6fafab3e51906f9393f441dd58d0071649f06a83b77829ffb12b11",
+      "bytes": 821,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/native/worker.h": {
+      "sha256": "1f687dd228841c01b5ce32ee3561ab70dfca5f6b26547b2fa568f04be0c41423",
+      "bytes": 698,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/patches/native-host.patch": {
+      "sha256": "79e0a59b1d28c4fb1fab6f31ce7593014f703ffe8ac973136e1632ee220f52d1",
+      "bytes": 56448,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/patches/native-pcm-sink.patch": {
+      "sha256": "8a679f42f43c65220bfaad8b0e199132dc6961edae6517bad449aa16d739083d",
+      "bytes": 8532,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/patches/pool-memory.patch": {
+      "sha256": "4db537387ecacfd28a6440f518a292f50cf23e781b87a171d69b2679a6c74535",
+      "bytes": 11021,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/platform/pcm_output.cpp": {
+      "sha256": "71438d8550b736ad894e081ce7dd06e7dae131d0185c490527392c579306a809",
+      "bytes": 1965,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/platform/pcm_output.h": {
+      "sha256": "be4905005f5b7ca1b2b1d116d35cfe315430a33aa6b629ad61d68d77a91ba466",
+      "bytes": 1319,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/platform/platform.cpp": {
+      "sha256": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65",
+      "bytes": 12225,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/platform/platform.h": {
+      "sha256": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b",
+      "bytes": 4431,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/provenance/eden-cpmfile.json": {
+      "sha256": "e1a263a2825e1204a243998cd5254c600201a0d3ed9b542f7a25ef99f2bdb157",
+      "bytes": 14535,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/audren_host_probe.cpp": {
+      "sha256": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592",
+      "bytes": 9160,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/native_sink_stream_probe.cpp": {
+      "sha256": "f55513466e436c23d5a88e043d2da96ac6817df62448059630c8a6c93ef5e035",
+      "bytes": 17191,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/pcm_mock_au.c": {
+      "sha256": "86165ff9fd0cc85b1b3b403cebefdbcf7031d4657e8cbb1eb30236def33a4cd8",
+      "bytes": 2566,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/pcm_output_probe.cpp": {
+      "sha256": "1cdb3b3e77bf010a39f22641fe2c5827ff96a2d714f45328123a4af08c54dde6",
+      "bytes": 3419,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/platform_probe.cpp": {
+      "sha256": "e24449eb1629cf98a0773b7a05b85a855e577b6b8af8f203eaf4e9e1084f8c38",
+      "bytes": 7191,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/pool_mapper_probe.cpp": {
+      "sha256": "69f8a371ac452c6283ea7725f4ec940b660f17721ac9521f880569d1d813d39d",
+      "bytes": 3326,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_adsp_pause_probe.cpp": {
+      "sha256": "667a9b718af71f062fc0d4de8f8f79c34b7042049341bdeef2e3c73a79ec1f36",
+      "bytes": 3718,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_event_probe.cpp": {
+      "sha256": "06bfebb5c4e59e0827f508c8e66a6915a04b4f62ef88251cb9cbfed7209e4aea",
+      "bytes": 1904,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_failure_probe.cpp": {
+      "sha256": "d47f1ad84720722fab07f1374d70ce449623652d9efa5fbf5eb83b0d7c92e227",
+      "bytes": 1120,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_host_probe.cpp": {
+      "sha256": "2cbbf6f99bf4eece3f51a6668de1e4c6ff60b170a2bd5b0e811c812307a1ef4b",
+      "bytes": 2335,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_memory_probe.cpp": {
+      "sha256": "35582deb9c8164123cd9a882eefa12c6a866d62c56ab73ba89af860d73ae970b",
+      "bytes": 3454,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_pause_probe.cpp": {
+      "sha256": "ad40602c407f78607fcb77febc2829d44ddb5f1bdd480f0a3e61977e2a5c5a23",
+      "bytes": 2198,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_pcm_mock.c": {
+      "sha256": "842a8804e165f46c797266b4b1e46d3a6c78ddeafa5d5ee0de2aee823ddb9028",
+      "bytes": 2064,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_update_probe.cpp": {
+      "sha256": "7483d270322df1ca84888c90fa43d11cf9e0767189adde9ccaa0522d79da629d",
+      "bytes": 6962,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/renderer_worker_probe.cpp": {
+      "sha256": "4fceed359344b6209f415efee23b17929024edf7e6308868beda1a3857278fe7",
+      "bytes": 3015,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/test_native_pcm_sink.py": {
+      "sha256": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02",
+      "bytes": 10630,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/test_native_platform.py": {
+      "sha256": "0e260ffaa605d6bbba34e0c2dfb4cc145049de3d35cdba1901347b7e41837c49",
+      "bytes": 5041,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/test_renderer_memory.py": {
+      "sha256": "67025f2f80f29297a34b1c9061e29dec9e7a316c0dfff2208b116e53aaa5f125",
+      "bytes": 1526,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/test_renderer_module.py": {
+      "sha256": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817",
+      "bytes": 2171,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/test_renderer_ports.py": {
+      "sha256": "1dd913c708a2245d9772e679247375da8e8d636158ce98d39223e86dfab686fa",
+      "bytes": 4322,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tests/wire_probe.cpp": {
+      "sha256": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d",
+      "bytes": 2411,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tools/prepare_eden.py": {
+      "sha256": "4e7afdc60b8b2f250357e31b4082f632e2bddcff3eb27e56578c4de480072da4",
+      "bytes": 3583,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tools/vendor_from_receipts.py": {
+      "sha256": "e76f4b07a84e5903a1d8806b03f3dc41b4b60957ba6559e116c6229d95a67963",
+      "bytes": 2773,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/tools/verify_native.py": {
+      "sha256": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522",
+      "bytes": 2327,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/CMakeLists.txt": {
+      "sha256": "4ac86a4906bfa588753c41b120dc8a42a7b1dab3e407e962c8521e4c51b8a262",
+      "bytes": 26549,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/LICENSE.txt": {
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "bytes": 35149,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/CMakeLists.txt": {
+      "sha256": "dd84e22af1d1001571eaf4ee05ddb6afb954384eb78a056bbda247338678c73a",
+      "bytes": 8960,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/adsp.cpp": {
+      "sha256": "d234d5f128ef0ec5d8560ef43802c43aff82f6b36ad5d50c7d84dbc4b79f2e55",
+      "bytes": 877,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/adsp.h": {
+      "sha256": "fe9ee42f295e68f17ed438fc95a08e9185b90423ee7bcd3162e6d7a7af4febcd",
+      "bytes": 1838,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/audio_renderer/audio_renderer.cpp": {
+      "sha256": "07a2204be18b65f93d69e0e040e69817d3f1479e092d9eac7e328dc05deda91e",
+      "bytes": 8109,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/audio_renderer/audio_renderer.h": {
+      "sha256": "253dd31dd8185847797db4b1906204b885e9841df96b89a7fe95cf6f53bdbec8",
+      "bytes": 3168,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_buffer.h": {
+      "sha256": "4cdebe84b746a42850befb8a7c9bb1cc9f6227bbe31fb1506eb65a2c2980b827",
+      "bytes": 616,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_list_processor.cpp": {
+      "sha256": "713dc9c65fb49da4e69ed685adabf338152b109c94752a7a179f0f4fdcf1a95e",
+      "bytes": 3527,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_list_processor.h": {
+      "sha256": "f504a90b8b21c73a6666c78b604d6bb8f3b53dd3cfcc942b84831cc0b1d8b281",
+      "bytes": 3063,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_decode_object.cpp": {
+      "sha256": "8dcf11f7314529c8c842383f1840566ef0c3c47f2d419a503994a83999d29e6d",
+      "bytes": 3583,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_decode_object.h": {
+      "sha256": "770c7bfc0a30069e20321e871166b90c1f1e1d65428f38942e5b3478e32dfb0e",
+      "bytes": 1148,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_decoder.cpp": {
+      "sha256": "89c4fcdb62a3fa8ebce9bdc5d151187658958f1c395b4317965fbdab31c09b0b",
+      "bytes": 11265,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_decoder.h": {
+      "sha256": "affffc2c5b96c971bcb86a0134b812c8a20ceddb52bd61980c3da89ec94bd2a4",
+      "bytes": 2586,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_multistream_decode_object.cpp": {
+      "sha256": "05a1137787e90b606386f8b23d4415f64e6046ddba3822eec4c1023babc26f3c",
+      "bytes": 3864,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/opus_multistream_decode_object.h": {
+      "sha256": "8ba451a0d6c5bfb5e8ce09b4a3c237ab07bfee58d2b5f448cdd94f4c94dfeda0",
+      "bytes": 1340,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/apps/opus/shared_memory.h": {
+      "sha256": "8e65138ac1e1c450c42840b58a3d5bfeb4b7e3449c77a9af5389295d60bbc35a",
+      "bytes": 543,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/adsp/mailbox.h": {
+      "sha256": "9adde9681775bded9b0bfe84a168f0f64e2f64ff3281099e11dd55c2db4d05f5",
+      "bytes": 1256,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_core.cpp": {
+      "sha256": "116f0294e57c5ce920d2468eb497c70d477940997fb2387404cc9f01f508f386",
+      "bytes": 1385,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_core.h": {
+      "sha256": "802272e9b0944682548a67327986ea07e3d97beeab79ddbe7d00b3de4428c134",
+      "bytes": 1641,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_event.cpp": {
+      "sha256": "204a097daf3e75e5e8f29db03e35bd705bbf09ca3fff8fda4ebd2f2204459530",
+      "bytes": 1604,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_event.h": {
+      "sha256": "88e69709f1b09970e0a8bd5a0cff3fb2fefc3408ffc414919263ac2d1c68b4e6",
+      "bytes": 2671,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_in_manager.cpp": {
+      "sha256": "56c7a304ce246344cad9fda3d997cb98cf709059946e44e504e534302db34472",
+      "bytes": 2717,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_in_manager.h": {
+      "sha256": "daa7996e2f2184a715583ce36144858042069d90eb828a0c235908a0c6d59482",
+      "bytes": 2319,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_manager.cpp": {
+      "sha256": "512cfe5d37f8a8a178f2e8977b76be5e6fed17153dbef50d14866f54a75e696c",
+      "bytes": 2597,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_manager.h": {
+      "sha256": "19ae4b13ea260f13f5855fe324fd648a31d37de6811f095b7c0b26713a5d3c2e",
+      "bytes": 2239,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_out_manager.cpp": {
+      "sha256": "1c5eb2b1efbb072c554d93c47fbfc5127fc4790e9520f89c310b04f2876a265b",
+      "bytes": 2400,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_out_manager.h": {
+      "sha256": "64fff64b0c051bfb1a2391820437d11e0fdb82445391337be4d1242d1b96dcb9",
+      "bytes": 2241,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_render_manager.cpp": {
+      "sha256": "ed29f22c5c399a52c0358111b796513eac4999367d120ff8bf1b9f35d5b4818c",
+      "bytes": 1869,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/audio_render_manager.h": {
+      "sha256": "10b7e1325d3fe609b0dab49a2c9f7ba229fe82054e632a542f6d613b3c9caa16",
+      "bytes": 2693,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/common/audio_renderer_parameter.h": {
+      "sha256": "2c54f371ffd0dc2239d5b6dcbd727999b593e4ea696d0dac7b3a0410c3a01b33",
+      "bytes": 1696,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/common/common.h": {
+      "sha256": "2d7b9971c628aa65c9146c5d476b9b865c087745d0a12fb2089c2c1be1c051ad",
+      "bytes": 3483,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/common/feature_support.h": {
+      "sha256": "002f46bb6d323e8cc087406e4449e71e15ca8dc0788e0678dd9642dbf1a1d9dc",
+      "bytes": 4372,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/common/wave_buffer.h": {
+      "sha256": "d2ee8aeba445ead2a3de85d797ae77003782569b6cca7b148793734d3288d5ca",
+      "bytes": 670,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/common/workbuffer_allocator.h": {
+      "sha256": "1d9d5e9b23614518f3f396b0267365bef5760f7ce0f251f4ff5146e4791fd6f6",
+      "bytes": 2901,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/device/audio_buffer.h": {
+      "sha256": "e9cfdec356ccee95350e0602d399f72ba3c49f92b3746e34e49b14fe5122c81e",
+      "bytes": 626,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/device/audio_buffers.h": {
+      "sha256": "373f7183477b81482d94235a6ba0a03e04e62df52b80a7bfb94baf0b4481820d",
+      "bytes": 9657,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/device/device_session.cpp": {
+      "sha256": "6a4a5fd739a0d451230e5b3c0950e23bcb92e2619f937427e600587063599245",
+      "bytes": 4491,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/device/device_session.h": {
+      "sha256": "83ac6de64a41b7b8904b39de456b24d130d3a48e870fc942cc9afcde00a0caae",
+      "bytes": 4531,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/in/audio_in.cpp": {
+      "sha256": "6b7c2730be07f204b382e5632f8bf111fb286d41569968cf3855701420ebc0cf",
+      "bytes": 2496,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/in/audio_in.h": {
+      "sha256": "347a98aadc3a8a2c4613635061cb13ab1dbf178f4f3619fe393dca14c0402347",
+      "bytes": 3242,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/in/audio_in_system.cpp": {
+      "sha256": "7643c5a06471935a62d5104098b1b7eb0593813451923266234dc429079e88b2",
+      "bytes": 5892,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/in/audio_in_system.h": {
+      "sha256": "8c92f702b6fed6fe2cbc57101c6f13a907e948b60d851257a0a3110977e0166c",
+      "bytes": 6758,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/decoder.cpp": {
+      "sha256": "48d42784905291aef291f2140dea80d065d6a319809c3dd5dbd4c8b1231b9c81",
+      "bytes": 7558,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/decoder.h": {
+      "sha256": "9d6218f189db2e7be4aaf33015631111f55fe0904af62597df104abf9f16a9d0",
+      "bytes": 1919,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/decoder_manager.cpp": {
+      "sha256": "a1901b1c734c9d1cda7f4851b5c6654ccb3c530b12ccf960094c895e31123090",
+      "bytes": 4124,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/decoder_manager.h": {
+      "sha256": "4d7a924ed9947a0b71e108bdced7969291feeb95b8e583ab50c19fc1ac4f8d19",
+      "bytes": 1320,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/hardware_opus.cpp": {
+      "sha256": "73f7950eef7baef835e2bde7780f853b0f559ebc7872fe050c91f6748d58a26a",
+      "bytes": 11604,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/hardware_opus.h": {
+      "sha256": "82d95b9172afc8a5729a2f9ba31ae2e0cbecd1c49162055da5401da5f4f344a2",
+      "bytes": 2329,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/opus/parameters.h": {
+      "sha256": "69592a19d82301739cde2e8359f8e2f6ab0c868f75ecc66d1521c7f3a1f2debc",
+      "bytes": 1878,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/out/audio_out.cpp": {
+      "sha256": "91dae89e1f2009c92f74453b20f4a577c30deb5d444556432157cb88811b3f08",
+      "bytes": 2541,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/out/audio_out.h": {
+      "sha256": "577b078497e9021e0449a8815c36fb7fc0b76f156b6ce340abafd8f3170cfcf1",
+      "bytes": 3260,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/out/audio_out_system.cpp": {
+      "sha256": "3fe7e00a224e85d509a40e97d042ce973767b3ebc6294a781ffa7f6b9792e00f",
+      "bytes": 6340,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/out/audio_out_system.h": {
+      "sha256": "eb5c6e9d493cef3ecdb16e379162dceca57f531b6040d0ae1eda92128b6efb05",
+      "bytes": 6275,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/audio_device.cpp": {
+      "sha256": "3c695b7e266c62b8d30741ce2830a45cfae8398ab46d6bd91d8aed7002ca8d0e",
+      "bytes": 2511,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/audio_device.h": {
+      "sha256": "7147d81c8a0bb7086c6282f482834fca137976aef5c70d2e874684c1d3694f55",
+      "bytes": 2038,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/audio_renderer.cpp": {
+      "sha256": "59acc4e7b6dbfb1f6399be0c37810e5a53214188d324623211918400c589b44c",
+      "bytes": 2147,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/audio_renderer.h": {
+      "sha256": "b7f1d001e5a28cabc75cf4ecfee9fb50460cbfb094d562aa8e8f33e7845754ad",
+      "bytes": 2886,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/behavior/behavior_info.cpp": {
+      "sha256": "522323033d594fbb5264b42e2d1eeb0a46fd83bb9e115adef967bd4f5dee1d0c",
+      "bytes": 7596,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/behavior/behavior_info.h": {
+      "sha256": "6f4c31f640a6c252a08339543912f828b14fa84a3bb8e9b45f3d37d61c0a6413",
+      "bytes": 12676,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/behavior/info_updater.cpp": {
+      "sha256": "cdfcc6c956a010bf049a25ee6acdbaaedb89c2eb86129e69834c6ca65e80f49a",
+      "bytes": 27760,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/behavior/info_updater.h": {
+      "sha256": "242e13725c8a112f30d1974ee4734cd7ff8894ecf271f7af26ba49fe687d7ea0",
+      "bytes": 6829,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_buffer.cpp": {
+      "sha256": "26d23f21727c6f6612b47bc712c5df2a13cc1ef8166cdb7f5d9303057b30406f",
+      "bytes": 32795,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_buffer.h": {
+      "sha256": "88db1ab94b69e9bac13fe8fe2c98809985ff9aa114b427b2b173d792993f3e9c",
+      "bytes": 24416,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_generator.cpp": {
+      "sha256": "005761a8ede148b23142274486a163173391ca8a26be4dc2585153fbf90eba4e",
+      "bytes": 38613,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_generator.h": {
+      "sha256": "58439b696e945d459fd8f3de7d308fcd8c389d9bffaa26c58d4f6902734fdfc8",
+      "bytes": 13051,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_list_header.h": {
+      "sha256": "40d390791f4e7490114541dec920a71e5dc9cd61e4f5bc1a776f657941c3c232",
+      "bytes": 456,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_processing_time_estimator.cpp": {
+      "sha256": "3a1fb890316b1d9882e7331a914b2e1ea0148c3774548aea26704a5afdddae1d",
+      "bytes": 129543,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/command_processing_time_estimator.h": {
+      "sha256": "54a1b3e0dc9b0e24f1e42bd02b89944e55fd4079dac5c7cf02efea57488a8277",
+      "bytes": 14921,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/commands.h": {
+      "sha256": "99f04d8a6552b8d40dc351eb7dc40e82b9cdefc53eab09351d6cfffd54175d57",
+      "bytes": 1710,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/adpcm.cpp": {
+      "sha256": "c8d6f0e4f1de9f1e39a86a7ccb4819fe5cca454a8218821e6a7ac8c055bc71d8",
+      "bytes": 3747,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/adpcm.h": {
+      "sha256": "307f4fb73270eb0e4f61ed61b76c91927ee337171db04726204f67f42b173f59",
+      "bytes": 3973,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/decode.cpp": {
+      "sha256": "18a750c857d13f3a997491cbd5ec6e4480ed037152a6a3d47bbdab35fa47119f",
+      "bytes": 15728,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/decode.h": {
+      "sha256": "be6eb0d250443ec067fb0689ee9bd60eb000e6cfea2b8d1055e8c7a69208e0e4",
+      "bytes": 1479,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/pcm_float.cpp": {
+      "sha256": "afc768c86a2469ac228a1895c9ea932fa54a37632285f9efa7d33bd18cdd6f1a",
+      "bytes": 3954,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/pcm_float.h": {
+      "sha256": "e0490df641e2a4f1f432748fc41aeebf3a9b9ddb6f473321a7ae12d0e5ea385d",
+      "bytes": 3858,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/pcm_int16.cpp": {
+      "sha256": "e877a20cd67a677055146760c0848bb4406b52e7cbfedfb2abcbbb71d1d8f572",
+      "bytes": 3970,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/data_source/pcm_int16.h": {
+      "sha256": "0f1b28b5afe224765660ee3dcd15aeb538576fe09eff42073f0210b4291612a3",
+      "bytes": 3833,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/aux_.cpp": {
+      "sha256": "ef97429f51f41299121d517e37799bc5066ad8fdafe89d3fb3f2670db7e953c7",
+      "bytes": 8058,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/aux_.h": {
+      "sha256": "3ac2b84ca24f0b296cd89a281d1945943804f4d031a905331398cb867de5aec6",
+      "bytes": 1943,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/biquad_filter.cpp": {
+      "sha256": "94fa729264605ebd963daa2b57b1232845ddca0546352a413923a344fd70dfca",
+      "bytes": 6542,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/biquad_filter.h": {
+      "sha256": "e65e3092d93323384ca6793c1067267c61c4ed99fcb8ea6162edda4f878ee2d2",
+      "bytes": 3474,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/capture.cpp": {
+      "sha256": "66b95490846fb0be64a08c5e28103ee40488972f7707da0e0bd07f67e018c6ef",
+      "bytes": 5647,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/capture.h": {
+      "sha256": "db7cd2e051c21df53043ae0069f3ec88e38b176e6d48870e628e6cb1dcf4a235",
+      "bytes": 1774,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/compressor.cpp": {
+      "sha256": "3fe2f868c576cd3bcbde844d652ced944716fd2952cd85d68d8a9e64d52c8599",
+      "bytes": 5984,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/compressor.h": {
+      "sha256": "a6d4b08882a5e7e19bae4f32c2b6c5c8f79c222d98c69887625e3312443bd065",
+      "bytes": 1813,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/delay.cpp": {
+      "sha256": "95bfac51081fc231a99f479b1a383f018f558315bdf9a72dfadaef25f09ed8e6",
+      "bytes": 11006,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/delay.h": {
+      "sha256": "b5e6b9b33dc0a61a1f3b7e988d346d83d5d5c85a24d4143e851a9f0a32a5ff52",
+      "bytes": 1856,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/i3dl2_reverb.cpp": {
+      "sha256": "89c07d48180d515ab83f558fc184f584dfbf10632995b3aa188606c63a0c67b3",
+      "bytes": 19657,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/i3dl2_reverb.h": {
+      "sha256": "b37cbc490b2ce9be3751cf8fa428d6dfc7966e38af6d3ab7b29ea19156df18af",
+      "bytes": 1866,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/light_limiter.cpp": {
+      "sha256": "9e83d6c1502f5d473f9da5f1f28665c15f8d4758e34fb6d572f1672bad25d645",
+      "bytes": 10599,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/light_limiter.h": {
+      "sha256": "611442dc1a8e3f7e324940360c2a81c5cf5d208fe3820ad0695502b9ea5d74a3",
+      "bytes": 3259,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/multi_tap_biquad_filter.cpp": {
+      "sha256": "c68623a3be1c545ed463e2114f1cc4052a8d6a6a843d13657650a632d2fa3119",
+      "bytes": 2263,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/multi_tap_biquad_filter.h": {
+      "sha256": "acf092ad4bb4ca1fa2b12facb8d9e24c9da4a429307bb54efe1dfad723e0cb43",
+      "bytes": 2127,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/reverb.cpp": {
+      "sha256": "58629ff05d459d34823e41c0c2a9368687b10bf435440c10a8efe104467b4155",
+      "bytes": 21818,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/effect/reverb.h": {
+      "sha256": "ce50e213f8d7b7a7fb32ce07023de690902bfd239767373a8445d4a3305a1d43",
+      "bytes": 1907,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/icommand.h": {
+      "sha256": "101ccf431d63b23b2c4b2e855c6f46c50e1bbb01c4fe1005e48f523c7861b1db",
+      "bytes": 2777,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/clear_mix.cpp": {
+      "sha256": "2db9446db70fb58e446056f320382c2692a48ae0d38e55e85b1ad8a1cd107bcc",
+      "bytes": 801,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/clear_mix.h": {
+      "sha256": "3463d6b4bea022ace42241c8647b7377f18df3a71c688b1f979d7977b5c3f9cb",
+      "bytes": 1322,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/copy_mix.cpp": {
+      "sha256": "9543ff8b675ee7135737ac81f12f8ed252c1f4c393d9c241a4b1e424ff403192",
+      "bytes": 1174,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/copy_mix.h": {
+      "sha256": "fd36fc457083d9517a2a0ff05c8b83cfad75b8a0c1223c471b26939c0b286390",
+      "bytes": 1402,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/depop_for_mix_buffers.cpp": {
+      "sha256": "eb8f739da265bee6320755de7cab583508578e6380e00fe42cc170b1cafdadb3",
+      "bytes": 2668,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/depop_for_mix_buffers.h": {
+      "sha256": "def47bd8e9ebaee7c60abf5b259bd6e885647760f5385ff3796c897fdedf864d",
+      "bytes": 1709,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/depop_prepare.cpp": {
+      "sha256": "46f04d10a9e5ddb2f2ce9d29854751e6d09d8fe26e65f67d552286eff8ea8145",
+      "bytes": 1191,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/depop_prepare.h": {
+      "sha256": "0a1bf769e1b72a672ac5277bf1c6342a64f4c4aa4a5536a5d2d05ec40a006368",
+      "bytes": 1632,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix.cpp": {
+      "sha256": "e31ac072ca4dd895f9a6d912a6ef397383aa15208eb7c5e079a0632975513d18",
+      "bytes": 2398,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix.h": {
+      "sha256": "781cc36e657bb389270f81547829e5e7ac3d633b74d378b90b0f099cda85b125",
+      "bytes": 1542,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix_ramp.cpp": {
+      "sha256": "f64b5a1c1c6459032952fc67a3f21b048e5853ce27e333829776d74160eebc4e",
+      "bytes": 3224,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix_ramp.h": {
+      "sha256": "da67b3a581ed3dd3089903fa7d4833a799a374d8a270ec4219bd3328d4881347",
+      "bytes": 2369,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix_ramp_grouped.cpp": {
+      "sha256": "e37f793918acb0d1545a934e9d392302b5290d5a3e9bc926accf44914cebe768",
+      "bytes": 2741,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/mix_ramp_grouped.h": {
+      "sha256": "db3349a2f934eda4e0e5d7ad34885057a9e8b5559c041e6aaf2939ff23dec210",
+      "bytes": 2006,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/volume.cpp": {
+      "sha256": "fc5c451e9b73fa5a93c5a97d39085356ba89278f307f10b7bbc673b9d071570f",
+      "bytes": 2706,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/volume.h": {
+      "sha256": "e163f1676f81c62e6dc5283274f60a0e491517792765092917bdb916d408fcc9",
+      "bytes": 1487,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/volume_ramp.cpp": {
+      "sha256": "fb21089cb16888133686fe3363e6eb5779253f222434875be812603a862e465a",
+      "bytes": 3465,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/mix/volume_ramp.h": {
+      "sha256": "23c4acba2b257da5caa9f012433d017569e47793aa2d42dfe1afe398c1a69931",
+      "bytes": 1630,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/performance/performance.cpp": {
+      "sha256": "e87885d5707e5cdf292b0715da816c0bd64ecbe8b98e7e98dae04ad449bf305f",
+      "bytes": 1736,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/performance/performance.h": {
+      "sha256": "689701bc1808fe10b9fcb58354848cc0f4b4cd4d3a658ed67519ce0a2674afcb",
+      "bytes": 1589,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.cpp": {
+      "sha256": "e7aa6a25d67fe505565739794a6d4bc810b9bc0970343dc208ef774c17f2099f",
+      "bytes": 3460,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.h": {
+      "sha256": "1b8c685fc55078b7cb34dbe6f7173eb63f753ea2a0c99d96f47e9d6b4d77b062",
+      "bytes": 1748,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/resample.cpp": {
+      "sha256": "16da8c73c9560f141f509bb6cb7d46bc3fb72d592d1959e35254dbcb2beeec49",
+      "bytes": 74848,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/resample.h": {
+      "sha256": "5a9fb778f09eeb7eedacbad6fb56e91df74e17c199bfea50a0aa4e3fb414b29a",
+      "bytes": 1119,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/upsample.cpp": {
+      "sha256": "dc32cee5ed6b197f9b96190cee1f5798ac318fc59276b4a0be6bc824dd9f2497",
+      "bytes": 9610,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/resample/upsample.h": {
+      "sha256": "fac0a67650c056a0ba835f45f4ea6ee7a75a212041923fffda06babccfba76bd",
+      "bytes": 1792,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/sink/circular_buffer.cpp": {
+      "sha256": "2a905f9e4850b58cfa26ab51bba926d5dc212fa73bfc41fedd6452c2e9097231",
+      "bytes": 2001,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/sink/circular_buffer.h": {
+      "sha256": "319a365315c2aa55eddafaca17907097b52f0442a7fa9e78684e961b09cc066a",
+      "bytes": 1564,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/sink/device.cpp": {
+      "sha256": "c835aefbc6edd6e582cf82755ef480d2280fef7d06935ad7e304cac3f84c803e",
+      "bytes": 2100,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/command/sink/device.h": {
+      "sha256": "e736d1e73504214367b1fbc733f062f81d10df005b6b907309627b3ad2d2a3dd",
+      "bytes": 1615,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/aux_.cpp": {
+      "sha256": "98d5664933c2a479d8c4be7689b47e76a83edab3ac22aad7511792bb5a631ff4",
+      "bytes": 3724,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/aux_.h": {
+      "sha256": "9f461249716b7c8ec54e4d946c52a00cb6c8b50fc7b0b2d559c924a253061e22",
+      "bytes": 4727,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/biquad_filter.cpp": {
+      "sha256": "ab3b8d26cb820954bfe82a17c0c33689d8fb433325a62ebaa62431dfad731756",
+      "bytes": 2545,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/biquad_filter.h": {
+      "sha256": "cb87d91c6b9b29277805e27a10fb763d4d24e761201e84087a4ef16dd63f7d3f",
+      "bytes": 3054,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/buffer_mixer.cpp": {
+      "sha256": "1d90b02e4d6966f8a8a90380a4823f04ba6e2f868a12c428a5f3295b1bb378b7",
+      "bytes": 1820,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/buffer_mixer.h": {
+      "sha256": "100b69dbd7b3cee557bcd34720ed5e619166b2c3e7319c811bba08ab9e8be322",
+      "bytes": 2750,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/capture.cpp": {
+      "sha256": "26aa0f54e369e277f6b79e2019829e92c77651583c2b92b974bca92906ddd0e8",
+      "bytes": 3202,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/capture.h": {
+      "sha256": "74d6ee8aa9556c906a814547a9223e0b16bc59c47f44b72d277187ee51dc62e6",
+      "bytes": 2133,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/compressor.cpp": {
+      "sha256": "abf6f9e783b2aa71d8d2d66baae471c4be20c61eee608cb1b240d7af4bb6e95e",
+      "bytes": 1373,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/compressor.h": {
+      "sha256": "81c599f3fc8b4050978e4a3767acffbf400d30ef1db9a93c8f3292fb36ccedf1",
+      "bytes": 3569,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/delay.cpp": {
+      "sha256": "ce0baecffba25d4b5285bcd239c63959fb10833402dbac3bd0ec82426008d69a",
+      "bytes": 3472,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/delay.h": {
+      "sha256": "cb01dcb63354939ca9c9bd21978153afc6ee4a93c11ec0a906d420ebaf98f70e",
+      "bytes": 5057,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/effect_context.cpp": {
+      "sha256": "dc012ee3dcb3132e2bd2f3c09fd0214786e8b41829d4f1ba2e61e85ac4dfe6e9",
+      "bytes": 1332,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/effect_context.h": {
+      "sha256": "e0e3ad8b4183b4bd6c1c36d4e6bb6dfa3de65a745bdfc3b861d576408001725a",
+      "bytes": 2575,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/effect_info_base.h": {
+      "sha256": "175de1512e9b5d73cfb3d5144364e5fa81ae129102295c6380f5e11ce5b98ea9",
+      "bytes": 12398,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/effect_reset.h": {
+      "sha256": "ed6bb121be919f3d4878046ff89fb5554b36ea1c0dcd6b96de755baf083e3fb9",
+      "bytes": 2898,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/effect_result_state.h": {
+      "sha256": "a89c9ed7c292ff04c4a5681112bedb0bde7f3364a91c34ff5969a61b4ff61aa7",
+      "bytes": 307,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/i3dl2.cpp": {
+      "sha256": "db26b4486efce3594e3e2785b68f3e125e52f4591d74ae291a87cf20c227c3f3",
+      "bytes": 3560,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/i3dl2.h": {
+      "sha256": "54d2b1ccb836295ab79d33546e678cac9ff38b8a637cefbd10a1125ae7e2e465",
+      "bytes": 6864,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/light_limiter.cpp": {
+      "sha256": "7f018c2445906534a21244e913273aa3e1e826a089c0494669aa30f781e4fb7a",
+      "bytes": 3126,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/light_limiter.h": {
+      "sha256": "e8b3bd1aca5db69148f7408ec82bff15b1331c27e0df84c445943ed211af5309",
+      "bytes": 5177,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/reverb.cpp": {
+      "sha256": "7b74ff7c615004f21b296c14957ed1fa1ff05d8286f39185796c9d4d48294d2f",
+      "bytes": 3481,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/effect/reverb.h": {
+      "sha256": "b7463664ee97e47f9c92975f1e889141bf37843982bfae3e8b5e003ffa2a5791",
+      "bytes": 6563,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/memory/address_info.h": {
+      "sha256": "ef77e4fcc3c7109a904212b8034113acdf89a41923053b68f6f803d30a090b00",
+      "bytes": 3033,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/memory/memory_pool_info.cpp": {
+      "sha256": "06bf5310080d9e22787854512d06fc15b66217077492753e913e54b0d9f99a42",
+      "bytes": 1357,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/memory/memory_pool_info.h": {
+      "sha256": "f7e9459aac6f03b30469a7fca5d7c64c46365bdb099aaf0dae73068c35e6b294",
+      "bytes": 4318,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/memory/pool_mapper.cpp": {
+      "sha256": "ec07ec112a79aa5059eb3796650e24cd0f4e89ba2525c4e7659f79e6338763ed",
+      "bytes": 8231,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/memory/pool_mapper.h": {
+      "sha256": "6aee73a1c9ea600d9335dc3dc8ce77f9a9612511306ad4a7227ce1d55cdf6dde",
+      "bytes": 6404,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/mix/mix_context.cpp": {
+      "sha256": "3ab1e3ba0f2d4d062ea3ebf5b6cdc8d5033470ecdfdcc9f01b9a08bae4fff6cb",
+      "bytes": 4312,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/mix/mix_context.h": {
+      "sha256": "a2d3fdf31acb515e2f04b3ce1f7eb3e3b2ff1f0586fe4e87312cbaa4cee84566",
+      "bytes": 3676,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/mix/mix_info.cpp": {
+      "sha256": "d9a8e90ece045500d1691ab34a22637c03218f07f9722529f90c12e910c49ed1",
+      "bytes": 4377,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/mix/mix_info.h": {
+      "sha256": "843dce78ef39f8717a507c7ccb2bacd72431e245c49a2ff9f3ac1537df1ba843",
+      "bytes": 4320,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/nodes/bit_array.h": {
+      "sha256": "c0bb714440ba801a0e6fc14d6f2583d681e2a17f9b63eb852d5ad3ee42e131e5",
+      "bytes": 511,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/nodes/edge_matrix.cpp": {
+      "sha256": "79c383d89508e1eb337cd6fd3e7c5fa7a37fbc6eb5bb31b29ecb7d4a479b4905",
+      "bytes": 1083,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/nodes/edge_matrix.h": {
+      "sha256": "0cde8f9ce8567fedf99b1675feae563f1a2d4f8a39abbfb7afed1e2d1a045b8c",
+      "bytes": 2194,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/nodes/node_states.cpp": {
+      "sha256": "d7cd2c9febf3e7132f7b648655c2b956cb7c5ba2ba6cf066952ef318b8e09d06",
+      "bytes": 4258,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/nodes/node_states.h": {
+      "sha256": "ec0142ff556133ee912a6b5215047b090196887fbb4c97f6020cd84ee59638ab",
+      "bytes": 5095,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/detail_aspect.cpp": {
+      "sha256": "059a2d16fe8c0f65665e197981af86cf0cbeeda696859678eddd0d96c8df9d8f",
+      "bytes": 1125,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/detail_aspect.h": {
+      "sha256": "6f7e7edacf6ea0ce6a3e7191c7168888bdc9c53111b48d8af2324dc1cb4604c6",
+      "bytes": 1031,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/entry_aspect.cpp": {
+      "sha256": "cfabdc2cfc0f9af1bf561d9221a86f23773872c2dfb2389919c5c822980633b9",
+      "bytes": 978,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/entry_aspect.h": {
+      "sha256": "9626929faa54b40c7e0dc4e89b1a288d2142879321b6bc306d845174216a1774",
+      "bytes": 968,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_detail.h": {
+      "sha256": "5da2f463bb840af9da41558deec927640142b96ea3c19c73404d3f187dedaaf1",
+      "bytes": 1243,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_entry.h": {
+      "sha256": "b63c09263c3cb6a321d44bdc7edef3c63493086c51af815f8e475a19a1c0711c",
+      "bytes": 959,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_entry_addresses.h": {
+      "sha256": "5645bafcc4ee1686d515d77bbcca0a14430ce4554f3add909b2161a53821bb18",
+      "bytes": 419,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_frame_header.h": {
+      "sha256": "49f6ed4d4e3e225debc502379bbd21e22a2520253ede430b22834e6529099991",
+      "bytes": 1130,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_manager.cpp": {
+      "sha256": "e257d83651d0452c43dc63e91406b2c04ba53a9451fbf2cb4202b827b85eae2e",
+      "bytes": 29330,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/performance/performance_manager.h": {
+      "sha256": "bdd4844f1e4152852791b7012c94076fbe98a55bb2b6cd1a892132bf9217d5d8",
+      "bytes": 11078,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/circular_buffer_sink_info.cpp": {
+      "sha256": "18d4181a3dac4c1c189900a323268b33e6f4664bba41f2c88b1f04cbe283220b",
+      "bytes": 2722,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/circular_buffer_sink_info.h": {
+      "sha256": "4bd35462063770ec88fc81b0429242ccfc0a7f262e7b5025a6115a9e7dcfba8c",
+      "bytes": 1278,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/device_sink_info.cpp": {
+      "sha256": "b3342d7f7c765226d621d629ca3485e6d26666a11febbfce4af45f9068ae8930",
+      "bytes": 1868,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/device_sink_info.h": {
+      "sha256": "788a6dea01a993134d4d63a59fa39985948656bc0516b1735b612f26e1501575",
+      "bytes": 1168,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/sink_context.cpp": {
+      "sha256": "6b6fc9fed191b04c2eb5e2978c73ca6567a55393dabf48749139127faba56779",
+      "bytes": 534,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/sink_context.h": {
+      "sha256": "4dfb64cf776f1f2dad5071bdd9406114392e3a05ac1a112bffc56a400fe3ae5d",
+      "bytes": 1061,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/sink_info_base.cpp": {
+      "sha256": "eedef281a1a1d8ca0ae51474c39bae62ee922c02fede3b193fa4d6d0569a2055",
+      "bytes": 1273,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/sink/sink_info_base.h": {
+      "sha256": "1e9e5581b5f9042b92e576e265ff03674eb4f3a35af42b72b07dcca820f38d35",
+      "bytes": 5372,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_context.cpp": {
+      "sha256": "5cb36dfd1a62bbab942dfdc0b3294950c88313501d6c7e084a7e4c3e8a4d3191",
+      "bytes": 11868,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_context.h": {
+      "sha256": "6923d5a2ddf33b0c22534bfbe4066be1bb4012381a2fe15507f83c7e58731b0a",
+      "bytes": 6862,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_destinations_data.cpp": {
+      "sha256": "769faa10586c1eda4ef45112f7f08f3921342423ad1a26347ff203f1b0992251",
+      "bytes": 2640,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_destinations_data.h": {
+      "sha256": "ad76332295c00a3fdcd505c65f991ce6104723e2d92e5b8f9dad55a59e1ff0aa",
+      "bytes": 6637,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_info.cpp": {
+      "sha256": "6fcced46ad7a9d943bb041de394b4ececdfb36eb514ab8c0f4dac15370d092c8",
+      "bytes": 2033,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/splitter/splitter_info.h": {
+      "sha256": "2a2a7b729510734a404949f8262f949c2d3ea3416fd11603dc6ae0d37e7c97c6",
+      "bytes": 2820,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/system.cpp": {
+      "sha256": "8243b7e3c61f84aacfe7928c4b38f854267207530718a5c8e2e8d1bdfdc5e0fd",
+      "bytes": 30848,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/system.h": {
+      "sha256": "92e81d5b393a78891d74f979cd0508c15c0fae8c8630567bd7b1a6031eec519a",
+      "bytes": 10547,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/system_manager.cpp": {
+      "sha256": "c08ece05cb6133a31678bfd8f11488bcf82e35f944ac3899704a7a3d509b98ab",
+      "bytes": 2321,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/system_manager.h": {
+      "sha256": "8e3fab01da8f8736b05eeefd7531f72dc61e7ca02984c11e67755d0ddc6ca28b",
+      "bytes": 2212,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/upsampler/upsampler_info.cpp": {
+      "sha256": "4f76ea6db3b93766cd2d2be6c3644aed822aa433b10453e80633d35d02467794",
+      "bytes": 245,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/upsampler/upsampler_info.h": {
+      "sha256": "69f1db63e23a9e02469b4f558cbb7b1d05311a2e03638a96c89d033e23e77a1c",
+      "bytes": 978,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/upsampler/upsampler_manager.cpp": {
+      "sha256": "d86258873f400b0e6b44dee3a3b1dc88c4c3f2daf0c95830df1634057b395a6f",
+      "bytes": 1199,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/upsampler/upsampler_manager.h": {
+      "sha256": "041e5c69e66f02dd760350ffebb27613770c0233ec6f79aef030c69d3274a6a2",
+      "bytes": 1096,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/upsampler/upsampler_state.h": {
+      "sha256": "79a8f98c20cef048bb8fbcdc8692861eb0dd9025f0ef47dd31a65e05a214f817",
+      "bytes": 1222,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_channel_resource.h": {
+      "sha256": "1a5216109c714cb1c092f92c370aa85ed37060c8c273a77e0ce88838a109aea4",
+      "bytes": 1037,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_context.cpp": {
+      "sha256": "0b2f8318d4d63ea7a44de0782e9184ce9d2a51e36f50950052d3372938301a30",
+      "bytes": 2854,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_context.h": {
+      "sha256": "242f0210cf65ffc010b4fddcc6bee2442770c0cf17edbc866d001c9f70b1aee2",
+      "bytes": 3802,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_info.cpp": {
+      "sha256": "2168749b65ef2878ecccade45916c4a2c5defb17291117bc09be3a4e06c33c29",
+      "bytes": 15146,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_info.h": {
+      "sha256": "cb53462b85c76a3a73a42e8f4e402b298d4ef3f86ec05becfd2e6f7bd30281fe",
+      "bytes": 16161,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/renderer/voice/voice_state.h": {
+      "sha256": "033773c2ab250535929e1da7cf5e5324fc49c2b9f5d5be58ddfd0c2671116fba",
+      "bytes": 1898,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/cubeb_sink.cpp": {
+      "sha256": "d43b349fbde1c758a4b4ad09aee8fe67e3bb2804c02fa47533c8bef1a2731381",
+      "bytes": 14530,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/cubeb_sink.h": {
+      "sha256": "916705ef4fe632c34eaffccfb1e05e9c63de162f5f49dc2c9b86c4f17eca56a6",
+      "bytes": 3246,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/null_sink.h": {
+      "sha256": "9a74f0a0a85f6811496e145f2c36881b42f7077821c51dad90a64df8a544da8e",
+      "bytes": 1812,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sdl3_sink.cpp": {
+      "sha256": "8fa57e8ceacef92387d32d4a3ab8965a687a19d15154a8646761ce0aac536dcf",
+      "bytes": 11707,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sdl3_sink.h": {
+      "sha256": "90f42fc0a5afa63841eb6aa88b8652618d509b679b6a32fceb93acbc19c59aa0",
+      "bytes": 3129,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sink.h": {
+      "sha256": "789fd32ff0c5b9128468d4ea713a5afc636c56cc55ec18a3944319951049d500",
+      "bytes": 3114,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sink_details.cpp": {
+      "sha256": "d5e82b08a52df33a37d3e7a0e715e979904e08d2f29959d8c05e038fb5833394",
+      "bytes": 5271,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sink_details.h": {
+      "sha256": "29249c8deae410f0a0ab0aa0bc05c66f8af40e19dafbcea5bc50a99463dd78fe",
+      "bytes": 1164,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sink_stream.cpp": {
+      "sha256": "f58977c270aaa8602e79c4144b236e06ea03389f3458c31d5f12e7ce954aa5aa",
+      "bytes": 9857,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/audio_core/sink/sink_stream.h": {
+      "sha256": "84ca36746dbc122ccf6617f28ccf3a2831a6d327550a57369d5740a0cbff2055",
+      "bytes": 7495,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/alignment.h": {
+      "sha256": "5be249150c43cdd3fc275657ae18d55a1655ffbf4f41b25ab044353fee8c9036",
+      "bytes": 3469,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/assert.h": {
+      "sha256": "7d81ef1250fc85103a2211bd3b0a30fbec91f25dc98b89d1eaa0bbba0cfc2d23",
+      "bytes": 3446,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/bit_field.h": {
+      "sha256": "efb2e6a9f1226f8ee326413af9dc50913a54c18cbd1deab14b2899dc5da5dc0a",
+      "bytes": 6451,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/bounded_threadsafe_queue.h": {
+      "sha256": "c996b005f429f9db4fd1c7af209ecc01e37db51651f832f69995cbadeb1666d5",
+      "bytes": 7185,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/common_funcs.h": {
+      "sha256": "76f40ba19e202247a3b8cc5453f2a98e41ac66fba232794251a1cd1ab6d76e17",
+      "bytes": 6690,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/common_types.h": {
+      "sha256": "94721ea08145c100d8196e8f5ea98344e76cd9daf65855de107b24b212d7fcbb",
+      "bytes": 2129,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/concepts.h": {
+      "sha256": "aa6379af981233218cb2b8b88608a3f25bbd9a1b91b31560750c9fd8ec70300a",
+      "bytes": 493,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/fixed_point.h": {
+      "sha256": "0a26b95ce65c168a2f159fc4f90fa027c9da437c5478ff12671e5d70c359a74c",
+      "bytes": 20184,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/log_classes.inc": {
+      "sha256": "150f466fb802202261ba776be5bcc0c5aea2165d18bf8582caef7340e29d4766",
+      "bytes": 1920,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/logging.h": {
+      "sha256": "948517395f74f9eacec9b2b702ac37daa9df95a3a98edd0663d071a273be4449",
+      "bytes": 6327,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/polyfill_thread.h": {
+      "sha256": "07a94fe7a84f29c76f8c903f77cc33364893e1385ad5b621960142c10768bc33",
+      "bytes": 783,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/ring_buffer.h": {
+      "sha256": "74331f44196163e8623f84613e47e614a4bec3bf0863060fe65239186fc1abc2",
+      "bytes": 3855,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/scope_exit.h": {
+      "sha256": "936b4f9c76a625625f13b266cae2b734e47254518a9dcd07eb7755d6ea2ea98e",
+      "bytes": 1917,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/scratch_buffer.h": {
+      "sha256": "4dc5c6f83f6aec237c0ddcd232c76ad8225608d3b938ba98ea32149e5c8b44c2",
+      "bytes": 4067,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/settings.h": {
+      "sha256": "abaa919eb866d2f324d5ae1f85428205ae2fa67cfe4b6bddfa22dffb4c96e4d0",
+      "bytes": 53657,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/settings_common.h": {
+      "sha256": "136c5efc637dd509631f5b709ce56cd1ffe6e1df2416c3ef5442e3321b9a9d18",
+      "bytes": 8178,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/settings_enums.h": {
+      "sha256": "74e32734644ff5031e9c234cb452d6eea4070a9ecbe8d7630df0f3e07888d590",
+      "bytes": 9680,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/settings_input.h": {
+      "sha256": "f1724fc48fad815c1265999981c7bd268d8917742e1cd96ef78fde08ccd4d7ed",
+      "bytes": 6683,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/settings_setting.h": {
+      "sha256": "48f6b7f725d2401ed41eb5a59824f0d0a95931caf199c424839965c98cd342e9",
+      "bytes": 17627,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/swap.h": {
+      "sha256": "446585330e0c964e2063b1cc8e3cd9c686f89afd81236986857dbb3d6446e349",
+      "bytes": 16879,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/common/thread.h": {
+      "sha256": "d85556df49451f28a6771a9b9e71731649e2fd01035afc31f3eabe2689a454ff",
+      "bytes": 3007,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/core/hle/result.h": {
+      "sha256": "40febde3d6f26651bfca7853f7e8dc9bc73fb59549a0b5cf50e023bd0013f89b",
+      "bytes": 15775,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/eden/src/core/hle/service/audio/errors.h": {
+      "sha256": "6f775042c945ba1f5cc1714679ead7da82106837401481a7bb357c4c3bf63db5",
+      "bytes": 1982,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/LICENSE": {
+      "sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+      "bytes": 1431,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/args.h": {
+      "sha256": "6e0bf8ffbd904e6ef525cdce8e6e00312ce5d14f616cea5d88132606ca0384c4",
+      "bytes": 7199,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/base.h": {
+      "sha256": "73ba80ca15c02d6826a611d1651ca6f1495ec127815e257a5d6552d6f6ad313e",
+      "bytes": 105031,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/chrono.h": {
+      "sha256": "f8e2a69bd97bc5b90c9af7fb87e010775b695d487a77e8d8cbe624e57bd2f9bf",
+      "bytes": 77454,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/color.h": {
+      "sha256": "f88bf0c4833caed3a7f01b6d633c7b259741a26119e84c651ac1e31cfc980b72",
+      "bytes": 24145,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/compile.h": {
+      "sha256": "636c13842acce0b42b378e65fe67a69e5635e8225c9701975e5b326a97be5cb8",
+      "bytes": 20493,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/core.h": {
+      "sha256": "b2b6692145b11c7c2774db106078c97575a47d18e80c7783c68566475325ebb4",
+      "bytes": 187,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/format-inl.h": {
+      "sha256": "e7baf108b84e89b29915bb35733540f8f4262cd8f4b41c15754eed4d2f185f61",
+      "bytes": 81008,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/format.h": {
+      "sha256": "b4c65350362bf40e76a8e6b450587d912c7081b6eafeafaf3d7bcf53153e17fc",
+      "bytes": 162666,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/os.h": {
+      "sha256": "45d4e84be4e84a128442f04eda06e1305c8e02c61166854a3b8b348194d35da5",
+      "bytes": 12860,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/ostream.h": {
+      "sha256": "742416a6a88286609887fa512c4423820764aafbb723a42a825f3193cb52b4f0",
+      "bytes": 5027,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/printf.h": {
+      "sha256": "afddb422a86125e04a7260bb0f0ae3423ea8d591181ed5d4ef60b7a5d068993a",
+      "bytes": 19991,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/ranges.h": {
+      "sha256": "ccaf61c9b5937e0fa97737fb047121c5fca9db34de516b8edfc1d913583e3c8e",
+      "bytes": 28126,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/std.h": {
+      "sha256": "3f06cdf32774b9e6915e9762411f5f4de8b8ba5660adccbdea514be7f0b23826",
+      "bytes": 23532,
+      "role": "complete-verified-audio-component"
+    },
+    "experiments/botw_audio_renderer/vendor/fmt/include/fmt/xchar.h": {
+      "sha256": "f0903d522c64faaee2c374a0b2063ac3e43d0b5006dfd3411f0e5dccd8ff6062",
+      "bytes": 13098,
+      "role": "complete-verified-audio-component"
     }
+  },
+  "audio_renderer": {
+    "component": "experiments/botw_audio_renderer",
+    "upstream_commit": "d8c6c59b679867d2595fdc0953df033475e23380",
+    "files": {
+      "CMakeLists.txt": "45c2dfa6e2b14db6f5360ffab811e8bec8cdec496732de459a3ef52efb4fba3e",
+      "DEPENDENCIES.lock.json": "d03405dfea28cbbd970401894cf4fd576e78145c4d88dbf67b5d01cf3bcbcc79",
+      "NATIVE.lock.json": "e3b41a3de1e1fc125160b199df43dedc516997b869a5e91d78585ca9a0374367",
+      "README.md": "165ecfbe922d4fec62b5a58cccb67d2a5982cfbf2d57a090679713d9c74b91f3",
+      "SOURCE.lock.json": "bf9a925daf4f704cbb994e047c9e66246dedcbac72d6b8cdb69aa388625cf121",
+      "adapter/native_sink_stream.cpp": "862a9cc09e756c023b485cff7bf410b8ea09818440653609b783c183f83585c2",
+      "adapter/native_sink_stream.h": "bc59db65540d49996a108024df600500d3e519e7e20915351e22736f4a1709aa",
+      "licenses/eden/GPL-2.0-or-later.txt": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+      "licenses/eden/GPL-3.0-or-later.txt": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e",
+      "native/CMakeLists.txt": "8bfa3a8a46e6a25b9d61dea9c044695a0f6fd73b4d4960977bd67149ad0fa585",
+      "native/README.md": "45629c834d58a64469b089cde43b6da0231c60e56628f6864350907392206e76",
+      "native/audren_host.cpp": "5cea07d10ab7ef3e34bb1a50522963ce49713a16116ca95896a75c5ea36d49cc",
+      "native/audren_host.h": "664f157b21495b45c457411ba256eb510c41b3eac49bce58ca2f23a5f785bbbc",
+      "native/common_ports.cpp": "14eeb8428ccd639dff1ac2e32fc5e8793999d03932a2284913c2752e8c6bf8fa",
+      "native/renderer_event.cpp": "dfcf5cc4a63351f181bd6cb4fdbacd38e132451c1689082d767094b34a8ae621",
+      "native/renderer_event.h": "01213fd876b437a6907fe592df9b75bba10bb5ff70803faed95f3af6564a63a6",
+      "native/renderer_host.cpp": "597eadac7796883b6937394bdabaf6c9432b93fd41998b21f8442281b445314f",
+      "native/renderer_host.h": "096cad29d15a1d7014f20993850d531bc5853d7e0e16e6cc3603b2ae434ac35f",
+      "native/renderer_memory.cpp": "5cd700c49d5b51dfb00b4958d064af98f135dfe35f12a92029f14958f559e7f4",
+      "native/renderer_memory.h": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868",
+      "native/wire.cpp": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
+      "native/wire.h": "a89673593b6fafab3e51906f9393f441dd58d0071649f06a83b77829ffb12b11",
+      "native/worker.h": "1f687dd228841c01b5ce32ee3561ab70dfca5f6b26547b2fa568f04be0c41423",
+      "patches/native-host.patch": "79e0a59b1d28c4fb1fab6f31ce7593014f703ffe8ac973136e1632ee220f52d1",
+      "patches/native-pcm-sink.patch": "8a679f42f43c65220bfaad8b0e199132dc6961edae6517bad449aa16d739083d",
+      "patches/pool-memory.patch": "4db537387ecacfd28a6440f518a292f50cf23e781b87a171d69b2679a6c74535",
+      "platform/pcm_output.cpp": "71438d8550b736ad894e081ce7dd06e7dae131d0185c490527392c579306a809",
+      "platform/pcm_output.h": "be4905005f5b7ca1b2b1d116d35cfe315430a33aa6b629ad61d68d77a91ba466",
+      "platform/platform.cpp": "bd0de625493f17ca30efedcceafea1bede106c2c9988d3a8a5d1af400b661a65",
+      "platform/platform.h": "208722ec0a473c70f058bf9af91a9b59a22cb38a6636d6dcf1c118688ec83e6b",
+      "provenance/eden-cpmfile.json": "e1a263a2825e1204a243998cd5254c600201a0d3ed9b542f7a25ef99f2bdb157",
+      "tests/audren_host_probe.cpp": "b4725deb58e5960520506aa10b1e5b29037abfb1d84898896dfe3453c2414592",
+      "tests/native_sink_stream_probe.cpp": "f55513466e436c23d5a88e043d2da96ac6817df62448059630c8a6c93ef5e035",
+      "tests/pcm_mock_au.c": "86165ff9fd0cc85b1b3b403cebefdbcf7031d4657e8cbb1eb30236def33a4cd8",
+      "tests/pcm_output_probe.cpp": "1cdb3b3e77bf010a39f22641fe2c5827ff96a2d714f45328123a4af08c54dde6",
+      "tests/platform_probe.cpp": "e24449eb1629cf98a0773b7a05b85a855e577b6b8af8f203eaf4e9e1084f8c38",
+      "tests/pool_mapper_probe.cpp": "69f8a371ac452c6283ea7725f4ec940b660f17721ac9521f880569d1d813d39d",
+      "tests/renderer_adsp_pause_probe.cpp": "667a9b718af71f062fc0d4de8f8f79c34b7042049341bdeef2e3c73a79ec1f36",
+      "tests/renderer_event_probe.cpp": "06bfebb5c4e59e0827f508c8e66a6915a04b4f62ef88251cb9cbfed7209e4aea",
+      "tests/renderer_failure_probe.cpp": "d47f1ad84720722fab07f1374d70ce449623652d9efa5fbf5eb83b0d7c92e227",
+      "tests/renderer_host_probe.cpp": "2cbbf6f99bf4eece3f51a6668de1e4c6ff60b170a2bd5b0e811c812307a1ef4b",
+      "tests/renderer_memory_probe.cpp": "35582deb9c8164123cd9a882eefa12c6a866d62c56ab73ba89af860d73ae970b",
+      "tests/renderer_pause_probe.cpp": "ad40602c407f78607fcb77febc2829d44ddb5f1bdd480f0a3e61977e2a5c5a23",
+      "tests/renderer_pcm_mock.c": "842a8804e165f46c797266b4b1e46d3a6c78ddeafa5d5ee0de2aee823ddb9028",
+      "tests/renderer_update_probe.cpp": "7483d270322df1ca84888c90fa43d11cf9e0767189adde9ccaa0522d79da629d",
+      "tests/renderer_worker_probe.cpp": "4fceed359344b6209f415efee23b17929024edf7e6308868beda1a3857278fe7",
+      "tests/test_native_pcm_sink.py": "83836437fa4d6727d8e820f286c84f0b433ab67a52b3c39122e6985b05ff1b02",
+      "tests/test_native_platform.py": "0e260ffaa605d6bbba34e0c2dfb4cc145049de3d35cdba1901347b7e41837c49",
+      "tests/test_renderer_memory.py": "67025f2f80f29297a34b1c9061e29dec9e7a316c0dfff2208b116e53aaa5f125",
+      "tests/test_renderer_module.py": "2e5bc2204209c3694c69d48fa13d694816a326e59aa4775b734ae37236835817",
+      "tests/test_renderer_ports.py": "1dd913c708a2245d9772e679247375da8e8d636158ce98d39223e86dfab686fa",
+      "tests/wire_probe.cpp": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d",
+      "tools/prepare_eden.py": "4e7afdc60b8b2f250357e31b4082f632e2bddcff3eb27e56578c4de480072da4",
+      "tools/vendor_from_receipts.py": "e76f4b07a84e5903a1d8806b03f3dc41b4b60957ba6559e116c6229d95a67963",
+      "tools/verify_native.py": "ea19c34fdf1e3b19d3e65d93f0d6b9837b3d871cee4af0fb757039d8b2273522",
+      "vendor/eden/CMakeLists.txt": "4ac86a4906bfa588753c41b120dc8a42a7b1dab3e407e962c8521e4c51b8a262",
+      "vendor/eden/LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "vendor/eden/src/audio_core/CMakeLists.txt": "dd84e22af1d1001571eaf4ee05ddb6afb954384eb78a056bbda247338678c73a",
+      "vendor/eden/src/audio_core/adsp/adsp.cpp": "d234d5f128ef0ec5d8560ef43802c43aff82f6b36ad5d50c7d84dbc4b79f2e55",
+      "vendor/eden/src/audio_core/adsp/adsp.h": "fe9ee42f295e68f17ed438fc95a08e9185b90423ee7bcd3162e6d7a7af4febcd",
+      "vendor/eden/src/audio_core/adsp/apps/audio_renderer/audio_renderer.cpp": "07a2204be18b65f93d69e0e040e69817d3f1479e092d9eac7e328dc05deda91e",
+      "vendor/eden/src/audio_core/adsp/apps/audio_renderer/audio_renderer.h": "253dd31dd8185847797db4b1906204b885e9841df96b89a7fe95cf6f53bdbec8",
+      "vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_buffer.h": "4cdebe84b746a42850befb8a7c9bb1cc9f6227bbe31fb1506eb65a2c2980b827",
+      "vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_list_processor.cpp": "713dc9c65fb49da4e69ed685adabf338152b109c94752a7a179f0f4fdcf1a95e",
+      "vendor/eden/src/audio_core/adsp/apps/audio_renderer/command_list_processor.h": "f504a90b8b21c73a6666c78b604d6bb8f3b53dd3cfcc942b84831cc0b1d8b281",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_decode_object.cpp": "8dcf11f7314529c8c842383f1840566ef0c3c47f2d419a503994a83999d29e6d",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_decode_object.h": "770c7bfc0a30069e20321e871166b90c1f1e1d65428f38942e5b3478e32dfb0e",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_decoder.cpp": "89c4fcdb62a3fa8ebce9bdc5d151187658958f1c395b4317965fbdab31c09b0b",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_decoder.h": "affffc2c5b96c971bcb86a0134b812c8a20ceddb52bd61980c3da89ec94bd2a4",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_multistream_decode_object.cpp": "05a1137787e90b606386f8b23d4415f64e6046ddba3822eec4c1023babc26f3c",
+      "vendor/eden/src/audio_core/adsp/apps/opus/opus_multistream_decode_object.h": "8ba451a0d6c5bfb5e8ce09b4a3c237ab07bfee58d2b5f448cdd94f4c94dfeda0",
+      "vendor/eden/src/audio_core/adsp/apps/opus/shared_memory.h": "8e65138ac1e1c450c42840b58a3d5bfeb4b7e3449c77a9af5389295d60bbc35a",
+      "vendor/eden/src/audio_core/adsp/mailbox.h": "9adde9681775bded9b0bfe84a168f0f64e2f64ff3281099e11dd55c2db4d05f5",
+      "vendor/eden/src/audio_core/audio_core.cpp": "116f0294e57c5ce920d2468eb497c70d477940997fb2387404cc9f01f508f386",
+      "vendor/eden/src/audio_core/audio_core.h": "802272e9b0944682548a67327986ea07e3d97beeab79ddbe7d00b3de4428c134",
+      "vendor/eden/src/audio_core/audio_event.cpp": "204a097daf3e75e5e8f29db03e35bd705bbf09ca3fff8fda4ebd2f2204459530",
+      "vendor/eden/src/audio_core/audio_event.h": "88e69709f1b09970e0a8bd5a0cff3fb2fefc3408ffc414919263ac2d1c68b4e6",
+      "vendor/eden/src/audio_core/audio_in_manager.cpp": "56c7a304ce246344cad9fda3d997cb98cf709059946e44e504e534302db34472",
+      "vendor/eden/src/audio_core/audio_in_manager.h": "daa7996e2f2184a715583ce36144858042069d90eb828a0c235908a0c6d59482",
+      "vendor/eden/src/audio_core/audio_manager.cpp": "512cfe5d37f8a8a178f2e8977b76be5e6fed17153dbef50d14866f54a75e696c",
+      "vendor/eden/src/audio_core/audio_manager.h": "19ae4b13ea260f13f5855fe324fd648a31d37de6811f095b7c0b26713a5d3c2e",
+      "vendor/eden/src/audio_core/audio_out_manager.cpp": "1c5eb2b1efbb072c554d93c47fbfc5127fc4790e9520f89c310b04f2876a265b",
+      "vendor/eden/src/audio_core/audio_out_manager.h": "64fff64b0c051bfb1a2391820437d11e0fdb82445391337be4d1242d1b96dcb9",
+      "vendor/eden/src/audio_core/audio_render_manager.cpp": "ed29f22c5c399a52c0358111b796513eac4999367d120ff8bf1b9f35d5b4818c",
+      "vendor/eden/src/audio_core/audio_render_manager.h": "10b7e1325d3fe609b0dab49a2c9f7ba229fe82054e632a542f6d613b3c9caa16",
+      "vendor/eden/src/audio_core/common/audio_renderer_parameter.h": "2c54f371ffd0dc2239d5b6dcbd727999b593e4ea696d0dac7b3a0410c3a01b33",
+      "vendor/eden/src/audio_core/common/common.h": "2d7b9971c628aa65c9146c5d476b9b865c087745d0a12fb2089c2c1be1c051ad",
+      "vendor/eden/src/audio_core/common/feature_support.h": "002f46bb6d323e8cc087406e4449e71e15ca8dc0788e0678dd9642dbf1a1d9dc",
+      "vendor/eden/src/audio_core/common/wave_buffer.h": "d2ee8aeba445ead2a3de85d797ae77003782569b6cca7b148793734d3288d5ca",
+      "vendor/eden/src/audio_core/common/workbuffer_allocator.h": "1d9d5e9b23614518f3f396b0267365bef5760f7ce0f251f4ff5146e4791fd6f6",
+      "vendor/eden/src/audio_core/device/audio_buffer.h": "e9cfdec356ccee95350e0602d399f72ba3c49f92b3746e34e49b14fe5122c81e",
+      "vendor/eden/src/audio_core/device/audio_buffers.h": "373f7183477b81482d94235a6ba0a03e04e62df52b80a7bfb94baf0b4481820d",
+      "vendor/eden/src/audio_core/device/device_session.cpp": "6a4a5fd739a0d451230e5b3c0950e23bcb92e2619f937427e600587063599245",
+      "vendor/eden/src/audio_core/device/device_session.h": "83ac6de64a41b7b8904b39de456b24d130d3a48e870fc942cc9afcde00a0caae",
+      "vendor/eden/src/audio_core/in/audio_in.cpp": "6b7c2730be07f204b382e5632f8bf111fb286d41569968cf3855701420ebc0cf",
+      "vendor/eden/src/audio_core/in/audio_in.h": "347a98aadc3a8a2c4613635061cb13ab1dbf178f4f3619fe393dca14c0402347",
+      "vendor/eden/src/audio_core/in/audio_in_system.cpp": "7643c5a06471935a62d5104098b1b7eb0593813451923266234dc429079e88b2",
+      "vendor/eden/src/audio_core/in/audio_in_system.h": "8c92f702b6fed6fe2cbc57101c6f13a907e948b60d851257a0a3110977e0166c",
+      "vendor/eden/src/audio_core/opus/decoder.cpp": "48d42784905291aef291f2140dea80d065d6a319809c3dd5dbd4c8b1231b9c81",
+      "vendor/eden/src/audio_core/opus/decoder.h": "9d6218f189db2e7be4aaf33015631111f55fe0904af62597df104abf9f16a9d0",
+      "vendor/eden/src/audio_core/opus/decoder_manager.cpp": "a1901b1c734c9d1cda7f4851b5c6654ccb3c530b12ccf960094c895e31123090",
+      "vendor/eden/src/audio_core/opus/decoder_manager.h": "4d7a924ed9947a0b71e108bdced7969291feeb95b8e583ab50c19fc1ac4f8d19",
+      "vendor/eden/src/audio_core/opus/hardware_opus.cpp": "73f7950eef7baef835e2bde7780f853b0f559ebc7872fe050c91f6748d58a26a",
+      "vendor/eden/src/audio_core/opus/hardware_opus.h": "82d95b9172afc8a5729a2f9ba31ae2e0cbecd1c49162055da5401da5f4f344a2",
+      "vendor/eden/src/audio_core/opus/parameters.h": "69592a19d82301739cde2e8359f8e2f6ab0c868f75ecc66d1521c7f3a1f2debc",
+      "vendor/eden/src/audio_core/out/audio_out.cpp": "91dae89e1f2009c92f74453b20f4a577c30deb5d444556432157cb88811b3f08",
+      "vendor/eden/src/audio_core/out/audio_out.h": "577b078497e9021e0449a8815c36fb7fc0b76f156b6ce340abafd8f3170cfcf1",
+      "vendor/eden/src/audio_core/out/audio_out_system.cpp": "3fe7e00a224e85d509a40e97d042ce973767b3ebc6294a781ffa7f6b9792e00f",
+      "vendor/eden/src/audio_core/out/audio_out_system.h": "eb5c6e9d493cef3ecdb16e379162dceca57f531b6040d0ae1eda92128b6efb05",
+      "vendor/eden/src/audio_core/renderer/audio_device.cpp": "3c695b7e266c62b8d30741ce2830a45cfae8398ab46d6bd91d8aed7002ca8d0e",
+      "vendor/eden/src/audio_core/renderer/audio_device.h": "7147d81c8a0bb7086c6282f482834fca137976aef5c70d2e874684c1d3694f55",
+      "vendor/eden/src/audio_core/renderer/audio_renderer.cpp": "59acc4e7b6dbfb1f6399be0c37810e5a53214188d324623211918400c589b44c",
+      "vendor/eden/src/audio_core/renderer/audio_renderer.h": "b7f1d001e5a28cabc75cf4ecfee9fb50460cbfb094d562aa8e8f33e7845754ad",
+      "vendor/eden/src/audio_core/renderer/behavior/behavior_info.cpp": "522323033d594fbb5264b42e2d1eeb0a46fd83bb9e115adef967bd4f5dee1d0c",
+      "vendor/eden/src/audio_core/renderer/behavior/behavior_info.h": "6f4c31f640a6c252a08339543912f828b14fa84a3bb8e9b45f3d37d61c0a6413",
+      "vendor/eden/src/audio_core/renderer/behavior/info_updater.cpp": "cdfcc6c956a010bf049a25ee6acdbaaedb89c2eb86129e69834c6ca65e80f49a",
+      "vendor/eden/src/audio_core/renderer/behavior/info_updater.h": "242e13725c8a112f30d1974ee4734cd7ff8894ecf271f7af26ba49fe687d7ea0",
+      "vendor/eden/src/audio_core/renderer/command/command_buffer.cpp": "26d23f21727c6f6612b47bc712c5df2a13cc1ef8166cdb7f5d9303057b30406f",
+      "vendor/eden/src/audio_core/renderer/command/command_buffer.h": "88db1ab94b69e9bac13fe8fe2c98809985ff9aa114b427b2b173d792993f3e9c",
+      "vendor/eden/src/audio_core/renderer/command/command_generator.cpp": "005761a8ede148b23142274486a163173391ca8a26be4dc2585153fbf90eba4e",
+      "vendor/eden/src/audio_core/renderer/command/command_generator.h": "58439b696e945d459fd8f3de7d308fcd8c389d9bffaa26c58d4f6902734fdfc8",
+      "vendor/eden/src/audio_core/renderer/command/command_list_header.h": "40d390791f4e7490114541dec920a71e5dc9cd61e4f5bc1a776f657941c3c232",
+      "vendor/eden/src/audio_core/renderer/command/command_processing_time_estimator.cpp": "3a1fb890316b1d9882e7331a914b2e1ea0148c3774548aea26704a5afdddae1d",
+      "vendor/eden/src/audio_core/renderer/command/command_processing_time_estimator.h": "54a1b3e0dc9b0e24f1e42bd02b89944e55fd4079dac5c7cf02efea57488a8277",
+      "vendor/eden/src/audio_core/renderer/command/commands.h": "99f04d8a6552b8d40dc351eb7dc40e82b9cdefc53eab09351d6cfffd54175d57",
+      "vendor/eden/src/audio_core/renderer/command/data_source/adpcm.cpp": "c8d6f0e4f1de9f1e39a86a7ccb4819fe5cca454a8218821e6a7ac8c055bc71d8",
+      "vendor/eden/src/audio_core/renderer/command/data_source/adpcm.h": "307f4fb73270eb0e4f61ed61b76c91927ee337171db04726204f67f42b173f59",
+      "vendor/eden/src/audio_core/renderer/command/data_source/decode.cpp": "18a750c857d13f3a997491cbd5ec6e4480ed037152a6a3d47bbdab35fa47119f",
+      "vendor/eden/src/audio_core/renderer/command/data_source/decode.h": "be6eb0d250443ec067fb0689ee9bd60eb000e6cfea2b8d1055e8c7a69208e0e4",
+      "vendor/eden/src/audio_core/renderer/command/data_source/pcm_float.cpp": "afc768c86a2469ac228a1895c9ea932fa54a37632285f9efa7d33bd18cdd6f1a",
+      "vendor/eden/src/audio_core/renderer/command/data_source/pcm_float.h": "e0490df641e2a4f1f432748fc41aeebf3a9b9ddb6f473321a7ae12d0e5ea385d",
+      "vendor/eden/src/audio_core/renderer/command/data_source/pcm_int16.cpp": "e877a20cd67a677055146760c0848bb4406b52e7cbfedfb2abcbbb71d1d8f572",
+      "vendor/eden/src/audio_core/renderer/command/data_source/pcm_int16.h": "0f1b28b5afe224765660ee3dcd15aeb538576fe09eff42073f0210b4291612a3",
+      "vendor/eden/src/audio_core/renderer/command/effect/aux_.cpp": "ef97429f51f41299121d517e37799bc5066ad8fdafe89d3fb3f2670db7e953c7",
+      "vendor/eden/src/audio_core/renderer/command/effect/aux_.h": "3ac2b84ca24f0b296cd89a281d1945943804f4d031a905331398cb867de5aec6",
+      "vendor/eden/src/audio_core/renderer/command/effect/biquad_filter.cpp": "94fa729264605ebd963daa2b57b1232845ddca0546352a413923a344fd70dfca",
+      "vendor/eden/src/audio_core/renderer/command/effect/biquad_filter.h": "e65e3092d93323384ca6793c1067267c61c4ed99fcb8ea6162edda4f878ee2d2",
+      "vendor/eden/src/audio_core/renderer/command/effect/capture.cpp": "66b95490846fb0be64a08c5e28103ee40488972f7707da0e0bd07f67e018c6ef",
+      "vendor/eden/src/audio_core/renderer/command/effect/capture.h": "db7cd2e051c21df53043ae0069f3ec88e38b176e6d48870e628e6cb1dcf4a235",
+      "vendor/eden/src/audio_core/renderer/command/effect/compressor.cpp": "3fe2f868c576cd3bcbde844d652ced944716fd2952cd85d68d8a9e64d52c8599",
+      "vendor/eden/src/audio_core/renderer/command/effect/compressor.h": "a6d4b08882a5e7e19bae4f32c2b6c5c8f79c222d98c69887625e3312443bd065",
+      "vendor/eden/src/audio_core/renderer/command/effect/delay.cpp": "95bfac51081fc231a99f479b1a383f018f558315bdf9a72dfadaef25f09ed8e6",
+      "vendor/eden/src/audio_core/renderer/command/effect/delay.h": "b5e6b9b33dc0a61a1f3b7e988d346d83d5d5c85a24d4143e851a9f0a32a5ff52",
+      "vendor/eden/src/audio_core/renderer/command/effect/i3dl2_reverb.cpp": "89c07d48180d515ab83f558fc184f584dfbf10632995b3aa188606c63a0c67b3",
+      "vendor/eden/src/audio_core/renderer/command/effect/i3dl2_reverb.h": "b37cbc490b2ce9be3751cf8fa428d6dfc7966e38af6d3ab7b29ea19156df18af",
+      "vendor/eden/src/audio_core/renderer/command/effect/light_limiter.cpp": "9e83d6c1502f5d473f9da5f1f28665c15f8d4758e34fb6d572f1672bad25d645",
+      "vendor/eden/src/audio_core/renderer/command/effect/light_limiter.h": "611442dc1a8e3f7e324940360c2a81c5cf5d208fe3820ad0695502b9ea5d74a3",
+      "vendor/eden/src/audio_core/renderer/command/effect/multi_tap_biquad_filter.cpp": "c68623a3be1c545ed463e2114f1cc4052a8d6a6a843d13657650a632d2fa3119",
+      "vendor/eden/src/audio_core/renderer/command/effect/multi_tap_biquad_filter.h": "acf092ad4bb4ca1fa2b12facb8d9e24c9da4a429307bb54efe1dfad723e0cb43",
+      "vendor/eden/src/audio_core/renderer/command/effect/reverb.cpp": "58629ff05d459d34823e41c0c2a9368687b10bf435440c10a8efe104467b4155",
+      "vendor/eden/src/audio_core/renderer/command/effect/reverb.h": "ce50e213f8d7b7a7fb32ce07023de690902bfd239767373a8445d4a3305a1d43",
+      "vendor/eden/src/audio_core/renderer/command/icommand.h": "101ccf431d63b23b2c4b2e855c6f46c50e1bbb01c4fe1005e48f523c7861b1db",
+      "vendor/eden/src/audio_core/renderer/command/mix/clear_mix.cpp": "2db9446db70fb58e446056f320382c2692a48ae0d38e55e85b1ad8a1cd107bcc",
+      "vendor/eden/src/audio_core/renderer/command/mix/clear_mix.h": "3463d6b4bea022ace42241c8647b7377f18df3a71c688b1f979d7977b5c3f9cb",
+      "vendor/eden/src/audio_core/renderer/command/mix/copy_mix.cpp": "9543ff8b675ee7135737ac81f12f8ed252c1f4c393d9c241a4b1e424ff403192",
+      "vendor/eden/src/audio_core/renderer/command/mix/copy_mix.h": "fd36fc457083d9517a2a0ff05c8b83cfad75b8a0c1223c471b26939c0b286390",
+      "vendor/eden/src/audio_core/renderer/command/mix/depop_for_mix_buffers.cpp": "eb8f739da265bee6320755de7cab583508578e6380e00fe42cc170b1cafdadb3",
+      "vendor/eden/src/audio_core/renderer/command/mix/depop_for_mix_buffers.h": "def47bd8e9ebaee7c60abf5b259bd6e885647760f5385ff3796c897fdedf864d",
+      "vendor/eden/src/audio_core/renderer/command/mix/depop_prepare.cpp": "46f04d10a9e5ddb2f2ce9d29854751e6d09d8fe26e65f67d552286eff8ea8145",
+      "vendor/eden/src/audio_core/renderer/command/mix/depop_prepare.h": "0a1bf769e1b72a672ac5277bf1c6342a64f4c4aa4a5536a5d2d05ec40a006368",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix.cpp": "e31ac072ca4dd895f9a6d912a6ef397383aa15208eb7c5e079a0632975513d18",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix.h": "781cc36e657bb389270f81547829e5e7ac3d633b74d378b90b0f099cda85b125",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix_ramp.cpp": "f64b5a1c1c6459032952fc67a3f21b048e5853ce27e333829776d74160eebc4e",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix_ramp.h": "da67b3a581ed3dd3089903fa7d4833a799a374d8a270ec4219bd3328d4881347",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix_ramp_grouped.cpp": "e37f793918acb0d1545a934e9d392302b5290d5a3e9bc926accf44914cebe768",
+      "vendor/eden/src/audio_core/renderer/command/mix/mix_ramp_grouped.h": "db3349a2f934eda4e0e5d7ad34885057a9e8b5559c041e6aaf2939ff23dec210",
+      "vendor/eden/src/audio_core/renderer/command/mix/volume.cpp": "fc5c451e9b73fa5a93c5a97d39085356ba89278f307f10b7bbc673b9d071570f",
+      "vendor/eden/src/audio_core/renderer/command/mix/volume.h": "e163f1676f81c62e6dc5283274f60a0e491517792765092917bdb916d408fcc9",
+      "vendor/eden/src/audio_core/renderer/command/mix/volume_ramp.cpp": "fb21089cb16888133686fe3363e6eb5779253f222434875be812603a862e465a",
+      "vendor/eden/src/audio_core/renderer/command/mix/volume_ramp.h": "23c4acba2b257da5caa9f012433d017569e47793aa2d42dfe1afe398c1a69931",
+      "vendor/eden/src/audio_core/renderer/command/performance/performance.cpp": "e87885d5707e5cdf292b0715da816c0bd64ecbe8b98e7e98dae04ad449bf305f",
+      "vendor/eden/src/audio_core/renderer/command/performance/performance.h": "689701bc1808fe10b9fcb58354848cc0f4b4cd4d3a658ed67519ce0a2674afcb",
+      "vendor/eden/src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.cpp": "e7aa6a25d67fe505565739794a6d4bc810b9bc0970343dc208ef774c17f2099f",
+      "vendor/eden/src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.h": "1b8c685fc55078b7cb34dbe6f7173eb63f753ea2a0c99d96f47e9d6b4d77b062",
+      "vendor/eden/src/audio_core/renderer/command/resample/resample.cpp": "16da8c73c9560f141f509bb6cb7d46bc3fb72d592d1959e35254dbcb2beeec49",
+      "vendor/eden/src/audio_core/renderer/command/resample/resample.h": "5a9fb778f09eeb7eedacbad6fb56e91df74e17c199bfea50a0aa4e3fb414b29a",
+      "vendor/eden/src/audio_core/renderer/command/resample/upsample.cpp": "dc32cee5ed6b197f9b96190cee1f5798ac318fc59276b4a0be6bc824dd9f2497",
+      "vendor/eden/src/audio_core/renderer/command/resample/upsample.h": "fac0a67650c056a0ba835f45f4ea6ee7a75a212041923fffda06babccfba76bd",
+      "vendor/eden/src/audio_core/renderer/command/sink/circular_buffer.cpp": "2a905f9e4850b58cfa26ab51bba926d5dc212fa73bfc41fedd6452c2e9097231",
+      "vendor/eden/src/audio_core/renderer/command/sink/circular_buffer.h": "319a365315c2aa55eddafaca17907097b52f0442a7fa9e78684e961b09cc066a",
+      "vendor/eden/src/audio_core/renderer/command/sink/device.cpp": "c835aefbc6edd6e582cf82755ef480d2280fef7d06935ad7e304cac3f84c803e",
+      "vendor/eden/src/audio_core/renderer/command/sink/device.h": "e736d1e73504214367b1fbc733f062f81d10df005b6b907309627b3ad2d2a3dd",
+      "vendor/eden/src/audio_core/renderer/effect/aux_.cpp": "98d5664933c2a479d8c4be7689b47e76a83edab3ac22aad7511792bb5a631ff4",
+      "vendor/eden/src/audio_core/renderer/effect/aux_.h": "9f461249716b7c8ec54e4d946c52a00cb6c8b50fc7b0b2d559c924a253061e22",
+      "vendor/eden/src/audio_core/renderer/effect/biquad_filter.cpp": "ab3b8d26cb820954bfe82a17c0c33689d8fb433325a62ebaa62431dfad731756",
+      "vendor/eden/src/audio_core/renderer/effect/biquad_filter.h": "cb87d91c6b9b29277805e27a10fb763d4d24e761201e84087a4ef16dd63f7d3f",
+      "vendor/eden/src/audio_core/renderer/effect/buffer_mixer.cpp": "1d90b02e4d6966f8a8a90380a4823f04ba6e2f868a12c428a5f3295b1bb378b7",
+      "vendor/eden/src/audio_core/renderer/effect/buffer_mixer.h": "100b69dbd7b3cee557bcd34720ed5e619166b2c3e7319c811bba08ab9e8be322",
+      "vendor/eden/src/audio_core/renderer/effect/capture.cpp": "26aa0f54e369e277f6b79e2019829e92c77651583c2b92b974bca92906ddd0e8",
+      "vendor/eden/src/audio_core/renderer/effect/capture.h": "74d6ee8aa9556c906a814547a9223e0b16bc59c47f44b72d277187ee51dc62e6",
+      "vendor/eden/src/audio_core/renderer/effect/compressor.cpp": "abf6f9e783b2aa71d8d2d66baae471c4be20c61eee608cb1b240d7af4bb6e95e",
+      "vendor/eden/src/audio_core/renderer/effect/compressor.h": "81c599f3fc8b4050978e4a3767acffbf400d30ef1db9a93c8f3292fb36ccedf1",
+      "vendor/eden/src/audio_core/renderer/effect/delay.cpp": "ce0baecffba25d4b5285bcd239c63959fb10833402dbac3bd0ec82426008d69a",
+      "vendor/eden/src/audio_core/renderer/effect/delay.h": "cb01dcb63354939ca9c9bd21978153afc6ee4a93c11ec0a906d420ebaf98f70e",
+      "vendor/eden/src/audio_core/renderer/effect/effect_context.cpp": "dc012ee3dcb3132e2bd2f3c09fd0214786e8b41829d4f1ba2e61e85ac4dfe6e9",
+      "vendor/eden/src/audio_core/renderer/effect/effect_context.h": "e0e3ad8b4183b4bd6c1c36d4e6bb6dfa3de65a745bdfc3b861d576408001725a",
+      "vendor/eden/src/audio_core/renderer/effect/effect_info_base.h": "175de1512e9b5d73cfb3d5144364e5fa81ae129102295c6380f5e11ce5b98ea9",
+      "vendor/eden/src/audio_core/renderer/effect/effect_reset.h": "ed6bb121be919f3d4878046ff89fb5554b36ea1c0dcd6b96de755baf083e3fb9",
+      "vendor/eden/src/audio_core/renderer/effect/effect_result_state.h": "a89c9ed7c292ff04c4a5681112bedb0bde7f3364a91c34ff5969a61b4ff61aa7",
+      "vendor/eden/src/audio_core/renderer/effect/i3dl2.cpp": "db26b4486efce3594e3e2785b68f3e125e52f4591d74ae291a87cf20c227c3f3",
+      "vendor/eden/src/audio_core/renderer/effect/i3dl2.h": "54d2b1ccb836295ab79d33546e678cac9ff38b8a637cefbd10a1125ae7e2e465",
+      "vendor/eden/src/audio_core/renderer/effect/light_limiter.cpp": "7f018c2445906534a21244e913273aa3e1e826a089c0494669aa30f781e4fb7a",
+      "vendor/eden/src/audio_core/renderer/effect/light_limiter.h": "e8b3bd1aca5db69148f7408ec82bff15b1331c27e0df84c445943ed211af5309",
+      "vendor/eden/src/audio_core/renderer/effect/reverb.cpp": "7b74ff7c615004f21b296c14957ed1fa1ff05d8286f39185796c9d4d48294d2f",
+      "vendor/eden/src/audio_core/renderer/effect/reverb.h": "b7463664ee97e47f9c92975f1e889141bf37843982bfae3e8b5e003ffa2a5791",
+      "vendor/eden/src/audio_core/renderer/memory/address_info.h": "ef77e4fcc3c7109a904212b8034113acdf89a41923053b68f6f803d30a090b00",
+      "vendor/eden/src/audio_core/renderer/memory/memory_pool_info.cpp": "06bf5310080d9e22787854512d06fc15b66217077492753e913e54b0d9f99a42",
+      "vendor/eden/src/audio_core/renderer/memory/memory_pool_info.h": "f7e9459aac6f03b30469a7fca5d7c64c46365bdb099aaf0dae73068c35e6b294",
+      "vendor/eden/src/audio_core/renderer/memory/pool_mapper.cpp": "ec07ec112a79aa5059eb3796650e24cd0f4e89ba2525c4e7659f79e6338763ed",
+      "vendor/eden/src/audio_core/renderer/memory/pool_mapper.h": "6aee73a1c9ea600d9335dc3dc8ce77f9a9612511306ad4a7227ce1d55cdf6dde",
+      "vendor/eden/src/audio_core/renderer/mix/mix_context.cpp": "3ab1e3ba0f2d4d062ea3ebf5b6cdc8d5033470ecdfdcc9f01b9a08bae4fff6cb",
+      "vendor/eden/src/audio_core/renderer/mix/mix_context.h": "a2d3fdf31acb515e2f04b3ce1f7eb3e3b2ff1f0586fe4e87312cbaa4cee84566",
+      "vendor/eden/src/audio_core/renderer/mix/mix_info.cpp": "d9a8e90ece045500d1691ab34a22637c03218f07f9722529f90c12e910c49ed1",
+      "vendor/eden/src/audio_core/renderer/mix/mix_info.h": "843dce78ef39f8717a507c7ccb2bacd72431e245c49a2ff9f3ac1537df1ba843",
+      "vendor/eden/src/audio_core/renderer/nodes/bit_array.h": "c0bb714440ba801a0e6fc14d6f2583d681e2a17f9b63eb852d5ad3ee42e131e5",
+      "vendor/eden/src/audio_core/renderer/nodes/edge_matrix.cpp": "79c383d89508e1eb337cd6fd3e7c5fa7a37fbc6eb5bb31b29ecb7d4a479b4905",
+      "vendor/eden/src/audio_core/renderer/nodes/edge_matrix.h": "0cde8f9ce8567fedf99b1675feae563f1a2d4f8a39abbfb7afed1e2d1a045b8c",
+      "vendor/eden/src/audio_core/renderer/nodes/node_states.cpp": "d7cd2c9febf3e7132f7b648655c2b956cb7c5ba2ba6cf066952ef318b8e09d06",
+      "vendor/eden/src/audio_core/renderer/nodes/node_states.h": "ec0142ff556133ee912a6b5215047b090196887fbb4c97f6020cd84ee59638ab",
+      "vendor/eden/src/audio_core/renderer/performance/detail_aspect.cpp": "059a2d16fe8c0f65665e197981af86cf0cbeeda696859678eddd0d96c8df9d8f",
+      "vendor/eden/src/audio_core/renderer/performance/detail_aspect.h": "6f7e7edacf6ea0ce6a3e7191c7168888bdc9c53111b48d8af2324dc1cb4604c6",
+      "vendor/eden/src/audio_core/renderer/performance/entry_aspect.cpp": "cfabdc2cfc0f9af1bf561d9221a86f23773872c2dfb2389919c5c822980633b9",
+      "vendor/eden/src/audio_core/renderer/performance/entry_aspect.h": "9626929faa54b40c7e0dc4e89b1a288d2142879321b6bc306d845174216a1774",
+      "vendor/eden/src/audio_core/renderer/performance/performance_detail.h": "5da2f463bb840af9da41558deec927640142b96ea3c19c73404d3f187dedaaf1",
+      "vendor/eden/src/audio_core/renderer/performance/performance_entry.h": "b63c09263c3cb6a321d44bdc7edef3c63493086c51af815f8e475a19a1c0711c",
+      "vendor/eden/src/audio_core/renderer/performance/performance_entry_addresses.h": "5645bafcc4ee1686d515d77bbcca0a14430ce4554f3add909b2161a53821bb18",
+      "vendor/eden/src/audio_core/renderer/performance/performance_frame_header.h": "49f6ed4d4e3e225debc502379bbd21e22a2520253ede430b22834e6529099991",
+      "vendor/eden/src/audio_core/renderer/performance/performance_manager.cpp": "e257d83651d0452c43dc63e91406b2c04ba53a9451fbf2cb4202b827b85eae2e",
+      "vendor/eden/src/audio_core/renderer/performance/performance_manager.h": "bdd4844f1e4152852791b7012c94076fbe98a55bb2b6cd1a892132bf9217d5d8",
+      "vendor/eden/src/audio_core/renderer/sink/circular_buffer_sink_info.cpp": "18d4181a3dac4c1c189900a323268b33e6f4664bba41f2c88b1f04cbe283220b",
+      "vendor/eden/src/audio_core/renderer/sink/circular_buffer_sink_info.h": "4bd35462063770ec88fc81b0429242ccfc0a7f262e7b5025a6115a9e7dcfba8c",
+      "vendor/eden/src/audio_core/renderer/sink/device_sink_info.cpp": "b3342d7f7c765226d621d629ca3485e6d26666a11febbfce4af45f9068ae8930",
+      "vendor/eden/src/audio_core/renderer/sink/device_sink_info.h": "788a6dea01a993134d4d63a59fa39985948656bc0516b1735b612f26e1501575",
+      "vendor/eden/src/audio_core/renderer/sink/sink_context.cpp": "6b6fc9fed191b04c2eb5e2978c73ca6567a55393dabf48749139127faba56779",
+      "vendor/eden/src/audio_core/renderer/sink/sink_context.h": "4dfb64cf776f1f2dad5071bdd9406114392e3a05ac1a112bffc56a400fe3ae5d",
+      "vendor/eden/src/audio_core/renderer/sink/sink_info_base.cpp": "eedef281a1a1d8ca0ae51474c39bae62ee922c02fede3b193fa4d6d0569a2055",
+      "vendor/eden/src/audio_core/renderer/sink/sink_info_base.h": "1e9e5581b5f9042b92e576e265ff03674eb4f3a35af42b72b07dcca820f38d35",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_context.cpp": "5cb36dfd1a62bbab942dfdc0b3294950c88313501d6c7e084a7e4c3e8a4d3191",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_context.h": "6923d5a2ddf33b0c22534bfbe4066be1bb4012381a2fe15507f83c7e58731b0a",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_destinations_data.cpp": "769faa10586c1eda4ef45112f7f08f3921342423ad1a26347ff203f1b0992251",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_destinations_data.h": "ad76332295c00a3fdcd505c65f991ce6104723e2d92e5b8f9dad55a59e1ff0aa",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_info.cpp": "6fcced46ad7a9d943bb041de394b4ececdfb36eb514ab8c0f4dac15370d092c8",
+      "vendor/eden/src/audio_core/renderer/splitter/splitter_info.h": "2a2a7b729510734a404949f8262f949c2d3ea3416fd11603dc6ae0d37e7c97c6",
+      "vendor/eden/src/audio_core/renderer/system.cpp": "8243b7e3c61f84aacfe7928c4b38f854267207530718a5c8e2e8d1bdfdc5e0fd",
+      "vendor/eden/src/audio_core/renderer/system.h": "92e81d5b393a78891d74f979cd0508c15c0fae8c8630567bd7b1a6031eec519a",
+      "vendor/eden/src/audio_core/renderer/system_manager.cpp": "c08ece05cb6133a31678bfd8f11488bcf82e35f944ac3899704a7a3d509b98ab",
+      "vendor/eden/src/audio_core/renderer/system_manager.h": "8e3fab01da8f8736b05eeefd7531f72dc61e7ca02984c11e67755d0ddc6ca28b",
+      "vendor/eden/src/audio_core/renderer/upsampler/upsampler_info.cpp": "4f76ea6db3b93766cd2d2be6c3644aed822aa433b10453e80633d35d02467794",
+      "vendor/eden/src/audio_core/renderer/upsampler/upsampler_info.h": "69f1db63e23a9e02469b4f558cbb7b1d05311a2e03638a96c89d033e23e77a1c",
+      "vendor/eden/src/audio_core/renderer/upsampler/upsampler_manager.cpp": "d86258873f400b0e6b44dee3a3b1dc88c4c3f2daf0c95830df1634057b395a6f",
+      "vendor/eden/src/audio_core/renderer/upsampler/upsampler_manager.h": "041e5c69e66f02dd760350ffebb27613770c0233ec6f79aef030c69d3274a6a2",
+      "vendor/eden/src/audio_core/renderer/upsampler/upsampler_state.h": "79a8f98c20cef048bb8fbcdc8692861eb0dd9025f0ef47dd31a65e05a214f817",
+      "vendor/eden/src/audio_core/renderer/voice/voice_channel_resource.h": "1a5216109c714cb1c092f92c370aa85ed37060c8c273a77e0ce88838a109aea4",
+      "vendor/eden/src/audio_core/renderer/voice/voice_context.cpp": "0b2f8318d4d63ea7a44de0782e9184ce9d2a51e36f50950052d3372938301a30",
+      "vendor/eden/src/audio_core/renderer/voice/voice_context.h": "242f0210cf65ffc010b4fddcc6bee2442770c0cf17edbc866d001c9f70b1aee2",
+      "vendor/eden/src/audio_core/renderer/voice/voice_info.cpp": "2168749b65ef2878ecccade45916c4a2c5defb17291117bc09be3a4e06c33c29",
+      "vendor/eden/src/audio_core/renderer/voice/voice_info.h": "cb53462b85c76a3a73a42e8f4e402b298d4ef3f86ec05becfd2e6f7bd30281fe",
+      "vendor/eden/src/audio_core/renderer/voice/voice_state.h": "033773c2ab250535929e1da7cf5e5324fc49c2b9f5d5be58ddfd0c2671116fba",
+      "vendor/eden/src/audio_core/sink/cubeb_sink.cpp": "d43b349fbde1c758a4b4ad09aee8fe67e3bb2804c02fa47533c8bef1a2731381",
+      "vendor/eden/src/audio_core/sink/cubeb_sink.h": "916705ef4fe632c34eaffccfb1e05e9c63de162f5f49dc2c9b86c4f17eca56a6",
+      "vendor/eden/src/audio_core/sink/null_sink.h": "9a74f0a0a85f6811496e145f2c36881b42f7077821c51dad90a64df8a544da8e",
+      "vendor/eden/src/audio_core/sink/sdl3_sink.cpp": "8fa57e8ceacef92387d32d4a3ab8965a687a19d15154a8646761ce0aac536dcf",
+      "vendor/eden/src/audio_core/sink/sdl3_sink.h": "90f42fc0a5afa63841eb6aa88b8652618d509b679b6a32fceb93acbc19c59aa0",
+      "vendor/eden/src/audio_core/sink/sink.h": "789fd32ff0c5b9128468d4ea713a5afc636c56cc55ec18a3944319951049d500",
+      "vendor/eden/src/audio_core/sink/sink_details.cpp": "d5e82b08a52df33a37d3e7a0e715e979904e08d2f29959d8c05e038fb5833394",
+      "vendor/eden/src/audio_core/sink/sink_details.h": "29249c8deae410f0a0ab0aa0bc05c66f8af40e19dafbcea5bc50a99463dd78fe",
+      "vendor/eden/src/audio_core/sink/sink_stream.cpp": "f58977c270aaa8602e79c4144b236e06ea03389f3458c31d5f12e7ce954aa5aa",
+      "vendor/eden/src/audio_core/sink/sink_stream.h": "84ca36746dbc122ccf6617f28ccf3a2831a6d327550a57369d5740a0cbff2055",
+      "vendor/eden/src/common/alignment.h": "5be249150c43cdd3fc275657ae18d55a1655ffbf4f41b25ab044353fee8c9036",
+      "vendor/eden/src/common/assert.h": "7d81ef1250fc85103a2211bd3b0a30fbec91f25dc98b89d1eaa0bbba0cfc2d23",
+      "vendor/eden/src/common/bit_field.h": "efb2e6a9f1226f8ee326413af9dc50913a54c18cbd1deab14b2899dc5da5dc0a",
+      "vendor/eden/src/common/bounded_threadsafe_queue.h": "c996b005f429f9db4fd1c7af209ecc01e37db51651f832f69995cbadeb1666d5",
+      "vendor/eden/src/common/common_funcs.h": "76f40ba19e202247a3b8cc5453f2a98e41ac66fba232794251a1cd1ab6d76e17",
+      "vendor/eden/src/common/common_types.h": "94721ea08145c100d8196e8f5ea98344e76cd9daf65855de107b24b212d7fcbb",
+      "vendor/eden/src/common/concepts.h": "aa6379af981233218cb2b8b88608a3f25bbd9a1b91b31560750c9fd8ec70300a",
+      "vendor/eden/src/common/fixed_point.h": "0a26b95ce65c168a2f159fc4f90fa027c9da437c5478ff12671e5d70c359a74c",
+      "vendor/eden/src/common/log_classes.inc": "150f466fb802202261ba776be5bcc0c5aea2165d18bf8582caef7340e29d4766",
+      "vendor/eden/src/common/logging.h": "948517395f74f9eacec9b2b702ac37daa9df95a3a98edd0663d071a273be4449",
+      "vendor/eden/src/common/polyfill_thread.h": "07a94fe7a84f29c76f8c903f77cc33364893e1385ad5b621960142c10768bc33",
+      "vendor/eden/src/common/ring_buffer.h": "74331f44196163e8623f84613e47e614a4bec3bf0863060fe65239186fc1abc2",
+      "vendor/eden/src/common/scope_exit.h": "936b4f9c76a625625f13b266cae2b734e47254518a9dcd07eb7755d6ea2ea98e",
+      "vendor/eden/src/common/scratch_buffer.h": "4dc5c6f83f6aec237c0ddcd232c76ad8225608d3b938ba98ea32149e5c8b44c2",
+      "vendor/eden/src/common/settings.h": "abaa919eb866d2f324d5ae1f85428205ae2fa67cfe4b6bddfa22dffb4c96e4d0",
+      "vendor/eden/src/common/settings_common.h": "136c5efc637dd509631f5b709ce56cd1ffe6e1df2416c3ef5442e3321b9a9d18",
+      "vendor/eden/src/common/settings_enums.h": "74e32734644ff5031e9c234cb452d6eea4070a9ecbe8d7630df0f3e07888d590",
+      "vendor/eden/src/common/settings_input.h": "f1724fc48fad815c1265999981c7bd268d8917742e1cd96ef78fde08ccd4d7ed",
+      "vendor/eden/src/common/settings_setting.h": "48f6b7f725d2401ed41eb5a59824f0d0a95931caf199c424839965c98cd342e9",
+      "vendor/eden/src/common/swap.h": "446585330e0c964e2063b1cc8e3cd9c686f89afd81236986857dbb3d6446e349",
+      "vendor/eden/src/common/thread.h": "d85556df49451f28a6771a9b9e71731649e2fd01035afc31f3eabe2689a454ff",
+      "vendor/eden/src/core/hle/result.h": "40febde3d6f26651bfca7853f7e8dc9bc73fb59549a0b5cf50e023bd0013f89b",
+      "vendor/eden/src/core/hle/service/audio/errors.h": "6f775042c945ba1f5cc1714679ead7da82106837401481a7bb357c4c3bf63db5",
+      "vendor/fmt/LICENSE": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+      "vendor/fmt/include/fmt/args.h": "6e0bf8ffbd904e6ef525cdce8e6e00312ce5d14f616cea5d88132606ca0384c4",
+      "vendor/fmt/include/fmt/base.h": "73ba80ca15c02d6826a611d1651ca6f1495ec127815e257a5d6552d6f6ad313e",
+      "vendor/fmt/include/fmt/chrono.h": "f8e2a69bd97bc5b90c9af7fb87e010775b695d487a77e8d8cbe624e57bd2f9bf",
+      "vendor/fmt/include/fmt/color.h": "f88bf0c4833caed3a7f01b6d633c7b259741a26119e84c651ac1e31cfc980b72",
+      "vendor/fmt/include/fmt/compile.h": "636c13842acce0b42b378e65fe67a69e5635e8225c9701975e5b326a97be5cb8",
+      "vendor/fmt/include/fmt/core.h": "b2b6692145b11c7c2774db106078c97575a47d18e80c7783c68566475325ebb4",
+      "vendor/fmt/include/fmt/format-inl.h": "e7baf108b84e89b29915bb35733540f8f4262cd8f4b41c15754eed4d2f185f61",
+      "vendor/fmt/include/fmt/format.h": "b4c65350362bf40e76a8e6b450587d912c7081b6eafeafaf3d7bcf53153e17fc",
+      "vendor/fmt/include/fmt/os.h": "45d4e84be4e84a128442f04eda06e1305c8e02c61166854a3b8b348194d35da5",
+      "vendor/fmt/include/fmt/ostream.h": "742416a6a88286609887fa512c4423820764aafbb723a42a825f3193cb52b4f0",
+      "vendor/fmt/include/fmt/printf.h": "afddb422a86125e04a7260bb0f0ae3423ea8d591181ed5d4ef60b7a5d068993a",
+      "vendor/fmt/include/fmt/ranges.h": "ccaf61c9b5937e0fa97737fb047121c5fca9db34de516b8edfc1d913583e3c8e",
+      "vendor/fmt/include/fmt/std.h": "3f06cdf32774b9e6915e9762411f5f4de8b8ba5660adccbdea514be7f0b23826",
+      "vendor/fmt/include/fmt/xchar.h": "f0903d522c64faaee2c374a0b2063ac3e43d0b5006dfd3411f0e5dccd8ff6062"
+    },
+    "patches": [
+      "pool-memory.patch",
+      "native-host.patch",
+      "native-pcm-sink.patch"
+    ],
+    "prepared_source_sha256": {
+      "CMakeLists.txt": "4ac86a4906bfa588753c41b120dc8a42a7b1dab3e407e962c8521e4c51b8a262",
+      "LICENSE.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "src/audio_core/audio_render_manager.cpp": "4b7fa7aa6004e11d05dfa00e6821caf27cbda144f809261a14184556f0173a45",
+      "src/audio_core/audio_core.cpp": "116f0294e57c5ce920d2468eb497c70d477940997fb2387404cc9f01f508f386",
+      "src/audio_core/CMakeLists.txt": "dd84e22af1d1001571eaf4ee05ddb6afb954384eb78a056bbda247338678c73a",
+      "src/audio_core/audio_out_manager.cpp": "1c5eb2b1efbb072c554d93c47fbfc5127fc4790e9520f89c310b04f2876a265b",
+      "src/audio_core/audio_out_manager.h": "64fff64b0c051bfb1a2391820437d11e0fdb82445391337be4d1242d1b96dcb9",
+      "src/audio_core/audio_core.h": "802272e9b0944682548a67327986ea07e3d97beeab79ddbe7d00b3de4428c134",
+      "src/audio_core/audio_manager.h": "19ae4b13ea260f13f5855fe324fd648a31d37de6811f095b7c0b26713a5d3c2e",
+      "src/audio_core/audio_in_manager.cpp": "56c7a304ce246344cad9fda3d997cb98cf709059946e44e504e534302db34472",
+      "src/audio_core/audio_in_manager.h": "daa7996e2f2184a715583ce36144858042069d90eb828a0c235908a0c6d59482",
+      "src/audio_core/audio_manager.cpp": "512cfe5d37f8a8a178f2e8977b76be5e6fed17153dbef50d14866f54a75e696c",
+      "src/audio_core/audio_render_manager.h": "181b82ed53e59f19e3e7f8d36b7e2408c4876cfb61e40105edb10af9ff6e1bfd",
+      "src/audio_core/audio_event.h": "88e69709f1b09970e0a8bd5a0cff3fb2fefc3408ffc414919263ac2d1c68b4e6",
+      "src/audio_core/audio_event.cpp": "204a097daf3e75e5e8f29db03e35bd705bbf09ca3fff8fda4ebd2f2204459530",
+      "src/common/common_types.h": "94721ea08145c100d8196e8f5ea98344e76cd9daf65855de107b24b212d7fcbb",
+      "src/common/polyfill_thread.h": "07a94fe7a84f29c76f8c903f77cc33364893e1385ad5b621960142c10768bc33",
+      "src/common/settings_setting.h": "48f6b7f725d2401ed41eb5a59824f0d0a95931caf199c424839965c98cd342e9",
+      "src/common/settings_input.h": "f1724fc48fad815c1265999981c7bd268d8917742e1cd96ef78fde08ccd4d7ed",
+      "src/common/settings.h": "abaa919eb866d2f324d5ae1f85428205ae2fa67cfe4b6bddfa22dffb4c96e4d0",
+      "src/common/alignment.h": "5be249150c43cdd3fc275657ae18d55a1655ffbf4f41b25ab044353fee8c9036",
+      "src/common/ring_buffer.h": "74331f44196163e8623f84613e47e614a4bec3bf0863060fe65239186fc1abc2",
+      "src/common/bit_field.h": "efb2e6a9f1226f8ee326413af9dc50913a54c18cbd1deab14b2899dc5da5dc0a",
+      "src/common/swap.h": "446585330e0c964e2063b1cc8e3cd9c686f89afd81236986857dbb3d6446e349",
+      "src/common/log_classes.inc": "150f466fb802202261ba776be5bcc0c5aea2165d18bf8582caef7340e29d4766",
+      "src/common/bounded_threadsafe_queue.h": "c996b005f429f9db4fd1c7af209ecc01e37db51651f832f69995cbadeb1666d5",
+      "src/common/scope_exit.h": "936b4f9c76a625625f13b266cae2b734e47254518a9dcd07eb7755d6ea2ea98e",
+      "src/common/logging.h": "948517395f74f9eacec9b2b702ac37daa9df95a3a98edd0663d071a273be4449",
+      "src/common/common_funcs.h": "76f40ba19e202247a3b8cc5453f2a98e41ac66fba232794251a1cd1ab6d76e17",
+      "src/common/thread.h": "d85556df49451f28a6771a9b9e71731649e2fd01035afc31f3eabe2689a454ff",
+      "src/common/settings_enums.h": "74e32734644ff5031e9c234cb452d6eea4070a9ecbe8d7630df0f3e07888d590",
+      "src/common/fixed_point.h": "0a26b95ce65c168a2f159fc4f90fa027c9da437c5478ff12671e5d70c359a74c",
+      "src/common/settings_common.h": "136c5efc637dd509631f5b709ce56cd1ffe6e1df2416c3ef5442e3321b9a9d18",
+      "src/common/assert.h": "7d81ef1250fc85103a2211bd3b0a30fbec91f25dc98b89d1eaa0bbba0cfc2d23",
+      "src/common/concepts.h": "aa6379af981233218cb2b8b88608a3f25bbd9a1b91b31560750c9fd8ec70300a",
+      "src/common/scratch_buffer.h": "4dc5c6f83f6aec237c0ddcd232c76ad8225608d3b938ba98ea32149e5c8b44c2",
+      "src/core/hle/result.h": "40febde3d6f26651bfca7853f7e8dc9bc73fb59549a0b5cf50e023bd0013f89b",
+      "src/core/hle/service/audio/errors.h": "6f775042c945ba1f5cc1714679ead7da82106837401481a7bb357c4c3bf63db5",
+      "src/audio_core/renderer/system_manager.cpp": "0c789c549ad88b4a0ab2d41d4bd6145ea7d2cee783b98512804c3e1dcf4fd09c",
+      "src/audio_core/renderer/audio_device.h": "d80410229b14a8e3b9062d34a59076bbdecead19f525d36da5b7274f32d8e722",
+      "src/audio_core/renderer/system.cpp": "a9f83a612772cdf1057d8d2a9d5def6e88213c93f307eac57177d334a9b78b5d",
+      "src/audio_core/renderer/system.h": "cc3926533ad1bc120ec3071a5d5268048c4624aa7aec8dc8f6d9b9c922aa52b6",
+      "src/audio_core/renderer/system_manager.h": "c7f387f6ccafdaa3de3aa4c6319daaaa0979f86b63b814fd1384082e0be73b46",
+      "src/audio_core/renderer/audio_renderer.h": "1d00a977e911f83880317d0024bd506714e3c068ac6cefab79ca84dc4c07bb4d",
+      "src/audio_core/renderer/audio_device.cpp": "a86e7068244c2d5296bcac489649d9b79ba383876b22a6990f840bcb281a56d6",
+      "src/audio_core/renderer/audio_renderer.cpp": "97f5d82b4210325ac98ad022c4adb1b5c71d11a40b0a9aff0f184bb28fc8e565",
+      "src/audio_core/opus/hardware_opus.cpp": "73f7950eef7baef835e2bde7780f853b0f559ebc7872fe050c91f6748d58a26a",
+      "src/audio_core/opus/decoder.h": "9d6218f189db2e7be4aaf33015631111f55fe0904af62597df104abf9f16a9d0",
+      "src/audio_core/opus/hardware_opus.h": "82d95b9172afc8a5729a2f9ba31ae2e0cbecd1c49162055da5401da5f4f344a2",
+      "src/audio_core/opus/decoder_manager.cpp": "a1901b1c734c9d1cda7f4851b5c6654ccb3c530b12ccf960094c895e31123090",
+      "src/audio_core/opus/parameters.h": "69592a19d82301739cde2e8359f8e2f6ab0c868f75ecc66d1521c7f3a1f2debc",
+      "src/audio_core/opus/decoder.cpp": "48d42784905291aef291f2140dea80d065d6a319809c3dd5dbd4c8b1231b9c81",
+      "src/audio_core/opus/decoder_manager.h": "4d7a924ed9947a0b71e108bdced7969291feeb95b8e583ab50c19fc1ac4f8d19",
+      "src/audio_core/out/audio_out_system.h": "eb5c6e9d493cef3ecdb16e379162dceca57f531b6040d0ae1eda92128b6efb05",
+      "src/audio_core/out/audio_out.h": "577b078497e9021e0449a8815c36fb7fc0b76f156b6ce340abafd8f3170cfcf1",
+      "src/audio_core/out/audio_out_system.cpp": "3fe7e00a224e85d509a40e97d042ce973767b3ebc6294a781ffa7f6b9792e00f",
+      "src/audio_core/out/audio_out.cpp": "91dae89e1f2009c92f74453b20f4a577c30deb5d444556432157cb88811b3f08",
+      "src/audio_core/in/audio_in_system.h": "8c92f702b6fed6fe2cbc57101c6f13a907e948b60d851257a0a3110977e0166c",
+      "src/audio_core/in/audio_in.h": "347a98aadc3a8a2c4613635061cb13ab1dbf178f4f3619fe393dca14c0402347",
+      "src/audio_core/in/audio_in_system.cpp": "7643c5a06471935a62d5104098b1b7eb0593813451923266234dc429079e88b2",
+      "src/audio_core/in/audio_in.cpp": "6b7c2730be07f204b382e5632f8bf111fb286d41569968cf3855701420ebc0cf",
+      "src/audio_core/sink/cubeb_sink.cpp": "d43b349fbde1c758a4b4ad09aee8fe67e3bb2804c02fa47533c8bef1a2731381",
+      "src/audio_core/sink/sink_stream.h": "569990f9770a7bf993cf9d8af2c2e848b9fa057eb2ca38bdbf24cdcfd592e766",
+      "src/audio_core/sink/sdl3_sink.h": "90f42fc0a5afa63841eb6aa88b8652618d509b679b6a32fceb93acbc19c59aa0",
+      "src/audio_core/sink/sink_stream.cpp": "25ac587e80ab8e6dd04970e654cd1d5a93479b644f6676b2a56efa2d311f044a",
+      "src/audio_core/sink/sink.h": "4075b94ed8539d8d1efec72a2bfc5f024e4ec659018802c3fda3a57d3db4c3d6",
+      "src/audio_core/sink/cubeb_sink.h": "916705ef4fe632c34eaffccfb1e05e9c63de162f5f49dc2c9b86c4f17eca56a6",
+      "src/audio_core/sink/sdl3_sink.cpp": "8fa57e8ceacef92387d32d4a3ab8965a687a19d15154a8646761ce0aac536dcf",
+      "src/audio_core/sink/sink_details.h": "29249c8deae410f0a0ab0aa0bc05c66f8af40e19dafbcea5bc50a99463dd78fe",
+      "src/audio_core/sink/sink_details.cpp": "d5e82b08a52df33a37d3e7a0e715e979904e08d2f29959d8c05e038fb5833394",
+      "src/audio_core/sink/null_sink.h": "9a74f0a0a85f6811496e145f2c36881b42f7077821c51dad90a64df8a544da8e",
+      "src/audio_core/common/feature_support.h": "002f46bb6d323e8cc087406e4449e71e15ca8dc0788e0678dd9642dbf1a1d9dc",
+      "src/audio_core/common/workbuffer_allocator.h": "1d9d5e9b23614518f3f396b0267365bef5760f7ce0f251f4ff5146e4791fd6f6",
+      "src/audio_core/common/common.h": "2d7b9971c628aa65c9146c5d476b9b865c087745d0a12fb2089c2c1be1c051ad",
+      "src/audio_core/common/audio_renderer_parameter.h": "2c54f371ffd0dc2239d5b6dcbd727999b593e4ea696d0dac7b3a0410c3a01b33",
+      "src/audio_core/common/wave_buffer.h": "d2ee8aeba445ead2a3de85d797ae77003782569b6cca7b148793734d3288d5ca",
+      "src/audio_core/device/device_session.cpp": "6a4a5fd739a0d451230e5b3c0950e23bcb92e2619f937427e600587063599245",
+      "src/audio_core/device/audio_buffer.h": "e9cfdec356ccee95350e0602d399f72ba3c49f92b3746e34e49b14fe5122c81e",
+      "src/audio_core/device/audio_buffers.h": "373f7183477b81482d94235a6ba0a03e04e62df52b80a7bfb94baf0b4481820d",
+      "src/audio_core/device/device_session.h": "83ac6de64a41b7b8904b39de456b24d130d3a48e870fc942cc9afcde00a0caae",
+      "src/audio_core/adsp/adsp.h": "fe9ee42f295e68f17ed438fc95a08e9185b90423ee7bcd3162e6d7a7af4febcd",
+      "src/audio_core/adsp/mailbox.h": "9adde9681775bded9b0bfe84a168f0f64e2f64ff3281099e11dd55c2db4d05f5",
+      "src/audio_core/adsp/adsp.cpp": "d234d5f128ef0ec5d8560ef43802c43aff82f6b36ad5d50c7d84dbc4b79f2e55",
+      "src/audio_core/adsp/apps/audio_renderer/command_list_processor.h": "5d99eb3c06173b449c37a98bf487a2abbead97dd2b351511ee3b94df54e70e2a",
+      "src/audio_core/adsp/apps/audio_renderer/command_buffer.h": "6dc5f0312dddfc2537d1a7f40e3df3797f692ba4a451b92c951ddfe3076b185c",
+      "src/audio_core/adsp/apps/audio_renderer/command_list_processor.cpp": "2864d509d4cc5353bba80826cf812d48ccf923b0b4129c89ec4a245170781fea",
+      "src/audio_core/adsp/apps/audio_renderer/audio_renderer.h": "51616c171439a2b317bb7e2ff979130e2e70d41cfac324c5cc54e07721ecba93",
+      "src/audio_core/adsp/apps/audio_renderer/audio_renderer.cpp": "96d526be6bb5a8a94d9bc5f9aeccae6f175c70efffa56e8146328c549879826d",
+      "src/audio_core/adsp/apps/opus/opus_decode_object.cpp": "8dcf11f7314529c8c842383f1840566ef0c3c47f2d419a503994a83999d29e6d",
+      "src/audio_core/adsp/apps/opus/opus_decode_object.h": "770c7bfc0a30069e20321e871166b90c1f1e1d65428f38942e5b3478e32dfb0e",
+      "src/audio_core/adsp/apps/opus/opus_multistream_decode_object.cpp": "05a1137787e90b606386f8b23d4415f64e6046ddba3822eec4c1023babc26f3c",
+      "src/audio_core/adsp/apps/opus/opus_multistream_decode_object.h": "8ba451a0d6c5bfb5e8ce09b4a3c237ab07bfee58d2b5f448cdd94f4c94dfeda0",
+      "src/audio_core/adsp/apps/opus/opus_decoder.cpp": "89c4fcdb62a3fa8ebce9bdc5d151187658958f1c395b4317965fbdab31c09b0b",
+      "src/audio_core/adsp/apps/opus/opus_decoder.h": "affffc2c5b96c971bcb86a0134b812c8a20ceddb52bd61980c3da89ec94bd2a4",
+      "src/audio_core/adsp/apps/opus/shared_memory.h": "8e65138ac1e1c450c42840b58a3d5bfeb4b7e3449c77a9af5389295d60bbc35a",
+      "src/audio_core/renderer/behavior/info_updater.h": "3bb6af320db5489cf1412ddd44ff1e1936e15c518b9519680314069cceba8548",
+      "src/audio_core/renderer/behavior/behavior_info.h": "6f4c31f640a6c252a08339543912f828b14fa84a3bb8e9b45f3d37d61c0a6413",
+      "src/audio_core/renderer/behavior/behavior_info.cpp": "522323033d594fbb5264b42e2d1eeb0a46fd83bb9e115adef967bd4f5dee1d0c",
+      "src/audio_core/renderer/behavior/info_updater.cpp": "03cfe1981c8dbf10b3630f017e3b001b66c0b28df3e0416b1879f75a8759f78e",
+      "src/audio_core/renderer/memory/address_info.h": "ef77e4fcc3c7109a904212b8034113acdf89a41923053b68f6f803d30a090b00",
+      "src/audio_core/renderer/memory/memory_pool_info.h": "f7e9459aac6f03b30469a7fca5d7c64c46365bdb099aaf0dae73068c35e6b294",
+      "src/audio_core/renderer/memory/pool_mapper.cpp": "a5f0a256f597cf374b15a69226ad57751dff040a257f1327356136e5cb74bb44",
+      "src/audio_core/renderer/memory/pool_mapper.h": "6e98cf154c88c4c610940de6fe2de532fd0047b47f9f497912b4a2d638135eec",
+      "src/audio_core/renderer/memory/memory_pool_info.cpp": "3b1dae0093c6c5182236856eced5a4892436dd87743d97578094ef1e0f920772",
+      "src/audio_core/renderer/nodes/edge_matrix.h": "0cde8f9ce8567fedf99b1675feae563f1a2d4f8a39abbfb7afed1e2d1a045b8c",
+      "src/audio_core/renderer/nodes/node_states.h": "ec0142ff556133ee912a6b5215047b090196887fbb4c97f6020cd84ee59638ab",
+      "src/audio_core/renderer/nodes/edge_matrix.cpp": "79c383d89508e1eb337cd6fd3e7c5fa7a37fbc6eb5bb31b29ecb7d4a479b4905",
+      "src/audio_core/renderer/nodes/bit_array.h": "c0bb714440ba801a0e6fc14d6f2583d681e2a17f9b63eb852d5ad3ee42e131e5",
+      "src/audio_core/renderer/nodes/node_states.cpp": "d7cd2c9febf3e7132f7b648655c2b956cb7c5ba2ba6cf066952ef318b8e09d06",
+      "src/audio_core/renderer/effect/biquad_filter.h": "cb87d91c6b9b29277805e27a10fb763d4d24e761201e84087a4ef16dd63f7d3f",
+      "src/audio_core/renderer/effect/capture.h": "74d6ee8aa9556c906a814547a9223e0b16bc59c47f44b72d277187ee51dc62e6",
+      "src/audio_core/renderer/effect/reverb.h": "b7463664ee97e47f9c92975f1e889141bf37843982bfae3e8b5e003ffa2a5791",
+      "src/audio_core/renderer/effect/capture.cpp": "26aa0f54e369e277f6b79e2019829e92c77651583c2b92b974bca92906ddd0e8",
+      "src/audio_core/renderer/effect/effect_reset.h": "ed6bb121be919f3d4878046ff89fb5554b36ea1c0dcd6b96de755baf083e3fb9",
+      "src/audio_core/renderer/effect/effect_context.h": "e0e3ad8b4183b4bd6c1c36d4e6bb6dfa3de65a745bdfc3b861d576408001725a",
+      "src/audio_core/renderer/effect/i3dl2.cpp": "db26b4486efce3594e3e2785b68f3e125e52f4591d74ae291a87cf20c227c3f3",
+      "src/audio_core/renderer/effect/light_limiter.cpp": "7f018c2445906534a21244e913273aa3e1e826a089c0494669aa30f781e4fb7a",
+      "src/audio_core/renderer/effect/light_limiter.h": "e8b3bd1aca5db69148f7408ec82bff15b1331c27e0df84c445943ed211af5309",
+      "src/audio_core/renderer/effect/effect_info_base.h": "175de1512e9b5d73cfb3d5144364e5fa81ae129102295c6380f5e11ce5b98ea9",
+      "src/audio_core/renderer/effect/effect_result_state.h": "a89c9ed7c292ff04c4a5681112bedb0bde7f3364a91c34ff5969a61b4ff61aa7",
+      "src/audio_core/renderer/effect/buffer_mixer.h": "100b69dbd7b3cee557bcd34720ed5e619166b2c3e7319c811bba08ab9e8be322",
+      "src/audio_core/renderer/effect/i3dl2.h": "54d2b1ccb836295ab79d33546e678cac9ff38b8a637cefbd10a1125ae7e2e465",
+      "src/audio_core/renderer/effect/buffer_mixer.cpp": "1d90b02e4d6966f8a8a90380a4823f04ba6e2f868a12c428a5f3295b1bb378b7",
+      "src/audio_core/renderer/effect/compressor.cpp": "abf6f9e783b2aa71d8d2d66baae471c4be20c61eee608cb1b240d7af4bb6e95e",
+      "src/audio_core/renderer/effect/aux_.h": "9f461249716b7c8ec54e4d946c52a00cb6c8b50fc7b0b2d559c924a253061e22",
+      "src/audio_core/renderer/effect/biquad_filter.cpp": "ab3b8d26cb820954bfe82a17c0c33689d8fb433325a62ebaa62431dfad731756",
+      "src/audio_core/renderer/effect/aux_.cpp": "98d5664933c2a479d8c4be7689b47e76a83edab3ac22aad7511792bb5a631ff4",
+      "src/audio_core/renderer/effect/delay.cpp": "ce0baecffba25d4b5285bcd239c63959fb10833402dbac3bd0ec82426008d69a",
+      "src/audio_core/renderer/effect/reverb.cpp": "7b74ff7c615004f21b296c14957ed1fa1ff05d8286f39185796c9d4d48294d2f",
+      "src/audio_core/renderer/effect/delay.h": "cb01dcb63354939ca9c9bd21978153afc6ee4a93c11ec0a906d420ebaf98f70e",
+      "src/audio_core/renderer/effect/compressor.h": "81c599f3fc8b4050978e4a3767acffbf400d30ef1db9a93c8f3292fb36ccedf1",
+      "src/audio_core/renderer/effect/effect_context.cpp": "dc012ee3dcb3132e2bd2f3c09fd0214786e8b41829d4f1ba2e61e85ac4dfe6e9",
+      "src/audio_core/renderer/splitter/splitter_destinations_data.h": "ad76332295c00a3fdcd505c65f991ce6104723e2d92e5b8f9dad55a59e1ff0aa",
+      "src/audio_core/renderer/splitter/splitter_info.cpp": "6fcced46ad7a9d943bb041de394b4ececdfb36eb514ab8c0f4dac15370d092c8",
+      "src/audio_core/renderer/splitter/splitter_destinations_data.cpp": "769faa10586c1eda4ef45112f7f08f3921342423ad1a26347ff203f1b0992251",
+      "src/audio_core/renderer/splitter/splitter_context.h": "6923d5a2ddf33b0c22534bfbe4066be1bb4012381a2fe15507f83c7e58731b0a",
+      "src/audio_core/renderer/splitter/splitter_context.cpp": "5cb36dfd1a62bbab942dfdc0b3294950c88313501d6c7e084a7e4c3e8a4d3191",
+      "src/audio_core/renderer/splitter/splitter_info.h": "2a2a7b729510734a404949f8262f949c2d3ea3416fd11603dc6ae0d37e7c97c6",
+      "src/audio_core/renderer/sink/circular_buffer_sink_info.cpp": "18d4181a3dac4c1c189900a323268b33e6f4664bba41f2c88b1f04cbe283220b",
+      "src/audio_core/renderer/sink/sink_info_base.cpp": "eedef281a1a1d8ca0ae51474c39bae62ee922c02fede3b193fa4d6d0569a2055",
+      "src/audio_core/renderer/sink/sink_context.cpp": "6b6fc9fed191b04c2eb5e2978c73ca6567a55393dabf48749139127faba56779",
+      "src/audio_core/renderer/sink/device_sink_info.cpp": "b3342d7f7c765226d621d629ca3485e6d26666a11febbfce4af45f9068ae8930",
+      "src/audio_core/renderer/sink/circular_buffer_sink_info.h": "4bd35462063770ec88fc81b0429242ccfc0a7f262e7b5025a6115a9e7dcfba8c",
+      "src/audio_core/renderer/sink/sink_context.h": "4dfb64cf776f1f2dad5071bdd9406114392e3a05ac1a112bffc56a400fe3ae5d",
+      "src/audio_core/renderer/sink/device_sink_info.h": "788a6dea01a993134d4d63a59fa39985948656bc0516b1735b612f26e1501575",
+      "src/audio_core/renderer/sink/sink_info_base.h": "1e9e5581b5f9042b92e576e265ff03674eb4f3a35af42b72b07dcca820f38d35",
+      "src/audio_core/renderer/mix/mix_context.h": "a2d3fdf31acb515e2f04b3ce1f7eb3e3b2ff1f0586fe4e87312cbaa4cee84566",
+      "src/audio_core/renderer/mix/mix_info.h": "843dce78ef39f8717a507c7ccb2bacd72431e245c49a2ff9f3ac1537df1ba843",
+      "src/audio_core/renderer/mix/mix_info.cpp": "d9a8e90ece045500d1691ab34a22637c03218f07f9722529f90c12e910c49ed1",
+      "src/audio_core/renderer/mix/mix_context.cpp": "3ab1e3ba0f2d4d062ea3ebf5b6cdc8d5033470ecdfdcc9f01b9a08bae4fff6cb",
+      "src/audio_core/renderer/upsampler/upsampler_manager.cpp": "d86258873f400b0e6b44dee3a3b1dc88c4c3f2daf0c95830df1634057b395a6f",
+      "src/audio_core/renderer/upsampler/upsampler_manager.h": "041e5c69e66f02dd760350ffebb27613770c0233ec6f79aef030c69d3274a6a2",
+      "src/audio_core/renderer/upsampler/upsampler_info.h": "69f1db63e23a9e02469b4f558cbb7b1d05311a2e03638a96c89d033e23e77a1c",
+      "src/audio_core/renderer/upsampler/upsampler_info.cpp": "4f76ea6db3b93766cd2d2be6c3644aed822aa433b10453e80633d35d02467794",
+      "src/audio_core/renderer/upsampler/upsampler_state.h": "79a8f98c20cef048bb8fbcdc8692861eb0dd9025f0ef47dd31a65e05a214f817",
+      "src/audio_core/renderer/voice/voice_info.cpp": "2168749b65ef2878ecccade45916c4a2c5defb17291117bc09be3a4e06c33c29",
+      "src/audio_core/renderer/voice/voice_state.h": "033773c2ab250535929e1da7cf5e5324fc49c2b9f5d5be58ddfd0c2671116fba",
+      "src/audio_core/renderer/voice/voice_context.h": "242f0210cf65ffc010b4fddcc6bee2442770c0cf17edbc866d001c9f70b1aee2",
+      "src/audio_core/renderer/voice/voice_info.h": "cb53462b85c76a3a73a42e8f4e402b298d4ef3f86ec05becfd2e6f7bd30281fe",
+      "src/audio_core/renderer/voice/voice_context.cpp": "0b2f8318d4d63ea7a44de0782e9184ce9d2a51e36f50950052d3372938301a30",
+      "src/audio_core/renderer/voice/voice_channel_resource.h": "1a5216109c714cb1c092f92c370aa85ed37060c8c273a77e0ce88838a109aea4",
+      "src/audio_core/renderer/command/command_processing_time_estimator.h": "54a1b3e0dc9b0e24f1e42bd02b89944e55fd4079dac5c7cf02efea57488a8277",
+      "src/audio_core/renderer/command/command_processing_time_estimator.cpp": "3a1fb890316b1d9882e7331a914b2e1ea0148c3774548aea26704a5afdddae1d",
+      "src/audio_core/renderer/command/command_generator.h": "58439b696e945d459fd8f3de7d308fcd8c389d9bffaa26c58d4f6902734fdfc8",
+      "src/audio_core/renderer/command/command_buffer.cpp": "26d23f21727c6f6612b47bc712c5df2a13cc1ef8166cdb7f5d9303057b30406f",
+      "src/audio_core/renderer/command/commands.h": "99f04d8a6552b8d40dc351eb7dc40e82b9cdefc53eab09351d6cfffd54175d57",
+      "src/audio_core/renderer/command/command_buffer.h": "88db1ab94b69e9bac13fe8fe2c98809985ff9aa114b427b2b173d792993f3e9c",
+      "src/audio_core/renderer/command/command_generator.cpp": "005761a8ede148b23142274486a163173391ca8a26be4dc2585153fbf90eba4e",
+      "src/audio_core/renderer/command/command_list_header.h": "40d390791f4e7490114541dec920a71e5dc9cd61e4f5bc1a776f657941c3c232",
+      "src/audio_core/renderer/command/icommand.h": "101ccf431d63b23b2c4b2e855c6f46c50e1bbb01c4fe1005e48f523c7861b1db",
+      "src/audio_core/renderer/performance/performance_manager.cpp": "e257d83651d0452c43dc63e91406b2c04ba53a9451fbf2cb4202b827b85eae2e",
+      "src/audio_core/renderer/performance/performance_frame_header.h": "49f6ed4d4e3e225debc502379bbd21e22a2520253ede430b22834e6529099991",
+      "src/audio_core/renderer/performance/performance_entry_addresses.h": "5645bafcc4ee1686d515d77bbcca0a14430ce4554f3add909b2161a53821bb18",
+      "src/audio_core/renderer/performance/performance_manager.h": "bdd4844f1e4152852791b7012c94076fbe98a55bb2b6cd1a892132bf9217d5d8",
+      "src/audio_core/renderer/performance/entry_aspect.h": "9626929faa54b40c7e0dc4e89b1a288d2142879321b6bc306d845174216a1774",
+      "src/audio_core/renderer/performance/performance_entry.h": "b63c09263c3cb6a321d44bdc7edef3c63493086c51af815f8e475a19a1c0711c",
+      "src/audio_core/renderer/performance/detail_aspect.cpp": "059a2d16fe8c0f65665e197981af86cf0cbeeda696859678eddd0d96c8df9d8f",
+      "src/audio_core/renderer/performance/detail_aspect.h": "6f7e7edacf6ea0ce6a3e7191c7168888bdc9c53111b48d8af2324dc1cb4604c6",
+      "src/audio_core/renderer/performance/performance_detail.h": "5da2f463bb840af9da41558deec927640142b96ea3c19c73404d3f187dedaaf1",
+      "src/audio_core/renderer/performance/entry_aspect.cpp": "cfabdc2cfc0f9af1bf561d9221a86f23773872c2dfb2389919c5c822980633b9",
+      "src/audio_core/renderer/command/data_source/adpcm.h": "307f4fb73270eb0e4f61ed61b76c91927ee337171db04726204f67f42b173f59",
+      "src/audio_core/renderer/command/data_source/pcm_float.cpp": "afc768c86a2469ac228a1895c9ea932fa54a37632285f9efa7d33bd18cdd6f1a",
+      "src/audio_core/renderer/command/data_source/adpcm.cpp": "c8d6f0e4f1de9f1e39a86a7ccb4819fe5cca454a8218821e6a7ac8c055bc71d8",
+      "src/audio_core/renderer/command/data_source/pcm_int16.cpp": "e877a20cd67a677055146760c0848bb4406b52e7cbfedfb2abcbbb71d1d8f572",
+      "src/audio_core/renderer/command/data_source/pcm_float.h": "e0490df641e2a4f1f432748fc41aeebf3a9b9ddb6f473321a7ae12d0e5ea385d",
+      "src/audio_core/renderer/command/data_source/decode.cpp": "6bb255b81de141e99ede05ab79a80bb4acc448d627c14b4f340ef4fdcf04d110",
+      "src/audio_core/renderer/command/data_source/pcm_int16.h": "0f1b28b5afe224765660ee3dcd15aeb538576fe09eff42073f0210b4291612a3",
+      "src/audio_core/renderer/command/data_source/decode.h": "c5c399a2802f08b49d1fcd1cc737d51325e60a1bff71d4b743149c66eb4d8254",
+      "src/audio_core/renderer/command/resample/resample.h": "5a9fb778f09eeb7eedacbad6fb56e91df74e17c199bfea50a0aa4e3fb414b29a",
+      "src/audio_core/renderer/command/resample/upsample.cpp": "dc32cee5ed6b197f9b96190cee1f5798ac318fc59276b4a0be6bc824dd9f2497",
+      "src/audio_core/renderer/command/resample/resample.cpp": "16da8c73c9560f141f509bb6cb7d46bc3fb72d592d1959e35254dbcb2beeec49",
+      "src/audio_core/renderer/command/resample/upsample.h": "fac0a67650c056a0ba835f45f4ea6ee7a75a212041923fffda06babccfba76bd",
+      "src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.h": "1b8c685fc55078b7cb34dbe6f7173eb63f753ea2a0c99d96f47e9d6b4d77b062",
+      "src/audio_core/renderer/command/resample/downmix_6ch_to_2ch.cpp": "e7aa6a25d67fe505565739794a6d4bc810b9bc0970343dc208ef774c17f2099f",
+      "src/audio_core/renderer/command/effect/biquad_filter.h": "e65e3092d93323384ca6793c1067267c61c4ed99fcb8ea6162edda4f878ee2d2",
+      "src/audio_core/renderer/command/effect/capture.h": "db7cd2e051c21df53043ae0069f3ec88e38b176e6d48870e628e6cb1dcf4a235",
+      "src/audio_core/renderer/command/effect/reverb.h": "ce50e213f8d7b7a7fb32ce07023de690902bfd239767373a8445d4a3305a1d43",
+      "src/audio_core/renderer/command/effect/capture.cpp": "6d7ddd3d59c0c89a6f0d0896c57393ce5c712f77703dc60f299936add1b6df38",
+      "src/audio_core/renderer/command/effect/multi_tap_biquad_filter.h": "acf092ad4bb4ca1fa2b12facb8d9e24c9da4a429307bb54efe1dfad723e0cb43",
+      "src/audio_core/renderer/command/effect/light_limiter.cpp": "9e83d6c1502f5d473f9da5f1f28665c15f8d4758e34fb6d572f1672bad25d645",
+      "src/audio_core/renderer/command/effect/light_limiter.h": "611442dc1a8e3f7e324940360c2a81c5cf5d208fe3820ad0695502b9ea5d74a3",
+      "src/audio_core/renderer/command/effect/i3dl2_reverb.h": "b37cbc490b2ce9be3751cf8fa428d6dfc7966e38af6d3ab7b29ea19156df18af",
+      "src/audio_core/renderer/command/effect/i3dl2_reverb.cpp": "89c07d48180d515ab83f558fc184f584dfbf10632995b3aa188606c63a0c67b3",
+      "src/audio_core/renderer/command/effect/compressor.cpp": "3fe2f868c576cd3bcbde844d652ced944716fd2952cd85d68d8a9e64d52c8599",
+      "src/audio_core/renderer/command/effect/aux_.h": "3ac2b84ca24f0b296cd89a281d1945943804f4d031a905331398cb867de5aec6",
+      "src/audio_core/renderer/command/effect/biquad_filter.cpp": "94fa729264605ebd963daa2b57b1232845ddca0546352a413923a344fd70dfca",
+      "src/audio_core/renderer/command/effect/aux_.cpp": "afd44b4026a0500d8967da159d3d840b8b4b77dc9c5c6855e6c9106a7d79a54c",
+      "src/audio_core/renderer/command/effect/delay.cpp": "95bfac51081fc231a99f479b1a383f018f558315bdf9a72dfadaef25f09ed8e6",
+      "src/audio_core/renderer/command/effect/reverb.cpp": "58629ff05d459d34823e41c0c2a9368687b10bf435440c10a8efe104467b4155",
+      "src/audio_core/renderer/command/effect/delay.h": "b5e6b9b33dc0a61a1f3b7e988d346d83d5d5c85a24d4143e851a9f0a32a5ff52",
+      "src/audio_core/renderer/command/effect/multi_tap_biquad_filter.cpp": "c68623a3be1c545ed463e2114f1cc4052a8d6a6a843d13657650a632d2fa3119",
+      "src/audio_core/renderer/command/effect/compressor.h": "a6d4b08882a5e7e19bae4f32c2b6c5c8f79c222d98c69887625e3312443bd065",
+      "src/audio_core/renderer/command/sink/device.h": "e736d1e73504214367b1fbc733f062f81d10df005b6b907309627b3ad2d2a3dd",
+      "src/audio_core/renderer/command/sink/circular_buffer.h": "319a365315c2aa55eddafaca17907097b52f0442a7fa9e78684e961b09cc066a",
+      "src/audio_core/renderer/command/sink/device.cpp": "c835aefbc6edd6e582cf82755ef480d2280fef7d06935ad7e304cac3f84c803e",
+      "src/audio_core/renderer/command/sink/circular_buffer.cpp": "3a8e1daba206403d0ce654b5d383cc87c50d097ee5d9f1b1beed688c38ce7590",
+      "src/audio_core/renderer/command/mix/mix_ramp.cpp": "f64b5a1c1c6459032952fc67a3f21b048e5853ce27e333829776d74160eebc4e",
+      "src/audio_core/renderer/command/mix/depop_prepare.h": "0a1bf769e1b72a672ac5277bf1c6342a64f4c4aa4a5536a5d2d05ec40a006368",
+      "src/audio_core/renderer/command/mix/mix.h": "781cc36e657bb389270f81547829e5e7ac3d633b74d378b90b0f099cda85b125",
+      "src/audio_core/renderer/command/mix/mix_ramp_grouped.cpp": "e37f793918acb0d1545a934e9d392302b5290d5a3e9bc926accf44914cebe768",
+      "src/audio_core/renderer/command/mix/mix_ramp.h": "da67b3a581ed3dd3089903fa7d4833a799a374d8a270ec4219bd3328d4881347",
+      "src/audio_core/renderer/command/mix/clear_mix.cpp": "2db9446db70fb58e446056f320382c2692a48ae0d38e55e85b1ad8a1cd107bcc",
+      "src/audio_core/renderer/command/mix/clear_mix.h": "3463d6b4bea022ace42241c8647b7377f18df3a71c688b1f979d7977b5c3f9cb",
+      "src/audio_core/renderer/command/mix/copy_mix.cpp": "9543ff8b675ee7135737ac81f12f8ed252c1f4c393d9c241a4b1e424ff403192",
+      "src/audio_core/renderer/command/mix/mix_ramp_grouped.h": "db3349a2f934eda4e0e5d7ad34885057a9e8b5559c041e6aaf2939ff23dec210",
+      "src/audio_core/renderer/command/mix/depop_for_mix_buffers.h": "def47bd8e9ebaee7c60abf5b259bd6e885647760f5385ff3796c897fdedf864d",
+      "src/audio_core/renderer/command/mix/volume_ramp.h": "23c4acba2b257da5caa9f012433d017569e47793aa2d42dfe1afe398c1a69931",
+      "src/audio_core/renderer/command/mix/depop_for_mix_buffers.cpp": "eb8f739da265bee6320755de7cab583508578e6380e00fe42cc170b1cafdadb3",
+      "src/audio_core/renderer/command/mix/depop_prepare.cpp": "46f04d10a9e5ddb2f2ce9d29854751e6d09d8fe26e65f67d552286eff8ea8145",
+      "src/audio_core/renderer/command/mix/volume.h": "e163f1676f81c62e6dc5283274f60a0e491517792765092917bdb916d408fcc9",
+      "src/audio_core/renderer/command/mix/mix.cpp": "e31ac072ca4dd895f9a6d912a6ef397383aa15208eb7c5e079a0632975513d18",
+      "src/audio_core/renderer/command/mix/volume_ramp.cpp": "fb21089cb16888133686fe3363e6eb5779253f222434875be812603a862e465a",
+      "src/audio_core/renderer/command/mix/copy_mix.h": "fd36fc457083d9517a2a0ff05c8b83cfad75b8a0c1223c471b26939c0b286390",
+      "src/audio_core/renderer/command/mix/volume.cpp": "fc5c451e9b73fa5a93c5a97d39085356ba89278f307f10b7bbc673b9d071570f",
+      "src/audio_core/renderer/command/performance/performance.cpp": "c6053c81af7b1f37bdce138ce4329e1dbf926ebe6ef8fe920743610a0cc257fc",
+      "src/audio_core/renderer/command/performance/performance.h": "689701bc1808fe10b9fcb58354848cc0f4b4cd4d3a658ed67519ce0a2674afcb"
+    },
+    "adapter_translation_units": [
+      "native/renderer_memory.cpp",
+      "native/renderer_host.cpp",
+      "native/renderer_event.cpp",
+      "native/common_ports.cpp",
+      "native/wire.cpp",
+      "native/audren_host.cpp",
+      "adapter/native_sink_stream.cpp",
+      "platform/platform.cpp"
+    ],
+    "expected_original_translation_units": 71,
+    "expected_total_translation_units": 79
   }
 }

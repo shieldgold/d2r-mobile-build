@@ -4,6 +4,7 @@ on:
     paths:
       - 'experiments/botw_upstream_backend/**'
       - 'experiments/botw_upstream_host/**'
+      - 'experiments/botw_audio_renderer/**'
       - 'tests/test_botw_whole*.py'
       - 'tests/test_botw_upstream_host_policy.py'
       - 'tests/test_botw_upstream_backend_compile.py'
@@ -52,6 +53,7 @@ on:
     paths:
       - 'experiments/botw_upstream_backend/**'
       - 'experiments/botw_upstream_host/**'
+      - 'experiments/botw_audio_renderer/**'
       - 'tests/test_botw_whole*.py'
       - 'tests/test_botw_upstream_host_policy.py'
       - 'tests/test_botw_upstream_backend_compile.py'
@@ -102,7 +104,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -143,6 +145,10 @@ jobs:
           .tools/botw-ci-venv/bin/python -m pip install -r requirements.botw.txt
       - name: Test native host using synthetic programs
         run: .tools/botw-ci-venv/bin/python -m unittest discover -s tests -p 'test_botw_*.py' -v
+      - name: Test complete native renderer using owned CPU and AudioUnit fixtures
+        env:
+          BOTW_AUDIO_RENDERER_SANITIZERS: '1'
+        run: .tools/botw-ci-venv/bin/python -m unittest discover -s experiments/botw_audio_renderer/tests -p 'test_*.py' -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: BOTWNative-generic-ios-host

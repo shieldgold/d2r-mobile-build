@@ -94,6 +94,32 @@ class WholeHostBuildTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "staged source lock mismatch"):
                 build.verify_staged(staged, before, patched)
 
+    def test_audio_prepared_dependency_preserves_original_identity_and_exact_patch_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            component, staged, sdk = (root / p for p in ("component", "staged", "SDK"))
+            for p in (component, staged, sdk):
+                p.mkdir()
+            original = root / "audio/original.h"
+            original.parent.mkdir()
+            original.write_text("// original fixed upstream\n")
+            prepared = root / "audio-prepared.h"
+            prepared.write_text("// reviewed platform patch\n")
+            external = {"audio/original.h": {"sha256": build.sha(original)}}
+            mapping = {prepared.resolve(): {"repository_path": "audio/original.h",
+                "compiled_sha256": build.sha(prepared), "role": "complete-audio-original-or-patched-source"}}
+            records, _ = build.classify_dependencies({prepared}, staged, component, sdk,
+                {}, {}, root, external, mapping)
+            self.assertEqual(records, [mapping[prepared.resolve()]])
+            prepared.write_text("// unexpected output\n")
+            with self.assertRaisesRegex(ValueError, "prepared source lock mismatch"):
+                build.classify_dependencies({prepared}, staged, component, sdk,
+                    {}, {}, root, external, mapping)
+            prepared.write_text("// reviewed platform patch\n")
+            with self.assertRaisesRegex(ValueError, "original absent"):
+                build.classify_dependencies({prepared}, staged, component, sdk,
+                    {}, {}, root, {}, mapping)
+
     def test_lock_rejects_changed_added_missing_and_symlinked_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             component = Path(directory)

@@ -1,0 +1,275 @@
+--- a/src/audio_core/sink/sink.h
++++ b/src/audio_core/sink/sink.h
+@@ -15,8 +15,8 @@
+ namespace Common {
+ class Event;
+ }
+-namespace Core {
+-class System;
++namespace botw::audio {
++class RendererHost;
+ }
+ 
+ namespace AudioCore::Sink {
+@@ -54,7 +54,7 @@
+      *
+      * @return A pointer to the created SinkStream
+      */
+-    virtual SinkStream* AcquireSinkStream(Core::System& system, u32 system_channels,
++    virtual SinkStream* AcquireSinkStream(botw::audio::RendererHost& system, u32 system_channels,
+                                           const std::string& name, StreamType type) = 0;
+ 
+     /**
+--- a/src/audio_core/sink/sink_stream.h
++++ b/src/audio_core/sink/sink_stream.h
+@@ -21,8 +21,8 @@
+ #include "common/ring_buffer.h"
+ #include "common/thread.h"
+ 
+-namespace Core {
+-class System;
++namespace botw::audio {
++class RendererHost;
+ } // namespace Core
+ 
+ namespace AudioCore::Sink {
+@@ -58,13 +58,13 @@
+  */
+ class SinkStream {
+ public:
+-    explicit SinkStream(Core::System& system_, StreamType type_) : system{system_}, type{type_} {}
++    explicit SinkStream(botw::audio::RendererHost& system_, StreamType type_) : system{system_}, type{type_} {}
+     virtual ~SinkStream() {}
+ 
+     /**
+      * Finalize the sink stream.
+      */
+-    virtual void Finalize() {}
++    virtual void Finalize() = 0;
+ 
+     /**
+      * Start the sink stream.
+@@ -72,12 +72,12 @@
+      * @param resume - Set to true if this is resuming the stream a previously-active stream.
+      *                 Default false.
+      */
+-    virtual void Start(bool resume = false) {}
++    virtual void Start(bool resume = false) = 0;
+ 
+     /**
+      * Stop the sink stream.
+      */
+-    virtual void Stop() {}
++    virtual void Stop() = 0;
+ 
+     /**
+      * Check if the stream is paused.
+@@ -102,7 +102,7 @@
+      *
+      * @param channels - New number of system channels.
+      */
+-    void SetSystemChannels(u32 channels) {
++    virtual void SetSystemChannels(u32 channels) {
+         system_channels = channels;
+     }
+ 
+@@ -138,7 +138,7 @@
+      *
+      * @param volume_ - The new system volume.
+      */
+-    void SetSystemVolume(f32 volume_) {
++    virtual void SetSystemVolume(f32 volume_) {
+         system_volume = volume_;
+     }
+ 
+@@ -147,7 +147,7 @@
+      *
+      * @param volume_ - The new device volume.
+      */
+-    void SetDeviceVolume(f32 volume_) {
++    virtual void SetDeviceVolume(f32 volume_) {
+         device_volume = volume_;
+     }
+ 
+@@ -156,14 +156,14 @@
+      *
+      * @return The number of queued buffers.
+      */
+-    u32 GetQueueSize() const {
++    virtual u32 GetQueueSize() const {
+         return queued_buffers.load();
+     }
+ 
+     /**
+      * Set the maximum buffer queue size.
+      */
+-    void SetRingSize(u32 ring_size) {
++    virtual void SetRingSize(u32 ring_size) {
+         max_queue_size = ring_size;
+     }
+ 
+@@ -186,7 +186,7 @@
+     /**
+      * Empty out the buffer queue.
+      */
+-    void ClearQueue();
++    virtual void ClearQueue();
+ 
+     /**
+      * Callback for AudioIn.
+@@ -209,14 +209,17 @@
+      *
+      * @return The number of samples.
+      */
+-    u64 GetExpectedPlayedSampleCount();
++    virtual u64 GetExpectedPlayedSampleCount();
+ 
+     /**
+      * Waits for free space in the sample ring buffer
+      */
+-    void WaitFreeSpace(std::stop_token stop_token);
++    virtual void WaitFreeSpace(std::stop_token stop_token);
+ 
+ protected:
++    virtual f32 GetMasterVolume() const;
++    virtual void SubmitBuffer(const SinkBuffer& buffer, std::span<const s16> samples);
++
+     /**
+      * Unblocks the ADSP if the stream is paused.
+      */
+@@ -224,7 +227,7 @@
+ 
+ protected:
+     /// Core system
+-    Core::System& system;
++    botw::audio::RendererHost& system;
+     /// Type of this stream
+     StreamType type;
+     /// Set by the audio render/in/out system which uses this stream
+--- a/src/audio_core/sink/sink_stream.cpp
++++ b/src/audio_core/sink/sink_stream.cpp
+@@ -3,6 +3,9 @@
+ 
+ // SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
++
++#include <cmath>
++#include "renderer_host.h"
+ 
+ #include <array>
+ #include <atomic>
+@@ -10,17 +13,17 @@
+ #include <span>
+ #include <vector>
+ 
+-#include "audio_core/audio_core.h"
+ #include "audio_core/common/common.h"
+ #include "audio_core/sink/sink_stream.h"
+ #include "common/common_types.h"
+ #include "common/fixed_point.h"
+ #include "common/scope_exit.h"
+-#include "common/settings.h"
+-#include "core/core.h"
+-#include "core/core_timing.h"
+ 
+ namespace AudioCore::Sink {
++
++f32 SinkStream::GetMasterVolume() const {
++    return system.master_volume();
++}
+ 
+ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
+     if (type == StreamType::In)
+@@ -29,7 +32,7 @@
+     constexpr s32 min = (std::numeric_limits<s16>::min)();
+     constexpr s32 max = (std::numeric_limits<s16>::max)();
+ 
+-    auto yuzu_volume = Settings::Volume();
++    auto yuzu_volume = GetMasterVolume();
+     if (yuzu_volume > 1.0f)
+         yuzu_volume = 0.6f + 20.0f * std::log10(yuzu_volume);
+     auto const volume = system_volume * device_volume * yuzu_volume;
+@@ -57,26 +60,28 @@
+             samples[w_offs + 1] = s16(std::clamp(s32(right * volume), min, max));
+         }
+ 
+-        queue.EmplaceWait(buffer);
+-        samples_buffer.Push(samples.subspan(0, samples.size() / system_channels * device_channels));
++        SubmitBuffer(buffer, samples.subspan(0, samples.size() / system_channels * device_channels));
+     } else if (system_channels < device_channels) {
+         std::vector<s16> new_samples(samples.size() / system_channels * device_channels);
+         for (u32 r_offs = 0, w_offs = 0; r_offs < samples.size(); r_offs += system_channels, w_offs += device_channels)
+             for (u32 channel = 0; channel < system_channels; ++channel)
+                 new_samples[w_offs + channel] = s16(std::clamp(s32(f32(samples[r_offs + channel]) * volume), min, max));
+ 
+-        queue.EmplaceWait(buffer);
+-        samples_buffer.Push(new_samples);
++        SubmitBuffer(buffer, new_samples);
+     } else {
+         if (volume != 1.0f) {
+             for (u32 i = 0; i < samples.size(); ++i)
+                 samples[i] = s16(std::clamp(s32(f32(samples[i]) * volume), min, max));
+         }
+ 
+-        queue.EmplaceWait(buffer);
+-        samples_buffer.Push(samples);
+-    }
+-
++        SubmitBuffer(buffer, samples);
++    }
++
++}
++
++void SinkStream::SubmitBuffer(const SinkBuffer& buffer, std::span<const s16> samples) {
++    queue.EmplaceWait(buffer);
++    samples_buffer.Push(samples);
+     ++queued_buffers;
+ }
+ 
+@@ -119,7 +124,7 @@
+ 
+     // If we're paused or going to shut down, we don't want to consume buffers as coretiming is
+     // paused and we'll desync, so just return.
+-    if (system.IsPaused() || system.IsShuttingDown())
++    if (system.is_paused() || system.is_shutting_down())
+         return;
+ 
+     while (frames_written < num_frames) {
+@@ -158,7 +163,7 @@
+     // update sample counts fuer audio-ins
+     {
+         std::scoped_lock lk{sample_count_lock};
+-        last_sample_count_update_time = system.CoreTiming().GetGlobalTimeNs();
++        last_sample_count_update_time = std::chrono::nanoseconds(system.clock_ns());
+         min_played_sample_count = max_played_sample_count;
+         max_played_sample_count += frames_written;
+     }
+@@ -171,8 +176,8 @@
+     size_t frames_written{0};
+     size_t actual_frames_written{0};
+ 
+-    if (system.IsPaused() || system.IsShuttingDown()) {
+-        if (system.IsShuttingDown()) {
++    if (system.is_paused() || system.is_shutting_down()) {
++        if (system.is_shutting_down()) {
+             std::scoped_lock lk{release_mutex};
+             queued_buffers.store(0);
+             release_cv.notify_one();
+@@ -215,7 +220,7 @@
+ 
+     {
+         std::scoped_lock lk{sample_count_lock};
+-        last_sample_count_update_time = system.CoreTiming().GetGlobalTimeNs();
++        last_sample_count_update_time = std::chrono::nanoseconds(system.clock_ns());
+         min_played_sample_count = max_played_sample_count;
+         max_played_sample_count += actual_frames_written;
+     }
+@@ -223,7 +228,7 @@
+ 
+ u64 SinkStream::GetExpectedPlayedSampleCount() {
+     std::scoped_lock lk{sample_count_lock};
+-    auto cur_time{system.CoreTiming().GetGlobalTimeNs()};
++    auto cur_time{std::chrono::nanoseconds(system.clock_ns())};
+     auto time_delta{cur_time - last_sample_count_update_time};
+     auto exp_played_sample_count{min_played_sample_count + (TargetSampleRate * time_delta) / std::chrono::seconds{1}};
+ 

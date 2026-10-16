@@ -1,0 +1,134 @@
+{
+  "format": 1,
+  "eden_commit": "d8c6c59b679867d2595fdc0953df033475e23380",
+  "eden_additional_original_blobs": [
+    {
+      "path": "cpmfile.json",
+      "git_blob": "9cac812b7aff38b6b3099752217b45938a6853a4",
+      "sha256": "e1a263a2825e1204a243998cd5254c600201a0d3ed9b542f7a25ef99f2bdb157",
+      "bytes": 14535,
+      "destination": "provenance/eden-cpmfile.json"
+    },
+    {
+      "path": "LICENSES/GPL-2.0-or-later.txt",
+      "git_blob": "17cb286430a4d8094e473d06bd7f50f40438ddba",
+      "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+      "bytes": 17337,
+      "destination": "licenses/eden/GPL-2.0-or-later.txt"
+    },
+    {
+      "path": "LICENSES/GPL-3.0-or-later.txt",
+      "git_blob": "d41c0bd98feb776ef7d81efbc1b5447e0284a187",
+      "sha256": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e",
+      "bytes": 34670,
+      "destination": "licenses/eden/GPL-3.0-or-later.txt"
+    }
+  ],
+  "fmt": {
+    "repository": "https://github.com/fmtlib/fmt",
+    "tag": "12.1.0",
+    "source": "https://github.com/fmtlib/fmt/archive/refs/tags/12.1.0.tar.gz",
+    "resolved_source": "https://codeload.github.com/fmtlib/fmt/tar.gz/refs/tags/12.1.0",
+    "sha512": "f0da82c545b01692e9fd30fdfb613dbb8dd9716983dcd0ff19ac2a8d36f74beb5540ef38072fdecc1e34191b3682a8542ecbf3a61ef287dbba0a2679d4e023f2",
+    "bytes": 711419,
+    "tag_object": {
+      "sha": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+      "type": "commit",
+      "url": "https://api.github.com/repos/fmtlib/fmt/git/commits/407c905e45ad75fc29bf0f9bb7c5c2fd3475976f"
+    },
+    "commit": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+    "files": [
+      {
+        "path": "LICENSE",
+        "bytes": 1431,
+        "sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+        "git_blob": "1cd1ef92696b65b2ecb0e560e622f0a0e869dcf3"
+      },
+      {
+        "path": "include/fmt/args.h",
+        "bytes": 7199,
+        "sha256": "6e0bf8ffbd904e6ef525cdce8e6e00312ce5d14f616cea5d88132606ca0384c4",
+        "git_blob": "5e5f40f9ebf75c68ea11fbed9b48851c3f734566"
+      },
+      {
+        "path": "include/fmt/base.h",
+        "bytes": 105031,
+        "sha256": "73ba80ca15c02d6826a611d1651ca6f1495ec127815e257a5d6552d6f6ad313e",
+        "git_blob": "0d57867782fcf571e7581b2bc70fa04bf43e4ccc"
+      },
+      {
+        "path": "include/fmt/chrono.h",
+        "bytes": 77454,
+        "sha256": "f8e2a69bd97bc5b90c9af7fb87e010775b695d487a77e8d8cbe624e57bd2f9bf",
+        "git_blob": "9fbeeed6798e73f4f3f076894385dfcb232c9287"
+      },
+      {
+        "path": "include/fmt/color.h",
+        "bytes": 24145,
+        "sha256": "f88bf0c4833caed3a7f01b6d633c7b259741a26119e84c651ac1e31cfc980b72",
+        "git_blob": "2cbc53ca3048f5cbd232cb3077c99f1ff1321726"
+      },
+      {
+        "path": "include/fmt/compile.h",
+        "bytes": 20493,
+        "sha256": "636c13842acce0b42b378e65fe67a69e5635e8225c9701975e5b326a97be5cb8",
+        "git_blob": "64eb7a20dc8134841b4e36d1056b446fac0e5362"
+      },
+      {
+        "path": "include/fmt/core.h",
+        "bytes": 187,
+        "sha256": "b2b6692145b11c7c2774db106078c97575a47d18e80c7783c68566475325ebb4",
+        "git_blob": "8ca735f0c00498a19b7bcc44493b1417faf4fb8c"
+      },
+      {
+        "path": "include/fmt/format-inl.h",
+        "bytes": 81008,
+        "sha256": "e7baf108b84e89b29915bb35733540f8f4262cd8f4b41c15754eed4d2f185f61",
+        "git_blob": "945cb912a6014813864ef8c92bc20e28339f77ab"
+      },
+      {
+        "path": "include/fmt/format.h",
+        "bytes": 162666,
+        "sha256": "b4c65350362bf40e76a8e6b450587d912c7081b6eafeafaf3d7bcf53153e17fc",
+        "git_blob": "4a6530072f875b752fe7c3a9b3b0285260d17c63"
+      },
+      {
+        "path": "include/fmt/os.h",
+        "bytes": 12860,
+        "sha256": "45d4e84be4e84a128442f04eda06e1305c8e02c61166854a3b8b348194d35da5",
+        "git_blob": "94d730de281ec9a5af1a02bafe5fdea67f6734b7"
+      },
+      {
+        "path": "include/fmt/ostream.h",
+        "bytes": 5027,
+        "sha256": "742416a6a88286609887fa512c4423820764aafbb723a42a825f3193cb52b4f0",
+        "git_blob": "bf2371b7998488601cd1b7b297e06d8a14a8933b"
+      },
+      {
+        "path": "include/fmt/printf.h",
+        "bytes": 19991,
+        "sha256": "afddb422a86125e04a7260bb0f0ae3423ea8d591181ed5d4ef60b7a5d068993a",
+        "git_blob": "cc066d8c07c7a49c194400eceea928c850e558bc"
+      },
+      {
+        "path": "include/fmt/ranges.h",
+        "bytes": 28126,
+        "sha256": "ccaf61c9b5937e0fa97737fb047121c5fca9db34de516b8edfc1d913583e3c8e",
+        "git_blob": "36b38e29636567153b6d368f60fecf3383a90a8e"
+      },
+      {
+        "path": "include/fmt/std.h",
+        "bytes": 23532,
+        "sha256": "3f06cdf32774b9e6915e9762411f5f4de8b8ba5660adccbdea514be7f0b23826",
+        "git_blob": "184c6d26d605f47518ef1f420b1ae7a698807445"
+      },
+      {
+        "path": "include/fmt/xchar.h",
+        "bytes": 13098,
+        "sha256": "f0903d522c64faaee2c374a0b2063ac3e43d0b5006dfd3411f0e5dccd8ff6062",
+        "git_blob": "9334b87fdc13cb8600c4392eefd08e9ef050c024"
+      }
+    ]
+  },
+  "build_mode": "Native C++ header-only fmt; no emulator core, runtime JIT, or global package installation"
+}

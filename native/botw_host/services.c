@@ -51,7 +51,7 @@ enum ObjectKind { OBJECT_SM, OBJECT_LM, OBJECT_LOGGER, OBJECT_APM, OBJECT_APM_SE
     OBJECT_LIBRARY_APPLET_CREATOR, OBJECT_APPLET_STORAGE, OBJECT_STORAGE_ACCESSOR, OBJECT_AUDIO_CONTROLLER, OBJECT_DISPLAY_CONTROLLER, OBJECT_DEBUG_FUNCTIONS,
     OBJECT_FSP, OBJECT_ROMFS_STORAGE, OBJECT_ROMFS_FILESYSTEM, OBJECT_ROMFS_FILE, OBJECT_HID, OBJECT_HID_APPLET_RESOURCE, OBJECT_AOC, OBJECT_PCTL_FACTORY, OBJECT_PCTL_SERVICE,
     OBJECT_ACCOUNT, OBJECT_ACCOUNT_CONTEXT, OBJECT_SAVE_FILESYSTEM, OBJECT_SAVE_FILE, OBJECT_SETTINGS,
-    OBJECT_HID_VIBRATION_LIST };
+    OBJECT_HID_VIBRATION_LIST, OBJECT_AUDREN_MANAGER, OBJECT_AUDREN };
 typedef struct StorageBacking {
     botw_services *owner;
     unsigned refs;
@@ -72,9 +72,12 @@ typedef struct Object {
      * refcounted object; the final reference releases all of these bits. This
      * records no actuator presence, permission, requested value or output. */
     uint8_t vibration_devices[10];
+    void *audren_owner;
+    uint32_t audren_event_read;
+    unsigned borrowed, initializing;
 } Object;
 typedef struct Session {
-    unsigned refs, domain;
+    unsigned refs, domain, in_flight, closing;
     Object *root;
     Object *objects[DOMAIN_LIMIT];
 } Session;
@@ -87,6 +90,7 @@ typedef struct {
     uint8_t *pointer_memory;
     uint32_t retire_id;
     int retirement_pending;
+    unsigned in_flight;
 } Handle;
 typedef struct {
     uint64_t ipc_address, output_address;
@@ -113,6 +117,8 @@ struct botw_services {
     uint32_t focus_mode;
     unsigned focus_suspend_out, focus_policy_configured;
     botw_services_kernel_api kernel;
+    botw_services_audren_api audren;
+    unsigned audren_selected, external_calls, destroying;
     botw_input *input;
     botw_romfs *romfs;
     botw_savefs *savefs;
@@ -157,6 +163,7 @@ typedef struct {
     uint32_t type, command, token;
     unsigned pid, domain, domain_close, copy_count;
     uint32_t copy_handle;
+    uint32_t copy_handle_second;
     uint32_t object_id;
     const uint8_t *payload;
     size_t payload_size;
@@ -170,6 +177,9 @@ typedef struct {
     size_t output_size;
     size_t raw_start, raw_end, cmif_offset, pointer_input_bytes, pointer_output_bytes;
     unsigned input_is_static, output_is_static;
+    unsigned audren_update;
+    uint64_t alias_output_address[2];
+    size_t alias_output_size[2];
     PointerTransfer *transfer;
 } Request;
 
@@ -189,6 +199,8 @@ static const char *kind_name(enum ObjectKind kind) {
     switch (kind) {
         case OBJECT_SM: return "sm:";
         case OBJECT_SETTINGS: return "set.ISettingsServer";
+        case OBJECT_AUDREN_MANAGER: return "audren:u";
+        case OBJECT_AUDREN: return "audio.IAudioRenderer";
         case OBJECT_LM: return "lm";
         case OBJECT_LOGGER: return "lm.ILogger";
         case OBJECT_APM: return "apm.IPerformanceManager";
@@ -240,6 +252,58 @@ static Object *new_object(enum ObjectKind kind) {
     Object *o = calloc(1, sizeof *o);
     if (o) { o->kind = kind; o->refs = 1; }
     return o;
+}
+/* Only these calls drop the service mutex. Both the owning public send and the
+ * shared object remain borrowed until it is reacquired. No kernel lock is held.
+ * The same object can be referenced by independent CopyFromDomain sessions. */
+static void audren_unlock(botw_services *s, Object *o) {
+    o->borrowed++; s->external_calls++; pthread_mutex_unlock(&s->lock);
+}
+static void audren_relock(botw_services *s, Object *o) {
+    pthread_mutex_lock(&s->lock); s->external_calls--; o->borrowed--;
+}
+static int audren_control_result(botw_audren_result r, char *error, size_t cap) {
+    if (!r.host_status && !r.service_result_valid) return 0;
+    return problem(error, cap, "audren control/query did not complete (host=%d valid=%u result=0x%x)",
+        r.host_status, r.service_result_valid, r.service_result);
+}
+static int audren_service_result(botw_audren_result r, char *error, size_t cap) {
+    if (!r.host_status && r.service_result_valid == 1) return 0;
+    return problem(error, cap, "audren renderer Result unavailable (host=%d valid=%u)", r.host_status, r.service_result_valid);
+}
+/* Called before retiring a slot/ref/token. A successful backend close is a
+ * tombstone if a later transport release fails: retry never closes it twice. */
+static int prepare_object_release(botw_services *s, Object *o, unsigned references, char *error, size_t cap) {
+    if (!o) return 0;
+    if (o->borrowed) return problem(error, cap, "IPC object Busy during backend borrow");
+    if (o->kind != OBJECT_AUDREN || o->refs != references || !o->audren_owner) return 0;
+    void *owner = o->audren_owner;
+    audren_unlock(s, o);
+    botw_audren_result result = s->audren.close(s->audren.context, &owner, error, cap);
+    audren_relock(s, o);
+    o->audren_owner = owner;
+    if (audren_control_result(result, error, cap)) return -1;
+    if (owner) return problem(error, cap, "audren Close retained its backend owner without acknowledgement");
+    o->audren_event_read = 0; return 0;
+}
+static int prepare_session_release(botw_services *s, Session *session, unsigned own_send, char *error, size_t cap) {
+    if (!session) return 0;
+    if (session->closing || session->in_flight > own_send)
+        return problem(error, cap, "IPC session Busy during send/close");
+    session->closing = 1;
+    int result = 0;
+    if (session->domain) {
+        for (unsigned i = 0; i < DOMAIN_LIMIT && !result; i++) {
+            Object *o = session->objects[i];
+            if (!o) continue;
+            unsigned references = 0, seen = 0;
+            for (unsigned j = 0; j < DOMAIN_LIMIT; j++) if (session->objects[j] == o) {
+                references++; if (j < i) seen = 1;
+            }
+            if (!seen) result = prepare_object_release(s, o, session->refs == 1 ? references : 0, error, cap);
+        }
+    } else result = prepare_object_release(s, session->root, session->refs == 1, error, cap);
+    session->closing = 0; return result;
 }
 static void release_object(Object *o) {
     if (!o || --o->refs) return;
@@ -328,6 +392,17 @@ int botw_services_set_transport_api(botw_services *s,
     else s->transport = *api;
     pthread_mutex_unlock(&s->lock);
     return result;
+}
+int botw_services_set_audren_api(botw_services *s, const botw_services_audren_api *api, char *error, size_t cap) {
+    if (!s || !api || !api->get_work_buffer_size || !api->open || !api->get_info ||
+            !api->start || !api->stop || !api->update || !api->set_rendering_time_limit || !api->close)
+        return problem(error, cap, "audren requires the complete real backend API");
+    pthread_mutex_lock(&s->lock);
+    int result = 0;
+    if (s->destroying || s->audren_selected || s->audren.open)
+        result = problem(error, cap, "audren backend was already selected/used or services are closing");
+    else s->audren = *api;
+    pthread_mutex_unlock(&s->lock); return result;
 }
 void botw_services_set_performance_handler(botw_services *s, botw_services_performance_fn handler, void *opaque) {
     if (s) { pthread_mutex_lock(&s->lock); s->performance_handler = handler; s->performance_opaque = opaque; pthread_mutex_unlock(&s->lock); }
@@ -630,13 +705,20 @@ int botw_services_set_applet_state(botw_services *s, uint64_t user_id, int foreg
 int botw_services_destroy_checked(botw_services *s, char *error, size_t cap) {
     if (!s) return 0;
     pthread_mutex_lock(&s->lock);
+    if (s->external_calls || s->destroying) {
+        pthread_mutex_unlock(&s->lock); return problem(error, cap, "services Busy during backend call/destruction");
+    }
+    s->destroying = 1;
     if (s->trace_suppressed) emit(s, "ipc_trace_summary unique_commands=%u repeated_requests=%llu", s->trace_seen_count, (unsigned long long)s->trace_suppressed);
     for (unsigned i = 0; i < HANDLE_LIMIT; i++) {
         Handle *h = &s->handles[i];
+        if (h->in_flight || prepare_session_release(s, h->session, 0, error, cap)) {
+            s->destroying = 0; pthread_mutex_unlock(&s->lock); return -1;
+        }
         if ((h->id || h->retirement_pending) && s->transport.release &&
                 s->transport.release(s->transport.opaque, h,
                     h->retirement_pending ? h->retire_id : h->id, error, cap)) {
-            pthread_mutex_unlock(&s->lock); return -1;
+            s->destroying = 0; pthread_mutex_unlock(&s->lock); return -1;
         }
         release_session(h->session); free(h->pointer_memory); memset(h, 0, sizeof *h);
     }
@@ -669,6 +751,8 @@ static int services_connect(botw_services *s, const char *name, size_t length, u
 static int services_close(botw_services *s, uint32_t id, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, id) : NULL;
     if (!handle) return problem(error, cap, "CloseHandle invalid or closed IPC handle=0x%x", id);
+    if (handle->in_flight) return problem(error, cap, "IPC handle Busy during send");
+    if (prepare_session_release(s, handle->session, 0, error, cap)) return -1;
     if (s->transport.release &&
             s->transport.release(s->transport.opaque, handle, id, error, cap)) return -1;
     Session *session = handle->session; handle->id = 0; handle->session = NULL; release_session(session);
@@ -692,8 +776,8 @@ static int output_descriptor(botw_services *s, Request *r, uint64_t address, uin
     if (!length && !address) return 0;
     if (!length || length > SIZE_MAX || address > UINT64_MAX - length || !s->memory(s->opaque, address, (size_t)length, 1))
         return problem(error, cap, "IPC output descriptor is not checked guest writable memory address=0x%llx bytes=%llu", (unsigned long long)address, (unsigned long long)length);
-    if (++r->output_count > 1) return problem(error, cap, "IPC multiple nonempty output buffers are unsupported");
-    r->output_address = address; r->output_size = (size_t)length; return 0;
+    if (++r->output_count > (r->audren_update ? 2u : 1u)) return problem(error, cap, "IPC multiple nonempty output buffers are unsupported");
+    if (r->output_count == 1) { r->output_address = address; r->output_size = (size_t)length; } return 0;
 }
 static int copy_from_guest(botw_services *s, uint64_t source, void *destination,
         size_t size, char *error, size_t cap) {
@@ -737,7 +821,7 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
     if (b >> 31) {
         if (!checked_span(offset, 4, capacity)) return problem(error, cap, "truncated HIPC special header");
         uint32_t special = load32(ipc + offset); offset += 4;
-        if ((special & ~0x1fu) || ((special >> 1) & 15) > 1) return problem(error, cap, "IPC move/multiple input handles or reserved special header unsupported (0x%x)", special);
+        if ((special & ~0x1fu) || ((special >> 1) & 15) > 2) return problem(error, cap, "IPC move/multiple input handles or reserved special header unsupported (0x%x)", special);
         r->copy_count = (special >> 1) & 15;
         r->pid = special & 1;
         if (r->pid) {
@@ -745,49 +829,22 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
             offset += 8; /* Kernel supplies host process identity, never trusts placeholder. */
         }
         if (r->copy_count) {
-            if (!checked_span(offset, 4, capacity)) return problem(error, cap, "truncated HIPC copy handle");
-            r->copy_handle = load32(ipc + offset); offset += 4;
+            if (!checked_span(offset, r->copy_count * 4, capacity)) return problem(error, cap, "truncated HIPC copy handles");
+            r->copy_handle = load32(ipc + offset);
+            if (r->copy_count == 2) r->copy_handle_second = load32(ipc + offset + 4);
+            offset += r->copy_count * 4;
         }
     }
     if (!checked_span(offset, (size_t)statics * 8 + (size_t)(sends + recvs) * 12, capacity))
         return problem(error, cap, "HIPC descriptor list exceeds IPC buffer");
-    for (unsigned i = 0; i < statics; i++, offset += 8) {
-        uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
-        uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
-        /* Original zero-length storage writes retain a non-NULL X pointer.
-         * It grants no span. Only that exact method may accept it in staging. */
-        if (!(x >> 16) && address) r->zero_input_static_nonnull = 1;
-        else if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
-        if (x >> 16) r->input_is_static = 1;
-        r->pointer_input_bytes += ((size_t)(x >> 16) + 15) & ~(size_t)15;
-        r->input_static_count++;
-    }
-    for (unsigned i = 0; i < sends + recvs; i++, offset += 12) {
-        uint32_t size = load32(ipc + offset), low = load32(ipc + offset + 4), high = load32(ipc + offset + 8);
-        if ((high & 3) == 2) return problem(error, cap, "HIPC buffer has invalid memory mode=2");
-        uint64_t address = low | (uint64_t)(high >> 28) << 32 | (uint64_t)((high >> 2) & 0x3fffff) << 36;
-        uint64_t length = size | (uint64_t)((high >> 24) & 15) << 32;
-        if (i < sends ? input_descriptor(s, r, address, length, error, cap) : output_descriptor(s, r, address, length, error, cap)) return -1;
-    }
+    const size_t descriptor_start = offset;
+    offset += (size_t)statics * 8 + (size_t)(sends + recvs) * 12;
     size_t raw_end = offset + (size_t)(b & 0x3ff) * 4;
     r->raw_start = offset; r->raw_end = raw_end;
     if (raw_end > capacity) return problem(error, cap, "HIPC raw data exceeds IPC buffer (end=%zu capacity=%zu)", raw_end, capacity);
     unsigned recv_statics = recv_mode >= 3 ? recv_mode - 2 : 0;
     r->buffer_descriptor_count = statics + sends + recvs + recv_statics;
     if (!checked_span(raw_end, recv_statics * 8, capacity)) return problem(error, cap, "HIPC receive static list exceeds buffer");
-    for (unsigned i = 0; i < recv_statics; i++) {
-        const uint8_t *entry = ipc + raw_end + i * 8;
-        uint32_t high = load32(entry + 4);
-        uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
-        /* An old settings OutArray(0) still has a C descriptor with a real
-         * non-NULL client pointer. No bytes are authorized or dereferenced.
-         * stage_pointers subsequently permits this only for its exact schema. */
-        r->output_static_size = high >> 16;
-        if ((high >> 16) && output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
-        if (high >> 16) r->output_is_static = 1;
-        r->pointer_output_bytes += ((size_t)(high >> 16) + 15) & ~(size_t)15;
-        r->output_static_count++;
-    }
     offset = (offset + 15) & ~(size_t)15;
     if (session->domain && (r->type == 4 || r->type == 6)) {
         if (!checked_span(offset, 16, raw_end)) return problem(error, cap, "truncated CMIF domain header");
@@ -816,7 +873,76 @@ static int parse_request(botw_services *s, Session *session, const uint8_t *ipc,
         return problem(error, cap, "invalid CMIF header magic=0x%x version=%u", magic, version);
     r->cmif_offset = offset;
     r->command = load32(ipc + offset + 8); r->token = load32(ipc + offset + 12);
-    r->payload = ipc + offset + 16; r->payload_size = raw_end - offset - 16; return 0;
+    r->payload = ipc + offset + 16; r->payload_size = raw_end - offset - 16;
+    Object *target = session->root;
+    if (r->domain) target = r->object_id && r->object_id <= DOMAIN_LIMIT ? session->objects[r->object_id - 1] : NULL;
+    const int method = r->type == 4 || r->type == 6;
+    const int audio_open = method && target && target->kind == OBJECT_AUDREN_MANAGER && r->command == 0;
+    r->audren_update = method && target && target->kind == OBJECT_AUDREN && r->command == 4;
+    if (r->copy_count > 1 && !audio_open)
+        return problem(error, cap, "IPC multiple input handles require the exact audren Open schema");
+    if ((target && target->kind == OBJECT_AUDREN_MANAGER && method &&
+            (statics || sends || recvs || recv_statics)) ||
+            (r->audren_update && (statics || sends != 1 || recvs != 2 || recv_statics || r->pid || r->copy_count)))
+        return problem(error, cap, "audren method has unexpected descriptor/handle shape");
+    /* Count scalar descriptor metadata in this same parser before invoking any
+     * guest-range callback. An old service never gains authorization to inspect
+     * a second active span. Empty auto-select halves keep their old meaning. */
+    unsigned active_inputs = 0, active_outputs = 0;
+    size_t shape = descriptor_start;
+    for (unsigned i = 0; i < statics; i++, shape += 8)
+        active_inputs += !!(load32(ipc + shape) >> 16);
+    for (unsigned i = 0; i < sends + recvs; i++, shape += 12) {
+        unsigned nonempty = !!(load32(ipc + shape) || (load32(ipc + shape + 8) & 0x0f000000u));
+        if (i < sends) active_inputs += nonempty; else active_outputs += nonempty;
+    }
+    for (unsigned i = 0; i < recv_statics; i++)
+        active_outputs += !!(load32(ipc + r->raw_end + i * 8 + 4) >> 16);
+    if (active_inputs > 1 || active_outputs > (r->audren_update ? 2u : 1u))
+        return problem(error, cap, "IPC multiple nonempty input/output buffers exceed the selected method schema");
+    /* The audio extensions never authorize an old service's second buffer or
+     * dereference it before resolving its actual domain object and command. */
+    offset = descriptor_start;
+    for (unsigned i = 0; i < statics; i++, offset += 8) {
+        uint32_t x = load32(ipc + offset), low = load32(ipc + offset + 4);
+        uint64_t address = low | (uint64_t)((x >> 12) & 15) << 32 | (uint64_t)((x >> 6) & 63) << 36;
+        /* Original zero-length storage writes retain a non-NULL X pointer.
+         * It grants no span. Only that exact method may accept it in staging. */
+        if (!(x >> 16) && address) r->zero_input_static_nonnull = 1;
+        else if (input_descriptor(s, r, address, x >> 16, error, cap)) return -1;
+        if (x >> 16) r->input_is_static = 1;
+        r->pointer_input_bytes += ((size_t)(x >> 16) + 15) & ~(size_t)15;
+        r->input_static_count++;
+    }
+    for (unsigned i = 0; i < sends + recvs; i++, offset += 12) {
+        uint32_t size = load32(ipc + offset), low = load32(ipc + offset + 4), high = load32(ipc + offset + 8);
+        if ((high & 3) == 2) return problem(error, cap, "HIPC buffer has invalid memory mode=2");
+        uint64_t address = low | (uint64_t)(high >> 28) << 32 | (uint64_t)((high >> 2) & 0x3fffff) << 36;
+        uint64_t length = size | (uint64_t)((high >> 24) & 15) << 32;
+        if (r->audren_update && i >= sends && i - sends < 2) {
+            r->alias_output_address[i - sends] = address;
+            r->alias_output_size[i - sends] = (size_t)length;
+        }
+        /* Fixed SDK's performance cursor may be at the end of its allocation:
+         * only Update's second B can retain a non-NULL address with zero bytes.
+         * This grants no span and invokes no range/read/write callback. */
+        if (r->audren_update && i == sends + 1 && !length) continue;
+        if (i < sends ? input_descriptor(s, r, address, length, error, cap) : output_descriptor(s, r, address, length, error, cap)) return -1;
+    }
+    for (unsigned i = 0; i < recv_statics; i++) {
+        const uint8_t *entry = ipc + r->raw_end + i * 8;
+        uint32_t high = load32(entry + 4);
+        uint64_t address = load32(entry) | (uint64_t)(high & 0xffff) << 32;
+        /* An old settings OutArray(0) still has a C descriptor with a real
+         * non-NULL client pointer. No bytes are authorized or dereferenced.
+         * stage_pointers subsequently permits this only for its exact schema. */
+        r->output_static_size = high >> 16;
+        if ((high >> 16) && output_descriptor(s, r, address, high >> 16, error, cap)) return -1;
+        if (high >> 16) r->output_is_static = 1;
+        r->pointer_output_bytes += ((size_t)(high >> 16) + 15) & ~(size_t)15;
+        r->output_static_count++;
+    }
+    return 0;
 }
 static int storage_buffer_shape(const Request *r, const uint8_t *ipc, char *error, size_t cap) {
     int write = r->command == 10;
@@ -955,6 +1081,8 @@ static int return_object(botw_services *s, Session *session, Object *o, uint8_t 
 static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
     if (r->buffer_descriptor_count || r->input_count || r->output_count || r->pid || r->copy_count) return problem(error, cap, "CMIF control command=%u has unexpected buffers/PID", r->command);
     uint32_t handle = 0, object_id;
+    if (session->root && (session->root->borrowed || session->root->initializing))
+        return problem(error, cap, "CMIF control root Busy during backend initialization/borrow");
     switch (r->command) {
         case 0:
             if (session->domain || !session->root) return problem(error, cap, "CMIF ConvertCurrentObjectToDomain called on domain/empty session");
@@ -964,6 +1092,8 @@ static int control(botw_services *s, Session *session, uint8_t *ipc, size_t capa
             if (!session->domain || r->payload_size < 4) return problem(error, cap, "CMIF CopyFromCurrentDomain requires domain and object ID");
             object_id = load32(r->payload);
             if (!object_id || object_id > DOMAIN_LIMIT || !session->objects[object_id - 1]) return problem(error, cap, "CMIF CopyFromCurrentDomain invalid object=%u", object_id);
+            if (session->objects[object_id - 1]->borrowed || session->objects[object_id - 1]->initializing)
+                return problem(error, cap, "CMIF domain object Busy during backend initialization/borrow");
             session->objects[object_id - 1]->refs++;
             if (object_handle(s, session->objects[object_id - 1], &handle, error, cap)) return -1;
             response(ipc, capacity, r, NULL, 0, handle, 0); return 0;
@@ -1798,6 +1928,132 @@ static int parental_request(botw_services *s, Session *session, Object *o, uint8
     }
     return problem(error, cap, "unsupported pctl command=%u policy_source=%s (no external account/PIN authorization inferred)", r->command, s->parental_source);
 }
+static int audren_request(botw_services *s, Session *session, Object *o,
+        uint8_t *ipc, size_t capacity, const Request *r, char *error, size_t cap) {
+    if (!s->audren.open) return problem(error, cap, "audren has no real registered backend");
+    if (o->borrowed || o->initializing) return problem(error, cap, "audren object Busy during initialization/backend borrow");
+    if (o->kind == OBJECT_AUDREN_MANAGER) {
+        if (r->buffer_descriptor_count || r->input_count || r->output_count)
+            return problem(error, cap, "audren manager does not accept buffer descriptors");
+        if (r->command == 1) {
+            if (r->pid || r->copy_count || exact_payload(r, 0x34, "audren.GetWorkBufferSize", error, cap))
+                return problem(error, cap, "audren.GetWorkBufferSize requires the 0x34 wire parameters without PID/handles");
+            uint64_t size = 0;
+            audren_unlock(s, o);
+            botw_audren_result result = s->audren.get_work_buffer_size(s->audren.context, r->payload, 0x34, &size, error, cap);
+            audren_relock(s, o);
+            if (audren_service_result(result, error, cap)) return -1;
+            if (result.service_result) return result_response(ipc, capacity, r, result.service_result);
+            response(ipc, capacity, r, &size, sizeof size, 0, 0); return 0;
+        }
+        if (r->command != 0) return problem(error, cap, "unsupported audren manager command=%u", r->command);
+        if (!r->pid || r->copy_count != 2 || exact_payload(r, 0x48, "audren.OpenAudioRenderer", error, cap))
+            return problem(error, cap, "audren.Open requires PID, transfer/process copy handles and 0x48 bytes");
+        /* Allocate every service owner/arena/token before starting a renderer.
+         * The reservation is private until its successful CMIF reply. */
+        Object *child = new_object(OBJECT_AUDREN);
+        if (!child) return problem(error, cap, "allocate audren renderer owner failed");
+        child->initializing = 1;
+        uint32_t handle = 0, object_id = 0;
+        if (r->domain) {
+            for (unsigned i = 0; i < DOMAIN_LIMIT; i++) if (!session->objects[i]) {
+                session->objects[i] = child; object_id = i + 1; break;
+            }
+            if (!object_id) { release_object(child); return problem(error, cap, "CMIF domain object table exhausted before audren Open"); }
+        } else if (object_handle(s, child, &handle, error, cap)) return -1;
+        void *owner = NULL; uint32_t event_read = 0;
+        /* The manager can itself be copied out of a domain into an independent
+         * session. Borrow it as well as the reserved child during Open. */
+        o->borrowed++;
+        audren_unlock(s, child);
+        botw_audren_result result = s->audren.open(s->audren.context, r->payload, 0x34,
+            r->copy_handle, r->copy_handle_second, load64(r->payload + 0x38), load64(r->payload + 0x40),
+            &owner, &event_read, error, cap);
+        audren_relock(s, child);
+        o->borrowed--;
+        child->audren_owner = owner; child->audren_event_read = event_read;
+        const int failed = audren_service_result(result, error, cap);
+        if (failed || result.service_result || !owner || !event_read) {
+            if (owner) return problem(error, cap, "audren Open did not publish a complete successful renderer; owner retained for checked cleanup");
+            if (r->domain) { session->objects[object_id - 1] = NULL; release_object(child); }
+            else if (services_close(s, handle, error, cap)) return -1;
+            if (failed) return -1;
+            if (result.service_result) return result_response(ipc, capacity, r, result.service_result);
+            return problem(error, cap, "audren Open returned no real owner/event");
+        }
+        child->initializing = 0;
+        response(ipc, capacity, r, NULL, 0, handle, object_id); return 0;
+    }
+    if (!o->audren_owner) return problem(error, cap, "audren renderer backend is closed");
+    if (r->pid || r->copy_count) return problem(error, cap, "audren renderer methods reject PID/input handles");
+    if (r->command > 9) return problem(error, cap, "unsupported audren renderer command=%u", r->command);
+    if (exact_payload(r, r->command == 8 ? 4 : 0, "audren renderer", error, cap)) return -1;
+    if (r->command == 4) {
+        if (!r->audren_update || r->input_static_count || r->output_static_count ||
+                r->input_alias_count != 1 || r->output_alias_count != 2 || r->input_count != 1 ||
+                !r->alias_output_size[0] || r->input_size > BUFFER_LIMIT ||
+                r->alias_output_size[0] > BUFFER_LIMIT || r->alias_output_size[1] > BUFFER_LIMIT)
+            return problem(error, cap, "audren.Update requires exact MapAlias A input and B output/performance buffers within bounds");
+        uint64_t out_address = r->alias_output_address[0], perf_address = r->alias_output_address[1];
+        size_t out_size = r->alias_output_size[0], perf_size = r->alias_output_size[1];
+        if (ranges_overlap(out_address, out_size, perf_address, perf_size) ||
+                ranges_overlap(out_address, out_size, r->input_address, r->input_size) ||
+                ranges_overlap(perf_address, perf_size, r->input_address, r->input_size) ||
+                ranges_overlap(out_address, out_size, r->transfer->ipc_address, capacity) ||
+                ranges_overlap(perf_address, perf_size, r->transfer->ipc_address, capacity))
+            return problem(error, cap, "audren.Update descriptors overlap each other or the IPC message");
+        void *input = malloc(r->input_size), *output = calloc(1, out_size), *performance = perf_size ? calloc(1, perf_size) : NULL;
+        if (!input || !output || (perf_size && !performance)) {
+            free(input); free(output); free(performance); return problem(error, cap, "allocate bounded audren Update snapshots failed");
+        }
+        int rc = copy_from_guest(s, r->input_address, input, r->input_size, error, cap);
+        /* The original Update only writes performance bytes when its manager
+         * is initialized. Preserve untouched bytes in the real caller buffer. */
+        if (!rc && perf_size) rc = copy_from_guest(s, perf_address, performance, perf_size, error, cap);
+        if (!rc) rc = prepare_host_output(s, out_address, out_size, "audren Update output", error, cap);
+        if (!rc && perf_size) rc = prepare_host_output(s, perf_address, perf_size, "audren Update performance", error, cap);
+        if (!rc) {
+            audren_unlock(s, o);
+            botw_audren_result result = s->audren.update(s->audren.context, o->audren_owner,
+                input, r->input_size, performance, perf_size, output, out_size, error, cap);
+            audren_relock(s, o);
+            rc = audren_service_result(result, error, cap);
+            if (!rc && !result.service_result) rc = copy_to_guest(s, out_address, output, out_size, error, cap);
+            if (!rc && !result.service_result && perf_size) rc = copy_to_guest(s, perf_address, performance, perf_size, error, cap);
+            if (!rc) rc = result_response(ipc, capacity, r, result.service_result);
+        }
+        free(input); free(output); free(performance); return rc;
+    }
+    if (r->buffer_descriptor_count) return problem(error, cap, "audren control/query does not accept buffers");
+    if (r->command == 7) {
+        if (!s->kernel.duplicate_handle) return problem(error, cap, "audren event query requires the real kernel duplicator");
+        uint32_t event = 0;
+        if (s->kernel.duplicate_handle(s->kernel.opaque, o->audren_event_read, &event, error, cap)) return -1;
+        response(ipc, capacity, r, NULL, 0, event, 0); store32(ipc + 8, 1u << 1); return 0;
+    }
+    botw_audren_session_info info = {0};
+    audren_unlock(s, o);
+    botw_audren_result result;
+    if (r->command == 5) result = s->audren.start(s->audren.context, o->audren_owner, error, cap);
+    else if (r->command == 6) result = s->audren.stop(s->audren.context, o->audren_owner, error, cap);
+    else if (r->command == 8) result = s->audren.set_rendering_time_limit(s->audren.context, o->audren_owner, load32(r->payload), error, cap);
+    else result = s->audren.get_info(s->audren.context, o->audren_owner, &info, error, cap);
+    audren_relock(s, o);
+    if (audren_control_result(result, error, cap)) return -1;
+    uint32_t value = 0;
+    switch (r->command) {
+        case 0: value = info.sample_rate; break;
+        case 1: value = info.sample_count; break;
+        case 2: value = info.mix_count; break;
+        case 3:
+            if (info.active > 1) return problem(error, cap, "audren backend returned a non-boolean active state");
+            value = !info.active; break; /* Fixed Eden IAudioRenderer::GetState. */
+        case 9: value = info.rendering_time_limit; break;
+        default: response(ipc, capacity, r, NULL, 0, 0, 0); return 0;
+    }
+    response(ipc, capacity, r, &value, sizeof value, 0, 0); return 0;
+}
+
 static int services_send(botw_services *s, uint32_t handle_id, void *buffer, size_t capacity,
         PointerTransfer *transfer, char *error, size_t cap) {
     Handle *handle = s ? find_handle(s, handle_id) : NULL;
@@ -1808,6 +2064,8 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
     if ((r.type == 2 || r.type == 5 || r.type == 7) && s->write_guest &&
             prepare_host_output(s, transfer->ipc_address, capacity, "IPC reply preflight", error, cap)) return -1;
     if (r.type == 2) {
+        if (prepare_session_release(s, session, 1, error, cap)) return -1;
+        session->in_flight--;
         handle->session = NULL; release_session(session);
         emit(s, "ipc_session_closed handle=0x%x client_handle_live=true", handle_id);
         return 0;
@@ -1820,17 +2078,20 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
         o = session->objects[r.object_id - 1];
         if (r.domain_close) {
             if (s->write_guest && prepare_host_output(s, transfer->ipc_address, capacity, "IPC domain-close reply preflight", error, cap)) return -1;
+            if (prepare_object_release(s, o, 1, error, cap)) return -1;
             session->objects[r.object_id - 1] = NULL;
             if (session->root == o) session->root = NULL;
             release_object(o); memset(ipc, 0, capacity); return 0;
         }
     }
     if (!o) return problem(error, cap, "CMIF session has no live root object");
+    if (o->borrowed || o->initializing) return problem(error, cap, "IPC object Busy during backend initialization/borrow");
     if (stage_pointers(s, o, &r, ipc, transfer, capacity, error, cap)) return -1;
     if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE &&
-            !(o->kind == OBJECT_SETTINGS && r.command == 1 && r.output_static_count == 1))
+            !(o->kind == OBJECT_SETTINGS && r.command == 1 && r.output_static_count == 1) &&
+            !(o->kind == OBJECT_AUDREN && r.command == 4))
         return problem(error, cap, "unexpected output buffer service=%s command=%u", kind_name(o->kind), r.command);
-    if (r.copy_count && o->kind != OBJECT_APPLET_OE) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
+    if (r.copy_count && o->kind != OBJECT_APPLET_OE && !(o->kind == OBJECT_AUDREN_MANAGER && r.command == 0)) return problem(error, cap, "unexpected IPC copy handle service=%s command=%u handle=0x%x", kind_name(o->kind), r.command, r.copy_handle);
     /* Protected VM writes cannot enter the CPU dirty-fault handler. Preflight
      * the real reply span before logging, consuming storage or host I/O. This
      * does not promise a transaction against concurrent guest unmapping. */
@@ -1855,10 +2116,17 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
             else if (!memcmp(name, "pctl:a\0\0", 8)) service_kind = OBJECT_PCTL_FACTORY;
             else if (!memcmp(name, "acc:u0\0\0", 8)) service_kind = OBJECT_ACCOUNT;
             else if (!memcmp(name, "set\0\0\0\0\0", 8)) service_kind = OBJECT_SETTINGS;
+            else if (!memcmp(name, "audren:u", 8)) {
+                s->audren_selected = 1;
+                if (!s->audren.open) return problem(error, cap, "audren:u requires a real registered backend");
+                service_kind = OBJECT_AUDREN_MANAGER;
+            }
             else return problem(error, cap, "unsupported sm: GetService name=%s bytes=%02x%02x%02x%02x%02x%02x%02x%02x", name, r.payload[0], r.payload[1], r.payload[2], r.payload[3], r.payload[4], r.payload[5], r.payload[6], r.payload[7]);
             Object *service = new_object(service_kind); if (!service) return problem(error, cap, "allocate service=%s object failed", name);
             return return_object(s, session, service, ipc, capacity, &r, 1, error, cap);
         }
+    } else if (o->kind == OBJECT_AUDREN_MANAGER || o->kind == OBJECT_AUDREN) {
+        return audren_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_SAVE_FILESYSTEM || o->kind == OBJECT_SAVE_FILE) {
         return save_request(s, session, o, ipc, capacity, &r, error, cap);
     } else if (o->kind == OBJECT_ACCOUNT || o->kind == OBJECT_ACCOUNT_CONTEXT) {
@@ -1930,26 +2198,32 @@ static int services_send(botw_services *s, uint32_t handle_id, void *buffer, siz
  * services again. Context destruction requires callers to join guest threads. */
 int botw_services_connect(botw_services *s, const char *name, size_t length, uint32_t *handle, char *error, size_t cap) {
     if (!s) return problem(error, cap, "ConnectToNamedPort requires service context");
-    pthread_mutex_lock(&s->lock); int result = services_connect(s, name, length, handle, error, cap);
+    pthread_mutex_lock(&s->lock); int result = s->destroying ? problem(error, cap, "services Busy during destruction") : services_connect(s, name, length, handle, error, cap);
     pthread_mutex_unlock(&s->lock); return result;
 }
 int botw_services_close(botw_services *s, uint32_t handle, char *error, size_t cap) {
     if (!s) return problem(error, cap, "CloseHandle requires service context");
-    pthread_mutex_lock(&s->lock); int result = services_close(s, handle, error, cap);
+    pthread_mutex_lock(&s->lock); int result = s->destroying ? problem(error, cap, "services Busy during destruction") : services_close(s, handle, error, cap);
     pthread_mutex_unlock(&s->lock); return result;
 }
 int botw_services_send(botw_services *s, uint32_t handle, void *buffer, size_t capacity, char *error, size_t cap) {
     if (!s) return problem(error, cap, "SendSyncRequest requires service context");
     pthread_mutex_lock(&s->lock);
     int result = -1; Handle *entry = find_handle(s, handle);
-    if (!buffer || capacity < 0x40 || capacity > IPC_LIMIT ||
+    if (s->destroying) {
+        problem(error, cap, "services Busy during destruction");
+    } else if (!buffer || capacity < 0x40 || capacity > IPC_LIMIT ||
             !s->memory(s->opaque, (uint64_t)(uintptr_t)buffer, capacity, 1)) {
         problem(error, cap, "SendSyncRequest IPC buffer is not checked guest writable memory or capacity is outside 0x40..0x100");
     } else if (!!s->read_guest != !!s->write_guest) {
         problem(error, cap, "IPC protected copies require both read and write callbacks");
     } else if (!entry || !entry->session) {
         problem(error, cap, "SendSyncRequest invalid or closed IPC handle=0x%x", handle);
+    } else if (entry->in_flight || entry->session->in_flight || entry->session->closing) {
+        problem(error, cap, "IPC handle/session Busy during send/close");
     } else {
+        Session *borrowed_session = entry->session;
+        entry->in_flight = 1; borrowed_session->in_flight++;
         uint8_t snapshot[IPC_LIMIT];
         PointerTransfer transfer = {.ipc_address=(uint64_t)(uintptr_t)buffer, .arena=entry->pointer_memory};
         if (!copy_from_guest(s, transfer.ipc_address, snapshot, capacity, error, cap)) {
@@ -1964,6 +2238,8 @@ int botw_services_send(botw_services *s, uint32_t handle, void *buffer, size_t c
             }
             if (!result) result = copy_to_guest(s, transfer.ipc_address, snapshot, capacity, error, cap);
         }
+        if (entry->session == borrowed_session) borrowed_session->in_flight--;
+        entry->in_flight = 0;
     }
     pthread_mutex_unlock(&s->lock); return result;
 }

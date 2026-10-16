@@ -1,0 +1,295 @@
+--- a/src/audio_core/renderer/memory/pool_mapper.h
++++ b/src/audio_core/renderer/memory/pool_mapper.h
+@@ -10,9 +10,8 @@
+ #include "common/common_types.h"
+ #include "core/hle/service/audio/errors.h"
+ 
+-namespace Kernel {
+-class KProcess;
+-}
++#include "renderer_memory.h"
++#include "common/alignment.h"
+ 
+ namespace AudioCore::Renderer {
+ class AddressInfo;
+@@ -22,8 +21,8 @@
+  */
+ class PoolMapper {
+ public:
+-    explicit PoolMapper(Kernel::KProcess* process_handle, bool force_map);
+-    explicit PoolMapper(Kernel::KProcess* process_handle, std::span<MemoryPoolInfo> pool_infos,
++    explicit PoolMapper(botw::audio::RendererMemory* process_handle, bool force_map);
++    explicit PoolMapper(botw::audio::RendererMemory* process_handle, std::span<MemoryPoolInfo> pool_infos,
+                         u32 pool_count, bool force_map);
+ 
+     /**
+@@ -95,24 +94,9 @@
+      */
+     bool IsForceMapEnabled() const;
+ 
+-    /**
+-     * Get the process handle, depending on location.
+-     *
+-     * @param pool - The pool to check the location of.
+-     * @return CurrentProcessHandle if location == DSP,
+-     *         the PoolMapper's process_handle if location == CPU
+-     */
+-    Kernel::KProcess* GetProcessHandle(const MemoryPoolInfo* pool) const;
+ 
+-    /**
+-     * Map the given region with the given handle. This is a no-op.
+-     *
+-     * @param handle   - The process handle to map to.
+-     * @param cpu_addr - Address to map.
+-     * @param size     - Size to map.
+-     * @return True if successfully mapped, otherwise false.
+-     */
+-    bool Map(u32 handle, CpuAddr cpu_addr, u64 size) const;
++
++
+ 
+     /**
+      * Map the given memory pool.
+@@ -122,15 +106,7 @@
+      */
+     bool Map(MemoryPoolInfo& pool) const;
+ 
+-    /**
+-     * Unmap the given region with the given handle.
+-     *
+-     * @param handle   - The process handle to unmap to.
+-     * @param cpu_addr - Address to unmap.
+-     * @param size     - Size to unmap.
+-     * @return True if successfully unmapped, otherwise false.
+-     */
+-    bool Unmap(u32 handle, CpuAddr cpu_addr, u64 size) const;
++
+ 
+     /**
+      * Unmap the given memory pool.
+@@ -167,11 +143,11 @@
+      * @param size   - Size of the memory region for the pool.
+      * @return True if initialized successfully, otherwise false.
+      */
+-    bool InitializeSystemPool(MemoryPoolInfo& pool, const u8* memory, u64 size) const;
++    bool InitializeSystemPool(MemoryPoolInfo& pool, const botw::audio::TransferView& memory, u64 size) const;
+ 
+ private:
+     /// Process handle for this mapper, used when location == CPU
+-    Kernel::KProcess* process_handle{};
++    botw::audio::RendererMemory* process_handle{};
+     /// List of memory pools assigned to this mapper
+     MemoryPoolInfo* pool_infos{};
+     /// The number of pools
+--- a/src/audio_core/renderer/memory/pool_mapper.cpp
++++ b/src/audio_core/renderer/memory/pool_mapper.cpp
+@@ -6,15 +6,15 @@
+ 
+ #include "audio_core/renderer/memory/address_info.h"
+ #include "audio_core/renderer/memory/pool_mapper.h"
+-#include "core/hle/kernel/k_process.h"
+-#include "core/hle/kernel/svc.h"
++#include "renderer_memory.h"
++#include "common/alignment.h"
+ 
+ namespace AudioCore::Renderer {
+ 
+-PoolMapper::PoolMapper(Kernel::KProcess* process_handle_, bool force_map_)
++PoolMapper::PoolMapper(botw::audio::RendererMemory* process_handle_, bool force_map_)
+     : process_handle{process_handle_}, force_map{force_map_} {}
+ 
+-PoolMapper::PoolMapper(Kernel::KProcess* process_handle_, std::span<MemoryPoolInfo> pool_infos_,
++PoolMapper::PoolMapper(botw::audio::RendererMemory* process_handle_, std::span<MemoryPoolInfo> pool_infos_,
+                        u32 pool_count_, bool force_map_)
+     : process_handle{process_handle_}, pool_infos{pool_infos_.data()},
+       pool_count{pool_count_}, force_map{force_map_} {}
+@@ -61,7 +61,10 @@
+     }
+ 
+     if (force_map) {
+-        address_info.SetForceMappedDspAddr(address_info.GetCpuAddr());
++        botw::audio::DspMapping mapping{};
++        const bool mapped = process_handle && process_handle->map_span(
++            &address_info, address_info.GetCpuAddr(), address_info.GetSize(), mapping) == botw::audio::Status::Ok;
++        address_info.SetForceMappedDspAddr(mapped ? mapping.address : 0);
+     } else {
+         address_info.SetPool(nullptr);
+     }
+@@ -82,7 +85,10 @@
+     }
+ 
+     if (force_map) {
+-        address_info.SetForceMappedDspAddr(address_info.GetCpuAddr());
++        botw::audio::DspMapping mapping{};
++        const bool mapped = process_handle && process_handle->map_span(
++            &address_info, address_info.GetCpuAddr(), address_info.GetSize(), mapping) == botw::audio::Status::Ok;
++        address_info.SetForceMappedDspAddr(mapped ? mapping.address : 0);
+     } else {
+         address_info.SetPool(nullptr);
+     }
+@@ -97,7 +103,7 @@
+     if (!FillDspAddr(address_info)) {
+         error_info.error_code = Service::Audio::ResultInvalidAddressInfo;
+         error_info.address = address;
+-        return force_map;
++        return force_map && address_info.GetForceMappedDspAddr() != 0;
+     }
+ 
+     error_info.error_code = ResultSuccess;
+@@ -109,70 +115,33 @@
+     return force_map;
+ }
+ 
+-Kernel::KProcess* PoolMapper::GetProcessHandle(const MemoryPoolInfo* pool) const {
+-    switch (pool->GetLocation()) {
+-    case MemoryPoolInfo::Location::CPU:
+-        return process_handle;
+-    case MemoryPoolInfo::Location::DSP:
+-        // return Kernel::Svc::CurrentProcess;
+-        return nullptr;
+-    }
+-    LOG_WARNING(Service_Audio, "Invalid MemoryPoolInfo location!");
+-    // return Kernel::Svc::CurrentProcess;
+-    return nullptr;
+-}
+-
+-bool PoolMapper::Map([[maybe_unused]] const u32 handle, [[maybe_unused]] const CpuAddr cpu_addr,
+-                     [[maybe_unused]] const u64 size) const {
+-    // nn::audio::dsp::MapUserPointer(handle, cpu_addr, size);
+-    return true;
+-}
++
++
++
+ 
+ bool PoolMapper::Map(MemoryPoolInfo& pool) const {
+-    switch (pool.GetLocation()) {
+-    case MemoryPoolInfo::Location::CPU:
+-        // Map with process_handle
+-        pool.SetDspAddress(pool.GetCpuAddress());
+-        return true;
+-    case MemoryPoolInfo::Location::DSP:
+-        // Map with Kernel::Svc::CurrentProcess
+-        pool.SetDspAddress(pool.GetCpuAddress());
+-        return true;
+-    default:
+-        LOG_WARNING(Service_Audio, "Invalid MemoryPoolInfo location={}!",
+-                    static_cast<u32>(pool.GetLocation()));
+-        return false;
+-    }
+-}
+-
+-bool PoolMapper::Unmap([[maybe_unused]] const u32 handle, [[maybe_unused]] const CpuAddr cpu_addr,
+-                       [[maybe_unused]] const u64 size) const {
+-    // nn::audio::dsp::UnmapUserPointer(handle, cpu_addr, size);
+-    return true;
+-}
++    if (!process_handle || (pool.GetLocation() != MemoryPoolInfo::Location::CPU &&
++        pool.GetLocation() != MemoryPoolInfo::Location::DSP)) return false;
++    botw::audio::DspMapping mapping{};
++    if (process_handle->map_pool(&pool, pool.GetCpuAddress(), pool.GetSize(), mapping) != botw::audio::Status::Ok)
++        return false;
++    pool.SetDspAddress(mapping.address);
++    return true;
++}
++
++
+ 
+ bool PoolMapper::Unmap(MemoryPoolInfo& pool) const {
+-    [[maybe_unused]] Kernel::KProcess* handle{};
+-
+-    switch (pool.GetLocation()) {
+-    case MemoryPoolInfo::Location::CPU:
+-        handle = process_handle;
+-        break;
+-    case MemoryPoolInfo::Location::DSP:
+-        // handle = Kernel::Svc::CurrentProcess;
+-        break;
+-    }
+-    // nn::audio::dsp::UnmapUserPointer(handle, pool->cpu_address, pool->size);
++    if (!process_handle || process_handle->unmap(&pool) != botw::audio::Status::Ok) return false;
+     pool.SetCpuAddress(0, 0);
+     pool.SetDspAddress(0);
+     return true;
+ }
+ 
+ void PoolMapper::ForceUnmapPointer(const AddressInfo& address_info) const {
+-    if (force_map) {
+-        [[maybe_unused]] auto found_pool{
+-            FindMemoryPool(address_info.GetCpuAddr(), address_info.GetSize())};
+-        // nn::audio::dsp::UnmapUserPointer(this->processHandle, address_info.GetCpuAddr(), 0);
++    if (force_map && address_info.GetForceMappedDspAddr()) {
++        if (!process_handle) throw botw::audio::PlatformError(botw::audio::Status::Closed);
++        botw::audio::require(process_handle->unmap(&address_info));
+     }
+ }
+ 
+@@ -185,13 +154,14 @@
+     }
+ 
+     if (in_params.address == 0 || in_params.size == 0
+-    || !Common::IsAligned(in_params.address, Core::Memory::YUZU_PAGESIZE)
+-    || !Common::IsAligned(in_params.size, Core::Memory::YUZU_PAGESIZE)) {
++    || !Common::IsAligned(in_params.address, botw::audio::TransferPool::Alignment)
++    || !Common::IsAligned(in_params.size, botw::audio::TransferPool::Alignment)) {
+         return MemoryPoolInfo::ResultState::BadParam;
+     }
+ 
+     switch (in_params.state) {
+     case MemoryPoolInfo::State::RequestAttach:
++        if (pool.IsMapped()) return MemoryPoolInfo::ResultState::BadParam;
+         pool.SetCpuAddress(in_params.address, in_params.size);
+ 
+         Map(pool);
+@@ -212,7 +182,7 @@
+             return MemoryPoolInfo::ResultState::InUse;
+         }
+ 
+-        Unmap(pool);
++        if (!Unmap(pool)) return MemoryPoolInfo::ResultState::InUse;
+ 
+         pool.SetCpuAddress(0, 0);
+         pool.SetDspAddress(0);
+@@ -227,23 +197,15 @@
+     return MemoryPoolInfo::ResultState::Success;
+ }
+ 
+-bool PoolMapper::InitializeSystemPool(MemoryPoolInfo& pool, const u8* memory,
++bool PoolMapper::InitializeSystemPool(MemoryPoolInfo& pool, const botw::audio::TransferView& memory,
+                                       const u64 size_) const {
+-    switch (pool.GetLocation()) {
+-    case MemoryPoolInfo::Location::CPU:
+-        return false;
+-    case MemoryPoolInfo::Location::DSP:
+-        pool.SetCpuAddress(reinterpret_cast<u64>(memory), size_);
+-        if (Map(Kernel::Svc::CurrentProcess, reinterpret_cast<u64>(memory), size_)) {
+-            pool.SetDspAddress(pool.GetCpuAddress());
+-            return true;
+-        }
+-        return false;
+-    default:
+-        LOG_WARNING(Service_Audio, "Invalid MemoryPoolInfo location={}!",
+-                    static_cast<u32>(pool.GetLocation()));
+-        return false;
+-    }
++    if (!process_handle || pool.GetLocation() != MemoryPoolInfo::Location::DSP || memory.size() != size_)
++        return false;
++    botw::audio::DspMapping mapping{};
++    if (process_handle->map_transfer(&pool, memory, mapping) != botw::audio::Status::Ok) return false;
++    pool.SetCpuAddress(mapping.address, size_);
++    pool.SetDspAddress(mapping.address);
++    return true;
+ }
+ 
+ } // namespace AudioCore::Renderer
+--- a/src/audio_core/renderer/memory/memory_pool_info.cpp
++++ b/src/audio_core/renderer/memory/memory_pool_info.cpp
+@@ -31,7 +31,7 @@
+ }
+ 
+ bool MemoryPoolInfo::Contains(const CpuAddr address_, const u64 size_) const {
+-    return cpu_address <= address_ && (address_ + size_) <= (cpu_address + size);
++    return address_ >= cpu_address && size_ <= size && address_ - cpu_address <= size - size_;
+ }
+ 
+ bool MemoryPoolInfo::IsMapped() const {
