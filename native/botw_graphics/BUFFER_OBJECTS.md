@@ -8,6 +8,25 @@ offset/size at +0/+8/+16/+24. Defaults preserve device. The base-52 pool getter
 returns a pointer. BuilderGetDevice has no export in that profile and stays
 unsupported.
 
+Builder setters preserve the original field-write footprint: SetDevice writes
+only +0..7; Defaults and SetStorage write +8..31 and preserve device and opaque
+tail bytes. SetDevice stores its pointer without consuming a provider; Initialize
+still validates the consumed device, pool, range and backing. The complete vendor
+setter produces independent host bytes, followed by a protected field write.
+
+The metadata writer separates a primary storage claim from its retained value.
+Its initial admitted overlap is an owned, moved 192-byte BWTexture primary; other
+classes, selected/unmoved values, unknown identities and exhausted epochs remain
+rejected. It checks actual output bytes, queue/recording/callback borrows and all
+pending texture-transfer source/destination ranges. Fallible claim-clone work
+precedes dirty preparation and output; successful output publishes one claim
+snapshot and advances the retired claim epochs. It does not finalize textures,
+delete values or release descriptor, recorded, mapping or authority references.
+An unchanged opaque token remains usable as a value alias, without primary move
+ownership. This does not establish the validity of overwritten original SDK POD
+bytes. Preparation may conservatively change dirty state on failure; concurrent
+memory changes do not gain a byte-transaction or rollback guarantee.
+
 A host buffer is a retained, bounded slice of a live pool. Map respects CPU access;
 GetAddress returns the existing pool CPU alias, which the Metal backend resolves
 to a buffer plus offset. No allocation is invented for this slice. Empty slices

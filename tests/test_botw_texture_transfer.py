@@ -216,6 +216,85 @@ class TextureMoveGPUTests(unittest.TestCase):
                         self.assertNotEqual(run.returncode, 0, run.stdout+run.stderr)
                         self.assertIn(expected, run.stderr)
 
+    def test_builder_field_writes_retire_moved_slot_without_losing_array_commands_descriptors_or_buffer_copy(self):
+        from test_botw_graphics import ARRAY_FEATURE, METAL_SMOKE
+        move = r'''
+    NVNtexture movedArray,valueAlias;botw_graphics_texture_move_token moveToken;char moveError[256];
+    CHECK(botw_graphics_texture_move_preflight(&arrayTexture,&movedArray,sizeof arrayTexture,&moveToken,moveError,sizeof moveError));
+    memcpy(&movedArray,&arrayTexture,sizeof movedArray);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));valueAlias=movedArray;
+'''
+        write = r'''
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);
+    nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);
+    nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,textureHandle);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);
+    NVNcommandHandle beforeBuilderWrite=nvnCommandBufferEndRecording(&cb);
+    API(nvnBufferBuilderSetDevice);API(nvnBufferBuilderSetDefaults);API(nvnBufferBuilderSetStorage);
+    API(nvnBufferInitialize);API(nvnBufferGetAddress);API(nvnBufferFinalize);
+    NVNbufferBuilder *reclaimedBuilder=(NVNbufferBuilder*)((char*)&movedArray+48);
+    nvnBufferBuilderSetDevice(reclaimedBuilder,&device);nvnBufferBuilderSetDefaults(reclaimedBuilder);nvnBufferBuilderSetStorage(reclaimedBuilder,&pool,2048,128);
+    NVNbuffer copiedBuffer;CHECK(nvnBufferInitialize(&copiedBuffer,reclaimedBuilder));uint64_t copiedAddress=nvnBufferGetAddress(&copiedBuffer);
+    const char copyMessage[]="builder value survives";memcpy(memory+2048,copyMessage,sizeof copyMessage);memset(memory+2112,0xa5,sizeof copyMessage);
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferCopyBufferToBuffer(&cb,copiedAddress,copiedAddress+64,sizeof copyMessage,0);handle=nvnCommandBufferEndRecording(&cb);
+    nvnBufferFinalize(&copiedBuffer);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(!memcmp(memory+2112,copyMessage,sizeof copyMessage));
+    nvnQueueSubmitCommands(&queue,1,&beforeBuilderWrite);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++)CHECK(!memcmp(pixels+(y*4+x)*4,colors[x>=2][y<3?y:2],4));
+    CHECK(nvnTextureGetDepth(&movedArray)==2&&nvnTextureGetLevels(&valueAlias)==3);
+    nvnTexturePoolRegisterTexture(&tp,2,&valueAlias,NULL);uint64_t aliasHandle=nvnDeviceGetTextureHandle(&device,2,4);
+    puts("BUILDER_FIELDS_RECORDED_ARRAY_AND_REAL_BUFFER_COPY_OK");
+'''
+        feature = ARRAY_FEATURE.replace('nvnTexturePoolRegisterTexture(&tp,3,&arrayTexture,NULL);',
+            'nvnTexturePoolRegisterTexture(&tp,3,&arrayTexture,NULL);'+move)
+        feature = feature.replace('    for(unsigned pass=0;pass<2;pass++){', write+'    for(unsigned pass=0;pass<2;pass++){')
+        feature = feature.replace('if(pass){if(r8)', 'if(pass)textureHandle=aliasHandle;if(pass){if(r8)')
+        feature = feature.replace('nvnTextureFinalize(&arrayTexture);', 'nvnTextureFinalize(&valueAlias);')
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        self.probe(source, [('builder-array', 'GPU_ARRAY_LAYER_MIP_COLORS_OK', True)])
+
+    def test_builder_field_writes_preserve_private_content_and_live_retired_authority_before_any_gpu_copy(self):
+        from test_botw_graphics import METAL_SMOKE
+        feature = r'''
+    API(nvnTextureFinalize);API(nvnBufferBuilderSetDevice);API(nvnBufferBuilderSetDefaults);API(nvnBufferBuilderSetStorage);
+    NVNtexture privateTexture,movedPrivate,valueAlias;
+    nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);
+    nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetStorage(&tb,&pool,6144);CHECK(nvnTextureInitialize(&privateTexture,&tb));
+    const NVNtexture *privateTargets[]={&privateTexture};float privateColor[]={.125f,.5f,.875f,1};
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,privateTargets,NULL,NULL,NULL);
+    nvnCommandBufferClearColor(&cb,0,privateColor,15);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+    unsigned char beforeWrite[64],afterWrite[64];CHECK(botw_graphics_read_texture(&privateTexture,beforeWrite,sizeof beforeWrite));
+    for(unsigned i=0;i<16;i++)CHECK(abs((int)beforeWrite[i*4]-32)<=1&&abs((int)beforeWrite[i*4+1]-128)<=1&&abs((int)beforeWrite[i*4+2]-223)<=1&&beforeWrite[i*4+3]==255);
+    botw_graphics_texture_move_token moveToken;char moveError[256];CHECK(botw_graphics_texture_move_preflight(&privateTexture,&movedPrivate,sizeof privateTexture,&moveToken,moveError,sizeof moveError));
+    memcpy(&movedPrivate,&privateTexture,sizeof movedPrivate);CHECK(botw_graphics_texture_move_commit(&moveToken,moveError,sizeof moveError));valueAlias=movedPrivate;
+    NVNbufferBuilder *reclaimedBuilder=(NVNbufferBuilder*)((char*)&movedPrivate+48);
+    nvnBufferBuilderSetDevice(reclaimedBuilder,&device);nvnBufferBuilderSetDefaults(reclaimedBuilder);nvnBufferBuilderSetStorage(reclaimedBuilder,&pool,2048,128);
+    CHECK(botw_graphics_read_texture(&movedPrivate,afterWrite,sizeof afterWrite)&&!memcmp(beforeWrite,afterWrite,sizeof afterWrite));
+    CHECK(botw_graphics_read_texture(&valueAlias,afterWrite,sizeof afterWrite)&&!memcmp(beforeWrite,afterWrite,sizeof afterWrite));
+    puts("BUILDER_FIELDS_PRIVATE_PIXELS_AND_VALUE_ALIAS_OK");
+    if(strstr(argv[1],"retired"))nvnTextureFinalize(&valueAlias);
+    if(strstr(argv[1],"alias")){
+      unsigned char priorPixels[64];CHECK(botw_graphics_read_texture(&texture,priorPixels,sizeof priorPixels));memset(memory+2048,0x3c,32);memset(memory+2112,0xa5,32);
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferCopyBufferToBuffer(&cb,gpu+2048,gpu+2112,32,0);
+      nvnCommandBufferCopyBufferToBuffer(&cb,gpu+6144,gpu+7168,64,0);handle=nvnCommandBufferEndRecording(&cb);
+      builderGPUCallbacks=0;builderGPUEscaping=1;
+      if(!sigsetjmp(builderGPURecovery,1)){nvnQueueSubmitCommands(&queue,1,&handle);CHECK(0);}builderGPUEscaping=0;
+      CHECK(builderGPUCallbacks==1&&strstr(botw_graphics_last_error(),"buffer address aliases private texture storage authority"));
+      printf("EXPECTED_BUILDER_AUTHORITY_REJECTION %s\n",botw_graphics_last_error());nvnQueueFinish(&queue);
+      CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels)&&!memcmp(priorPixels,pixels,sizeof pixels));
+      char shutdownError[512];CHECK(botw_graphics_shutdown_checked(shutdownError,sizeof shutdownError));
+      for(unsigned i=0;i<32;i++)CHECK(memory[2112+i]==0xa5);
+      free(memory);puts("BUILDER_FIELDS_PRIVATE_AUTHORITY_REJECTED_BEFORE_ANY_GPU_COPY_OK");return 0;
+    }
+    nvnTextureFinalize(&valueAlias);puts("BUILDER_FIELDS_PRIVATE_CONTENTS_OK");
+'''
+        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        source = source.replace('#include <unistd.h>', r'''#include <unistd.h>
+#include <setjmp.h>
+static sigjmp_buf builderGPURecovery;static int builderGPUEscaping,builderGPUCallbacks;
+static void builderGPUError(const char *message){if(builderGPUEscaping){builderGPUCallbacks++;siglongjmp(builderGPURecovery,1);}fprintf(stderr,"EXPECTED_OR_UNHANDLED %s\n",message);}
+''').replace('botw_graphics_init(NULL, NULL, valid)', 'botw_graphics_init(NULL, builderGPUError, valid)')
+        self.probe(source, [('builder-private', 'BUILDER_FIELDS_PRIVATE_CONTENTS_OK', True),
+            ('builder-private-live-alias', 'BUILDER_FIELDS_PRIVATE_AUTHORITY_REJECTED_BEFORE_ANY_GPU_COPY_OK', True),
+            ('builder-private-retired-alias', 'BUILDER_FIELDS_PRIVATE_AUTHORITY_REJECTED_BEFORE_ANY_GPU_COPY_OK', True)])
+
     def test_transferred_array_descriptor_keeps_layers_mips_and_reclaimed_source_storage(self):
         from test_botw_graphics import ARRAY_FEATURE, METAL_SMOKE
         move = r'''

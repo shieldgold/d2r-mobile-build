@@ -29,9 +29,9 @@ static BWBuffer *bufferObject(const NVNbuffer *raw,BOOL requirePool){
     if(requirePool&&(![objects.allValues containsObject:b.device]||b.pool.device!=b.device))fatal("buffer device lifetime mismatch");
     return b;
 }
-NVN(nvnBufferBuilderSetDevice,void,NVNbufferBuilder *b,NVNdevice *d){bufferMemory(b,sizeof *b,YES,YES);get(d,[BWDevice class]);bwu_nvnBufferBuilderSetDevice(b,d);}
-NVN(nvnBufferBuilderSetDefaults,void,NVNbufferBuilder *b){bufferMemory(b,sizeof *b,YES,YES);bwu_nvnBufferBuilderSetDefaults(b);}
-NVN(nvnBufferBuilderSetStorage,void,NVNbufferBuilder *b,NVNmemoryPool *p,ptrdiff_t offset,size_t bytes){bufferMemory(b,sizeof *b,YES,YES);bwu_nvnBufferBuilderSetStorage(b,p,offset,bytes);}
+NVN(nvnBufferBuilderSetDevice,void,NVNbufferBuilder *b,NVNdevice *d){struct bwu_builder value={0};bwu_nvnBufferBuilderSetDevice((NVNbufferBuilder*)&value,d);metadataWrite(b,&value.device,sizeof value.device);}
+NVN(nvnBufferBuilderSetDefaults,void,NVNbufferBuilder *b){struct bwu_builder value={0};bwu_nvnBufferBuilderSetDefaults((NVNbufferBuilder*)&value);if((uintptr_t)b>UINTPTR_MAX-8)fatal("buffer builder address overflow");metadataWrite((void*)((uintptr_t)b+8),&value.pool,24);}
+NVN(nvnBufferBuilderSetStorage,void,NVNbufferBuilder *b,NVNmemoryPool *p,ptrdiff_t offset,size_t bytes){struct bwu_builder value={0};bwu_nvnBufferBuilderSetStorage((NVNbufferBuilder*)&value,p,offset,bytes);if((uintptr_t)b>UINTPTR_MAX-8)fatal("buffer builder address overflow");metadataWrite((void*)((uintptr_t)b+8),&value.pool,24);}
 NVN(nvnBufferBuilderGetMemoryPool,NVNmemoryPool*,const NVNbufferBuilder *b){bufferMemory(b,sizeof *b,NO,YES);return bwu_nvnBufferBuilderGetMemoryPool(b);}
 NVN(nvnBufferBuilderGetMemoryOffset,ptrdiff_t,const NVNbufferBuilder *b){bufferMemory(b,sizeof *b,NO,YES);return bwu_nvnBufferBuilderGetMemoryOffset(b);}
 NVN(nvnBufferBuilderGetSize,size_t,const NVNbufferBuilder *b){bufferMemory(b,sizeof *b,NO,YES);return bwu_nvnBufferBuilderGetSize(b);}

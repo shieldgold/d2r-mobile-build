@@ -299,6 +299,7 @@ static void textureReadBytes(const void *source,void *destination,size_t bytes,c
 static void textureTransferBeginLifecycle(void);
 static void textureTransferRequireQuiescent(void);
 static void textureTransferEndLifecycle(void);
+static void metadataWrite(void *destination,const void *source,size_t bytes);
 static void counterConfigureDevice(BWDevice *device);
 static void linearConfigureDevice(BWDevice *device);
 static void validateCounterAddress(BWAddressRecord *record,BWDevice *device);
@@ -806,6 +807,7 @@ NVN(nvnSyncWait,NVNsyncWaitResult,const NVNsync *raw,uint64_t timeout){BWSync *s
 static id descriptorEntry(BWDescriptors *p,unsigned index);
 #include "texture_family.inc"
 #include "texture_transfer.inc"
+#include "metadata_write.inc"
 NVN(nvnProgramInitialize,NVNboolean,NVNprogram *p,NVNdevice *d){BWProgram *program=[BWProgram new];program.device=get(d,[BWDevice class]);put(p,program);return 1;}
 NVN(nvnProgramFinalize,void,NVNprogram *p){get(p,[BWProgram class]);removeObject(p);}
 static const void *programCodeBytes(BWPoolRange *mapping){

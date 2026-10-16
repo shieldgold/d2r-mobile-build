@@ -212,3 +212,13 @@ fixtures are adapted to 3D grids without importing a new layout or codec.
 Apple MSL section6.13.5, official Type3D/depth/view/blit APIs and feature tables
 supply native type, depth1, dimensions and view constraints; they do not prove
 A14 game rendering or extend the GPU domain to multiple slices or mips.
+
+BufferBuilder storage adaptation retains the complete pinned MIT botw-buffer
+module and its field setters. Base-v0 static ABI evidence independently gives
+the 8-byte device store and 24-byte defaults/storage stores. metadata_write.inc
+is bridge-owned storage-claim bookkeeping and protected output publication;
+it is not a replacement buffer allocator, texture codec, or guest-memory
+scanner. Existing complete array/private-texture fixtures are extended to
+verify retained descriptor/recorded values and private authority after a POD
+field write retires a moved primary slot claim. No upstream algorithm or
+original executable instruction is copied into this bookkeeping helper.

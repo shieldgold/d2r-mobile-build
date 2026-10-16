@@ -510,7 +510,7 @@ class BufferStorageDiagnosticCPUTests(unittest.TestCase):
 #include <mach/mach.h>
 #include <setjmp.h>
 static unsigned vmQueries,accessCalls,callbacks;
-static kern_return_t diagnosticVMQuery(vm_map_read_t task,vm_address_t *address,vm_size_t *size,natural_t *depth,vm_region_recurse_info_t info,mach_msg_type_number_t *count){(void)task;(void)address;(void)size;(void)depth;(void)info;(void)count;vmQueries++;return KERN_FAILURE;}
+static kern_return_t diagnosticVMQuery(vm_map_read_t task,vm_address_t *address,vm_size_t *size,natural_t *depth,vm_region_recurse_info_t info,mach_msg_type_number_t *count){(void)task;(void)address;(void)size;(void)depth;(void)info;(void)count;vmQueries++;return vm_region_recurse_64(task,address,size,depth,info,count);}
 #define vm_region_recurse_64 diagnosticVMQuery
 #include "graphics.m"
 #undef vm_region_recurse_64
@@ -519,14 +519,14 @@ static void diagnosticError(const char *error){(void)error;callbacks++;siglongjm
 static int diagnosticAccess(const void *address,size_t bytes,int write){(void)address;(void)bytes;(void)write;accessCalls++;return 1;}
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"BUFFER_DIAGNOSTIC_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
 int main(int argc,char **argv){@autoreleasepool{
- CHECK(argc==2&&!gpu&&!commandQueue);objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];uint64_t allocation[96];memset(allocation,0xa5,sizeof allocation);unsigned char before[sizeof allocation];memcpy(before,allocation,sizeof before);unsigned char *base=(unsigned char*)allocation+256;void *destination=base;size_t spanBytes=sizeof(NVNtexture);NSNumber *key=@101;BWTexture *texture=[BWTexture new];texture.identity=101;texture.storageMoveEpoch=7;id value=texture;
- if(!strcmp(argv[1],"inside"))destination=base+16;else if(!strcmp(argv[1],"prefix"))destination=base-16;else if(!strcmp(argv[1],"exact-span"))spanBytes=sizeof(NVNbufferBuilder);else if(!strcmp(argv[1],"selected"))texture.base=[BWTexture new];else if(!strcmp(argv[1],"wrong-identity"))texture.identity=99;else if(!strcmp(argv[1],"other-class")){value=[BWSampler new];spanBytes=sizeof(NVNsampler);}else if(!strcmp(argv[1],"missing"))value=nil;
+ CHECK(argc==2&&!gpu&&!commandQueue);objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];uint64_t allocation[96];memset(allocation,0xa5,sizeof allocation);unsigned char before[sizeof allocation];memcpy(before,allocation,sizeof before);unsigned char *base=(unsigned char*)allocation+256;void *destination=base;size_t spanBytes=sizeof(NVNtexture);NSNumber *key=@101;BWTexture *texture=[BWTexture new];texture.identity=101;texture.storageMoveEpoch=0;id value=texture;
+ if(!strcmp(argv[1],"inside"))destination=base+16;else if(!strcmp(argv[1],"prefix"))destination=base-4;else if(!strcmp(argv[1],"exact-span"))spanBytes=sizeof(NVNbufferBuilder);else if(!strcmp(argv[1],"selected"))texture.base=[BWTexture new];else if(!strcmp(argv[1],"wrong-identity"))texture.identity=99;else if(!strcmp(argv[1],"other-class")){value=[BWSampler new];spanBytes=sizeof(NVNsampler);}else if(!strcmp(argv[1],"missing"))value=nil;
  size_t page=getpagesize();void *none=NULL;if(!strcmp(argv[1],"unreadable")){none=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(none!=MAP_FAILED);base=none;destination=none;}
  if(value)objects[key]=value;objectSpans[key]=[NSValue valueWithRange:NSMakeRange((NSUInteger)base,spanBytes)];uint64_t serialBefore=serial;NSUInteger count=objects.count;void *map=(__bridge void*)objectSpans;errorCallback=diagnosticError;memoryAccessValidator=diagnosticAccess;
- if(!strcmp(argv[1],"nonoverlap")){destination=(unsigned char*)allocation;NVNdevice rawDevice={0};BWDevice *device=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];memoryAccessValidator=NULL;put(&rawDevice,device);serialBefore=serial;count=objects.count;memoryAccessValidator=diagnosticAccess;w_nvnBufferBuilderSetDevice(destination,&rawDevice);CHECK(!callbacks&&!vmQueries&&accessCalls==2&&serial==serialBefore&&objects.count==count&&(__bridge void*)objectSpans==map);CHECK(*(NVNdevice**)destination==&rawDevice);CHECK(!memcmp((char*)destination+8,before+8,sizeof allocation-8));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK positive");return 0;}
+ if(!strcmp(argv[1],"nonoverlap")){destination=(unsigned char*)allocation;NVNdevice rawDevice={0};BWDevice *device=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];memoryAccessValidator=NULL;put(&rawDevice,device);serialBefore=serial;count=objects.count;memoryAccessValidator=diagnosticAccess;w_nvnBufferBuilderSetDevice(destination,&rawDevice);CHECK(!callbacks&&vmQueries>=2&&accessCalls==1&&serial==serialBefore&&objects.count==count&&(__bridge void*)objectSpans==map);CHECK(*(NVNdevice**)destination==&rawDevice);CHECK(!memcmp((char*)destination+8,before+8,sizeof allocation-8));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK positive");return 0;}
  if(!sigsetjmp(recovery,1)){w_nvnBufferBuilderSetDevice(destination,(NVNdevice*)(uintptr_t)1);CHECK(0);}
  CHECK(callbacks==1&&accessCalls==1&&!vmQueries&&!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(serial==serialBefore&&objects.count==count&&objectSpans.count==1&&(__bridge void*)objectSpans==map&&objects[key]==value);CHECK(!memcmp(before,allocation,sizeof allocation));
- CHECK(strstr(lastError,"entry=nvnBufferBuilderSetDevice: Unsupported or invalid NVN operation: buffer storage overlaps live NVN object"));char field[128];snprintf(field,sizeof field,"existing_class=%s",value?class_getName([value class]):"<none>");CHECK(strstr(lastError,field));snprintf(field,sizeof field,"span_bytes=%zu",spanBytes);CHECK(strstr(lastError,field));snprintf(field,sizeof field,"requested_bytes=%zu",sizeof(NVNbufferBuilder));CHECK(strstr(lastError,field));BOOL exact=destination==base;CHECK(strstr(lastError,exact?"exact_base=true":"exact_base=false"));CHECK(strstr(lastError,exact&&spanBytes==sizeof(NVNbufferBuilder)?"exact_span=true":"exact_span=false"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?(texture.base||texture.identity!=101?"existing_primary=false":"existing_primary=true"):"existing_primary=not_texture"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?"existing_move_epoch=7":"existing_move_epoch=0"));CHECK(strstr(lastError,!strcmp(argv[1],"prefix")?"relative_offset=-16":!strcmp(argv[1],"inside")?"relative_offset=+16":"relative_offset=+0"));CHECK(strlen(lastError)<512);CHECK(!pthread_mutex_trylock(&graphicsLock));pthread_mutex_unlock(&graphicsLock);if(none)CHECK(!munmap(none,page));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK refused_unchanged");return 0;
+ CHECK(strstr(lastError,"entry=nvnBufferBuilderSetDevice: Unsupported or invalid NVN operation: buffer storage overlaps live NVN object"));char field[128];snprintf(field,sizeof field,"existing_class=%s",value?class_getName([value class]):"<none>");CHECK(strstr(lastError,field));snprintf(field,sizeof field,"span_bytes=%zu",spanBytes);CHECK(strstr(lastError,field));snprintf(field,sizeof field,"requested_bytes=%zu",sizeof(void*));CHECK(strstr(lastError,field));BOOL exact=destination==base;CHECK(strstr(lastError,exact?"exact_base=true":"exact_base=false"));CHECK(strstr(lastError,exact&&spanBytes==sizeof(void*)?"exact_span=true":"exact_span=false"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?(texture.base||texture.identity!=101?"existing_primary=false":"existing_primary=true"):"existing_primary=not_texture"));CHECK(strstr(lastError,[value isKindOfClass:[BWTexture class]]?"existing_move_epoch=0":"existing_move_epoch=0"));CHECK(strstr(lastError,!strcmp(argv[1],"prefix")?"relative_offset=-4":!strcmp(argv[1],"inside")?"relative_offset=+16":"relative_offset=+0"));CHECK(strlen(lastError)<512);CHECK(!pthread_mutex_trylock(&graphicsLock));pthread_mutex_unlock(&graphicsLock);if(none)CHECK(!munmap(none,page));puts("BUFFER_STORAGE_DIAGNOSTIC_CPU_OK refused_unchanged");return 0;
 }}
 ''')
         cls.executable = folder / 'diagnostic'
@@ -555,6 +555,117 @@ int main(int argc,char **argv){@autoreleasepool{
 
     def test_nonoverlapping_buffer_builder_preserves_original_write_and_access_count(self):
         self.mode('nonoverlap')
+
+
+@unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation ABI')
+class BufferBuilderStorageCPUTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from test_botw_texture_transfer import CPU_SOURCE
+        cls.directory = tempfile.TemporaryDirectory(prefix='botw-builder-storage-')
+        cls.addClassCleanup(cls.directory.cleanup)
+        folder = Path(cls.directory.name)
+        source = CPU_SOURCE[:CPU_SOURCE.index('int main(int argc')]
+        source = source.replace('#import <Metal/Metal.h>', '#include <setjmp.h>\n#import <Metal/Metal.h>')
+        source = source.replace('static void captureError(const char *error){(void)error;callbacks++;}',
+            'static sigjmp_buf writeRecovery;static BOOL expectingError;static void captureError(const char *error){(void)error;callbacks++;if(expectingError)siglongjmp(writeRecovery,1);}')
+        source += r"""
+static const void *expectedWrite;static size_t expectedBytes;static unsigned validations;
+static int writeAccess(const void *p,size_t n,int write){validations++;return p==expectedWrite&&n==expectedBytes&&write;}
+static int providerAccess(const void *p,size_t n,int write){(void)n;(void)write;return p!=(void*)1;}
+#define REFUSE(call) do{unsigned c=callbacks;expectingError=YES;if(!sigsetjmp(writeRecovery,1)){call;CHECK(0);}expectingError=NO;CHECK(callbacks==c+1&&!graphicsDepth&&!pendingError&&!pendingFatal);}while(0)
+static int moved(void){char error[256];botw_graphics_texture_move_token token;CHECK(botw_graphics_texture_move_preflight(source,destination,192,&token,error,sizeof error));memcpy(destination,source,192);CHECK(botw_graphics_texture_move_commit(&token,error,sizeof error));return 0;}
+int main(int argc,char **argv){@autoreleasepool{
+ CHECK(argc==2&&!setup());const char *mode=argv[1];BWTexture *texture=textureObject(source);NVNtexture alias=*source;uint64_t identity=texture.identity;
+ if(!strcmp(mode,"footprints")){
+  unsigned char raw[64],before[64];size_t page=getpagesize();void *none=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(none!=MAP_FAILED);const void *devices[]={NULL,(void*)1,none,&device};
+  for(unsigned i=0;i<4;i++){memset(raw,0xa5,sizeof raw);memcpy(before,raw,sizeof raw);expectedWrite=raw;expectedBytes=8;validations=0;memoryAccessValidator=writeAccess;w_nvnBufferBuilderSetDevice((void*)raw,(void*)devices[i]);CHECK(validations==1&&*(void**)raw==devices[i]&&!memcmp(raw+8,before+8,56));}
+  expectedWrite=raw+8;expectedBytes=24;validations=0;w_nvnBufferBuilderSetDefaults((void*)raw);CHECK(validations==1&&*(void**)raw==&device&&!memcmp(raw+32,before+32,32));for(unsigned i=8;i<32;i++)CHECK(!raw[i]);
+  validations=0;w_nvnBufferBuilderSetStorage((void*)raw,(void*)1,-3,SIZE_MAX);CHECK(validations==1&&*(void**)raw==&device&&*(void**)(raw+8)==(void*)1&&*(ptrdiff_t*)(raw+16)==-3&&*(size_t*)(raw+24)==SIZE_MAX&&!memcmp(raw+32,before+32,32));memoryAccessValidator=NULL;CHECK(!munmap(none,page));
+  unsigned char *edge=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(edge!=MAP_FAILED);memset(edge,0xa5,page);CHECK(!mprotect(edge+page,page,PROT_NONE));memoryAccessValidator=writeAccess;
+  expectedWrite=edge+page-8;expectedBytes=8;w_nvnBufferBuilderSetDevice((void*)(edge+page-8),(void*)1);CHECK(*(void**)(edge+page-8)==(void*)1);
+  expectedWrite=edge+page-24;expectedBytes=24;w_nvnBufferBuilderSetDefaults((void*)(edge+page-32));for(unsigned i=0;i<24;i++)CHECK(!edge[page-24+i]);w_nvnBufferBuilderSetStorage((void*)(edge+page-32),(void*)1,2,3);CHECK(*(void**)(edge+page-24)==(void*)1&&*(size_t*)(edge+page-8)==3);memoryAccessValidator=NULL;CHECK(!munmap(edge,page*2));
+ }else if(!strcmp(mode,"provider")){
+  NVNbufferBuilder b={0};NVNbuffer buffer={0};w_nvnBufferBuilderSetDevice(&b,(void*)1);w_nvnBufferBuilderSetDefaults(&b);w_nvnBufferBuilderSetStorage(&b,&pool,0,4);memoryAccessValidator=providerAccess;REFUSE(w_nvnBufferInitialize(&buffer,&b));CHECK(strstr(lastError,"object lifetime/type expected=BWDevice")&&!((BWObject*)&buffer)->serial);memoryAccessValidator=NULL;
+ }else if(!strncmp(mode,"permission",10)){
+  size_t page=getpagesize();unsigned char *storage=mmap(NULL,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(storage!=MAP_FAILED);memset(storage,0xa5,page*2);unsigned char *raw=storage+page-16;objectSpans[@(identity)]=[NSValue valueWithRange:NSMakeRange((uintptr_t)storage+page-64,192)];texture.storageMoveEpoch=1;unsigned char before[32];memcpy(before,raw,32);void *map=(__bridge void*)objectSpans;
+  if(!strcmp(mode,"permission-rw")){w_nvnBufferBuilderSetStorage((void*)raw,(void*)1,3,7);CHECK(!objectSpans[@(identity)]&&texture.storageMoveEpoch==2&&*(void**)(raw+8)==(void*)1&&*(ptrdiff_t*)(raw+16)==3&&*(size_t*)(raw+24)==7&&!memcmp(raw,before,8));}
+  else{CHECK(!mprotect(storage+page,page,!strcmp(mode,"permission-ro")?PROT_READ:PROT_NONE));REFUSE(w_nvnBufferBuilderSetStorage((void*)raw,(void*)1,3,7));CHECK((__bridge void*)objectSpans==map&&texture.storageMoveEpoch==1);CHECK(!mprotect(storage+page,page,PROT_READ|PROT_WRITE));CHECK(!memcmp(before,raw,32));}CHECK(!munmap(storage,page*2));
+ }else if(!strcmp(mode,"invalid-range")){
+  REFUSE(w_nvnBufferBuilderSetDevice(NULL,NULL));REFUSE(w_nvnBufferBuilderSetDefaults(NULL));REFUSE(w_nvnBufferBuilderSetStorage(NULL,NULL,0,0));REFUSE(w_nvnBufferBuilderSetDevice((void*)(UINTPTR_MAX-3),NULL));REFUSE(w_nvnBufferBuilderSetDefaults((void*)(UINTPTR_MAX-3)));REFUSE(w_nvnBufferBuilderSetStorage((void*)(UINTPTR_MAX-3),NULL,0,0));
+ }else{
+  CHECK(!moved());alias=*destination;unsigned char before[256];memcpy(before,destination,sizeof before);void *output=(char*)destination+48;
+  if(!strcmp(mode,"exact"))output=destination;
+  if(!strcmp(mode,"multiple")){BWTexture *other=[BWTexture new];other.identity=identity+100;other.pool=texture.pool;other.poolGeneration=texture.poolGeneration;other.device=texture.device;other.kindPolicy=texture.kindPolicy;other.storageMoveEpoch=3;objects[@(other.identity)]=other;objectSpans[@(other.identity)]=[NSValue valueWithRange:objectSpans[@(identity)].rangeValue];}
+  if(!strcmp(mode,"partial")||!strcmp(mode,"exact")||!strcmp(mode,"multiple")||!strcmp(mode,"defaults-claim")||!strcmp(mode,"storage-claim")){
+   NSDictionary *values=[objects copy];size_t written=8;if(!strcmp(mode,"defaults-claim")){output=(char*)output+8;written=24;w_nvnBufferBuilderSetDefaults((void*)((char*)output-8));}else if(!strcmp(mode,"storage-claim")){output=(char*)output+8;written=24;w_nvnBufferBuilderSetStorage((void*)((char*)output-8),&pool,5,9);}else w_nvnBufferBuilderSetDevice(output,&device);CHECK(!objectSpans[@(identity)]&&texture.storageMoveEpoch==2&&textureObject(&alias)==texture&&[objects isEqual:values]);if(written==8)CHECK(*(void**)output==&device);else if(!strcmp(mode,"defaults-claim")){for(unsigned i=0;i<24;i++)CHECK(!((unsigned char*)output)[i]);}else CHECK(*(void**)output==&pool&&*(ptrdiff_t*)((char*)output+8)==5&&*(size_t*)((char*)output+16)==9);size_t offset=(char*)output-(char*)destination;CHECK(!memcmp(before,destination,offset)&&!memcmp(before+offset+written,(char*)destination+offset+written,256-offset-written));
+   if(!strcmp(mode,"multiple"))CHECK(!objectSpans[@(identity+100)]&&((BWTexture*)objects[@(identity+100)]).storageMoveEpoch==4);
+   botw_graphics_texture_move_token token;char error[256];CHECK(!botw_graphics_texture_move_preflight(destination,third,192,&token,error,sizeof error));CHECK(textureObject(&alias)==texture);
+  }else{
+   if(!strcmp(mode,"unmoved"))texture.storageMoveEpoch=0;
+   if(!strcmp(mode,"selected"))texture.base=[BWTexture new];
+   if(!strcmp(mode,"wrong-identity"))texture.identity++;
+   if(!strcmp(mode,"wrong-size"))objectSpans[@(identity)]=[NSValue valueWithRange:NSMakeRange((uintptr_t)destination,64)];
+   if(!strcmp(mode,"stateful"))objects[@(identity)]=[BWDevice new];
+   if(!strcmp(mode,"missing"))[objects removeObjectForKey:@(identity)];
+   if(!strcmp(mode,"span-overflow"))objectSpans[@(identity)]=[NSValue valueWithRange:NSMakeRange(UINTPTR_MAX-100,192)];
+   if(!strcmp(mode,"maximum"))texture.storageMoveEpoch=UINT64_MAX;
+   if(!strcmp(mode,"mixed")){objects[@(identity+100)]=[BWDevice new];objectSpans[@(identity+100)]=[NSValue valueWithRange:NSMakeRange((uintptr_t)output,8)];}
+   if(!strncmp(mode,"pending",7)){botw_graphics_texture_move_token token;char error[256];CHECK(botw_graphics_texture_move_preflight(destination,third,192,&token,error,sizeof error));if(!strcmp(mode,"pending-destination"))output=(char*)third+48;}
+   if(!strcmp(mode,"arena")){BWQueue *q=[BWQueue new];q.arena=destination;q.arenaBytes=256;objects[@(identity+100)]=q;}
+   if(!strcmp(mode,"recording")){BWCommands *c=[BWCommands new];BWCommandMemory *m=[BWCommandMemory new];m.memory=output;m.size=24;c.controlMemory=m;objects[@(identity+100)]=c;}
+   if(!strcmp(mode,"callback")){BWCommands *c=[BWCommands new];c.callbackActive=YES;objects[@(identity+100)]=c;objectSpans[@(identity+100)]=[NSValue valueWithRange:NSMakeRange((uintptr_t)output,8)];}
+   if(!strncmp(mode,"clone",5)){MoveSpanMap *map=[MoveSpanMap new];map.map=objectSpans;objectSpans=(NSMutableDictionary*)map;spanFailure=!strcmp(mode,"clone-throw")?1:!strcmp(mode,"clone-remove")?2:4;}
+   if(!strcmp(mode,"dirty"))textureTrackingAvailable=YES;
+   if(!strcmp(mode,"logical"))memoryAccessValidator=noAccess;
+   uint64_t epoch=texture.storageMoveEpoch;NSDictionary *values=[objects copy];void *map=(__bridge void*)objectSpans;NSUInteger spans=objectSpans.count;
+   REFUSE(w_nvnBufferBuilderSetDevice(output,&device));CHECK((__bridge void*)objectSpans==map&&objectSpans.count==spans&&[objects isEqual:values]&&texture.storageMoveEpoch==epoch&&!memcmp(before,destination,sizeof before));
+  }
+ }
+ CHECK(!gpu||[gpu isKindOfClass:[MoveCPUDevice class]]);CHECK(!pthread_mutex_trylock(&graphicsLock));pthread_mutex_unlock(&graphicsLock);puts("BUFFER_BUILDER_STORAGE_CPU_OK");return 0;
+}}
+"""
+        path = folder / 'builder.m'; path.write_text(source)
+        cls.executable = folder / 'builder'
+        build = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc', '-fobjc-arc-exceptions',
+            '-fblocks', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-O1', '-g',
+            '-fsanitize=address,undefined', '-I', str(ROOT/'native/botw_graphics'), str(path),
+            '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore',
+            '-o', str(cls.executable)], capture_output=True, text=True, timeout=120)
+        if build.returncode:
+            raise AssertionError(build.stdout+build.stderr)
+
+    def mode(self, mode):
+        run = subprocess.run([str(self.executable), mode], capture_output=True, text=True, timeout=15)
+        self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        self.assertIn('BUFFER_BUILDER_STORAGE_CPU_OK', run.stdout)
+        self.assertNotIn('ERROR: AddressSanitizer', run.stderr)
+        self.assertNotIn('runtime error:', run.stderr)
+
+    def test_original_field_footprints_and_pointer_only_device_store(self): self.mode('footprints')
+    def test_initialize_still_validates_consumed_provider(self): self.mode('provider')
+    def test_moved_primary_actual_partial_exact_and_multiple_claims_keep_value_alias(self):
+        for mode in ['partial', 'exact', 'multiple', 'defaults-claim', 'storage-claim']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_unmoved_selected_unknown_identity_size_and_other_classes_still_refuse(self):
+        for mode in ['unmoved', 'selected', 'wrong-identity', 'wrong-size', 'stateful', 'mixed', 'missing', 'span-overflow']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_epoch_exhaustion_and_all_pending_source_destination_ranges_refuse(self):
+        for mode in ['maximum', 'pending-source', 'pending-destination']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_real_clone_exceptions_and_nil_do_not_publish_or_write(self):
+        for mode in ['clone-throw', 'clone-remove', 'clone-nil']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_arena_and_active_callback_guards_stay_before_write(self):
+        for mode in ['arena', 'callback', 'recording']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_real_cross_page_write_and_ro_none_failures_preserve_claim(self):
+        for mode in ['permission-rw', 'permission-ro', 'permission-none']:
+            with self.subTest(mode=mode): self.mode(mode)
+    def test_null_and_overflow_addresses_fail_without_unprotected_write(self): self.mode('invalid-range')
+    def test_dirty_and_logical_prepare_failures_do_not_retire_claim(self):
+        for mode in ['dirty', 'logical']:
+            with self.subTest(mode=mode): self.mode(mode)
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation ABI')

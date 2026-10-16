@@ -1,7 +1,8 @@
 /* Host-only storage transfer, entered only by the separately audited runtime
  * copy site. A registry value/resource is independent of its primary C0 slot.
  * This module never copies or reads that guest slot or changes general NVN
- * storage guards. Only this audited protocol may retire a qualified target. */
+ * storage guards. Within the copy path, this protocol alone may retire a
+ * qualified target; metadata-only field writes have their own narrow gate. */
 #define BW_TEXTURE_MOVE_CAPACITY 64
 #define BW_TEXTURE_MOVE_MAGIC UINT64_C(0x4257544d4f564531)
 static NSMutableDictionary<NSNumber*,NSDictionary*> *textureMoves;
