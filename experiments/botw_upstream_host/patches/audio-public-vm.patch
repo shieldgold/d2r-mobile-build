@@ -1,0 +1,40 @@
+--- a/dm/host/botw_audio_renderer.c
++++ b/dm/host/botw_audio_renderer.c
+@@ -16,7 +16,7 @@
+ #include <time.h>
+ #include <unistd.h>
+ #include <mach/mach.h>
+-#include <mach/mach_vm.h>
++#include "public_vm_read.h"
+ 
+ enum {
+     NAT_WORK_SIZE, NAT_CONFIG_SIZE, NAT_CONFIG_INIT, NAT_OPEN, NAT_UPDATE, NAT_START, NAT_STOP, NAT_CLOSE,
+@@ -428,7 +428,7 @@
+ // Copies one enabled DeviceSink command into interleaved PCM16. Returns NULL or the reason.
+ static int audio_read_exact(const void *source, void *out, size_t size) {
+     mach_vm_size_t got = 0;
+-    return source && mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)source, size,
++    return source && botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)source, size,
+                                             (mach_vm_address_t)(uintptr_t)out, &got) == KERN_SUCCESS && got == size;
+ }
+ static const char *device_sink(audio_session *s, const uint8_t *processor_input, const uint8_t *command_input) {
+--- a/dm/host/botw_audio_device.c
++++ b/dm/host/botw_audio_device.c
+@@ -6,7 +6,7 @@
+ #include <math.h>
+ #include <stdatomic.h>
+ #include <mach/mach.h>
+-#include <mach/mach_vm.h>
++#include "public_vm_read.h"
+ 
+ enum { DEVICE_LIST, DEVICE_VOLUME, DEVICE_CHANNELS, DEVICE_NOTIFY, DEVICE_CREATE_EVENT, DEVICE_FUNCTIONS };
+ static const struct { const char *name; uint64_t offset; } device_exports[DEVICE_FUNCTIONS] = {
+@@ -31,7 +31,7 @@
+ }
+ static int device_read(const void *source, void *out, size_t size) {
+     mach_vm_size_t got = 0;
+-    return source && mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)source, size,
++    return source && botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)(uintptr_t)source, size,
+                                             (mach_vm_address_t)(uintptr_t)out, &got) == KERN_SUCCESS && got == size;
+ }
+ enum { DEVICE_NAME_SIZE = 256, DEVICE_ROUTES = 3, DEVICE_ACTIVE = 2 };

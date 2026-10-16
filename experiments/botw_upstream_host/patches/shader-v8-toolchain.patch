@@ -1,0 +1,24 @@
+--- a/dm/gfx/tools/botw_shader_build.py
++++ b/dm/gfx/tools/botw_shader_build.py
+@@ -53,7 +53,7 @@
+ DOMAIN = SCHEMA.encode() + b'\0'
+ SHADER_MAGIC = 0x98761234
+ CODE_MAGIC = 0x12345678
+-CONTROL_VERSIONS = frozenset((9, 14))
++CONTROL_VERSIONS = frozenset((8, 9, 14))
+ CONTROL_HEADER_SIZE = 0x718
+ # Resource policy for opaque control tails, not a serialized format size.
+ CONTROL_LIMIT = 1024 * 1024
+@@ -316,6 +316,12 @@
+         raise CaptureError(f'unexpected shader control size {size:#x} for version {version}')
+     if len(control) != size:
+         raise CaptureError(f'control file has {len(control)} bytes, header says {size}')
++    # Fixed base-v0 graphics v8: preserve the 2000 original bytes and v8 identity.
++    # The remaining code/SPH/C1 and resource-facts checks stay shared below.
++    if version == 8 and (size != 2000 or u32(control, 12) != 0x120 or u32(control, 16) != 11 or
++                         u32(control, 20) != size or u32(control, 0x6f0) != size or
++                         u32(control, 0x708) != 0x30 or u32(control, 0x714) > 2):
++        raise CaptureError('unsupported base-v0 v8 graphics control profile')
+     f = {'version': version, 'control_size': size, 'c1_offset': u32(control, 0x700),
+          'code_size': u32(control, 0x704), 'code_offset': u32(control, 0x708), 'stage': u32(control, 0x714)}
+     graphics = f['stage'] != 5

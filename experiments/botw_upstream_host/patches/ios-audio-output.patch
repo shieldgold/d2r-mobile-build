@@ -1,0 +1,173 @@
+--- a/dm/host/botw_pcm.c
++++ b/dm/host/botw_pcm.c
+@@ -1,5 +1,5 @@
+ // Host-owned PCM16 output for the native BotW host: a bounded single-producer / single-consumer
+-// ring of 48000 Hz stereo frames drained by a CoreAudio DefaultOutput AudioUnit, or by nothing at
++// ring of 48000 Hz stereo frames drained by the selected platform output AudioUnit, or by nothing at
+ // all in the explicit muted mode. The producer (the audio renderer worker) converts its mono,
+ // stereo or 5.1 PCM16 into stereo while copying into the ring; the realtime render callback drains
+ // the ring into the device buffer — a plain memcpy at unity gain, otherwise an exact saturating
+@@ -48,6 +48,8 @@
+ // (declared below), so tests can drive pcm_render and the lifecycle with no audio device.
+ 
+ #include "botw_pcm.h"
++#include "whole_audio_platform.h"
++#include <TargetConditionals.h>
+ 
+ #include <math.h>
+ #include <sched.h>
+@@ -119,7 +121,7 @@
+ #else
+ static OSStatus au_real_new(const AudioComponentDescription *desc, AudioUnit *out) {
+     AudioComponent c = AudioComponentFindNext(NULL, desc);
+-    if (!c) { PCM_LOG("no default output AudioUnit component on this system"); return kAudioUnitErr_InvalidElement; }
++    if (!c) { PCM_LOG("no selected output AudioUnit component on this system"); return kAudioUnitErr_InvalidElement; }
+     return AudioComponentInstanceNew(c, out);
+ }
+ #define AU_NEW au_real_new
+@@ -249,11 +251,11 @@
+ static int pcm_open_unit(botw_pcm_sink *s) {
+     AudioComponentDescription desc = {
+         .componentType = kAudioUnitType_Output,
+-        .componentSubType = kAudioUnitSubType_DefaultOutput,   // Output only; input element 1 is never enabled.
++        .componentSubType = whole_audio_platform_output_subtype(),   // Output only; input element 1 is never enabled.
+         .componentManufacturer = kAudioUnitManufacturer_Apple,
+     };
+     OSStatus st = AU_NEW(&desc, &s->au);
+-    if (st || !s->au) { s->au = NULL; s->last_error = st ? st : -1; PCM_LOG("cannot create the default output AudioUnit (status %d)", (int)s->last_error); return -1; }
++    if (st || !s->au) { s->au = NULL; s->last_error = st ? st : -1; PCM_LOG("cannot create the selected output AudioUnit (status %d)", (int)s->last_error); return -1; }
+ 
+     AudioStreamBasicDescription fmt = {
+         .mSampleRate = PCM_RATE,
+@@ -267,12 +269,23 @@
+     };
+     AURenderCallbackStruct cb = { pcm_render, s };
+     const char *step = "set stream format";
+-    st = AU_SET_PROPERTY(s->au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &fmt, sizeof fmt);
++    st = noErr;
++#if TARGET_OS_IPHONE
++    UInt32 output_enabled = 1, input_enabled = 0;
++    step = "enable RemoteIO output";
++    st = AU_SET_PROPERTY(s->au, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0,
++                         &output_enabled, sizeof output_enabled);
++    if (!st) { step = "disable RemoteIO input";
++        st = AU_SET_PROPERTY(s->au, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1,
++                             &input_enabled, sizeof input_enabled); }
++#endif
++    if (!st) { step = "set stream format";
++        st = AU_SET_PROPERTY(s->au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &fmt, sizeof fmt); }
+     if (!st) { step = "set render callback"; st = AU_SET_PROPERTY(s->au, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &cb, sizeof cb); }
+     if (!st) { step = "initialize"; st = AU_INITIALIZE(s->au); }
+     if (st) {
+         s->last_error = st;
+-        PCM_LOG("cannot %s on the default output AudioUnit (status %d); no output device?", step, (int)st);
++        PCM_LOG("cannot %s on the selected output AudioUnit (status %d); no output device?", step, (int)st);
+         OSStatus disposed = AU_DISPOSE(s->au);
+         if (disposed) {
+             s->last_error = disposed;
+@@ -286,7 +299,7 @@
+     return 0;
+ }
+ 
+-botw_pcm_sink *botw_pcm_open(int audible) {
++static botw_pcm_sink *pcm_open_impl(int audible) {
+     botw_pcm_sink *s = calloc(1, sizeof *s);
+     if (!s) { PCM_LOG("cannot allocate the sink"); return NULL; }
+     s->audible = audible != 0;
+@@ -303,7 +316,7 @@
+     return s;
+ }
+ 
+-int botw_pcm_set_active(botw_pcm_sink *s, int active) {
++static int pcm_set_active_impl(botw_pcm_sink *s, int active) {
+     if (!s) return -1;
+     int was = atomic_load_explicit(&s->active, memory_order_relaxed);
+     if (active) {
+@@ -335,7 +348,7 @@
+     return rc;
+ }
+ 
+-size_t botw_pcm_write(botw_pcm_sink *s, const int16_t *samples, size_t frames, unsigned channels) {
++static size_t pcm_write_impl(botw_pcm_sink *s, const int16_t *samples, size_t frames, unsigned channels) {
+     if (!s || !samples || frames == 0) return 0;
+     if (channels != 1 && channels != 2 && channels != 6) return 0;
+     if (frames > SIZE_MAX / sizeof(*samples) / channels) return 0;   // No valid source span can represent this request.
+@@ -361,7 +374,7 @@
+     return n;
+ }
+ 
+-int botw_pcm_set_volume(botw_pcm_sink *s, float volume) {
++static int pcm_set_volume_impl(botw_pcm_sink *s, float volume) {
+     if (!s) return -1;
+     if (!isfinite(volume)) return -1;   // NaN and both infinities: rejected, the stored gain is untouched.
+     // Finite out-of-range values clamp into [0, 128] (the BotW 1.9 SDK device-volume range);
+@@ -373,7 +386,7 @@
+     return 0;
+ }
+ 
+-void botw_pcm_get_counters(const botw_pcm_sink *s, botw_pcm_counters *out) {
++static void pcm_get_counters_impl(const botw_pcm_sink *s, botw_pcm_counters *out) {
+     if (!out) return;
+     if (!s) { memset(out, 0, sizeof *out); return; }
+     out->submitted_frames = atomic_load_explicit(&s->submitted, memory_order_relaxed);
+@@ -382,9 +395,9 @@
+     out->underrun_frames = atomic_load_explicit(&s->underrun, memory_order_relaxed);
+ }
+ 
+-void botw_pcm_close(botw_pcm_sink *s) {
++static void pcm_close_impl(botw_pcm_sink *s) {
+     if (!s) return;
+-    botw_pcm_set_active(s, 0);   // Clears `active`, stops the unit, waits for the consumer, flushes.
++    pcm_set_active_impl(s, 0);   // Clears `active`, stops the unit, waits for the consumer, flushes.
+     if (s->au) {
+         // Only successful disposal excludes future callbacks. The quiesce below covers a
+         // callback that was already past the active check; it cannot substitute for disposal.
+@@ -402,3 +415,48 @@
+     free(s->ring);
+     free(s);
+ }
++
++// The platform registry serializes producer APIs with lifecycle and close. The
++// realtime callback above never enters this registry or acquires its mutex.
++botw_pcm_sink *botw_pcm_open(int audible) {
++    whole_audio_platform_lock();
++    botw_pcm_sink *s = pcm_open_impl(audible);
++    if (s && whole_audio_platform_register_locked(s, pcm_set_active_impl)) {
++        PCM_LOG("cannot register sink for platform lifecycle");
++        pcm_close_impl(s);
++        s = NULL;
++    }
++    whole_audio_platform_unlock();
++    return s;
++}
++int botw_pcm_set_active(botw_pcm_sink *s, int active) {
++    whole_audio_platform_lock();
++    int result = whole_audio_platform_request_locked(s, active);
++    whole_audio_platform_unlock();
++    return result;
++}
++size_t botw_pcm_write(botw_pcm_sink *s, const int16_t *samples, size_t frames, unsigned channels) {
++    whole_audio_platform_lock();
++    size_t written = pcm_write_impl(s, samples, frames, channels);
++    whole_audio_platform_unlock();
++    return written;
++}
++int botw_pcm_set_volume(botw_pcm_sink *s, float volume) {
++    whole_audio_platform_lock();
++    int result = pcm_set_volume_impl(s, volume);
++    whole_audio_platform_unlock();
++    return result;
++}
++void botw_pcm_get_counters(const botw_pcm_sink *s, botw_pcm_counters *out) {
++    whole_audio_platform_lock();
++    pcm_get_counters_impl(s, out);
++    whole_audio_platform_unlock();
++}
++void botw_pcm_close(botw_pcm_sink *s) {
++    whole_audio_platform_lock();
++    // Retire before disposal. A failed Dispose keeps the original callback
++    // storage alive, but the platform must never resume that closed sink.
++    whole_audio_platform_unregister_locked(s);
++    pcm_close_impl(s);
++    whole_audio_platform_unlock();
++}

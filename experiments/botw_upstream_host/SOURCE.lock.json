@@ -1,0 +1,1061 @@
+{
+  "schema": "botw-whole-upstream-host-v1",
+  "upstream_repository": "https://github.com/TommyLau/botw-mobile",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "files": {
+    "README.zh-CN.md": {
+      "sha256": "ee3653f6e10ca657a108eeb216b401e19a34e8d872e16138d3a46a0dd34c523a",
+      "bytes": 3114,
+      "role": "thin-adapter-or-verification"
+    },
+    "UPSTREAM_UNITS.json": {
+      "sha256": "2db9f601bd94ce8b60382ef12b45c894c5dba9dbb9c45d04953280b2fbaecf40",
+      "bytes": 3322,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_abi.c": {
+      "sha256": "5a5a77442cdf91825bb3bb75560166365245508e8e53738a84cdb509c3101364",
+      "bytes": 4869,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_abi.h": {
+      "sha256": "ba980a0597fcc86c14119419e95b59613a7995d8fe6bd12ee317d400c474b213",
+      "bytes": 3023,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_abi.json": {
+      "sha256": "850080d27627d6091cd0146eb24d2640fb31f6dd1630599aff76452699dee217",
+      "bytes": 4447,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/public_vm_read.h": {
+      "sha256": "6403c785cb8e83888e2c8c3334ba6f2ce7cf78961a3f29b5af5502ec89ed3db6",
+      "bytes": 1480,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/shader_v8_control.h": {
+      "sha256": "a1d2794eaaa283dbb1117a1478490e88543139248b4330ce06f69fc811f341c8",
+      "bytes": 979,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/shader_v8_control.json": {
+      "sha256": "90c6fe0d77ae2fc684959ce255029d9210a76565774a5ff90c8cf887bb5ad30f",
+      "bytes": 4821,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/shader_v8_control.py": {
+      "sha256": "c3f20f9db0525f2db46583308f93e598c6e3b47bb0da38c911c918b323c22145",
+      "bytes": 3128,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_applet.c": {
+      "sha256": "def1cc857765dbbc0e13962626e1b16db8359a8af36c9e6934fc9aaff4f389db",
+      "bytes": 5816,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_applet.h": {
+      "sha256": "c488c3ede48b459f040b53dca189c457d61feaed00b4321130a0996d9411ceee",
+      "bytes": 2486,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_audio_platform.h": {
+      "sha256": "e610bc07f665f98904160e7eb9d24f538a08217cb8ad05d4ea81250a3df364a0",
+      "bytes": 1756,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_audio_platform.m": {
+      "sha256": "b1a74ac4f987acedc1a1a4983289061e82aa0b48f69f71e7be5b59758963fd3b",
+      "bytes": 3564,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_identity.c": {
+      "sha256": "6d2e60a6a7344b76b492fbd5fac500611a6246d94f33b5c1a6afdb91ab65e963",
+      "bytes": 3530,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_identity.h": {
+      "sha256": "419284c551b045dc36461641f2de4e00ea286e26e875aac640dc0f7111807c42",
+      "bytes": 446,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_policy.c": {
+      "sha256": "0366fa75db3dac7d7422a6f7976a3023462f1bc4147664a47649a0905f407a28",
+      "bytes": 3542,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_policy.h": {
+      "sha256": "ed32997adde85bf69844d9234da3efd2d798e22b35bdb8015bdc0007f35beb9f",
+      "bytes": 1270,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_romfs.c": {
+      "sha256": "4ba6d333b84da0254a40e9c57b9d87179ef69d07f43fb1d35171cdf2bb4c2953",
+      "bytes": 3749,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_romfs.h": {
+      "sha256": "a24c6f7acac90558b4fd408c417c5efb3fcd69fb4c533ac7a71186e2561acd49",
+      "bytes": 1188,
+      "role": "thin-adapter-or-verification"
+    },
+    "frontend/whole_front_state.c": {
+      "sha256": "46c0af78fed0e370071f32f2b9ca85fb2c062de9e0458e7251a02d8a0dd9b357",
+      "bytes": 4377,
+      "role": "thin-adapter-or-verification"
+    },
+    "frontend/whole_front_state.h": {
+      "sha256": "04442036e84751376b607b07e9559d484f1698de6605680d6484046db62c2b8d",
+      "bytes": 1546,
+      "role": "thin-adapter-or-verification"
+    },
+    "frontend/whole_frontend.h": {
+      "sha256": "4bd3fce4e08155dab5d1be883f4a4329bbc38330357ca91b9a07a4e1db349505",
+      "bytes": 2944,
+      "role": "thin-adapter-or-verification"
+    },
+    "frontend/whole_frontend.m": {
+      "sha256": "46255587b14d4c2793795aaae0dd8ee7aa47e4aab6243ddef507d0fe3bff4dce",
+      "bytes": 31968,
+      "role": "thin-adapter-or-verification"
+    },
+    "frontend/whole_main.m": {
+      "sha256": "9b77f80c5a91e4f0e5c3687005700030af82f61a2e433d2cd15a3eb4c5d8f17e",
+      "bytes": 328,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/applet-lifecycle.patch": {
+      "sha256": "3dbeaf133ee94cbdc4ffd6fa4403a128acce3a3dc8538e378de4f880f6d6c280",
+      "bytes": 6435,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/audio-public-vm.patch": {
+      "sha256": "9381f448338ffa2c9d1fb6cfffd1bf658fae14a6adb6cc56ce7a27d0a8288c62",
+      "bytes": 1953,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-abi.patch": {
+      "sha256": "3df5bc95e832d5fdab6eff78c545e3074de44be0f23457874c1448e7b3263ff9",
+      "bytes": 6410,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/diagnostic-routing.patch": {
+      "sha256": "249d56a66c9d96f0b6a7e431ae464e787121b6fe9465a4796a430752eab29d1c",
+      "bytes": 3832,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/host-policy.patch": {
+      "sha256": "d345e2b247ef43cc01ec48b0d50a6647c2327817468ec68d065ad82c2af014f7",
+      "bytes": 45829,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/ios-audio-output.patch": {
+      "sha256": "60aeb3ab02446aacff820cc6b9fe1eb6b39eb9f56efcc6165d2dd0d34036bd5c",
+      "bytes": 8076,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/ios-vm-interface.patch": {
+      "sha256": "dc0ac2bd7ac733516dd6aeecbbd0e4ecb691e80b3d6763335c94893259c0450f",
+      "bytes": 1246,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/persistent-identity.patch": {
+      "sha256": "81a38fb274e2e9433c69e9c54ac006ecf8b35b8dcde8e66224e6f2e630084ce6",
+      "bytes": 1571,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/romfs-image-provider.patch": {
+      "sha256": "581c69e0074c4493edc8de0f2546a0dce0d6e00a39d25b1bef7c120a609737c6",
+      "bytes": 14379,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/shader-v8-runtime.patch": {
+      "sha256": "ac8a4f0f15a0a46301986e4f19d2b50704a57a88a2ae1e534851fa6284f4aa79",
+      "bytes": 1411,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/shader-v8-toolchain.patch": {
+      "sha256": "ff3ff1577682e2a1905437235de09e107eb3c1a12e9eb7828d1c0fd5370bb4fd",
+      "bytes": 1368,
+      "role": "thin-adapter-or-verification"
+    },
+    "scripts/build_link_only.py": {
+      "sha256": "e6e5f939642e0876fc55a179089e7e7650eef65c1df8f2894d60630e07633151",
+      "bytes": 12903,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/base_v0_abi_probe.c": {
+      "sha256": "053c36278f8ed133a625ab3b2b2edd1f070d0df6c094db0ccb52e079430873dc",
+      "bytes": 7951,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/host_policy_probe.c": {
+      "sha256": "160190c621c05aecdd098ce0705eae9cd8060430870ebae5062c12e0840fcd4c",
+      "bytes": 4008,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/shader_v8_control_probe.c": {
+      "sha256": "343eb1d6e66d9468f35ebd5209ef66f96f4cdf1b77b400319556aeb38f983212",
+      "bytes": 1372,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_applet_probe.c": {
+      "sha256": "99d2147a9b97c920143dc053eedccfdf7ee82804a2595380f1446d9957644889",
+      "bytes": 5693,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_applet_sdk_probe.c": {
+      "sha256": "8313e3adbbedeb586c108f376183b30ebcff2585545d4ea545bc99ac823fb715",
+      "bytes": 2138,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_audio_platform_probe.c": {
+      "sha256": "4e89d45142cebec96109cd8af04412b6f8e3984d66a86b63241014568c671b0d",
+      "bytes": 6382,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_front_state_probe.c": {
+      "sha256": "b8fe07d441f96f17762fffb328c36ef9862114bec2be5acfdfea4ae2532c1c91",
+      "bytes": 8577,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_romfs_probe.c": {
+      "sha256": "38fe157c09b5f97b1cd57e4ae3401c01160ce3f61aaaa2fe7e29d3834df6d047",
+      "bytes": 10282,
+      "role": "thin-adapter-or-verification"
+    },
+    "upstream/LICENSE": {
+      "sha256": "5811600bb8fc4522d3310e8e0e637a1bb14b7c64412f8cfc6234872eb53129b9",
+      "bytes": 1065,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e98c7620fff706c032c62d120eef265c4d9ee408"
+    },
+    "upstream/dm/gfx/nvn/botw_buffer.c": {
+      "sha256": "87f1faabc5437f549256bed265e10e03743db103c3ecf90d511dfd6595b77c6f",
+      "bytes": 4517,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "78a6d7af57efed044fdd7ab19047bd788c97381a"
+    },
+    "upstream/dm/gfx/nvn/botw_sampler_reduction.c": {
+      "sha256": "8913b5e6a7f913d603391e7a141bb0dd2d37597c797c424c9d771c14bbe1403b",
+      "bytes": 2204,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f188f1d8c5566d575533db4db0887a826be564db"
+    },
+    "upstream/dm/gfx/nvn/botw_shader.c": {
+      "sha256": "537645f13f04110ad7a443e8da7b6f2567a8be99663b16f28b8f91eed4c8bc34",
+      "bytes": 17054,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f25de9abb12e4b1a105c2f93cacb8a79c843327c"
+    },
+    "upstream/dm/gfx/nvn/botw_shader.h": {
+      "sha256": "825df5cfd9bb10c627e0495833882ffd13942bb0027af744150e318805ec475d",
+      "bytes": 1569,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8c8963abbd397b149648b8dc13a832cd9aa2ee12"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_manifest.h": {
+      "sha256": "5291c3056392d112098e86db0453a1a3007503e12c2d198d16f1e9cae2dcaad0",
+      "bytes": 1995,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "4fabc91d365fa58299fce9b6f072b61ce3ae6d08"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_manifest.m": {
+      "sha256": "155e3fe8fedfa1691cd40d1cd5521a1a4738ca9b5995a14033f751723de289a1",
+      "bytes": 16074,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2e0267992485ac1976b7619184b937b097ff5a68"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_observation.c": {
+      "sha256": "e595385ed464f89ff7b614685146cd52b4d9923afe71927ac36850a7efe66ea9",
+      "bytes": 14489,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "234dac91e242e2b23d1d9f09822240ee7dadb5be"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_observation.h": {
+      "sha256": "e7549678f66757e90b16aee60b4373db1e29baeb2b96332c8aa936d5be7cf212",
+      "bytes": 3558,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "3159827025e56e6cdb305e3a22860941288bb3ae"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_runtime.h": {
+      "sha256": "fd6f29eb431c19d0339207d025ad60ef2a28af33d739e91b5680a7ba515b99d6",
+      "bytes": 3177,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e9aff5a1b9174f40dabf761fda1066d9542a82b3"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_runtime.m": {
+      "sha256": "81acb10d4251e248d975e9339447bf26d8376f51445e1a30f817471ff25deb7b",
+      "bytes": 7436,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "db4a7407dbaf813f77cebf49bf2c53d907a65593"
+    },
+    "upstream/dm/gfx/nvn/botw_storage_class.c": {
+      "sha256": "a0d77b1ab1ec64ad0a657798c79cb90081106cdfa50ccf229441e0147e3e3257",
+      "bytes": 2031,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c34ee71caf780d18ef03663832d5315aa9ec7b7c"
+    },
+    "upstream/dm/gfx/nvn/dmsh_chain.h": {
+      "sha256": "8d7fb2f03f6a8ab7fb8e8720f5bd2da8414f9981c21e5e575cb9b50574113b68",
+      "bytes": 235,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5de92f0394b3d7d6f9ceb265db15802b31c130f5"
+    },
+    "upstream/dm/gfx/nvn/hle_nvn.c": {
+      "sha256": "25dee0ce39ce821eac537a88cf80d2b1b5bf31a90fdfcab0317f529791b85e9f",
+      "bytes": 157683,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8fd069cb814468e94c285f9d4327873471cec21d"
+    },
+    "upstream/dm/gfx/nvn/include/nvn.h": {
+      "sha256": "51c3fab2156a95ac907d973c2a916f8cedf588f743f2b6c17ca0b57d989ba7b9",
+      "bytes": 89923,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "08e66978c7f097654ce1bfd61166e7694248d6a9"
+    },
+    "upstream/dm/gfx/nvn/nvn_builtin.h": {
+      "sha256": "7b9d24cc391b2ca0fdfe4ab087fce167cd9e95a86c76fa51ef691888261e0426",
+      "bytes": 2396,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "714fd340a97edfecda21271b4c2ff56ea72c2b85"
+    },
+    "upstream/dm/gfx/nvn/nvn_clock.h": {
+      "sha256": "af7d2dd346edb125424b85892730f686e0569878e648b742af6e0a906dc785b4",
+      "bytes": 702,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "cb31c086d428bbaf48bd5cb8a9fc8c8377e3a299"
+    },
+    "upstream/dm/gfx/nvn/nvn_cmd_audit.c": {
+      "sha256": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9",
+      "bytes": 34943,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f46ea1d318d8f164f3fdc60a704e5e2a9a47a720"
+    },
+    "upstream/dm/gfx/nvn/nvn_cmd_audit.h": {
+      "sha256": "ca6517d544e2a9ae10eb4f3f3fd79420a9fac14d3ff05f869d63ab55740b36e8",
+      "bytes": 4098,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c990c6014c0c86ff349b11ec5d6b45773e5eb011"
+    },
+    "upstream/dm/gfx/nvn/nvn_count.h": {
+      "sha256": "eebefa966311326ce506d09c5f391de4a261e7baf32895f026c666e30bdfa904",
+      "bytes": 65,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "d2c154e010ce2d5e9dfb68aa00d39b355d70e626"
+    },
+    "upstream/dm/gfx/nvn/nvn_cover.h": {
+      "sha256": "a45e3e26e995c9960abbe1b9cd82e1dd5e8d1ab9c29953276b833bc657adb2e7",
+      "bytes": 2973,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8fcbd99df51b60158ed7f2e2cfa5872a5ef5a543"
+    },
+    "upstream/dm/gfx/nvn/nvn_dirty.c": {
+      "sha256": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75",
+      "bytes": 16720,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "21e2520e1d3ef481a5f08239e2ace993aa258624"
+    },
+    "upstream/dm/gfx/nvn/nvn_dirty.h": {
+      "sha256": "d1b9aee7cff3bee7ff055b1aaaded0ff90f83d9412754c716e62fc0394c3c4b3",
+      "bytes": 2959,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "4b03b583cb1f2c59d666f24037c313167283ce10"
+    },
+    "upstream/dm/gfx/nvn/nvn_dtex.c": {
+      "sha256": "c837f78b59e9b415890334ae70508489ce2beada6fe64ccd46d290d2c8cf8099",
+      "bytes": 15586,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "34411240b12082d8ec88b6c974fd47aab46183d2"
+    },
+    "upstream/dm/gfx/nvn/nvn_dtex.h": {
+      "sha256": "37961c6d17ff5c266c76a834349710ada8903072f7fb04083b1577ce7feb28c1",
+      "bytes": 5174,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f455f080271ce271275514d5cee8e7801c164a29"
+    },
+    "upstream/dm/gfx/nvn/nvn_entry.S": {
+      "sha256": "f018457948f0c5a81c48213d51e7d9cef729dbc35fc97fed2f38e6557ce5db55",
+      "bytes": 2458,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fc28766a0ad2a84fe45834e93a6cef8202886c5a"
+    },
+    "upstream/dm/gfx/nvn/nvn_handle.h": {
+      "sha256": "43713a4659f7ca3756ad07454b689503b128d108c0d014e788f861102e8a9968",
+      "bytes": 858,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "1e3eabc950f425b96475ad5db0da98ad20de320d"
+    },
+    "upstream/dm/gfx/nvn/nvn_hmap.h": {
+      "sha256": "ae32d0081cf9313ca6511cdfd636e29e6acf60d2a3871f9f455a874ed2f52d7b",
+      "bytes": 3825,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0c51d1cd1b9e0a425eee102288211273d178cd72"
+    },
+    "upstream/dm/gfx/nvn/nvn_mtl.h": {
+      "sha256": "306ba5f5d2df220ff96850cb709174613d91bd6f6c14285958352e2eb79ba248",
+      "bytes": 3320,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c3ac5ba371e1019fa81a2ef85126cdbb3d847e98"
+    },
+    "upstream/dm/gfx/nvn/nvn_mtl.m": {
+      "sha256": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb",
+      "bytes": 636813,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5a7d93bc2ecaa8466cb4679344c3cfd604a65bfe"
+    },
+    "upstream/dm/gfx/nvn/nvn_obj.h": {
+      "sha256": "5078f832ff41314026425ced4c7121833d95b798cb06ff7320a49077a56c1584",
+      "bytes": 18518,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "1d6c53ae413d71c427d0098302d4a16a2866077f"
+    },
+    "upstream/dm/gfx/nvn/nvn_pace.h": {
+      "sha256": "2c63e64304a46b961cf09dce35504e4877471f124119f606130ab4a59e8d73fd",
+      "bytes": 1761,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0aa86c8c888d3f7a10820a9035f10d192cac7fcc"
+    },
+    "upstream/dm/gfx/nvn/nvn_protos.h": {
+      "sha256": "117f7a3805226319cfbb31da84d968e231a09382cdf8869c44bb74081c471f05",
+      "bytes": 46504,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b7b8dde26aebf4d2ff73e2a84c56dd86f6be9e93"
+    },
+    "upstream/dm/gfx/nvn/nvn_pso_skey.h": {
+      "sha256": "17a07f06bf8904803a28b062118cbb8f3ba45325a4e462b60cd80375f5efd2d5",
+      "bytes": 2061,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0b280f9ca6c6ebd1723c66115f26eee47772ffe0"
+    },
+    "upstream/dm/gfx/nvn/nvn_refl.h": {
+      "sha256": "ac05e9c2325dad07920ca64bb64e3fd038e15d4e745a146161f2eaa3461054cb",
+      "bytes": 4359,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "6c0aa18b293cf3745a66bc7cf9b007671421c5c0"
+    },
+    "upstream/dm/gfx/nvn/nvn_refl.m": {
+      "sha256": "7dd58622312854e15f231aecadab3eace049f01049810c23907aa8b20946b002",
+      "bytes": 8041,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "a6ef9fcf810e46b915e1491b75b8bc6e13d3a758"
+    },
+    "upstream/dm/gfx/nvn/nvn_rtex.inc": {
+      "sha256": "91f43914ad4426aa00df3fbcb58feb33f058d4ab4d8570422788db6261b40566",
+      "bytes": 17148,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "171c25bb0ebf80956535ac5c122c65c0c8eb04f3"
+    },
+    "upstream/dm/gfx/nvn/nvn_serial.c": {
+      "sha256": "f9a4a861c6e2360ed57adb729ebee82023fe573f8f198a9cead404037bcee248",
+      "bytes": 210,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "bff4adc03c86e30215e6fa44c8cc6632c41e2f67"
+    },
+    "upstream/dm/gfx/nvn/nvn_tex.c": {
+      "sha256": "b29c713909e77b784064b096037d71a1073faa116bb7826d8451914de9f18e44",
+      "bytes": 7369,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8ec16e870e3d8df690ab62150d9ecb44343ae8db"
+    },
+    "upstream/dm/gfx/nvn/nvn_tex.h": {
+      "sha256": "3e5ca71fdfb6d9f2bd06fd277d64947bebd906d918a4af55a702836eb9e21c3f",
+      "bytes": 2097,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e115643f38d1e6b63eb669dcd14e11bb57c96d45"
+    },
+    "upstream/dm/gfx/nvn/nvn_texflush.c": {
+      "sha256": "cf2a5ad0ebfb67b5769666dff8d8327f59228d9084ab356378d3b88c695d388f",
+      "bytes": 7656,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "39b062863edef159916572e4a7ba35219bd96012"
+    },
+    "upstream/dm/gfx/nvn/nvn_texflush.h": {
+      "sha256": "6129cee00316d867e3b62646977beec48a29ef4e7c24c106400fd09802cbf71a",
+      "bytes": 2120,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fca7e75b8eadea2149de08617aed2cabffeceb9d"
+    },
+    "upstream/dm/gfx/nvn/nvn_texown.c": {
+      "sha256": "a867a2265fc151d6e22d0363046a99a9df4935883d408db1e96fdff0fceac6ea",
+      "bytes": 6222,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c5be9408b594de651763ea256d13f07d26196f20"
+    },
+    "upstream/dm/gfx/nvn/nvn_texown.h": {
+      "sha256": "671c0d2be9dc4ba335166c14c6386b4c03fbfd1eecf4672be2667edb3d228c5e",
+      "bytes": 3029,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0f4d831da457f805742d02db24a8db1eb3e3c315"
+    },
+    "upstream/dm/gfx/nvn/nvn_texwrite.c": {
+      "sha256": "b7b7ada9d95e8c146f2c0bedd2c8815a6d5af762bc840dc4130f0e40804aa2c2",
+      "bytes": 12905,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "7423fb44307925b6749c812a599e843cdbb1c46b"
+    },
+    "upstream/dm/gfx/nvn/nvn_texwrite.h": {
+      "sha256": "88303b341dc9f88ccca43b04b3c15552f4d7529930ba10857acd11c209bfe8c3",
+      "bytes": 2647,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "dba0bc4187fcbc87e6b09980d7a263ad8d124c10"
+    },
+    "upstream/dm/gfx/nvn/nvn_thunks.S": {
+      "sha256": "99e14e026381e481337340d78e1196e5fa064660e0ea6a0be8bbd65ef686e305",
+      "bytes": 158981,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5abadb5f8cefef98e58a81714c173b6b84bebc0e"
+    },
+    "upstream/dm/gfx/nvn/nvn_vpool.c": {
+      "sha256": "102bcffbe3cce5ea94ac11cad410b95b088244d4779981086434a3ff901dbf46",
+      "bytes": 19063,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "888adb12a1d372de74cf28401ad86104f4fa8317"
+    },
+    "upstream/dm/gfx/nvn/nvn_vpool.h": {
+      "sha256": "13a7ac6cba262cb24a3aa5e6d3ad68385e9eab9ac2e89ab466ce48d38c8fc45c",
+      "bytes": 6890,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2ad6649f0bec3c92209accbac7d3923d39a238fb"
+    },
+    "upstream/dm/gfx/nvn/rt_range_check.inc": {
+      "sha256": "45435f633e474d6e5088b7ea31b65fa7a842e1a62b9a429f075726b7217edaa0",
+      "bytes": 10941,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "6cea440aad19cac94b8ac259910eb1d8e724932a"
+    },
+    "upstream/dm/gfx/tex/nvn_bcdec.c": {
+      "sha256": "b7a2b86ebb0ddedbb2a63bd1eff3dc82ddd9e2c4b833dc3f140dd6cd308be55f",
+      "bytes": 3169,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5244d45e5529182d3f16e02f961c38b5d0f94003"
+    },
+    "upstream/dm/gfx/tex/nvn_bcdec.h": {
+      "sha256": "bb792aabd6ab20ac737f30cc93f193e2a9b73ae777bae5165f38016f1271793e",
+      "bytes": 897,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5776e1a431998f15c60cbf4b9773e4a8dfafc098"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle.c": {
+      "sha256": "ad5cfde4084b0c72b917f449d25137aef3c808c0a0e157e58353d540f2e887c1",
+      "bytes": 4182,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "99ce3130a21597ef68402dcc1d74d10d07e6b420"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle.h": {
+      "sha256": "ec38832cdd9517411b4a6b77c351b74881b4328f4b94dc0971e1511fb4995e4a",
+      "bytes": 1871,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "ea525671fe86b9823b232e01661f9f4e9112bf49"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle_gpu.h": {
+      "sha256": "3a9534ad951107c30996d49f29e41f8b18e7d9618a034cbd6681887da84e7cd2",
+      "bytes": 898,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0b2695625ba057f204d1df4f3a00255bd6db3dfb"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle_gpu.m": {
+      "sha256": "c1de5d71322eb62be8894ff67e029035f5992527501caa8e6f90c68406f11abd",
+      "bytes": 4526,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "137ed78debe31497d065d69fa54f2c017dde3a0d"
+    },
+    "upstream/dm/gfx/tex/nvn_fmt_mtl.c": {
+      "sha256": "7c885cec28fd7b5ab46c672bc080fca45d14c5e5bbfb38828aeaf00b40d26107",
+      "bytes": 6863,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e03ddb7a544c0458162d4bd67c4f257b97318b72"
+    },
+    "upstream/dm/gfx/tex/nvn_fmt_mtl.h": {
+      "sha256": "3b99314b12eac5a4dce61c60024e32d7e23fe9f829c70501413843a271375c93",
+      "bytes": 972,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "18f1c852035060ee2e10bddab8f8220190434cea"
+    },
+    "upstream/dm/host/Makefile": {
+      "sha256": "15551c864fff5a7f1c5c70d5c9887b86da0066a5b82b38f1cae910b393d75328",
+      "bytes": 1594,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "959b2a9a2562f58da8bbde5ecb5eabf2b1415150"
+    },
+    "upstream/dm/host/botw_account.c": {
+      "sha256": "53ee9639c4a79afafcd9bde54b98c344548d8484b959adf37fb63aa0845097fc",
+      "bytes": 3450,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "848245970930d8e7338ef1a36f428b903768f539"
+    },
+    "upstream/dm/host/botw_account.h": {
+      "sha256": "68293ffcd1a1c1e5380817f5ba50f77e7fa593ac5a1347da762fba3cfe83e3e2",
+      "bytes": 514,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "14d7674720161b6cba503c53cacf351834b1069e"
+    },
+    "upstream/dm/host/botw_audio_device.c": {
+      "sha256": "bf9b830516742b2d507c221ffcfb3accdd33fe3dff8f26fb790218a2f3c113e5",
+      "bytes": 5965,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b46d7b5d0a509991082885d38d3059e407d7f674"
+    },
+    "upstream/dm/host/botw_audio_renderer.c": {
+      "sha256": "bcc267ecd021f6c946ef9068eed089c39c35a578c345121b755c1ecab3726c45",
+      "bytes": 43192,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "34ae2dded79894d266232aaa7615e8bbceba3c71"
+    },
+    "upstream/dm/host/botw_audio_renderer.h": {
+      "sha256": "d18f17e29e2a049ddb775103552af71353d6f784f854b933334f9f65015f6f12",
+      "bytes": 739,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "989527db80e0726a72cf3bfb00c5ca318a4a3e3a"
+    },
+    "upstream/dm/host/botw_diag.c": {
+      "sha256": "b100378c5a55ae5151bbca55f6f39220d2796328fe4a01f28e04c49d873c2b1d",
+      "bytes": 488,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b0df8b02fb69b962b838e225e717243789f11476"
+    },
+    "upstream/dm/host/botw_front.h": {
+      "sha256": "b3db41268fc97904264cb1f7ce45bf5d589d0a3f8975efd6aacfff2de837ccf6",
+      "bytes": 234,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "4ddbd3c545fb2136a2dc2d956ffebe54457d6a5e"
+    },
+    "upstream/dm/host/botw_front.m": {
+      "sha256": "4398f51d9b9b2086fd8ac52c6c1830c0da6a5d6752424dff93d4488ff2c6ed9f",
+      "bytes": 15690,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "1b1239e10b87f69228ba9c63afd23119ff17e590"
+    },
+    "upstream/dm/host/botw_fs.c": {
+      "sha256": "4952b9777fcb48edf77250d273687c07bdbda6a785d47fff2e08c41f9389d658",
+      "bytes": 48176,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "7ad494dd02df992ce0233d11cacb821d606c3ede"
+    },
+    "upstream/dm/host/botw_graphics.c": {
+      "sha256": "8b4da62c2d4b07b0e9d407950e65c8722ba0febc2f46c13c9705015bd2ca4d34",
+      "bytes": 3033,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0233fb5977a3d4f47cf1ba6fd2132a77dfad7afd"
+    },
+    "upstream/dm/host/botw_hid.c": {
+      "sha256": "f9dbc33fed3de1d840f67514ed457f6751873f6bf72e17c1e810d76f308e955f",
+      "bytes": 30643,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "cc77a71ec974fcd06dd9e10da9a92d0d0baa0e3d"
+    },
+    "upstream/dm/host/botw_hid.h": {
+      "sha256": "75ecc23e934d066dd77164fccaad0361a17772a24781e6bb10fc936e72640672",
+      "bytes": 4236,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "6b8ddb4ed714ad1035cac461c8162c5064f2a35d"
+    },
+    "upstream/dm/host/botw_input.m": {
+      "sha256": "dcf31f0c597dbfd533f2fdbd20b028ed7c4d7e845622095c4a885bc0750cd39e",
+      "bytes": 6347,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "dcaf1a77c064b93e58dc243d740caccbe397d6d3"
+    },
+    "upstream/dm/host/botw_keys.c": {
+      "sha256": "2222e271750a7459014a796f392cc9bc7501652d52414d7f4dccf80d96d9315d",
+      "bytes": 5935,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "a5fa9c9e4a3603fed717cc5b474adb5835f20284"
+    },
+    "upstream/dm/host/botw_keys.h": {
+      "sha256": "83f8c08fec3934726a33ea7a8a322f0ab6e9d19b2bfcfb77975af1d5fef05016",
+      "bytes": 654,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "3edc5b423da03a4c61e7e9eda12624a7bd865eb3"
+    },
+    "upstream/dm/host/botw_nfp.c": {
+      "sha256": "cf5687f9ac7115df03cbc75bbf92c518b2e2d4fc6eedc6a035aef5ac184949c6",
+      "bytes": 1789,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c2a154082f5bf7b1f715a764d0a9b3e0d110ce66"
+    },
+    "upstream/dm/host/botw_oe.c": {
+      "sha256": "cf9775bc3314bc5d60612861f3601d8e6dceddff88a578aa0a531aa31f3ac5a3",
+      "bytes": 9310,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "3103ec3826bd4410b80aca8d556220cae78bb085"
+    },
+    "upstream/dm/host/botw_pcm.c": {
+      "sha256": "fc270e91ee7ff261f81d11ae122bc60c2980cd5c9c1e172c635edcb778c00de7",
+      "bytes": 22953,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8834f989fc2d47bd8eaf096f6e953b4ddb88ccd9"
+    },
+    "upstream/dm/host/botw_pcm.h": {
+      "sha256": "fe88c5d17a110a9fa162e5407ea1c0bf057346baa483035d182e0a7408ccf911",
+      "bytes": 1634,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "87b45bba6bd319289d1eae7c793cc55e4afd28c3"
+    },
+    "upstream/dm/host/botw_prepo.c": {
+      "sha256": "817f8934be1e155fdc315b3a9ec277f7f8bcaddbc44bd78877af8100314e3898",
+      "bytes": 1084,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2a34ae0c8d1e6b123f76e306a344fe67b570fb94"
+    },
+    "upstream/dm/host/botw_time.c": {
+      "sha256": "b78fa88fef21e51f80a08f659e53916e4195e15fd509b55782206af833665a4f",
+      "bytes": 10324,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "909070fcd0b32956da837aa7bcca1395936978ca"
+    },
+    "upstream/dm/host/crash.c": {
+      "sha256": "bd59ace9998ed5ed4c3068dc5766e0f38b51f5ddac32345cf6a90d810441b444",
+      "bytes": 11688,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5f673f2b3fac0eb2fb6d4ceccb18b46334699a2f"
+    },
+    "upstream/dm/host/dm.h": {
+      "sha256": "a189e8c9daa00f8e8b0354ccd0005dd4850b399a2a206d1ce4b2d8773bbdb507",
+      "bytes": 8771,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "ea6b8160c1adad60a35f17e184537054fdd26109"
+    },
+    "upstream/dm/host/dm_title.c": {
+      "sha256": "4ffc497f0096fd99cce6cb609659cc575b9d626c170be9b8bd64df99e5f8b7e4",
+      "bytes": 4005,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b6a8c9b535e398071bbd4639dfb4a7202b695065"
+    },
+    "upstream/dm/host/dm_title.h": {
+      "sha256": "32c33f409369c8510a2063f8fa25c2f04336f89ebf38d9ecae9838fd37cd4edf",
+      "bytes": 3524,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "934a43f4666d3eebe07e0b7689489c16a42c4398"
+    },
+    "upstream/dm/host/entry.S": {
+      "sha256": "ac753892dcc7d1bfdd940a6935f73d627060b1790106569cffc4fab2a1b0a102",
+      "bytes": 4238,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "94416a70673b8e94ac01e7938803509eedaa1344"
+    },
+    "upstream/dm/host/front.h": {
+      "sha256": "79ce08f9ece0e430a81628178970efc2bc285e45d7b02563f3909ff3e3622c75",
+      "bytes": 3561,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fcd90f6577d19b71a73a0984302ffc999560d15e"
+    },
+    "upstream/dm/host/hle.c": {
+      "sha256": "0b555f60687bcc9052cf3aba9d0a660643d3dc0b6233baa01c35ced9ee6e8bf5",
+      "bytes": 5816,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2cc1c15a20d67de8c1ea7c3349c6cfdca094274a"
+    },
+    "upstream/dm/host/hle.h": {
+      "sha256": "a30e181f6b7551bdc4096fca7fad2db504c7c0623e623e36a5dbf4512f263aa3",
+      "bytes": 9267,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "41968c54382f4126f23fb99da9e9ec784fb88e42"
+    },
+    "upstream/dm/host/hle_count.c": {
+      "sha256": "bcaec87020c04761659c9cbe8aa0b03cb3b106ab1ad9fe98a2e5c6a135178ee6",
+      "bytes": 4421,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "7b1f45dc016e672ce59218717a132193441d983e"
+    },
+    "upstream/dm/host/hle_os.c": {
+      "sha256": "ca5be8f6645ddf22e55574a4fa8de892084a5083641f9e4b1fac8f8976fe924a",
+      "bytes": 7923,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "76df722568d55cfbb4ca033a68ca0931ee234388"
+    },
+    "upstream/dm/host/hle_sdkinit.c": {
+      "sha256": "0f6bc0b0a1325e92eccdbc58c7493693f1c60e7b2968ee0f2f3453add2a457a0",
+      "bytes": 2089,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f89313abae7005d0cfd932cec33086e9ab746e07"
+    },
+    "upstream/dm/host/hle_svc.c": {
+      "sha256": "e08082382946c763f00a85815accb94a0737d230f9cfc4ace2cd34137384550e",
+      "bytes": 23268,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c9b84d1d06b814c37f745b73b5f047aa1b94a065"
+    },
+    "upstream/dm/host/hle_table.c": {
+      "sha256": "9163a0947c3d51177b9dee0ef71cd90e806810e5a9f0da1c492415b03fab5a68",
+      "bytes": 1029,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "665246e1072fe779b890a30f02cb94a96c614032"
+    },
+    "upstream/dm/host/hle_thread.c": {
+      "sha256": "94193947139cab87946059c44eb473e7fa1539f3ef80fc913c818dedc345698f",
+      "bytes": 47528,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e2c8f423f8d710c9f11418b4f894adaf4392baeb"
+    },
+    "upstream/dm/host/hle_thread_core.h": {
+      "sha256": "e9648d1b363b50e437fbcba4bcbdd236f4285f651038ee29ca8af11ba61e43f3",
+      "bytes": 4562,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e84603d9eac52b62d6dc667880ba4fd2a49b7278"
+    },
+    "upstream/dm/host/loader.c": {
+      "sha256": "5ef25158dee11f5fac76b7d1580651d6004a5e8285fd45973553e3571b4c5380",
+      "bytes": 27205,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "d5701f0e6bb83d8e3075ac0424f7a16aa6bc703f"
+    },
+    "upstream/dm/host/main.c": {
+      "sha256": "e9013f253dc81ebe977536f2ecddf1e625ea262caee0cf4af4a292cc7d08d1fa",
+      "bytes": 9446,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0b21aa5067d5ced8ed0747e8a63299b3575dd27a"
+    },
+    "upstream/dm/host/relr.h": {
+      "sha256": "ee633deb48b0875ae9b5cf0415cc34ecc46d4bcfaa717902161d8f54f0adbf22",
+      "bytes": 1022,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "ae19e1ff9f7ec37219928ff619fa811696ce2d8d"
+    },
+    "upstream/dm/host/tests/t_botw_pcm.c": {
+      "sha256": "f151667d8a035bc6db79fac2290b9227165cc901d2c96d5855eaa21a31b688c2",
+      "bytes": 38271,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "d628a3b7d3b08f7776941a16dcb4a3f8d2296d97"
+    },
+    "upstream/dm/host/thread.c": {
+      "sha256": "2e40f0a3d87cd7b1cf9815ef5c60392de82bcd91a375d844b09f7990ed7ed36f",
+      "bytes": 2577,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "a268b01d304c0fd765c7b88bfa9f269c7bf5026e"
+    },
+    "upstream/dm/host/title_botw.c": {
+      "sha256": "00622f6900e958a2f795bf374b36de9c7fb1a4684affa187369066519b98188b",
+      "bytes": 1453,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b97c581c4c7b60abf3938538953ee4f48de3bdb9"
+    },
+    "upstream/dm/third_party/bcdec/LICENSE": {
+      "sha256": "2414c782587f6e96661cb0d19d752432ddecfcc1a221b4cb12bc2253a54dc5ac",
+      "bytes": 2564,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "78e53f197c01c91da1c2564eb45ea29e40177606"
+    },
+    "upstream/dm/third_party/bcdec/bcdec.h": {
+      "sha256": "134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189",
+      "bytes": 79434,
+      "role": "unmodified-upstream",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "553c3ec5a8b99082956f6b2118d508ae384feb23"
+    }
+  },
+  "patches": [
+    "patches/diagnostic-routing.patch",
+    "patches/shader-v8-runtime.patch",
+    "patches/ios-vm-interface.patch",
+    "patches/host-policy.patch",
+    "patches/audio-public-vm.patch",
+    "patches/base-v0-abi.patch",
+    "patches/ios-audio-output.patch",
+    "patches/romfs-image-provider.patch",
+    "patches/persistent-identity.patch",
+    "patches/applet-lifecycle.patch"
+  ],
+  "patched_source_sha256": {
+    "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
+    "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
+    "dm/gfx/nvn/hle_nvn.c": "175cc02e9391ba79b76257434255a3538333a2614dbfecc71719b70f70d39d64",
+    "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
+    "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
+    "dm/gfx/nvn/nvn_mtl.m": "b6db3087b4927b185c8b7c8b3bb8de7793d84dd85df4c9073d50cc2da801297a",
+    "dm/gfx/nvn/nvn_obj.h": "0bbeab7a18dfdbd3b3e4ad0cd2637b1de6c51a7f080b9564e810564e9ad8ca90",
+    "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
+    "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",
+    "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",
+    "dm/host/botw_fs.c": "c8c986526bc02ddd396be8d96ca8d93933525dea8babf9d59a8e0e6ec9395881",
+    "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
+    "dm/host/botw_pcm.c": "c6cb0a5200830d4d7a13c9fe52a86dbd5a70b1413abdba02d9dcdbe73513e31e",
+    "dm/host/crash.c": "316aa104b8e1a57bcbcebb7267d95e08aff4e50d45cefe445e6df2a3b5cb070e",
+    "dm/host/dm_title.c": "3967eb6b141445f192bd7bc28d4ced1fcbde021a43ea3bb9282f87c1715a87c9",
+    "dm/host/hle.c": "5b1be568e3bf9eabb3c7e130fe6e25d6ce84ee0f73922f4923578ebe9576bf82",
+    "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
+    "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
+    "dm/host/hle_svc.c": "5197623e5912e065b8a8d5eb09aca0415133b1319f23f5cfceac0c5ddba58b12",
+    "dm/host/hle_thread.c": "a5df84f5130950cef765b4c2162f39834a06ff5da439d6ee1d8c83747ff5c806",
+    "dm/host/main.c": "13ff3e987b525e7c6d31351b59659702712517d3b24262db0f57d52d6b25fc1d"
+  },
+  "targets": {
+    "macosx": "arm64-apple-macos15.0",
+    "iphoneos": "arm64-apple-ios18.0"
+  },
+  "frameworks": {
+    "macosx": [
+      "Cocoa",
+      "QuartzCore",
+      "Metal",
+      "CoreVideo",
+      "ImageIO",
+      "UniformTypeIdentifiers",
+      "CoreGraphics",
+      "GameController",
+      "AudioToolbox",
+      "Security"
+    ],
+    "iphoneos": [
+      "UIKit",
+      "Foundation",
+      "QuartzCore",
+      "Metal",
+      "CoreVideo",
+      "ImageIO",
+      "UniformTypeIdentifiers",
+      "CoreGraphics",
+      "GameController",
+      "AudioToolbox",
+      "AVFAudio",
+      "Security"
+    ]
+  },
+  "forbidden_external_references": [
+    "_system",
+    "_backtrace",
+    "_backtrace_symbols_fd",
+    "_thread_get_state",
+    "_thread_suspend",
+    "_task_threads",
+    "_vm_region_recurse_64",
+    "_mach_vm_region_recurse",
+    "_fork",
+    "_popen"
+  ],
+  "adapter_translation_units": [
+    "adapter/whole_policy.c",
+    "adapter/base_v0_abi.c",
+    "adapter/whole_audio_platform.m",
+    "adapter/whole_romfs.c",
+    "adapter/whole_identity.c",
+    "adapter/whole_applet.c"
+  ],
+  "external_translation_units": [
+    "native/botw_resources/romfs.c",
+    "native/botw_resources/local_user.c"
+  ],
+  "external_files": {
+    "native/botw_resources/romfs.c": {
+      "sha256": "4c0648b54e6ed44f6ec7f02109457d421796176228650cdf94160df87a95b132",
+      "bytes": 20641,
+      "role": "existing-complete-resource-provider"
+    },
+    "native/botw_resources/romfs.h": {
+      "sha256": "60a66eba001e89dc0f1a939946b53345d35de17dfc2ce1c72d1fea5b499b0a8c",
+      "bytes": 3000,
+      "role": "existing-complete-resource-provider"
+    },
+    "native/botw_resources/local_user.c": {
+      "sha256": "ed0e33754a9b07b5b9ddbb7eb1c064d000a3960afb1ef37a5436980f2329b486",
+      "bytes": 10436,
+      "role": "existing-complete-resource-provider"
+    },
+    "native/botw_resources/local_user.h": {
+      "sha256": "4f7aa0561f4e2b48d27cd81c10b029ff436f68c7cce7693c9c9a600be7999d9d",
+      "bytes": 1951,
+      "role": "existing-complete-resource-provider"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+--- a/dm/host/botw_account.h
++++ b/dm/host/botw_account.h
+@@ -4,7 +4,8 @@
+ 
+ // One host-local profile owns DM_SAVE across launches. This is not a console UID.
+ typedef struct { uint64_t low, high; } botw_uid;
+-static const botw_uid botw_local_uid = {1, 0};
++const botw_uid *whole_identity_uid(void);
++#define botw_local_uid (*whole_identity_uid())
+ _Static_assert(sizeof(botw_uid) == 16, "BotW account Uid ABI");
+ static inline int botw_uid_is_local(const void *value) {
+     if (!value) return 0;
+--- a/dm/host/botw_fs.c
++++ b/dm/host/botw_fs.c
+@@ -29,6 +29,7 @@
+ #include <sys/stdio.h>
+ #include <sys/xattr.h>
+ #include <unistd.h>
++#include "whole_identity.h"
+ 
+ // ---------- Results ----------
+ // nn::Result for the fs module: module 2 in the low 9 bits, description above. The description numbers
+@@ -432,7 +433,7 @@
+ HLE_FORCE("_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE", "BotW: save data -> $DM_SAVE host directory, transactional", Result, botw_fs_MountSaveData, const char *name, const void *uid) {
+     if (!uid) return RES_FS_NULLPTR_ARGUMENT;
+     if (!botw_uid_is_local(uid)) return RES_FS_INVALID_ARGUMENT;
+-    const char *env = getenv("DM_SAVE");
++    const char *env = whole_identity_save_directory();
+     if (!env || !*env) { LOG("fs MountSaveData: DM_SAVE is not set; point it at a writable save directory (created if missing)"); return RES_FS_TARGET_NOT_FOUND; }
+     char dir[PATH_MAX]; if (strlcpy(dir, env, sizeof dir) >= sizeof dir) return RES_FS_TOO_LONG_PATH;
+     size_t L = strlen(dir); while (L > 1 && dir[L - 1] == '/') dir[--L] = 0;

@@ -170,7 +170,8 @@ static int create_identity(int directory, botw_local_user *user) {
     if (temporary[0] && !same_named_inode(directory, temporary, fd)) (void)unlinkat(directory, temporary, 0);
     close(fd); return code;
 }
-int botw_local_user_open(const char *documents, botw_local_user *output, botw_local_user_error *error) {
+static int user_open(const char *documents, botw_local_user *output,
+                     botw_local_user_error *error, int allow_create) {
     const char *phase = "validate trusted Documents path";
     int code = output ? valid_path(documents) : EINVAL;
     if (code) return failure(error, code, phase);
@@ -183,19 +184,27 @@ int botw_local_user_open(const char *documents, botw_local_user *output, botw_lo
     if (fstat(parent, &info)) { code = errno; goto done; }
     if (!S_ISDIR(info.st_mode) || info.st_uid != geteuid()) { code = EPERM; goto done; }
     phase = "create private offline profile directory";
-    int created = !mkdirat(parent, PROFILE_DIRECTORY, 0700);
-    if (!created && errno != EEXIST) { code = errno; goto done; }
+    int created = 0;
+    if (allow_create) {
+        created = !mkdirat(parent, PROFILE_DIRECTORY, 0700);
+        if (!created && errno != EEXIST) { code = errno; goto done; }
+    }
     directory = openat(parent, PROFILE_DIRECTORY, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (directory < 0) { code = errno; goto done; }
     code = private_directory(directory);
     if (code) goto done;
     /* A concurrent opener can see the new directory before its creator has
      * synced Documents. Every successful opener makes that entry durable. */
-    if (fsync(parent)) { code = errno; goto done; }
+    if (allow_create && fsync(parent)) { code = errno; goto done; }
     phase = "open private offline profile lock";
-    lock = openat(directory, LOCK_FILE, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
-    created = lock >= 0;
-    if (lock < 0 && errno == EEXIST) lock = openat(directory, LOCK_FILE, O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (allow_create) {
+        lock = openat(directory, LOCK_FILE, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+        created = lock >= 0;
+        if (lock < 0 && errno == EEXIST) lock = openat(directory, LOCK_FILE, O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    } else {
+        created = 0;
+        lock = openat(directory, LOCK_FILE, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    }
     if (lock < 0) { code = errno; goto done; }
     if (created && fchmod(lock, 0600)) { code = errno; goto done; }
     code = private_file(lock, 0);
@@ -211,7 +220,7 @@ int botw_local_user_open(const char *documents, botw_local_user *output, botw_lo
     if (identity >= 0) {
         code = read_identity(identity, &user);
         if (!code) code = same_named_inode(directory, UID_FILE, identity);
-    } else if (errno == ENOENT) {
+    } else if (errno == ENOENT && allow_create) {
         phase = "atomically publish private offline UID";
         code = create_identity(directory, &user);
     } else code = errno;
@@ -226,4 +235,13 @@ done:
     *output = user;
     if (error) { error->code = 0; error->message[0] = 0; }
     return 0;
+}
+
+int botw_local_user_open(const char *documents, botw_local_user *output,
+                         botw_local_user_error *error) {
+    return user_open(documents, output, error, 1);
+}
+int botw_local_user_load_existing(const char *documents, botw_local_user *output,
+                                 botw_local_user_error *error) {
+    return user_open(documents, output, error, 0);
 }

@@ -1,0 +1,27 @@
+--- a/dm/gfx/nvn/botw_shader.c
++++ b/dm/gfx/nvn/botw_shader.c
+@@ -1,4 +1,5 @@
+ #include "botw_shader.h"
++#include "shader_v8_control.h"
+ #include <CommonCrypto/CommonDigest.h>
+ #include <mach/mach.h>
+ #include <mach/mach_vm.h>
+@@ -218,7 +219,7 @@
+     if (!read_safe(&sd, input, sizeof sd) || !read_safe(prefix, sd.control, sizeof prefix))
+         return fail(error, error_size, "unreadable shader descriptor or control header");
+     uint32_t version = u32(prefix + 8), size = u32(prefix + 0x20);
+-    if (u32(prefix) != SHADER_MAGIC || u32(prefix + 4) != 1 || (version != 9 && version != 14))
++    if (u32(prefix) != SHADER_MAGIC || u32(prefix + 4) != 1 || (version != 8 && version != 9 && version != 14))
+         return fail(error, error_size, "unsupported shader control magic or version");
+     /* Preserve opaque tails instead of requiring the lengths of earlier samples.
+      * These bounds cover our reads and limit capture allocation; they do not
+@@ -235,6 +236,9 @@
+     }
+     if (memcmp(prefix, s->control, sizeof prefix)) {
+         fail(error, error_size, "shader control header changed during capture"); goto done;
++    }
++    if (version == 8 && !botw_base_v0_shader_control_v8(s->control, size)) {
++        fail(error, error_size, "unsupported base-v0 v8 graphics control profile"); goto done;
+     }
+     if (extra) {
+         /* The comparison below reads control[0x768..0x77f]; a shorter

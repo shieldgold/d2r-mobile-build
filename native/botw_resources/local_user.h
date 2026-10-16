@@ -25,6 +25,12 @@ typedef struct { int code; char message[192]; } botw_local_user_error;
  * published; retry reads that identity rather than replacing it. */
 int botw_local_user_open(const char *trusted_absolute_documents,
     botw_local_user *output, botw_local_user_error *error);
+/* Load only an existing profile, lock and UID. Apply the same format, inode,
+ * owner and permission checks as open(), without creating or repairing any
+ * path. This preserves the account when adopting an existing App container.
+ * Missing paths are errors; output is unchanged on every failure. */
+int botw_local_user_load_existing(const char *trusted_absolute_documents,
+    botw_local_user *output, botw_local_user_error *error);
 #ifdef __cplusplus
 }
 #endif

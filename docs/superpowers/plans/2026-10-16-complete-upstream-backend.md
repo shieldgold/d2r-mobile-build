@@ -53,6 +53,18 @@
 
 ## 整体host接入边界
 
+### 完整宿主实施单元
+
+实际代码位于 `experiments/botw_upstream_host/`。保留固定原件与逐补丁哈希，不在 `.tools` 修改上游；完整编译驱动记录编译器实际依赖，不靠手写清单减少来源数量。
+
+- [x] 整体宿主诊断政策与正常 dirty-fault CPU 合同闭合，16项自有CPU合同通过。
+- [x] UIKit、CADisplayLink、完整上游 HID 与严格生命周期入口已实现；未配置运行时不得进入宿主。7项CPU/ASan/UBSan合同核定临时失焦等待恢复，真实iOS编译仍须CI证据。
+- [x] base-v0 TextureView 的完整 14 接口和内部消费者共享真实 36 字节布局，13项合同通过，保留静态程序证据。
+- [ ] 固定完整宿主在真实 macOS/iPhoneOS SDK 编译链接，并留存首次失败与修正证据。
+- [ ] 接入现有 RomFS.bin、持久 UID/事务存档、RemoteIO/真实 applet 焦点、匹配 Guest ABI 与完整 shader，形成可安装候选。
+
+薄资源与平台单元已经实现并经独审：RomFS同一mount/handle表14项合同，RemoteIO平台生命周期5项并含原完整PCM回归，Applet真实producer及typed consumers7项，持久UID只读绑定及实际FS存档路径5项；均保真失败，未运行整宿主/guest/GPU。完整Mac闭包62TU已真实compile/link-only，实际compilerdeps116项逐哈希记录，最低目标macOS15.0、实际SDK27.0；这不是旧生产100项预算通过或iOS/可玩证明。原始97源闭包之外追加原Mac前端与其头、Makefile和原PCM测试，所有原字节与licenses锁定。
+
 选择21f完整host及其消费者闭包，避免gfx-only方案持续维护两套IPC、线程和VI。上游29host+25gfx共54个TU；iOS排除AppKit的`botw_front.m`后，候选闭包53TU、递归97源文件。该数字不是最终生产manifest，不能与旧98项叠加，也不能隐藏include规避预算。
 
 上游`DM_SHELL`已有签名Guest.framework节装载和remap机制，`DM_NVN_M3=1`保有iOS18图形分支。保完整实现，只在UIKit/CADisplayLink事件、RemoteIO/AVAudioSession、持久UID、RomFS输入和事务存档根做薄接入。wholehost另有计数stub的RW→RX及guest dump入口，须封闭后才能运行；现实验图形政策不能被误认为已经覆盖wholehost。

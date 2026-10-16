@@ -1,0 +1,145 @@
+{
+  "functions": {
+    "TextureViewCompare": {
+      "bytes": 356,
+      "offset": 781108,
+      "sha256": "a9a41825d420a5c0f1c114955d64565c5af6ee4f5d2090d924608b53fab07803"
+    },
+    "TextureViewGetDepthStencilMode": {
+      "bytes": 20,
+      "offset": 781048,
+      "sha256": "fe10c67237741e9caaf272679d5d13a5c413087a9336545f38c238d3f256d919"
+    },
+    "TextureViewGetFormat": {
+      "bytes": 20,
+      "offset": 780984,
+      "sha256": "a532f5ced8d17d9390233da3fe6862636651e77570bdff630b9a82a191626af9"
+    },
+    "TextureViewGetLayers": {
+      "bytes": 28,
+      "offset": 780956,
+      "sha256": "7595efa31e6306de74431c329d2f9900269851e29c435ae5d95260201c9efb7a"
+    },
+    "TextureViewGetLevels": {
+      "bytes": 28,
+      "offset": 780928,
+      "sha256": "76f8d0cf4e237c315ea5ec79189055e3b17b1606fa38f329a80afb28fe4e8b35"
+    },
+    "TextureViewGetSwizzle": {
+      "bytes": 44,
+      "offset": 781004,
+      "sha256": "5c0570c57f6f8b45b07a9e62a26386a5a5e4b9ac2dfc0e14caad464c8e4f3075"
+    },
+    "TextureViewGetTarget": {
+      "bytes": 20,
+      "offset": 781068,
+      "sha256": "21c8aedeca31cd7cbbedcb17ec258fe8286c5628bde3784b138f42ba6563a46b"
+    },
+    "TextureViewSetDefaults": {
+      "bytes": 16,
+      "offset": 780800,
+      "sha256": "8ae4c8757336654b4fb5e9eb2e8e744f2fbcc7a7f364ba7ea138b86e13528749"
+    },
+    "TextureViewSetDepthStencilMode": {
+      "bytes": 20,
+      "offset": 780908,
+      "sha256": "cb3d2bc222ec21489139433e01a61b3c02a27f47e3f5f330e51c6017391241e9"
+    },
+    "TextureViewSetFormat": {
+      "bytes": 20,
+      "offset": 780864,
+      "sha256": "6f7b89ea515e23c761ee658179b05e566cbb0aeb2bf8a481df5e458392ad15a3"
+    },
+    "TextureViewSetLayers": {
+      "bytes": 24,
+      "offset": 780840,
+      "sha256": "dadda4781b9f79df32d0b2006fb516fae869486d80443768d9f59fdc5feba875"
+    },
+    "TextureViewSetLevels": {
+      "bytes": 24,
+      "offset": 780816,
+      "sha256": "bf186ac2198da4e884885202e35b24699cc55472e5cf3742c15fa07353441450"
+    },
+    "TextureViewSetSwizzle": {
+      "bytes": 24,
+      "offset": 780884,
+      "sha256": "df39e261eb5f738b03d121db7985d65609a05bfc63c34281cd5af5090cbffebd"
+    },
+    "TextureViewSetTarget": {
+      "bytes": 20,
+      "offset": 781088,
+      "sha256": "cc0235d15fd51a2660964497880b91fa29f806af2e053f8c3202d16c21d413e3"
+    }
+  },
+  "layout": {
+    "base_level": {
+      "bytes": 1,
+      "getter_extension": "unsigned",
+      "offset": 1
+    },
+    "bytes": 36,
+    "depth_stencil_mode": {
+      "bytes": 4,
+      "offset": 28
+    },
+    "flags": {
+      "bytes": 1,
+      "compare_mask": 63,
+      "offset": 0
+    },
+    "format": {
+      "bytes": 4,
+      "offset": 8
+    },
+    "min_layer": {
+      "bytes": 2,
+      "getter_extension": "unsigned",
+      "offset": 4
+    },
+    "nlayers": {
+      "bytes": 2,
+      "getter_extension": "unsigned",
+      "offset": 6
+    },
+    "nlevels": {
+      "bytes": 1,
+      "getter_extension": "unsigned",
+      "offset": 2
+    },
+    "padding": {
+      "bytes": 1,
+      "compare": "ignored",
+      "offset": 3
+    },
+    "swizzle": {
+      "bytes": 16,
+      "element_bytes": 4,
+      "offset": 12
+    },
+    "target": {
+      "bytes": 4,
+      "offset": 32
+    }
+  },
+  "limitations": [
+    "This module does not adapt TextureBuilder, shader-control v8, SDK startup or audio REV1.",
+    "Owned CPU schema and copied-command tests are not GPU, device or gameplay acceptance."
+  ],
+  "profile": "botw-switch-base-v0",
+  "schema": 1,
+  "scope": "complete NVN52 TextureView ABI only",
+  "semantics": [
+    "SetDefaults writes exactly offsets [0,36).",
+    "Setters preserve unrelated fields, padding and upper flag bits; levels truncate to u8, layers truncate to u16.",
+    "Swizzle, format, depth mode and target preserve 32-bit enum payloads.",
+    "Getters always write payload outputs before returning the associated low flag bit; layer getters zero-extend.",
+    "Compare uses low six flags only, then compares each enabled payload, ignoring unset fields and padding."
+  ],
+  "source": {
+    "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000",
+    "initialized_image_sha256": "065cfc8fc879b60d0ee4b08f169a64424b62ed57366f97d2ce053dd8b0c8448c",
+    "module": "subsdk0",
+    "nso_sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "provenance": "static decompression and disassembly of fixed local NSO; no runtime memory or guest execution"
+  }
+}

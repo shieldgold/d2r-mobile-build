@@ -90,6 +90,58 @@ class LocalUserTests(unittest.TestCase):
     def profile(self):
         return self.documents / 'botw-profile'
 
+    def existing(self, good=True):
+        function = self.lib.botw_local_user_load_existing
+        function.argtypes = [C.c_char_p, C.POINTER(User), C.POINTER(Error)]
+        function.restype = C.c_int
+        user, error = User(), Error()
+        C.memset(C.byref(user), 0xa5, C.sizeof(user))
+        before = bytes(user)
+        result = function(str(self.documents).encode(), C.byref(user), C.byref(error))
+        if good:
+            self.assertEqual(result, 0, error.message.decode())
+        else:
+            self.assertNotEqual(result, 0)
+            self.assertEqual(result, error.code)
+            self.assertEqual(bytes(user), before)
+        return user
+
+    def test_load_existing_preserves_identity_and_never_creates_missing_paths(self):
+        self.existing(good=False)
+        self.assertFalse(self.profile.exists())
+        first = self.open()
+        uid = self.profile / 'uid.bin'
+        content = uid.read_bytes()
+        before = (uid.stat().st_mtime_ns, self.profile.stat().st_mtime_ns)
+        self.assertEqual(bytes(self.existing()), bytes(first))
+        self.assertEqual(uid.read_bytes(), content)
+        self.assertEqual((uid.stat().st_mtime_ns, self.profile.stat().st_mtime_ns), before)
+        uid.unlink()
+        self.existing(good=False)
+        self.assertFalse(uid.exists())
+        uid.write_bytes(content)
+        uid.chmod(0o600)
+        (self.profile / '.lock').unlink()
+        self.existing(good=False)
+        self.assertFalse((self.profile / '.lock').exists())
+        self.assertEqual(uid.read_bytes(), content)
+
+    def test_load_existing_rejects_corrupt_or_linked_uid_without_repair(self):
+        self.open()
+        uid = self.profile / 'uid.bin'
+        valid = uid.read_bytes()
+        uid.write_bytes(valid[:-1])
+        self.existing(good=False)
+        self.assertEqual(uid.read_bytes(), valid[:-1])
+        uid.unlink()
+        outside = Path(self.temp.name) / 'outside'
+        outside.write_bytes(valid)
+        outside.chmod(0o600)
+        uid.symlink_to(outside)
+        self.existing(good=False)
+        self.assertTrue(uid.is_symlink())
+        self.assertEqual(outside.read_bytes(), valid)
+
     def test_create_private_nonzero_uid_and_reopen_exact_bytes(self):
         first = self.open()
         content = (self.profile / 'uid.bin').read_bytes()

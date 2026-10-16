@@ -1,0 +1,161 @@
+{
+  "control_profile": {
+    "bytes": 2000,
+    "c1_offset_field": 1792,
+    "code_offset_field": 1800,
+    "code_size_field": 1796,
+    "compiler_tag_0x10": 11,
+    "compiler_tag_0xc": 288,
+    "graphics_code_offset": 48,
+    "size_fields": [
+      20,
+      32,
+      1776
+    ],
+    "stage_field": 1812,
+    "stage_values": [
+      0,
+      1,
+      2
+    ],
+    "version": 8
+  },
+  "limitations": [
+    "Exact profile admission removes the unsupported-v8 error; it does not grant texture/image/buffer/device facts.",
+    "Native controls, code, C1 and opaque tails remain byte-identical and version 8 remains in capture identity.",
+    "Geometry parsing is supported; the original offline translator pipeline still rejects unsupported stages.",
+    "Owned EXIT translation is CPU-only and does not establish scene rendering or gameplay."
+  ],
+  "profile": "botw-base-v0-v8-2000-graphics",
+  "runtime_patch_sha256": "ac8a4f0f15a0a46301986e4f19d2b50704a57a88a2ae1e534851fa6284f4aa79",
+  "schema": 1,
+  "source_evidence": {
+    "container_set": "12 extracted SHA256-named static containers, distinct from the earlier 8-container set",
+    "containers": [
+      {
+        "bytes": 188416,
+        "sha256": "012ce21e3d650f04b50bc022b38a6efaef86c9f91795d55251c5d7cd448c8a33",
+        "stage_counts": {
+          "fragment": 64,
+          "vertex": 64
+        },
+        "stage_occurrences": 128
+      },
+      {
+        "bytes": 2023424,
+        "sha256": "1486e3161d8533cc446cfaae25b64feff2475368cbd7ea153b9eabd1184255fa",
+        "stage_counts": {
+          "fragment": 1316,
+          "vertex": 1316
+        },
+        "stage_occurrences": 2632
+      },
+      {
+        "bytes": 65536,
+        "sha256": "2173a96c202919165806ba33eb8cd2140def4221a9c5c7d7d3a4932adcebba41",
+        "stage_counts": {
+          "fragment": 7,
+          "vertex": 7
+        },
+        "stage_occurrences": 14
+      },
+      {
+        "bytes": 761856,
+        "sha256": "4032ecd9eb8cc470122fa6c0dde9cfbe5abf8a346661cf8e571309e9049837db",
+        "stage_counts": {
+          "fragment": 96,
+          "vertex": 96
+        },
+        "stage_occurrences": 192
+      },
+      {
+        "bytes": 3452928,
+        "sha256": "53673f1799103e9a040f242757541ab2878143f081d882f126fda4438c48df62",
+        "stage_counts": {
+          "fragment": 1028,
+          "vertex": 1028
+        },
+        "stage_occurrences": 2056
+      },
+      {
+        "bytes": 286720,
+        "sha256": "5f51c56143a5168be61b57f42052cd25d247a888c49588150f3415b46bf75cd1",
+        "stage_counts": {
+          "fragment": 91,
+          "vertex": 91
+        },
+        "stage_occurrences": 182
+      },
+      {
+        "bytes": 434176,
+        "sha256": "6db2c6e212f7064d9019571ee0dd3e5d9b8e5f4e747b09e9393c85a04a35b8dc",
+        "stage_counts": {
+          "fragment": 187,
+          "geometry": 1,
+          "vertex": 187
+        },
+        "stage_occurrences": 375
+      },
+      {
+        "bytes": 1167360,
+        "sha256": "7a720770c05f5997ef7e539432712683580d66cf2ac4c562182cab4875d80cd4",
+        "stage_counts": {
+          "fragment": 221,
+          "vertex": 221
+        },
+        "stage_occurrences": 442
+      },
+      {
+        "bytes": 942080,
+        "sha256": "84627b82466ad50f16348ed6356769595af340c86e44029c04281608ccf6e1f8",
+        "stage_counts": {
+          "fragment": 318,
+          "vertex": 318
+        },
+        "stage_occurrences": 636
+      },
+      {
+        "bytes": 2072576,
+        "sha256": "b563007ff411e4f5103c9e28c41ba72b1b00dff0abccf2e2956b2eb82f620d78",
+        "stage_counts": {
+          "fragment": 587,
+          "vertex": 587
+        },
+        "stage_occurrences": 1174
+      },
+      {
+        "bytes": 65536,
+        "sha256": "ee866ba69f73298ebcc11df8d3932064bc7d115a4d319c20ae098c5ab4177b0b",
+        "stage_counts": {
+          "fragment": 14,
+          "vertex": 14
+        },
+        "stage_occurrences": 28
+      },
+      {
+        "bytes": 708608,
+        "sha256": "ef311033e084963fe88e627214637e6a4419cf94f83697fa0df41609e0c2cccb",
+        "stage_counts": {
+          "fragment": 272,
+          "vertex": 272
+        },
+        "stage_occurrences": 544
+      }
+    ],
+    "kind": "bounded static SHARCB parsing with exact content hashes; no runtime captures or memory reads",
+    "stage_counts": {
+      "fragment": 4201,
+      "geometry": 1,
+      "vertex": 4201
+    },
+    "stage_occurrences": 8403
+  },
+  "toolchain_changed_files": {
+    "dm/gfx/tools/botw_shader_build.py": {
+      "after": "9091f46c82c30e8220a916377f5ac5c2cc1adb33add27737cd12bc0ffefc1068",
+      "before": "20e37d4e46f5b72633b680db98453a3da078839d0816680c17e7606aee1eac9f"
+    }
+  },
+  "toolchain_patch_sha256": "ff3ff1577682e2a1905437235de09e107eb3c1a12e9eb7828d1c0fd5370bb4fd",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e"
+}

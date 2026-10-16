@@ -1,0 +1,111 @@
+--- a/dm/host/botw_oe.c
++++ b/dm/host/botw_oe.c
+@@ -2,6 +2,7 @@
+ // The exported contracts were verified against BotW binaries; current target: 1.9.0.
+ #define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
++#include "whole_applet.h"
+ #include <pthread.h>
+ #include <unistd.h>
+ 
+@@ -19,13 +20,10 @@
+ }
+ 
+ #include <stdatomic.h>
+-static _Atomic unsigned g_notifications;
+-static _Atomic int g_focus_policy;
+-
+-// These SDK exports only configure applet notifications; retain their host preferences.
++// Typed SDK subscriptions and consumers share the measured host producer.
+ static void notification(unsigned bit, unsigned enabled) {
+-    if (enabled & 0xff) atomic_fetch_or(&g_notifications, bit);
+-    else atomic_fetch_and(&g_notifications, ~bit);
++    char error[256];
++    if (whole_applet_set_notifications(bit, (enabled & 0xff) != 0, error, sizeof error)) die("%s", error);
+ }
+ HLE_FORCE("_ZN2nn2oe28SetResumeNotificationEnabledEb", "BotW: host resume notification preference", void, botw_oe_resume, unsigned enabled) {
+     notification(1, enabled);
+@@ -59,35 +57,36 @@
+     pthread_mutex_lock(&g_volume_mu); *main_volume = g_volume_main; *applet_volume = g_volume_applet; pthread_mutex_unlock(&g_volume_mu);
+ }
+ 
+-// Retain focus policy modes 0..3; the headless guest remains in the foreground.
+-HLE_FORCE("_ZN2nn2oe20SetFocusHandlingModeENS0_17FocusHandlingModeE", "BotW: retain host focus policy", void, botw_oe_focus_policy, int mode) {
+-    if ((unsigned)mode >= 4) die("invalid BotW focus policy %d", mode);
+-    atomic_store(&g_focus_policy, mode);
+-    LOG("BotW focus policy %d", mode);
++// The fixed base-v0 public FocusHandlingMode enum accepts only 0..2.
++HLE_FORCE("_ZN2nn2oe20SetFocusHandlingModeENS0_17FocusHandlingModeE", "BotW: apply a real host execution policy or fail", void, botw_oe_focus_policy, int mode) {
++    char error[256];
++    if (whole_applet_set_focus_policy((unsigned)mode, error, sizeof error)) die("%s", error);
+ }
+-static int operation_mode(void) {
+-    const char *value = getenv("DM_OPMODE");
+-    if (!value || !*value) return 1;
+-    if (!strcmp(value, "0")) return 0;
+-    if (!strcmp(value, "1")) return 1;
+-    die("DM_OPMODE must be 0 (handheld) or 1 (docked)");
++static whole_applet_snapshot applet_snapshot(void) {
++    whole_applet_snapshot state;
++    char error[256];
++    if (whole_applet_query(&state, error, sizeof error)) die("%s", error);
++    return state;
+ }
+-HLE_FORCE("_ZN2nn2oe16GetOperationModeEv", "BotW: desktop operation mode", int, botw_oe_operation_mode, void) {
+-    return operation_mode();
++HLE_FORCE("_ZN2nn2oe16GetOperationModeEv", "BotW: measured host operation mode", int, botw_oe_operation_mode, void) {
++    return (int)applet_snapshot().operation_mode;
+ }
+-HLE_FORCE("_ZN2nn2oe18GetPerformanceModeEv", "BotW: performance mode follows operation mode", int, botw_oe_performance_mode, void) {
+-    return operation_mode();
++HLE_FORCE("_ZN2nn2oe18GetPerformanceModeEv", "BotW: measured host performance mode", int, botw_oe_performance_mode, void) {
++    return (int)applet_snapshot().performance_mode;
+ }
+ 
+-// The host currently has no applet-message producer. An empty notification source
+-// must not enter the SDK event path, whose Horizon session was never initialized.
+-// Return false without touching the output, matching the SDK empty-event branch.
+-HLE_FORCE("_ZN2nn2oe25TryPopNotificationMessageEPj", "BotW: no pending host applet notifications", unsigned, botw_oe_try_pop_notification, uint32_t *message) {
+-    (void)message;
+-    static atomic_flag logged = ATOMIC_FLAG_INIT;
+-    if (!atomic_flag_test_and_set(&logged))
+-        LOG("BotW applet notifications: no host messages pending");
+-    return 0;
++// base-v0 main polls this typed API. It consumes 16/30/31 and ignores 15;
++// operation/performance queries above complete the subsequent read path.
++// GetCurrentFocusState and notification-event APIs are not referenced by this
++// fixed base image. They are not newly forced or claimed as IPC implementations.
++HLE_FORCE("_ZN2nn2oe25TryPopNotificationMessageEPj", "BotW: consume actual host applet notifications", unsigned, botw_oe_try_pop_notification, uint32_t *message) {
++    uint32_t value;
++    char error[256];
++    if (!message) die("BotW notification requires an output word");
++    int result = whole_applet_try_pop(&value, error, sizeof error);
++    if (result < 0) die("%s", error);
++    if (result) { dm_guest_write_prepare(message, sizeof *message); *message = value; }
++    return result != 0;
+ }
+ 
+ // LanguageCode is an eight-byte value returned in x0, not a pointer or Result.
+--- a/dm/host/hle_sdkinit.c
++++ b/dm/host/hle_sdkinit.c
+@@ -3,11 +3,19 @@
+ // nn::os::InitializeVirtualAddressMemory belongs to the SDK's os layer and is not taken over; fs::SetLocalApplicationAccessLog /
+ // SetResultHandledByApplication only write SDK-internal switches and are not taken over.
+ #include "hle.h"
++#include "whole_applet.h"
+ 
+ static void once(const char *what) { LOG("init takeover: %s (no-op)", what); }
+ 
+ HLE_FORCE("nndiagStartup", "connects the lm log service; diagnostic logging is emitted by the host directly instead", void, h_nndiagStartup, void) { once("nndiagStartup"); }
+-HLE_FORCE("_ZN2nn2oe10InitializeEv", "connects the am/oe operating-environment service; environment queries become host defaults one by one", void, h_oe_Initialize, void) { once("oe::Initialize"); }
++HLE_FORCE("_ZN2nn2oe10InitializeEv", "BotW requires measured host applet state before SDK environment use", void, h_oe_Initialize, void) {
++    if (dm_title_is(DM_TITLE_BOTW)) {
++        whole_applet_snapshot state;
++        char error[256];
++        if (whole_applet_query(&state, error, sizeof error)) die("%s", error);
++        LOG("init takeover: oe::Initialize (measured host applet producer)");
++    } else once("oe::Initialize");
++}
+ HLE_FORCE("_ZN2nn3aoc10InitializeEv", "add-on content service: host enumeration and filesystem adapters replace the Horizon session", void, h_aoc_Initialize, void) { once("aoc::Initialize"); }
+ HLE_FORCE("_ZN2nn3err26InitializeContextWriterApiEv", "connects the err error-context service; the host does not report", void, h_err_InitCtx, void) { once("err::InitializeContextWriterApi"); }
+ HLE_FORCE("_ZN2nn2fs24InitializeForApplicationEv", "connects the fsp-srv file service; file interfaces go to the host file system + RomFS", void, h_fs_InitApp, void) { once("fs::InitializeForApplication"); }

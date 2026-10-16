@@ -1,0 +1,258 @@
+--- a/dm/host/botw_fs.c
++++ b/dm/host/botw_fs.c
+@@ -17,6 +17,7 @@
+ #define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
+ #include "botw_account.h"
++#include "whole_romfs.h"
+ #include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -86,6 +87,7 @@
+     char name[MOUNT_NAME_MAX + 1];
+     char dir[PATH_MAX];      // committed directory (save) or content root (rom / aoc)
+     char work[PATH_MAX];     // save only: working directory the guest reads and writes; "" when not transactional
++    botw_romfs *image;       // ROM only: owned immutable image, closed after slots are invalidated
+     int rootfd;              // O_DIRECTORY fd of the directory the guest sees
+     int kind, ro, used;
+     _Atomic int poison;      // save only: errno of the first failed write in this transaction (0 = clean)
+@@ -102,6 +104,10 @@
+     _Atomic int used;        // read lock-free by the allocator scan, written under the slot lock
+     int fd, mode, mnt;
+     DIR *dir;
++    botw_romfs *image;       // borrowed from the same mount, protected by this slot lock
++    botw_romfs_entry image_entry;
++    char image_path[PATH_MAX_LEN + 1];
++    uint64_t image_cursor;
+ } slot_t;
+ static slot_t g_files[FILE_SLOTS], g_dirs[DIR_SLOTS];
+ static pthread_mutex_t g_alloc_lock = PTHREAD_MUTEX_INITIALIZER;
+@@ -139,6 +145,8 @@
+ // Releases a slot: closes the host object, bumps the generation so outstanding copies of the handle go stale.
+ static void slot_release(slot_t *s) {
+     if (s->dir) closedir(s->dir); else if (s->fd >= 0) close(s->fd);
++    s->image = NULL; s->image_cursor = 0; s->image_path[0] = 0;
++    memset(&s->image_entry, 0, sizeof s->image_entry);
+     s->dir = NULL; s->fd = -1; s->mode = 0; s->mnt = -1; atomic_store(&s->used, 0);
+     if (!++s->gen) s->gen = 1;
+ }
+@@ -165,6 +173,16 @@
+     default: return RES_FS_UNEXPECTED;
+     }
+ }
++static Result image_result(int code) {
++    switch (code) {
++    case BOTW_ROMFS_OK: return RES_OK;
++    case BOTW_ROMFS_ENOENT: case BOTW_ROMFS_EISDIR: case BOTW_ROMFS_ENOTDIR: return RES_FS_PATH_NOT_FOUND;
++    case BOTW_ROMFS_EINVAL: return RES_FS_INVALID_PATH_FORMAT;
++    case BOTW_ROMFS_ERANGE: return RES_FS_INVALID_SIZE;
++    case BOTW_ROMFS_ENOMEM: return RES_FS_USABLE_SPACE_NOT_ENOUGH;
++    default: return RES_FS_UNEXPECTED;
++    }
++}
+ static Result fail_errno(const char *op, const char *what) {
+     int e = errno; Result r = res_errno(e);
+     if (r == RES_FS_PATH_NOT_FOUND || r == RES_FS_PATH_ALREADY_EXISTS) { if (g_flag.fs) LOG("fs %s %s: %s", op, what, strerror(e)); }
+@@ -175,7 +193,7 @@
+ // ---------- Path resolution ----------
+ // A resolved path: the mount, an owned fd of the parent directory of the final component, and the final
+ // component itself. For the mount root the parent fd is the root itself and leaf is "" (is_root = 1).
+-typedef struct { mount_t *m; int mi, parent, is_root; char leaf[PATH_MAX_LEN + 1]; } res_t;
++typedef struct { mount_t *m; int mi, parent, is_root; char leaf[PATH_MAX_LEN + 1]; char image_path[PATH_MAX_LEN + 1]; } res_t;
+ static void res_close(res_t *r) { if (r->parent >= 0) close(r->parent); r->parent = -1; }
+ static int mount_find(const char *name, size_t n) {
+     for (int i = 0; i < MAX_MOUNT; i++) if (g_mnt[i].used && strlen(g_mnt[i].name) == n && !memcmp(g_mnt[i].name, name, n)) return i;
+@@ -215,6 +233,18 @@
+     if (n < 0) return errno == ENAMETOOLONG ? RES_FS_TOO_LONG_PATH : RES_FS_INVALID_PATH_FORMAT;
+     for (int i = 0; i < n; i++) if (strlen(comp[i]) > NAME_MAX) return RES_FS_TOO_LONG_PATH;
+     r->m = &g_mnt[mi]; r->mi = mi;
++    if (r->m->image) {
++        size_t used = 0; r->image_path[used++] = '/';
++        for (int i = 0; i < n; i++) {
++            size_t length = strlen(comp[i]);
++            if (used + length + (i + 1 < n) >= sizeof r->image_path) return RES_FS_TOO_LONG_PATH;
++            memcpy(r->image_path + used, comp[i], length); used += length;
++            if (i + 1 < n) r->image_path[used++] = '/';
++        }
++        r->image_path[used] = 0;
++        if (n) strlcpy(r->leaf, comp[n - 1], sizeof r->leaf); else r->is_root = 1;
++        return RES_OK;
++    }
+     int cur = dup(r->m->rootfd); if (cur < 0) return fail_errno("dup root", path);
+     for (int i = 0; i + 1 < n; i++) {
+         int next = openat(cur, comp[i], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+@@ -350,20 +380,28 @@
+     if (mount_find(name, strlen(name)) >= 0) { LOG("fs mount %s: name already mounted", name); return RES_FS_INVALID_MOUNT_NAME; }
+     int i = 0; while (i < MAX_MOUNT && g_mnt[i].used) i++;
+     if (i == MAX_MOUNT) { LOG("fs mount %s: mount table full", name); return RES_FS_OPEN_COUNT_LIMIT; }
+-    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+-    if (fd < 0) { LOG("fs mount %s: cannot open directory %s: %s", name, dir, strerror(errno)); return res_errno(errno); }
++    int fd = -1; botw_romfs *image = NULL; struct stat source;
++    if (kind == MOUNT_ROM && !stat(dir, &source) && S_ISREG(source.st_mode)) {
++        botw_romfs_error error;
++        image = botw_romfs_open(dir, &error);
++        if (!image) { LOG("fs mount %s: invalid RomFS image: %s", name, error.message); return image_result(error.code); }
++    } else {
++        fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++        if (fd < 0) { LOG("fs mount %s: cannot open directory %s: %s", name, dir, strerror(errno)); return res_errno(errno); }
++    }
+     mount_t *m = &g_mnt[i];
+     memset(m->name, 0, sizeof m->name); strlcpy(m->name, name, sizeof m->name);
+     strlcpy(m->dir, commit ? commit : dir, sizeof m->dir);
+     strlcpy(m->work, commit ? dir : "", sizeof m->work);
+-    m->rootfd = fd; m->kind = kind; m->ro = ro; atomic_store(&m->poison, 0); atomic_store(&m->commits, 0); m->used = 1;
++    m->image = image; m->rootfd = fd; m->kind = kind; m->ro = ro; atomic_store(&m->poison, 0); atomic_store(&m->commits, 0); m->used = 1;
+     LOG("fs mount %s: -> %s%s%s", name, dir, ro ? " (read-only)" : "", commit ? " (transactional save working copy)" : "");
+     return RES_OK;
+ }
+ static void mount_drop(int mi) {
+     mount_t *m = &g_mnt[mi];
+     if (m->rootfd >= 0) close(m->rootfd);
+-    m->rootfd = -1; m->used = 0; m->name[0] = 0;
++    if (m->image) botw_romfs_close(m->image);
++    m->image = NULL; m->rootfd = -1; m->used = 0; m->name[0] = 0;
+ }
+ 
+ HLE_FORCE("_ZN2nn2fs22QueryMountRomCacheSizeEPm", "BotW: RomFS is a host directory, only a token cache is requested", Result, botw_fs_QueryMountRomCacheSize, size_t *out) {
+@@ -552,6 +590,18 @@
+     MNT_RDLOCK(); RESOLVE(path);
+     if (rs.is_root) return RES_FS_PATH_NOT_FOUND;
+     if (mode & (OPEN_WRITE | OPEN_ALLOW_APPEND)) WRITABLE(path);
++    if (rs.m->image) {
++        botw_romfs_entry entry; botw_romfs_error error;
++        int rc = botw_romfs_stat(rs.m->image, rs.image_path, &entry, &error);
++        if (rc) return image_result(rc);
++        if (entry.is_directory) return RES_FS_PATH_NOT_FOUND;
++        slot_t *s; int idx = slot_alloc(TAG_FILE, &s);
++        if (idx < 0) return RES_FS_OPEN_COUNT_LIMIT;
++        s->image = rs.m->image; s->image_entry = entry;
++        s->fd = -1; s->dir = NULL; s->mode = mode; s->mnt = rs.mi;
++        *out = handle_make(TAG_FILE, idx, s->gen);
++        pthread_rwlock_unlock(&s->lock); return RES_OK;
++    }
+     int flags = (mode & OPEN_WRITE) ? ((mode & OPEN_READ) ? O_RDWR : O_WRONLY) : O_RDONLY;
+     int fd = openat(rs.parent, rs.leaf, flags | O_NOFOLLOW | O_CLOEXEC);
+     if (fd < 0) return fail_errno("open", path);
+@@ -576,6 +626,11 @@
+     if (!(s->mode & OPEN_READ)) { pthread_rwlock_unlock(&s->lock); return RES_FS_READ_NOT_PERMITTED; }
+     Result r = RES_OK; size_t got = 0;
+     if (sz) dm_guest_write_prepare(buf, sz);   // the destination may be a write-protected guest page
++    if (s->image) {
++        botw_romfs_error error;
++        r = image_result(botw_whole_romfs_read(s->image, &s->image_entry, (uint64_t)off, buf, sz, &got, &error));
++        pthread_rwlock_unlock(&s->lock); *out = got; return r;
++    }
+     while (got < sz) {
+         size_t want = sz - got; if (want > IO_CHUNK) want = IO_CHUNK;
+         ssize_t k = pread(s->fd, (uint8_t *)buf + got, want, (off_t)(off + (int64_t)got));
+@@ -626,6 +681,10 @@
+     if (!out) return RES_FS_NULLPTR_ARGUMENT;
+     slot_t *s = handle_lock(h, TAG_FILE, 0);
+     if (!s) return RES_FS_INVALID_HANDLE;
++    if (s->image) {
++        *out = (int64_t)s->image_entry.size;
++        pthread_rwlock_unlock(&s->lock); return RES_OK;
++    }
+     struct stat st; Result r = RES_OK;
+     if (fstat(s->fd, &st)) r = fail_errno("stat", "file"); else *out = st.st_size;
+     pthread_rwlock_unlock(&s->lock);
+@@ -706,6 +765,12 @@
+ HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "BotW: lstat inside a mount", Result, botw_fs_GetEntryType, int32_t *out, const char *path) {
+     if (!out || !path) return RES_FS_NULLPTR_ARGUMENT;
+     MNT_RDLOCK(); RESOLVE(path);
++    if (rs.m->image) {
++        botw_romfs_entry entry; botw_romfs_error error;
++        int rc = botw_romfs_stat(rs.m->image, rs.image_path, &entry, &error);
++        if (!rc) *out = entry.is_directory ? ENTRY_DIRECTORY : ENTRY_FILE;
++        return image_result(rc);
++    }
+     struct stat st;
+     if (res_stat(&rs, &st)) return fail_errno("entry type", path);
+     if (S_ISDIR(st.st_mode)) *out = ENTRY_DIRECTORY;
+@@ -720,6 +785,19 @@
+     *out = 0;
+     if (!((unsigned)mode & (OPEN_DIR_DIRECTORY | OPEN_DIR_FILE)) || ((unsigned)mode & ~OPEN_DIR_ALL)) return RES_FS_INVALID_OPEN_MODE;
+     MNT_RDLOCK(); RESOLVE(path);
++    if (rs.m->image) {
++        botw_romfs_entry entry; botw_romfs_error error;
++        int rc = botw_romfs_stat(rs.m->image, rs.image_path, &entry, &error);
++        if (rc) return image_result(rc);
++        if (!entry.is_directory) return RES_FS_PATH_NOT_FOUND;
++        slot_t *s; int idx = slot_alloc(TAG_DIR, &s);
++        if (idx < 0) return RES_FS_OPEN_COUNT_LIMIT;
++        s->image = rs.m->image; s->image_cursor = 0;
++        strlcpy(s->image_path, rs.image_path, sizeof s->image_path);
++        s->fd = -1; s->dir = NULL; s->mode = mode; s->mnt = rs.mi;
++        *out = handle_make(TAG_DIR, idx, s->gen);
++        pthread_rwlock_unlock(&s->lock); return RES_OK;
++    }
+     // A fresh open file description every time: a dup() would share the directory offset with the mount root fd.
+     int fd = openat(rs.parent, rs.is_root ? "." : rs.leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+     if (fd < 0) return fail_errno("opendir", path);
+@@ -733,6 +811,16 @@
+     if (g_flag.fs) LOG("fs opendir %s mode=%#x -> handle %#llx", path, (unsigned)mode, (unsigned long long)h);
+     *out = h; return RES_OK;
+ }
++typedef struct { DirectoryEntry *entries; uint64_t used; unsigned mode; } image_directory_output;
++static int image_directory_emit(void *opaque, const char *name, const botw_romfs_entry *entry) {
++    image_directory_output *output = opaque;
++    DirectoryEntry *result = &output->entries[output->used];
++    dm_guest_write_prepare(result, sizeof *result);
++    memset(result, 0, sizeof *result); strlcpy(result->name, name, sizeof result->name);
++    result->type = entry->is_directory ? ENTRY_DIRECTORY : ENTRY_FILE;
++    result->size = entry->is_directory || (output->mode & OPEN_DIR_NO_FILE_SIZE) ? 0 : (int64_t)entry->size;
++    output->used++; return 0;
++}
+ HLE_FORCE("_ZN2nn2fs13ReadDirectoryEPlPNS0_14DirectoryEntryENS0_15DirectoryHandleEl", "BotW: readdir into DirectoryEntry records", Result, botw_fs_ReadDirectory, int64_t *count, DirectoryEntry *ents, uint64_t h, int64_t max) {
+     if (!count) return RES_FS_NULLPTR_ARGUMENT;
+     *count = 0;
+@@ -740,6 +828,14 @@
+     if (!ents && max) return RES_FS_NULLPTR_ARGUMENT;
+     slot_t *s = handle_lock(h, TAG_DIR, 1);   // readdir mutates the DIR stream: exclusive
+     if (!s) return RES_FS_INVALID_HANDLE;
++    if (s->image) {
++        if ((uint64_t)max > SIZE_MAX / sizeof *ents) { pthread_rwlock_unlock(&s->lock); return RES_FS_INVALID_SIZE; }
++        image_directory_output output = {ents, 0, (unsigned)s->mode};
++        uint64_t n = 0; botw_romfs_error error;
++        int rc = botw_whole_romfs_directory(s->image, s->image_path, (unsigned)s->mode, &s->image_cursor,
++                                           (uint64_t)max, image_directory_emit, &output, &n, &error);
++        pthread_rwlock_unlock(&s->lock); *count = (int64_t)n; return image_result(rc);
++    }
+     int64_t n = 0; struct dirent *e;
+     while (n < max && (e = readdir(s->dir))) {
+         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+@@ -765,3 +861,34 @@
+     slot_release(s);
+     pthread_rwlock_unlock(&s->lock);
+ }
++
++/* Count the complete filtered directory without consuming its read cursor. */
++HLE_FORCE("_ZN2nn2fs22GetDirectoryEntryCountEPlNS0_15DirectoryHandleE", "BotW: count the same mounted directory without advancing it", Result, botw_fs_GetDirectoryEntryCount, int64_t *out, uint64_t h) {
++    if (!out) return RES_FS_NULLPTR_ARGUMENT;
++    *out = 0;
++    slot_t *s = handle_lock(h, TAG_DIR, 0);
++    if (!s) return RES_FS_INVALID_HANDLE;
++    Result result = RES_OK;
++    if (s->image) {
++        uint64_t count = 0; botw_romfs_error error;
++        result = image_result(botw_whole_romfs_directory_count(s->image, s->image_path, (unsigned)s->mode, &count, &error));
++        if (!result) *out = (int64_t)count;
++    } else {
++        int fd = openat(s->fd, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++        DIR *directory = fd < 0 ? NULL : fdopendir(fd);
++        if (!directory) { int saved = errno; if (fd >= 0) close(fd); errno = saved; result = fail_errno("directory count", "directory"); }
++        else {
++            struct dirent *entry;
++            for (;;) {
++                errno = 0; entry = readdir(directory);
++                if (!entry) { if (errno) result = fail_errno("directory count", "directory"); break; }
++                if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
++                struct stat st; if (fstatat(fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW)) continue;
++                if (((unsigned)s->mode & OPEN_DIR_DIRECTORY) && S_ISDIR(st.st_mode)) (*out)++;
++                else if (((unsigned)s->mode & OPEN_DIR_FILE) && S_ISREG(st.st_mode)) (*out)++;
++            }
++            closedir(directory);
++        }
++    }
++    pthread_rwlock_unlock(&s->lock); return result;
++}

@@ -1,0 +1,89 @@
+--- a/dm/gfx/nvn/include/nvn.h
++++ b/dm/gfx/nvn/include/nvn.h
+@@ -124,8 +124,8 @@
+ } NVNtexture;
+ 
+ typedef struct {
+-    // BotW 1.9.0 wrapper stride 0x120 places its texture view at +0x110.
+-    char reserved[0x10];
++    // Fixed base-v0 NVN52 view ABI; all HLE/replay consumers share this size.
++    char reserved[0x24];
+ } NVNtextureView;
+ 
+ typedef struct {
+--- a/dm/gfx/nvn/nvn_obj.h
++++ b/dm/gfx/nvn/nvn_obj.h
+@@ -40,17 +40,11 @@
+     const void *snap;                    //This serial's immutable snapshot (hle_nvn.c snap_tex): command payloads store it, not the game object's address
+ } tex_t;                                                                                     FITS(tex_t, NVNtexture);
+ _Static_assert(sizeof(tex_t) <= 0x80, "BotW NVNtexture storage is 128 bytes");
+-// BotW's wrapper allocates exactly 16 bytes and reads swizzle bytes inline. Match the native
+-// SDK layout, including its setter truncation and signed layer getter semantics.
+-typedef struct {
+-    int16_t min_layer, nlayers;
+-    uint8_t base_level, nlevels, target;
+-    uint8_t set_levels:1, set_layers:1, set_format:1, set_swizzle:1, set_depth_stencil:1, set_target:1, depth_stencil_mode:2;
+-    int32_t format;
+-    uint8_t swizzle[4];
+-} view_t;
++// Fixed base-v0 schema is shared by HLE, copied command records and replay.
++#include "base_v0_abi.h"
++typedef botw_base_v0_texture_view view_t;
+ FITS(view_t, NVNtextureView);
+-_Static_assert(sizeof(view_t) == 16 && offsetof(view_t, format) == 8 && offsetof(view_t, swizzle) == 12, "BotW texture view ABI");
++_Static_assert(sizeof(view_t) == 36 && sizeof(NVNtextureView) == 36, "base-v0 view ABI");
+ 
+ 
+ // Sampler parameters (one copy shared by builder and object)
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -502,34 +502,21 @@
+ // No prototype in the header; call sites such as main 0x174899c compare the return value with 1 and set some status bit 0x100 if not equal. Meaning unverified; return 1 for now
+ NVN_NOPROTO(nvnTextureGetRawStorageClass, int, const NVNtexture *t) { (void)t; return 1; }
+ #define VW(v) ((view_t *)(v))
+-NVN(nvnTextureViewSetDefaults, void, NVNtextureView *v) { memset(v, 0, sizeof(view_t)); }
+-NVN(nvnTextureViewSetLevels, void, NVNtextureView *v, int base, int n) { VW(v)->set_levels = 1; VW(v)->base_level = base; VW(v)->nlevels = n; }
+-NVN(nvnTextureViewSetLayers, void, NVNtextureView *v, int min, int n) { VW(v)->set_layers = 1; VW(v)->min_layer = min; VW(v)->nlayers = n; }
+-NVN(nvnTextureViewSetFormat, void, NVNtextureView *v, NVNformat f) { VW(v)->set_format = 1; VW(v)->format = f; }
+-// Native view swizzles replace all four texture selectors; an unset view inherits them.
+-NVN(nvnTextureViewSetSwizzle, void, NVNtextureView *v, NVNtextureSwizzle r, NVNtextureSwizzle g, NVNtextureSwizzle b, NVNtextureSwizzle a) {
+-    checked_swizzle(r, g, b, a);
+-    VW(v)->set_swizzle = 1;
+-    VW(v)->swizzle[0] = r; VW(v)->swizzle[1] = g; VW(v)->swizzle[2] = b; VW(v)->swizzle[3] = a;
+-}
+-NVN(nvnTextureViewGetSwizzle, NVNboolean, const NVNtextureView *v, NVNtextureSwizzle *r, NVNtextureSwizzle *g, NVNtextureSwizzle *b, NVNtextureSwizzle *a) {
+-    const view_t *view = (const view_t *)v;
+-    *r = view->swizzle[0]; *g = view->swizzle[1]; *b = view->swizzle[2]; *a = view->swizzle[3];
+-    return view->set_swizzle;
+-}
+-NVN(nvnTextureViewSetDepthStencilMode, void, NVNtextureView *v, NVNtextureDepthStencilMode mode) {
+-    VW(v)->set_depth_stencil = 1;
+-    VW(v)->depth_stencil_mode = (unsigned)mode;
+-}
+-NVN(nvnTextureViewGetDepthStencilMode, NVNboolean, const NVNtextureView *v, NVNtextureDepthStencilMode *mode) {
+-    const view_t *view = (const view_t *)v;
+-    *mode = (NVNtextureDepthStencilMode)view->depth_stencil_mode;
+-    return view->set_depth_stencil;
+-}
+-NVN(nvnTextureViewSetTarget, void, NVNtextureView *v, NVNtextureTarget t) { VW(v)->set_target = 1; VW(v)->target = t; }
+-NVN(nvnTextureViewGetLayers, NVNboolean, const NVNtextureView *v, int *min, int *n) {
+-    const view_t *o = (const view_t *)v; *min = o->min_layer; *n = o->nlayers; return o->set_layers;
+-}
++// Complete fixed-base-v0 TextureView family; original texture algorithms remain shared.
++NVN(nvnTextureViewSetDefaults, void, NVNtextureView *v) { botw_base_v0_nvnTextureViewSetDefaults(v); }
++NVN(nvnTextureViewSetLevels, void, NVNtextureView *v, int base, int n) { botw_base_v0_nvnTextureViewSetLevels(v, base, n); }
++NVN(nvnTextureViewSetLayers, void, NVNtextureView *v, int min, int n) { botw_base_v0_nvnTextureViewSetLayers(v, min, n); }
++NVN(nvnTextureViewSetFormat, void, NVNtextureView *v, NVNformat f) { botw_base_v0_nvnTextureViewSetFormat(v, f); }
++NVN(nvnTextureViewSetSwizzle, void, NVNtextureView *v, NVNtextureSwizzle r, NVNtextureSwizzle g, NVNtextureSwizzle b, NVNtextureSwizzle a) { botw_base_v0_nvnTextureViewSetSwizzle(v, r, g, b, a); }
++NVN(nvnTextureViewSetDepthStencilMode, void, NVNtextureView *v, NVNtextureDepthStencilMode mode) { botw_base_v0_nvnTextureViewSetDepthStencilMode(v, mode); }
++NVN(nvnTextureViewSetTarget, void, NVNtextureView *v, NVNtextureTarget t) { botw_base_v0_nvnTextureViewSetTarget(v, t); }
++NVN(nvnTextureViewGetLevels, NVNboolean, const NVNtextureView *v, int *min, int *n) { return botw_base_v0_nvnTextureViewGetLevels(v, min, n); }
++NVN(nvnTextureViewGetLayers, NVNboolean, const NVNtextureView *v, int *min, int *n) { return botw_base_v0_nvnTextureViewGetLayers(v, min, n); }
++NVN(nvnTextureViewGetFormat, NVNboolean, const NVNtextureView *v, NVNformat *f) { return botw_base_v0_nvnTextureViewGetFormat(v, f); }
++NVN(nvnTextureViewGetSwizzle, NVNboolean, const NVNtextureView *v, NVNtextureSwizzle *r, NVNtextureSwizzle *g, NVNtextureSwizzle *b, NVNtextureSwizzle *a) { return botw_base_v0_nvnTextureViewGetSwizzle(v, r, g, b, a); }
++NVN(nvnTextureViewGetDepthStencilMode, NVNboolean, const NVNtextureView *v, NVNtextureDepthStencilMode *mode) { return botw_base_v0_nvnTextureViewGetDepthStencilMode(v, mode); }
++NVN(nvnTextureViewGetTarget, NVNboolean, const NVNtextureView *v, NVNtextureTarget *t) { return botw_base_v0_nvnTextureViewGetTarget(v, t); }
++NVN(nvnTextureViewCompare, NVNboolean, const NVNtextureView *a, const NVNtextureView *b) { return botw_base_v0_nvnTextureViewCompare(a, b); }
+ NVN(nvnTextureGetViewOffset, ptrdiff_t, const NVNtexture *t, const NVNtextureView *v) {
+     const tex_t *o = CTX(t); const view_t *w = (const view_t *)v;
+     if (!w) return 0;

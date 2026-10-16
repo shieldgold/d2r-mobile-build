@@ -1,0 +1,560 @@
+--- a/dm/host/crash.c
++++ b/dm/host/crash.c
+@@ -40,53 +40,14 @@
+ void crash_watch_pregame_again(void) { atomic_store(&g_watch_pregame, 1); }   // Back from a run to the front end: count progress by presented frames again (diag.c)
+ void crash_dump_now(const char *why);
+ static void *watchdog_main(void *arg) {
+-    (void)arg;
+-    for (;;) {
+-        usleep(250000);
+-        // Read the last progress time first, then read now: reading in the opposite order, if the game thread happens to record progress between the two reads, last is newer than now and now − last underflows as unsigned into "no progress since second 18446744073",
+-        // which is misjudged on the spot as a hang and exits (accept inv_drag_out, local load 11, the watchdog thread was switched out between the two reads). Reading this way gives last ≤ now; and if the clock ever wraps around it is not judged either
+-        uint64_t last = atomic_load(&g_watch_last_ns), now = watch_now_ns();
+-        if (last > now) continue;
+-        // Second-scale stall (progress has stopped for more than 1 second but has not yet reached the kill threshold): do not exit, dump what each thread is waiting on. When hitting a case of "only one frame every 2 seconds", the 15-second threshold cannot catch it and the log has nothing on what it is waiting for.
+-        // Dump only after entering a run; at most 3 dumps per process, at least 10 seconds between two dumps (the loading screen and the pause menu also stop ticks, do not let them flood the log)
+-        { static int dumps; static uint64_t last_dump, dumped_for;
+-          if (g_watch_stall && !atomic_load(&g_watch_pregame) && atomic_load(&g_watch_tick) > 0 && now - last >= 1000000000ull && now - last < (uint64_t)g_watch_stall * 1000000000ull
+-              && dumps < 3 && dumped_for != last && (!last_dump || now - last_dump >= 10000000000ull)) { dumps++; last_dump = now; dumped_for = last; crash_dump_now("no progress for over 1 second"); } }
+-        if (g_watch_stall && now - last >= (uint64_t)g_watch_stall * 1000000000ull) {
+-            uint64_t sec = (now - last) / 1000000000ull;
+-            int idx = atomic_load(&g_watch_stage_idx);
+-            LOG("[ERROR] watchdog: no progress for %llu s, stuck at tick %u / stage %s", (unsigned long long)sec,
+-                atomic_load(&g_watch_tick), g_watch_stage[idx]);
+-            if (g_dump_hook) g_dump_hook();
+-            if (g_wait_dump) g_wait_dump();   // State of all blocking wait points on the graphics side (registered when nvn_mtl.m initializes)
+-#if TARGET_OS_OSX
+-            { const char *d = getenv("DM_WATCH_SAMPLE");   // Mac diagnostics: when stuck, sample itself for 1 second and write the thread stacks to this path
+-              if (d) { char c[1200]; snprintf(c, sizeof c, "/usr/bin/sample %d 1 -f '%s' >/dev/null 2>&1", (int)getpid(), d); if (system(c)) LOG("watchdog: sampling failed"); else LOG("watchdog: thread stacks written to %s", d); } }
+-#endif
+-            _exit(128 + SIGALRM);
+-        }
+-    }
+-    return NULL;
++    botw_backend_host_diagnostic_denied("watchdog_main");
+ }
+-void crash_off(const char *tag, uint64_t a) {   // Also used by diag.c
+-#define off crash_off
+-
+-    module_t *m = module_of((void *)a);
+-    Dl_info di;
+-    if (m) fprintf(stderr, " %s%s%s+%#llx", tag, *tag ? "=" : "", m->name, a - (uint64_t)m->base);
+-    else if (dladdr((void *)a, &di) && di.dli_sname) fprintf(stderr, " %s%s%s+%#lx", tag, *tag ? "=" : "", di.dli_sname, (unsigned long)(a - (uint64_t)di.dli_saddr));
+-    else fprintf(stderr, " %s%s%#llx", tag, *tag ? "=" : "", a);
++void crash_off(const char *tag, uint64_t a) {
++    botw_backend_host_diagnostic_denied("crash_off");
+ }
+ // Frame pointer backtrace: x29 chain [fp]=previous frame's fp, [fp+8]=return address; only 8-byte aligned, monotonically increasing frames are walked
+ void dm_backtrace(uint64_t fp) {
+-    fprintf(stderr, "[dm] bt:");
+-    for (int i = 0; i < 32 && fp && !(fp & 7); i++) {
+-        uint64_t nfp = ((uint64_t *)fp)[0], ra = ((uint64_t *)fp)[1];
+-        off("", ra);
+-        if (nfp <= fp) break;
+-        fp = nfp;
+-    }
+-    fputc('\n', stderr);
++    botw_backend_host_diagnostic_denied("dm_backtrace");
+ }
+ // ---------- Page fault hooks (write-protect dirty page tracking) ----------
+ // Called in registration order before on_crash prints the crash state; returning 1 = handled (return directly and re-execute the faulting instruction); the crash path is taken only when all return 0.
+@@ -111,26 +72,29 @@
+ 
+ // The diagnostics module (the probes in diag.c) and the thread state dump (hle_thread.c) each register themselves here: a unit test that links only this file does not depend on them
+ static int (*g_trap_hook)(ucontext_t *uc);
+-void crash_set_trap_hook(int (*fn)(ucontext_t *uc)) { g_trap_hook = fn; }
+-void crash_set_dump_hook(void (*fn)(void)) { g_dump_hook = fn; }
+-void crash_set_wait_dump(void (*fn)(void)) { g_wait_dump = fn; }
++void crash_set_trap_hook(int (*fn)(ucontext_t *uc)) {
++    botw_backend_host_diagnostic_denied("crash_set_trap_hook");
++}
++void crash_set_dump_hook(void (*fn)(void)) {
++    botw_backend_host_diagnostic_denied("crash_set_dump_hook");
++}
++void crash_set_wait_dump(void (*fn)(void)) {
++    botw_backend_host_diagnostic_denied("crash_set_wait_dump");
++}
+ // Dump the current state on demand (without exiting): the iOS app has no no-progress watchdog, so when the smoke test fails it sends dump through DM_LOG_PORT to trigger this -- what each guest thread is waiting on + the graphics-side wait points, the same thing the watchdog prints
+-void crash_dump_now(const char *why) { fprintf(stderr, "[dm] state dump (%s): tick %u / stage %s\n", why, atomic_load(&g_watch_tick), g_watch_stage[atomic_load(&g_watch_stage_idx)]); if (g_dump_hook) g_dump_hook(); if (g_wait_dump) g_wait_dump(); }
++void crash_dump_now(const char *why) {
++    botw_backend_host_diagnostic_denied("crash_dump_now");
++}
+ static void on_crash(int sig, siginfo_t *si, void *uc_) {
+     ucontext_t *uc = uc_;
+-    if (sig == SIGTRAP && g_trap_hook && g_trap_hook(uc)) return;
+     if (sig == SIGSEGV || sig == SIGBUS) {
+-        int is_write = (int)((uc->uc_mcontext->__es.__esr >> 6) & 1);   // The WnR bit of ESR
+-        for (int i = 0; i < g_nfault_hook; i++) if (g_fault_hook[i](si->si_addr, is_write, uc)) return;
++        int is_write = (int)((uc->uc_mcontext->__es.__esr >> 6) & 1);
++        for (int i = 0; i < g_nfault_hook; i++)
++            if (g_fault_hook[i](si->si_addr, is_write, uc)) return;
+     }
+-    fprintf(stderr, "[dm] CRASH sig=%d", sig);
+-    off("addr", (uint64_t)si->si_addr); off("pc", uc->uc_mcontext->__ss.__pc); off("lr", uc->uc_mcontext->__ss.__lr);
+-    fprintf(stderr, " sp=%#llx\n", uc->uc_mcontext->__ss.__sp);
+-    for (int i = 0; i < 29; i++) fprintf(stderr, "x%d=%#llx%s", i, uc->uc_mcontext->__ss.__x[i], i % 6 == 5 ? "\n" : " ");
+-    fprintf(stderr, "\n");
+-    dm_backtrace(uc->uc_mcontext->__ss.__fp);
+-    if (g_dump_hook) g_dump_hook();
+-    _exit(128 + sig);
++    /* A handled dirty-page write resumes exactly as upstream; every other
++     * signal fails without inspecting PC, SP, registers, stack or callbacks. */
++    botw_whole_host_signal_failure(sig);
+ }
+ // The signal alternate stack is per thread: every guest thread must call this when it starts running (only then can the crash state be printed on the alternate stack on a stack overflow)
+ // The alternate stack is released when the thread exits: the pthread key destructor is called at thread exit (disable the alternate stack first, then free). The game frequently starts short-lived threads, and without releasing each one leaks 64 KiB.
+@@ -154,15 +118,5 @@
+     crash_thread_init();
+     struct sigaction sa = {.sa_sigaction = on_crash, .sa_flags = SA_SIGINFO | CRASH_SA_ONSTACK};
+     sigaction(SIGALRM, &sa, 0);
+-    // Both watchdogs are turned on only when a test explicitly sets DM_WATCH / DM_WATCH_STALL: the product (the player launches from the desktop, no environment variables) turns on neither.
+-    // Found by reading the code: iOS main.m did setenv DM_WATCH=30 by default → the player's launch was killed by SIGALRM at 30 s; the no-progress watchdog defaulted to 15 s → the pause menu (ticks stopped) was killed at 15 s
+-    const char *watch = getenv("DM_WATCH"), *stall = getenv("DM_WATCH_STALL");
+-    if (watch) alarm(atoi(watch));
+-    if (watch || stall) {
+-        g_watch_stall = stall && atoi(stall) > 0 ? (unsigned)atoi(stall) : 15;
+-        atomic_store(&g_watch_last_ns, watch_now_ns());
+-        pthread_t th; if (pthread_create(&th, NULL, watchdog_main, NULL)) die("watchdog thread");
+-        pthread_detach(th);
+-    }
+     sigaction(SIGSEGV, &sa, 0); sigaction(SIGBUS, &sa, 0); sigaction(SIGILL, &sa, 0); sigaction(SIGTRAP, &sa, 0);
+ }
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -80,7 +80,7 @@
+         pthread_detach(th);
+     }
+     if (T->host_early) T->host_early();   // Diablo II: SIGTERM graceful exit (hle_lifecycle.c)
+-    { void crash_set_dump_hook(void (*)(void)); void svc_thread_dump(void); crash_set_dump_hook(svc_thread_dump); }   // Dump guest thread state on a crash
++    if (botw_backend_compat_diagnostic_enabled()) { void crash_set_dump_hook(void (*)(void)); void svc_thread_dump(void); crash_set_dump_hook(svc_thread_dump); }   // Dump guest thread state on a crash
+     const char *names[MAX_MOD]; int n = 0;
+     int i = 2;
+     for (; i < argc && strcmp(argv[i], "--"); i++) {
+--- a/dm/host/hle_count.c
++++ b/dm/host/hle_count.c
+@@ -8,7 +8,7 @@
+ #include <sys/mman.h>
+ #include <unistd.h>
+ #include <libkern/OSCacheControl.h>
+-#if !TARGET_OS_IPHONE
++#if !TARGET_OS_IPHONE && !BOTW_WHOLE_HOST_POLICY
+ #define HC_MAX 8192
+ static struct { const char *kind, *name; void *fn; _Atomic uint64_t n; } g_hc[HC_MAX];
+ static unsigned g_nhc; static uint32_t *g_hcode; static int g_hon = -1, g_hsealed; static const char *g_hpath;
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -261,20 +261,12 @@
+ }
+ 
+ // Handle thread / synchronization SVCs; returns 1 = handled
+-static const char *thr_name(thr_t *t, char *nb, size_t n) {   // SDK ThreadType+0x1a0 = name pointer
+-    if (!t->arg) return t->handle == 0x1001 ? "main thread" : "?";
+-    uint64_t np = 0; vm_size_t got = 0;
+-    if (vm_read_overwrite(mach_task_self(), t->arg + 0x1a0, 8, (vm_address_t)&np, &got) || !np ||
+-        vm_read_overwrite(mach_task_self(), np, n - 1, (vm_address_t)nb, &got)) return "?";
+-    nb[got] = 0; return nb;
++static const char *thr_name(thr_t *t, char *nb, size_t n) {
++    botw_backend_host_diagnostic_denied("thr_name");
+ }
+ // All live guest threads (used by the sampler DM_SAMPLE=ms:*): fill the pthreads into out, return the count
+ int thr_list(pthread_t *out, int max) {
+-    int n = 0;
+-    pthread_mutex_lock(&G);
+-    for (thr_t *t = g_all; t && n < max; t = t->all) if (!t->exited && t->started) out[n++] = t->pt;
+-    pthread_mutex_unlock(&G);
+-    return n;
++    botw_backend_host_diagnostic_denied("thr_list");
+ }
+ // Soak readings (DM_SOAK): handle table usage, live guest threads, total thread objects (including exited but not yet freed)
+ void thr_counts(int *handles, int *live, int *objs) {
+@@ -287,151 +279,24 @@
+ }
+ // Get the guest thread name by pthread (used by per-thread CPU sampling DM_THRCPU, memstat.m): returns 0 if not a guest thread
+ int thr_name_of(pthread_t pt, char *out, size_t n) {
+-    int ok = 0; char nb[64];
+-    pthread_mutex_lock(&G);
+-    for (thr_t *t = g_all; t; t = t->all) if (t->pt == pt && !t->exited) { snprintf(out, n, "%#x %s", t->handle, thr_name(t, nb, sizeof nb)); ok = 1; break; }
+-    pthread_mutex_unlock(&G);
+-    return ok;
++    botw_backend_host_diagnostic_denied("thr_name_of");
+ }
+ uint32_t thr_cur_handle(void) { thr_t *t = pthread_getspecific(g_keythr); return t ? t->handle : 0; }   // Only reads TSD, usable in a signal handler
+ // Find a live guest thread by thread name (used by the sampler); returns 0 if not found
+ int thr_find_by_name(const char *name, pthread_t *out) {
+-    char nb[32]; int ok = 0;
+-    pthread_mutex_lock(&G);
+-    for (thr_t *t = g_all; t; t = t->all) if (!t->exited && !strcmp(thr_name(t, nb, sizeof nb), name)) { *out = t->pt; ok = 1; break; }
+-    pthread_mutex_unlock(&G);
+-    return ok;
++    botw_backend_host_diagnostic_denied("thr_find_by_name");
+ }
+ // State dump (called from crash.c on watchdog / crash; read-only, takes no lock): what each guest thread is waiting on and where its most recent SVC was issued from
+ // During a state dump, take the backtrace of other guest threads: suspend → read registers → walk the frame pointer chain (both guest code and gate blocks keep the x29 chain) → resume; only main / sdk frames are printed
+ static void thr_bt(thr_t *t) {
+-    if (!t->mport || t->exited || t->mport == mach_thread_self()) return;
+-    if (thread_suspend(t->mport) != KERN_SUCCESS) return;
+-    arm_thread_state64_t st; mach_msg_type_number_t n = ARM_THREAD_STATE64_COUNT;
+-    if (thread_get_state(t->mport, ARM_THREAD_STATE64, (thread_state_t)&st, &n) == KERN_SUCCESS) {
+-        // Threads not waiting in a system call (running guest code, possibly spinning on a condition): print the callee-saved registers x19–x28, plus 128 bytes of the memory pointed to by each of x19 / x20.
+-        // The state seen in the occasional "no frames after entering a run": the main thread spins in the job pool's "help while waiting" (main+0x14f08d8), x19 = wait object, x20 = job pool -- only with these can one tell which batch it is waiting for and what the unfinished count is
+-        if (t->wkind == 0) { char rl[400]; int q = snprintf(rl, sizeof rl, "[dm]   %#x registers pc=", t->handle); uint64_t pc = __darwin_arm_thread_state64_get_pc(st); module_t *pm = module_of((void *)pc);
+-            q += pm ? snprintf(rl + q, sizeof rl - q, "%s+%#llx", pm->name, pc - (uint64_t)pm->base) : snprintf(rl + q, sizeof rl - q, "%#llx", pc);
+-            for (int i = 19; i <= 28; i++) q += snprintf(rl + q, sizeof rl - q, " x%d=%#llx", i, st.__x[i]);
+-            fprintf(stderr, "%s\n", rl);
+-            for (int i = 19; i <= 20; i++) { uint8_t raw[128]; vm_size_t g = 0; uint64_t a = st.__x[i];
+-                if (a < 0x100000000ull || vm_read_overwrite(mach_task_self(), a, sizeof raw, (vm_address_t)raw, &g) || g != sizeof raw) continue;
+-                char hx[420]; int h = 0; for (int k = 0; k < 128; k += 4) h += snprintf(hx + h, sizeof hx - h, "%08x ", *(uint32_t *)(raw + k));
+-                uint64_t vt = *(uint64_t *)raw; module_t *vm_ = module_of((void *)vt); char vs[64] = ""; if (vm_) snprintf(vs, sizeof vs, " (first 8 bytes = %s+%#llx)", vm_->name, vt - (uint64_t)vm_->base);
+-                fprintf(stderr, "[dm]   %#x x%d -> 128 bytes at %#llx%s: %s\n", t->handle, i, a, vs, hx); } }
+-        uint64_t fp = __darwin_arm_thread_state64_get_fp(st), lr = __darwin_arm_thread_state64_get_lr(st);
+-        // Threads running guest code: print the 1 KiB above the stack top as is (the registers saved by the outer frames are in there, so the wait object and resource address can be recovered afterwards)
+-        if (t->wkind == 0 && module_of((void *)__darwin_arm_thread_state64_get_pc(st))) { uint64_t sp = __darwin_arm_thread_state64_get_sp(st), stk[128]; vm_size_t g = 0;   // Printed only if pc is inside a guest module: a thread in sleep / yield has its pc in a system library, and the stack is not worth looking at
+-            if (sp > 0x100000000ull && !vm_read_overwrite(mach_task_self(), sp, sizeof stk, (vm_address_t)stk, &g) && g == sizeof stk)
+-                for (int r = 0; r < 128; r += 8) fprintf(stderr, "[dm]   %#x stack sp+%#05x: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n", t->handle, r * 8,
+-                        stk[r], stk[r + 1], stk[r + 2], stk[r + 3], stk[r + 4], stk[r + 5], stk[r + 6], stk[r + 7]); }
+-        char line[1024]; int p = snprintf(line, sizeof line, "[dm]   %#x backtrace:", t->handle), nf = 0; uint64_t wait_fp = 0;
+-        for (int k = 0; k < 64 && fp && nf < 20 && p < (int)sizeof line - 40; k++) {
+-            module_t *m = module_of((void *)lr);
+-            if (m) { p += snprintf(line + p, sizeof line - p, " %s+%#llx", m->name, lr - (uint64_t)m->base); nf++; }
+-            uint64_t fr[2]; vm_size_t g2 = 0;
+-            if (vm_read_overwrite(mach_task_self(), fp, 16, (vm_address_t)fr, &g2) || g2 != 16 || fr[0] <= fp) break;
+-            if (m && dm_title_is(DM_TITLE_D2R) && !strcmp(m->name, "main") && lr - (uint64_t)m->base == 0x132db30) wait_fp = fp;   // The return point is inside the resource wait function main+0x132d988 (after it calls the job pool's "help while waiting"): the frame pointer at this moment is its own
+-            fp = fr[0]; lr = fr[1];
+-        }
+-        fprintf(stderr, "%s\n", line);
+-        // The resource wait function main+0x132d988 (prologue sub sp,#0x50 … add x29,sp,#0x40) places the wait object {vtable, pointer to the event pointer} at the bottom of its own stack (0x132db14 stp x8,x23,[sp]),
+-        // so the wait object = its frame pointer −0x40; what that points to, −0x10 = the resource wait object {+0 in-flight job, +8 mutex pointer, +0x10 event pointer}. It is located by the return point 0x132db30, regardless of which instruction of the wait loop the thread is stopped on right now.
+-        // The old code took "the previous frame" based on 0x14f0934 and was off by one level, reading the resource wait object as the wait object; "in-flight job null" and "event / lock unreadable" were both misreads
+-        if (wait_fp) { uint64_t wo[2] = {0, 0}, res[3] = {0, 0, 0}, wjob = 0; vm_size_t g = 0;
+-            #define RD(addr, buf) ((addr) > 0x100000000ull && !vm_read_overwrite(mach_task_self(), (addr), sizeof(buf), (vm_address_t)(buf), &g) && g == sizeof(buf))
+-            #define HEX(tag, addr, nbytes) { uint32_t raw[32]; vm_size_t gg = 0; if ((addr) > 0x100000000ull && !vm_read_overwrite(mach_task_self(), (addr), (nbytes), (vm_address_t)raw, &gg) && gg == (nbytes)) { \
+-                char hx[300]; int h = 0; for (unsigned q = 0; q < (nbytes) / 4; q++) h += snprintf(hx + h, sizeof hx - h, "%08x ", raw[q]); fprintf(stderr, "[dm]   %#x job-pool wait: %s %#llx: %s\n", t->handle, tag, (unsigned long long)(addr), hx); } \
+-                else fprintf(stderr, "[dm]   %#x job-pool wait: %s %#llx unreadable\n", t->handle, tag, (unsigned long long)(addr)); }
+-            if (RD(wait_fp - 0x40, wo)) { module_t *vm_ = module_of((void *)wo[0]);
+-                fprintf(stderr, "[dm]   %#x job-pool wait: wait object %#llx vtable %s+%#llx (expected main+0x20f2408), points to %#llx\n", t->handle, (unsigned long long)(wait_fp - 0x40), vm_ ? vm_->name : "?", vm_ ? wo[0] - (uint64_t)vm_->base : wo[0], wo[1]);
+-                if (RD(wo[1] - 0x10, res)) {
+-                    fprintf(stderr, "[dm]   %#x job-pool wait: resource wait object %#llx: in-flight job %#llx (%s), mutex %#llx, event %#llx. Diagnosis: in-flight job null = the signal was already consumed by some wait; non-null with event not signaled = the completion signal never came; event signaled = a problem in the wait loop\n",
+-                            t->handle, (unsigned long long)(wo[1] - 0x10), res[0], res[0] ? "non-null" : "null", res[1], res[2]);
+-                    HEX("event object 64 bytes", res[2], 64);
+-                    HEX("mutex object 32 bytes (+8 recursion count, +0x10 owning thread object, +0x18 lock word = owner handle)", res[1], 32);
+-                    // Job object (filled by the submit function main+0x147f154): +0x10 flags (filtered by a per-thread-class mask when taking a job, 0xeda190 / 0xdf8fac), +0x20 next in the queue, dependency table from +0x30 (low 31 bits = count), +0x60 resource, +0x68 pointer to the event pointer
+-                    if (res[0]) { HEX("in-flight job object 128 bytes at +0", res[0], 128); HEX("in-flight job object 128 bytes at +0x80", res[0] + 0x80, 128); } wjob = res[0]; } }
+-            // Job pool: when the thread is stopped on an instruction of the wait loop main+0x14f08d8 itself, x20 is the pool; when it is stopped in a function called from it, x20 cannot be trusted and is not printed
+-            { uint64_t pc = __darwin_arm_thread_state64_get_pc(st); module_t *pm = module_of((void *)pc); uint64_t off = pm && !strcmp(pm->name, "main") ? pc - (uint64_t)pm->base : 0;
+-              // Queue (0xeda190): {+0 tail, +8 head, +0x10 count, +0x18 lock}, node +0x10 flags, +0x20 next. Walk from the head for at most 8 nodes to see whether the awaited job is in this pool
+-              if (off >= 0x14f0900 && off < 0x14f09b8) { uint64_t qa = st.__x[20] + 0x410, nd = 0; HEX("job queue head (pool = x20, 32 bytes at +0x410)", qa, 32); int in = 0, cnt = 0;
+-                  if (RD(qa + 8, &nd)) for (; nd && cnt < 8; cnt++) { uint64_t nb[5] = {0}; if (!RD(nd, nb)) break; fprintf(stderr, "[dm]   %#x job-pool wait:  queue entry %d %#llx flags %#x%s\n", t->handle, cnt, (unsigned long long)nd, (uint32_t)nb[2], nd == wjob ? " (this is the awaited job)" : ""); in |= nd == wjob; nd = nb[4]; }
+-                  fprintf(stderr, "[dm]   %#x job-pool wait: the awaited job is%s in the first %d entries of the x20 pool queue\n", t->handle, in ? "" : " not", cnt); }
+-              else fprintf(stderr, "[dm]   %#x job-pool wait: thread is not on the wait loop's own instructions; job pool not fetched\n", t->handle); }
+-            #undef RD
+-            #undef HEX
+-        }
+-    }
+-    thread_resume(t->mport);
++    botw_backend_host_diagnostic_denied("thr_bt");
+ }
+ void svc_thread_dump(void) {
+-    static const char *kinds[] = {"running/not waiting", "lock", "condition variable", "address", "synchronization object"};
+-    int nh = 0; for (int i = 1; i < MAX_H; i++) nh += g_h[i].type != O_FREE;
+-    fprintf(stderr, "[dm] handle table usage %d / %d, threads created in total %llu\n", nh, MAX_H, g_next_id - 0x51);
+-    for (thr_t *t = g_all; t; t = t->all) {
+-        module_t *m = module_of((void *)t->last_lr);
+-        // Thread name: SDK ThreadType+0x1a0 is the name pointer (ThreadManager::SetInitialThreadNameUnsafe 0x34a2a4); x2 of CreateThread = ThreadType*
+-        char nb[32]; const char *nm = thr_name(t, nb, sizeof nb);
+-        double cpu = -1;
+-        if (t->mport && !t->exited) { thread_basic_info_data_t bi; mach_msg_type_number_t n = THREAD_BASIC_INFO_COUNT;
+-            if (thread_info(t->mport, THREAD_BASIC_INFO, (thread_info_t)&bi, &n) == KERN_SUCCESS)
+-                cpu = bi.user_time.seconds + bi.user_time.microseconds / 1e6 + bi.system_time.seconds + bi.system_time.microseconds / 1e6; }
+-        char own[96] = ""; if (t->wkind == 1 && t->waddr) { uint32_t w = 0; vm_size_t g2 = 0;   // Lock wait: lock word = owner handle | 0x40000000
+-            if (!vm_read_overwrite(mach_task_self(), t->waddr, 4, (vm_address_t)&w, &g2)) snprintf(own, sizeof own, " owner %#x", w & ~WAITERS_BIT); }
+-        if (t->wkind == 2 && t->waddr) { uint32_t w = 0, k = 0; vm_size_t g2 = 0;              // Condition wait: current values of the associated lock word and the condition key (the deadlock dump lacked this item)
+-            vm_read_overwrite(mach_task_self(), t->waddr, 4, (vm_address_t)&w, &g2); vm_read_overwrite(mach_task_self(), t->wkey, 4, (vm_address_t)&k, &g2);
+-            snprintf(own, sizeof own, " lock word %#x condition key %#llx=%#x", w, t->wkey, k); }
+-        uint8_t raw[64]; vm_size_t g3 = 0;                                                   // Raw 64 bytes of the object being waited on (the structure holding the read-write lock / condition variable): to see the counts and the owner
+-        int have_raw = (t->wkind == 1 || t->wkind == 2 || t->wkind == 3) && t->waddr && !vm_read_overwrite(mach_task_self(), t->waddr & ~0xfull, 64, (vm_address_t)raw, &g3) && g3 == 64;
+-        char life[96]; uint64_t nowns = now_ns();
+-        if (t->exited) snprintf(life, sizeof life, " created at tick %u, exited at tick %u (%.1f s ago)", t->born_tick, t->exit_tick, (nowns - t->exit_ns) / 1e9); else if (!t->born_ns) snprintf(life, sizeof life, " present since process start"); else snprintf(life, sizeof life, " created at tick %u (%.1f s ago)", t->born_tick, (nowns - t->born_ns) / 1e9);
+-        // A crash can interrupt a thread holding G; never wait for it in diagnostics.
+-        char core_info[96];
+-        if (!pthread_mutex_trylock(&G)) {
+-            core_state_t cs = t->cs;
+-            pthread_mutex_unlock(&G);
+-            snprintf(core_info, sizeof core_info, "core %d preferred %d mask %#llx", cs.cur, cs.pref, (unsigned long long)cs.mask);
+-        } else snprintf(core_info, sizeof core_info, "core state unavailable (lock busy)");
+-        fprintf(stderr, "[dm] thread %#x \"%s\" priority %d %s CPU %.2fs svc %llu %s%s%s waiting on:%s addr=%#llx%s last svc %#x lr=%s+%#llx\n", t->handle, nm, t->prio, core_info,
+-                cpu, t->nsvc, t->exited ? "exited" : "", t->started ? "" : "not started", life, kinds[t->wkind & 7], t->waddr, own, t->last_svc,
+-                m ? m->name : "?", m ? t->last_lr - (uint64_t)m->base : t->last_lr);
+-        if (have_raw) { char hx[200]; int q = 0; for (int i = 0; i < 64; i += 4) q += snprintf(hx + q, sizeof hx - q, "%08x ", *(uint32_t *)(raw + i));
+-                        fprintf(stderr, "[dm]   %#x waited-on object, 64 bytes at %#llx: %s\n", t->handle, t->waddr & ~0xfull, hx); }
+-        thr_bt(t);
+-    }
+-    // Threads created by the host itself (prefetch, Granny background, graphics present, audio, etc.): not in the guest thread table, enumerated as mach threads, the first 12 frames symbolized with dladdr
+-    thread_act_array_t ths; mach_msg_type_number_t nth = 0;
+-    if (task_threads(mach_task_self(), &ths, &nth) == KERN_SUCCESS) {
+-        for (mach_msg_type_number_t i = 0; i < nth; i++) {
+-            int guest = 0; for (thr_t *t = g_all; t; t = t->all) if (t->mport == ths[i]) { guest = 1; break; }
+-            if (!guest && ths[i] != mach_thread_self() && thread_suspend(ths[i]) == KERN_SUCCESS) {
+-                arm_thread_state64_t st; mach_msg_type_number_t n = ARM_THREAD_STATE64_COUNT;
+-                if (thread_get_state(ths[i], ARM_THREAD_STATE64, (thread_state_t)&st, &n) == KERN_SUCCESS) {
+-                    char line[1200]; int p = snprintf(line, sizeof line, "[dm] host thread %#x:", ths[i]);
+-                    uint64_t fp = __darwin_arm_thread_state64_get_fp(st), pc = __darwin_arm_thread_state64_get_pc(st);
+-                    for (int k = 0; k < 12 && p < (int)sizeof line - 80; k++) {
+-                        Dl_info di; module_t *m = module_of((void *)pc);
+-                        if (m) p += snprintf(line + p, sizeof line - p, " %s+%#llx", m->name, pc - (uint64_t)m->base);
+-                        else if (dladdr((void *)pc, &di) && di.dli_sname) p += snprintf(line + p, sizeof line - p, " %s+%#lx", di.dli_sname, (unsigned long)(pc - (uint64_t)di.dli_saddr));
+-                        else p += snprintf(line + p, sizeof line - p, " %#llx", pc);
+-                        uint64_t fr[2]; vm_size_t g2 = 0;
+-                        if (!fp || vm_read_overwrite(mach_task_self(), fp, 16, (vm_address_t)fr, &g2) || g2 != 16 || fr[0] <= fp) break;
+-                        fp = fr[0]; pc = fr[1];
+-                    }
+-                    fprintf(stderr, "%s\n", line);
+-                }
+-                thread_resume(ths[i]);
+-            }
+-            mach_port_deallocate(mach_task_self(), ths[i]);
+-        }
+-        vm_deallocate(mach_task_self(), (vm_address_t)ths, nth * sizeof *ths);
+-    }
++    botw_backend_host_diagnostic_denied("svc_thread_dump");
+ }
+ 
+ int svc_thread(int num, uint64_t *regs) {
+-    { thr_t *me = pthread_getspecific(g_keythr); if (me) { me->last_svc = num; me->last_lr = regs[30]; me->nsvc++; } }
++    { thr_t *me = pthread_getspecific(g_keythr); if (me) { me->last_svc = num; me->nsvc++; } }
+     if (g_flag.thr && num != 0x0B) { thr_t *me = pthread_getspecific(g_keythr); LOG("[%#x] svc %#x x0=%#llx x1=%#llx x2=%#llx x3=%#llx", me ? me->handle : 0, num, regs[0], regs[1], regs[2], regs[3]); }
+     switch (num) {
+     case 0x08: {  // CreateThread(→w1 handle; x1 entry, x2 argument, x3 stack top, w4 priority, w5 core)
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -59,15 +59,12 @@
+ static _Atomic unsigned long long g_gheap_last[3];
+ // Only knows Diablo II addresses (main+0x32137a0, sdk+0x2f9d78 / +0x2f9dbc): other titles do not read, return 0 (= no readout)
+ int dm_guest_heap_stat(unsigned long long *total_mb, unsigned long long *free_mb, unsigned long long *maxblk_kb) {
+-    if (!dm_title_is(DM_TITLE_D2R)) return 0;
+-    module_t *mm = mod_named("main"), *ms = mod_named("sdk"); if (!mm || !ms || !g_heap_cur) return 0;
+-    uint8_t *al = mm->base + 0x32137a0; if (!al[0]) return 0;   // First byte = initialized (written by sdk+0x2f9898)
+-    uint64_t fr = ((uint64_t (*)(void *))(ms->base + 0x2f9d78))(al), mx = ((uint64_t (*)(void *))(ms->base + 0x2f9dbc))(al);
+-    *total_mb = g_heap_cur >> 20; *free_mb = fr >> 20; *maxblk_kb = mx >> 10;
+-    g_gheap_last[0] = *total_mb; g_gheap_last[1] = *free_mb; g_gheap_last[2] = *maxblk_kb; return 1;
++    botw_backend_host_diagnostic_denied("dm_guest_heap_stat");
+ }
+ // The last main-heap readout (total MB, free MB, largest allocatable block KB; all 0 if never read). Callable from any thread - does not enter the allocator (the iOS shell uses it on the main thread for the memory-warning log line)
+-void dm_guest_heap_last(unsigned long long v[3]) { for (int i = 0; i < 3; i++) v[i] = atomic_load(&g_gheap_last[i]); }
++void dm_guest_heap_last(unsigned long long v[3]) {
++    botw_backend_host_diagnostic_denied("dm_guest_heap_last");
++}
+ // Diablo II only (HLE_FORCE default mask): the original implementation it forwards to is taken at offset sdk+0x2f9974 of Diablo II's SDK, which is not this function in other titles' SDKs
+ HLE_FORCE("_ZN2nn3mem17StandardAllocator8AllocateEmm", "allocates exactly as the original; only reports when returning null (original callers often skip the null check)", void *, hle_stdalloc_allocate, void *self, size_t size, size_t align) {
+     static void *(*orig)(void *, size_t, size_t); if (!orig) {
+@@ -116,28 +113,9 @@
+     return e && *e && strcmp(e, "0") != 0;
+ }
+ static uint64_t svc_unknown_strict(int num, uint64_t *regs, uint64_t orig_addr) {
+-    static _Atomic unsigned cnt[256];
+-    unsigned k = atomic_fetch_add(&cnt[num & 0xff], 1);
+-    module_t *mm = module_of((void *)regs[30]);
+-    // The IPC context is built in ASCII only (port name / handle / header); the explanatory wording stays in the LOG
+-    char ctx[96] = "";
+-    if (num == 0x1F && regs[1] > 0x100000000ull) {   // ConnectToNamedPort(→w1 handle, x1 port name)
+-        // Diagnostics must not dereference guest pointers; unreadable memory still leaves the raw register report.
+-        char nm[13] = {0}; vm_size_t got = 0;
+-        if (vm_read_overwrite(mach_task_self(), regs[1], 12, (vm_address_t)nm, &got) || got != 12)
+-            strlcpy(nm, "<unreadable>", sizeof nm);
+-        for (int i = 0; i < 12; i++) if (nm[i] && (nm[i] < 0x20 || nm[i] > 0x7e)) nm[i] = '?';
+-        snprintf(ctx, sizeof ctx, " port=\"%s\"", nm);
+-    } else if (num == 0x21 || num == 0x22) {   // message at the start of the thread-local region
+-        const uint32_t *tlr = pthread_getspecific(g_keytlr); uint32_t h = (uint32_t)(num == 0x21 ? regs[0] : regs[2]);
+-        if (tlr) snprintf(ctx, sizeof ctx, " handle=%#x hdr=%08x,%08x", h, tlr[0], tlr[1]); else snprintf(ctx, sizeof ctx, " handle=%#x", h);
+-    }
+-    if (k < 16 || (k & 255) == 0)
+-        LOG("[ERROR] unimplemented SVC %#x (occurrence %u) at %s+%#llx x0=%#llx x1=%#llx x2=%#llx x3=%#llx%s -> returns %#x (no host implementation for this system service / kernel call)", num, k + 1, mm ? mm->name : "?", (unsigned long long)orig_addr,
+-            regs[0], regs[1], regs[2], regs[3], ctx, RES_KERNEL_NOT_IMPLEMENTED);
+-    if (abort_unknown_svc()) { dm_backtrace(regs[29]); die("DM_SVC_UNKNOWN_ABORT: unimplemented SVC %#x", num); }
+-    if (dm_stop_on_unimpl()) { char what[128]; snprintf(what, sizeof what, "SVC %#x%s", num, ctx); dm_unimpl_hit(what, mm ? (uint64_t)mm->base + orig_addr : regs[30], regs[29]); }
+-    regs[0] = RES_KERNEL_NOT_IMPLEMENTED; return 0;
++    (void)regs; (void)orig_addr;
++    LOG("[ERROR] unimplemented SVC %#x", num);
++    botw_whole_host_exit(3);
+ }
+ 
+ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+@@ -219,14 +197,10 @@
+         if (g_flag.svc) LOG("%sPhysicalMemory %p+%#zx", num == 0x2C ? "Map" : "Unmap", a, size);
+         regs[0] = 0; return 0;
+     }
+-    case 0x26: {  // Break(reason, ptr, size): SDK fatal abort
+-        uint32_t res = (regs[1] && regs[2] >= 4) ? *(uint32_t *)regs[1] : 0;
+-        module_t *mm = module_of((void *)regs[30]);
+-        static int nb;
+-        LOG("Break#%d reason=%#llx Result=%#x svc at %s+%#llx", ++nb, regs[0], res, mm ? mm->name : "?", orig_addr);
+-        dm_backtrace(regs[29]);
+-        if (regs[0] & 0x80000000ull) return 0;   // Notification only, can continue
+-        _exit(42);
++    case 0x26: {  // Break: preserve notification-only vs fatal semantics.
++        if (regs[0] & 0x80000000ull) return 0;
++        LOG("[ERROR] guest requested fatal Break");
++        botw_whole_host_exit(42);
+     }
+     case 0x1E: regs[0] = 0; regs[1] = guest_ns() * 12 / 625; return 0;   // GetSystemTick
+     case 0x27: {  // OutputDebugString(str, len)
+--- a/dm/host/dm_title.c
++++ b/dm/host/dm_title.c
+@@ -71,11 +71,7 @@
+ }
+ // A bounded run stops at the first unimplemented thing: first print the caller as "module+offset", then a frame-pointer backtrace; no graphics / audio teardown, exit directly with 3
+ void dm_unimpl_hit(const char *what, uint64_t lr, uint64_t fp) {
+-    if (!dm_stop_on_unimpl()) return;
+-    module_t *m = module_of((void *)lr);
+-    if (m) LOG("[STOP] DM_STOP_ON_UNIMPL: %s, caller %s+%#llx", what, m->name, (unsigned long long)(lr - (uint64_t)m->base));
+-    else LOG("[STOP] DM_STOP_ON_UNIMPL: %s, caller %#llx (not inside a guest module)", what, (unsigned long long)lr);
+-    if (fp) dm_backtrace(fp);
+-    fflush(stderr);
+-    _exit(3);
++    (void)what; (void)lr; (void)fp;
++    LOG("[STOP] unimplemented guest operation");
++    botw_whole_host_exit(3);
+ }
+--- a/dm/host/hle.c
++++ b/dm/host/hle.c
+@@ -19,8 +19,8 @@
+ // Returns 0 as before; with DM_STOP_ON_UNIMPL=1 it stops on the first hit (dm_unimpl_hit in dm_title.c), for bounded runs.
+ uint64_t unimpl_c(unsigned idx, uint64_t *regs) {
+     if (!g_stub_seen[idx]++) {
+-        LOG("UNIMPL %s (x0=%#llx x1=%#llx x2=%#llx)", g_stub_name[idx], regs[0], regs[1], regs[2]);
+-        if (dm_stop_on_unimpl()) { char what[256]; snprintf(what, sizeof what, "UNIMPL %s", g_stub_name[idx]); dm_unimpl_hit(what, regs[-1], regs[-2]); }
++        LOG("UNIMPL %s", g_stub_name[idx]);
++        if (dm_stop_on_unimpl()) { char what[256]; snprintf(what, sizeof what, "UNIMPL %s", g_stub_name[idx]); dm_unimpl_hit(what, 0, 0); }
+     }
+     return 0;
+ }
+@@ -55,7 +55,9 @@
+ enum { G_SVC, G_CNTPCT, G_CNTVCT, G_OBS };
+ // Observation gates (inserted offline from the rewriter's OBS table): number → read-only callback; with no callback attached the gate returns after one pass in and out
+ static void (*g_obs_fn[OBS_MAX])(const uint64_t *regs); static int g_obs_have[OBS_MAX];
+-void gate_obs_set(int id, void (*fn)(const uint64_t *regs)) { if (id <= 0 || id >= OBS_MAX) die("observation gate id out of range: %d", id); g_obs_fn[id] = fn; }
++void gate_obs_set(int id, void (*fn)(const uint64_t *regs)) {
++    botw_backend_host_diagnostic_denied("gate_obs_set");
++}
+ int gate_obs_present(int id) { return id > 0 && id < OBS_MAX && g_obs_have[id]; }
+ static uint8_t g_svc_have[256];   // svc numbers registered in the build output (used to tell whether the host call numbers from 0x80 up, introduced by cuts, are present)
+ int gate_svc_present(int num) { return num >= 0 && num < 256 && g_svc_have[num]; }
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -353,7 +353,7 @@
+     g_res = [g_dev newResidencySetWithDescriptor:rd error:&re];
+     if (!g_res) MDIE("failed to create MTLResidencySet");
+     [g_q addResidencySet:g_res];
+-    { void crash_set_wait_dump(void (*fn)(void)); void mtl_wait_state_dump(void); crash_set_wait_dump(mtl_wait_state_dump); }
++    if (botw_backend_compat_diagnostic_enabled()) { void crash_set_wait_dump(void (*fn)(void)); void mtl_wait_state_dump(void); crash_set_wait_dump(mtl_wait_state_dump); }
+ #if !DM_NVN_M3
+     dispatch_queue_attr_t feedback_attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
+     g_feedback_q = dispatch_queue_create("dm.nvn.mtl4-feedback", feedback_attr);
+@@ -785,10 +785,7 @@
+ int g_la_cache = 1;   //Per-object caching for the per-draw reflection summary / all-zero fact table / all-zero set removal (udc_note_draw, zskip_can_draw); 0 = computed every time (for in-process alternating measurement comparison)   // Render encoder fixed-function state not resent if unchanged (FX_SET in draw); 0 = sent on every draw (for in-process alternating measurement comparison)
+ int g_blit_bar = 1;   //Barrier when reusing the blit encoder on Metal 4 (blit()); 0 = not set, only for measuring overhead with in-process alternation (data may be reordered)
+ static int *ub_var(const char *nm) {
+-    extern int g_bloom_q, g_dm_present_link, g_tbdr_rt, g_blit_bar;
+-    static const struct { const char *n; int *p; } t[] = { {"g_bloom_q", &g_bloom_q}, {"g_dm_present_link", &g_dm_present_link}, {"g_frz_on", &g_frz_on}, {"g_fx_dedup", &g_fx_dedup}, {"g_la_cache", &g_la_cache}, {"g_tbdr_rt", &g_tbdr_rt}, {"g_blit_bar", &g_blit_bar} };
+-    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) if (!strcmp(nm, t[i].n)) return t[i].p;
+-    return dlsym(RTLD_DEFAULT, nm);
++    botw_backend_host_diagnostic_denied("ub_var");
+ }
+ static void ub_frame(uint64_t f) {
+     if (g_ub_n < 0) { g_ub_n = 0; const char *e = getenv("DM_NVN_UB"), *n = getenv("DM_NVN_UB_N"); if (n && atoi(n) >= 60) g_ub_N = atoi(n);
+@@ -7526,10 +7523,7 @@
+ 
+ // Called by the watchdog (no progress): writes the state of all blocking wait points on the graphics side to the log -- who is waiting for whom is visible at a glance (after switching to the Metal 4 submit model there was once a case of "ran to 900 frames then stopped, no failure line")
+ void mtl_wait_state_dump(void) {
+-    MLOG("wait-point state: main fence committed %llu / completed %llu; main allocator fences [%llu %llu %llu]; upload pending %d, allocators in use [%d %d %d], serial %u, unflushed batch %d; present queue enqueued %llu / completed %llu; main command buffer encoding %d, submit thread set %d",
+-         (unsigned long long)g_fence, (unsigned long long)g_done, (unsigned long long)g_alloc_fence[0], (unsigned long long)g_alloc_fence[1], (unsigned long long)g_alloc_fence[2],
+-         atomic_load(&g_up_pending), atomic_load(&g_up_alloc_busy[0]), atomic_load(&g_up_alloc_busy[1]), atomic_load(&g_up_alloc_busy[2]), g_up_seq, g_up_cb != nil,
+-         (unsigned long long)g_pq_in, (unsigned long long)g_pq_done, g_cb != nil, atomic_load(&g_sub_thread_set));
++    botw_backend_host_diagnostic_denied("mtl_wait_state_dump");
+ }
+ void mtl_alloc_stats(uint64_t *waits, uint64_t *grown, int *n) { *waits = g_alloc_waits; *grown = g_alloc_grown; *n = g_alloc_n; }   //Main submit allocator pool: how many times it waited, how many times it grew, how many exist now
+ #pragma clang attribute pop
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -1703,7 +1703,7 @@
+     // Every 300 frames read resident memory and hand it to the graphics layer to print the memory readout line (mtl_mem_stat, low frequency, capped). Memory watchdog: when resident memory exceeds the cap, log a failure and exit on its own. On by default only on the Mac host (24 GB: runaway host memory
+     // drags the whole machine into a kernel panic, which happened twice with other programs on the same machine), or set for tests with DM_MEM_CAP_GB=<integer>; the player's iOS app has no cap (exiting before the system kills it is pointless and only adds another kind of crash)
+     if (g_frame % 300 == 0) { task_vm_info_data_t vi; mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+-        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS) { unsigned long long mb = (unsigned long long)(vi.phys_footprint >> 20); unsigned long long ht = 0, hf = 0, hm = 0; int dm_guest_heap_stat(unsigned long long *, unsigned long long *, unsigned long long *); int hok = dm_guest_heap_stat(&ht, &hf, &hm);
++        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS) { unsigned long long mb = (unsigned long long)(vi.phys_footprint >> 20); unsigned long long ht = 0, hf = 0, hm = 0; int dm_guest_heap_stat(unsigned long long *, unsigned long long *, unsigned long long *); int hok = botw_backend_compat_diagnostic_enabled() ? dm_guest_heap_stat(&ht, &hf, &hm) : 0;
+             void mtl_mem_stat(unsigned long long, unsigned long long, int, unsigned long long, unsigned long long, unsigned long long); mtl_mem_stat(g_frame, mb, hok, ht, hf, hm);
+             static long cap = -1; if (cap < 0) { const char *e = getenv("DM_MEM_CAP_GB"); cap = e ? atol(e) : DM_MEM_CAP_DEFAULT_GB; }
+             if (cap > 0 && mb > (unsigned long long)cap * 1024) { LOG("[ERROR] memory watchdog: resident %llu MB exceeds limit %ld GB (frame %llu), exiting", mb, cap, (unsigned long long)g_frame); _exit(86); } } }
+--- a/dm/host/botw_audio_renderer.c
++++ b/dm/host/botw_audio_renderer.c
+@@ -382,11 +382,9 @@
+ // handle; guest ELF TLS may legitimately be NULL and is never invented here.
+ static void audio_worker(void *opaque) {
+     audio_session *s = opaque;
+-    uint64_t entry_fpcr = fpcr_read(), entry_fpsr = fpsr_read();
++    uint64_t entry_fpcr = fpcr_read();
+     void *current = NATIVE(NAT_THREAD_CURRENT, thread_current_fn)();
+-    LOG("BotW AudioRenderer CPU %u: worker entered (handle %#x id %llu), entry FPCR/FPSR %#llx/%#llx, owner FPCR %#llx",
+-        session_id(s), rd32(s->thread_type, 0x1b0), (unsigned long long)rd64(s->thread_type, 0x1b8),
+-        (unsigned long long)entry_fpcr, (unsigned long long)entry_fpsr, (unsigned long long)s->owner_fpcr);
++    LOG("BotW AudioRenderer CPU %u: worker entered", session_id(s));
+     if (current != s->thread_type) audio_stop("worker %u: SDK GetCurrentThread does not match its ThreadType", session_id(s));
+     fpcr_write(s->owner_fpcr);   // Owner arithmetic mode for rendering; FPSR stays this thread's own
+     uint64_t next = 0;
+@@ -408,8 +406,8 @@
+         if (next <= now) { atomic_fetch_add(&s->late_wakes, 1); next = now + FRAME_NS; }   // Late: resume cadence without a catch-up burst
+     }
+     pthread_mutex_unlock(&s->wake_lock);
+-    LOG("BotW AudioRenderer CPU %u: worker leaving after %llu frames, FPCR/FPSR %#llx/%#llx", session_id(s),
+-        (unsigned long long)s->executions, (unsigned long long)fpcr_read(), (unsigned long long)fpsr_read());
++    LOG("BotW AudioRenderer CPU %u: worker leaving after %llu frames", session_id(s),
++        (unsigned long long)s->executions);
+     fpcr_write(entry_fpcr);
+ }
+ static void worker_create(audio_session *s) {
+--- a/dm/gfx/nvn/botw_shader_observation.c
++++ b/dm/gfx/nvn/botw_shader_observation.c
+@@ -32,42 +32,8 @@
+ }
+ 
+ int botw_shader_observation_environment(const char **path, const char **selector, char *error, size_t error_size) {
+-    const char *output = getenv("DM_SHADER_OBSERVATION");
+-    const char *sha = getenv("DM_SHADER_OBSERVATION_SHA256");
+-    if (path) *path = NULL;
+-    if (selector) *selector = NULL;
+-    if (error && error_size) error[0] = 0;
+-    if (sha && !*sha)
+-        return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 must not be empty; unset it for first-draw observation");
+-    if (sha && *sha && (!output || !*output))
+-        return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 requires the DM_SHADER_OBSERVATION output path");
+-    if (!output || !*output) return 0;
+-    if (output[0] != '/') return fail(error, error_size, "DM_SHADER_OBSERVATION must be an absolute path outside a repository");
+-    if (sha && *sha) {
+-        if (strpbrk(sha, ",;: \t"))
+-            return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 accepts a single digest, not a list");
+-        size_t length = strlen(sha);
+-        if (length != 64)
+-            return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 must be exactly 64 lowercase hex characters (got %zu)", length);
+-        for (size_t i = 0; i < length; ++i) {
+-            char c = sha[i];
+-            if (c >= 'A' && c <= 'F')
+-                return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 must use lowercase hex characters");
+-            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+-                return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 must use only lowercase hex characters");
+-        }
+-    } else if (sha) {
+-        return fail(error, error_size, "DM_SHADER_OBSERVATION_SHA256 must not be empty; unset it for first-draw observation");
+-    }
+-    static const char *required[] = {
+-        "DM_NVN_TBDR", "DM_NVN_ZSKIP", "DM_NVN_DEFER", "DM_NVN_BLOOM_Q", "DM_RT_AB",
+-    };
+-    for (size_t i = 0; i < sizeof required / sizeof *required; ++i)
+-        if (!exact_zero(required[i]))
+-            return fail(error, error_size, "%s=0 is required for first-draw observation", required[i]);
+-    if (path) *path = output;
+-    if (selector) *selector = sha && *sha ? sha : NULL;
+-    return 1;
++    /* Disabled before inspecting caller outputs or environment state. */
++    return 0;
+ }
+ 
+ static int reserve(json_buffer *buffer, size_t extra) {
