@@ -496,6 +496,80 @@ int main(void){NVNbufferBuilder builder;memset(&builder,0xa5,sizeof builder);NVN
             self.assertIn('UPSTREAM_BUFFER_BASE52_PORTABLE_ABI_AND_SLICE_OK',run.stdout)
 
 
+@unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS Foundation ABI')
+class TextureHandleCodecCPUTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory(prefix='botw-handle-cpu-')
+        cls.addClassCleanup(cls.directory.cleanup)
+        folder = Path(cls.directory.name)
+        graphics = ROOT / 'native/botw_graphics'
+        source = folder / 'codec.m'
+        # Independent arbitrary-precision oracle emits C golden constants;
+        # production uses fixed-width unsigned operations, not this formula.
+        values = [-2147483648, -1048576, -4096, -1, 0, 1, 0x101, 0x7ff,
+                  0x800, 0xfff, 0x1000, 0x7ffff, 0x80000, 0xfffff,
+                  0x100000, 0x12345678, 2147483647]
+        pairs = [(0, 0)] + [(t, s) for t in values for s in values if (t, s) != (0, 0)]
+        golden = []
+        for texture, sampler in pairs:
+            low = (texture | (sampler << 20)) & 0xffffffff
+            signed = low if low < 0x80000000 else low - 0x100000000
+            expected = (signed & 0xffffffffffffffff) | 0x100000000
+            golden.append(f' {{{texture},{sampler},UINT64_C(0x{expected:016x})}},')
+        source.write_text(r"""
+#import <Foundation/Foundation.h>
+#include <mach/mach.h>
+#include <stdint.h>
+#include <setjmp.h>
+static unsigned vmQueries,validatorCalls,callbacks;
+static kern_return_t codecVMQuery(vm_map_read_t task,vm_address_t *address,vm_size_t *size,natural_t *depth,vm_region_recurse_info_t info,mach_msg_type_number_t *count){(void)task;(void)address;(void)size;(void)depth;(void)info;(void)count;vmQueries++;return KERN_FAILURE;}
+#define vm_region_recurse_64 codecVMQuery
+#include "graphics.m"
+#undef vm_region_recurse_64
+static sigjmp_buf recovery;
+static void codecError(const char *error){fprintf(stderr,"UNEXPECTED_CODEC_CALLBACK %s\n",error);callbacks++;siglongjmp(recovery,1);}
+static int codecAccess(const void *address,size_t bytes,int write){(void)address;(void)bytes;(void)write;validatorCalls++;return 1;}
+#define CHECK(x) do{if(!(x)){fprintf(stderr,"HANDLE_CPU_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
+static const struct{int32_t texture,sampler;uint64_t expected;} golden[]={
+""" + "\n".join(golden) + r"""
+};
+int main(int argc,char **argv){@autoreleasepool{
+ CHECK(argc==2&&!gpu&&!commandQueue);objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];NVNdevice raw={0};BWDevice *device=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];put(&raw,device);uint64_t beforeSerial=serial;NSUInteger objectCount=objects.count,spanCount=objectSpans.count;void *objectMap=(__bridge void*)objects,*spanMap=(__bridge void*)objectSpans;
+ memoryAccessValidator=codecAccess;errorCallback=codecError;strcpy(lastError,"owned-codec-sentinel");const char *entry=currentEntry;
+ size_t page=getpagesize();void *none=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(none!=MAP_FAILED);NVNtexture wrong={0};objects[@(beforeSerial+100)]=[BWTexture new];((BWObject*)&wrong)->serial=beforeSerial+100;objectCount++;
+ const NVNdevice *arguments[]={&raw,NULL,none,(const NVNdevice*)(uintptr_t)1,(const NVNdevice*)&wrong};unsigned limit=!strcmp(argv[1],"golden")?1:5;
+ unsigned count=limit==1?sizeof golden/sizeof *golden:1;for(unsigned d=0;d<limit;d++)for(unsigned i=0;i<count;i++){
+  if(sigsetjmp(recovery,1)){fprintf(stderr,"CODEC_REJECTED d=%u case=%u\n",d,i);return 91;}
+  uint64_t value=w_nvnDeviceGetTextureHandle(arguments[d],golden[i].texture,golden[i].sampler);CHECK(value==golden[i].expected);CHECK(textureDescriptorIndex(value)==((uint32_t)value&0xfffff)&&samplerDescriptorIndex(value)==(((uint32_t)value>>20)&0xfff));
+ }
+ CHECK(!validatorCalls&&!vmQueries&&!callbacks&&!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(currentEntry==entry&&!strcmp(lastError,"owned-codec-sentinel"));CHECK(serial==beforeSerial&&objects.count==objectCount&&objectSpans.count==spanCount&&(__bridge void*)objects==objectMap&&(__bridge void*)objectSpans==spanMap&&!gpu&&!commandQueue);CHECK(!munmap(none,page));printf("HANDLE_CODEC_CPU_OK cases=%zu devices=%u validator=0 vm=0 callbacks=0 no_real_gpu=true\n",sizeof golden/sizeof *golden,limit);return 0;
+}}
+""")
+        cls.executable = folder / 'codec'
+        build = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+            '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            '-Wno-unused-function', '-O1', '-g', '-fsanitize=address,undefined',
+            '-I', str(graphics), str(source), '-framework', 'Foundation',
+            '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(cls.executable)],
+            capture_output=True, text=True, timeout=120)
+        if build.returncode:
+            raise AssertionError(build.stdout+build.stderr)
+
+    def mode(self, mode):
+        run = subprocess.run([str(self.executable), mode], capture_output=True,
+                             text=True, timeout=15)
+        self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        self.assertIn('HANDLE_CODEC_CPU_OK', run.stdout)
+        self.assertEqual(run.stderr, '')
+
+    def test_full_signed_indices_follow_fixed_original_packed_bit_contract(self):
+        self.mode('golden')
+
+    def test_device_is_ignored_without_header_validator_vm_callback_or_registry_effect(self):
+        self.mode('ignored-device')
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'Metal requires macOS')
 class MetalBridgeTests(unittest.TestCase):
     def run_graphics_probe(self, name, expected):
@@ -640,6 +714,63 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
 
     def test_object_errors_include_abi_entry_type_raw_identity_and_release_locks(self):
         self.run_graphics_probe('probe_object_diagnostic.c', 'NVN_ENTRY_OBJECT_DIAGNOSTIC_AND_ERROR_ESCAPE_OK')
+
+    def test_texture_handle_codec_keeps_valid_sampling_and_rejects_bad_use_before_counter(self):
+        import os
+        from botw_metal_counter_capability import require_counter_sampling
+        require_counter_sampling()
+        feature = RESOURCE_FEATURE.replace(
+            'uint64_t handleTexture=nvnDeviceGetTextureHandle(&device,3,4);',
+            'int rejectHandle=argc>1&&strcmp(argv[1],"valid");'
+            'uint64_t handleTexture=nvnDeviceGetTextureHandle(NULL,'
+            '(argc>1&&!strcmp(argv[1],"sentinel"))?-1:'
+            '(argc>1&&!strcmp(argv[1],"unregistered"))?5:3,4);'
+            'if(argc>1&&!strcmp(argv[1],"sentinel"))CHECK(handleTexture==UINT64_MAX);')
+        feature = feature.replace('    for(int pass=0;pass<2;pass++){',
+            '    API(nvnCommandBufferReportCounter);unsigned char priorPixels[64];memcpy(priorPixels,pixels,sizeof priorPixels);'
+            'memset(memory+16384,0x3c,32);memset(memory+16448,0xa5,32);memset(memory+16512,0xa5,16);'
+            '    for(int pass=0;pass<2;pass++){')
+        feature = feature.replace('nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets',
+            'nvnCommandBufferBeginRecording(&cb);nvnCommandBufferCopyBufferToBuffer(&cb,gpu+16384,gpu+16448,32,0);'
+            'nvnCommandBufferReportCounter(&cb,NVN_COUNTER_TYPE_TIMESTAMP_TOP,gpu+16512);nvnCommandBufferSetRenderTargets')
+        feature = feature.replace('nvnCommandBufferSetTexturePool(&cb,&tp);',
+            'if(!(argc>1&&!strcmp(argv[1],"missing-pool")))nvnCommandBufferSetTexturePool(&cb,&tp);')
+        feature = feature.replace('      nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);',r'''
+      if(rejectHandle){
+        BWQueue *owned=get(&queue,[BWQueue class]);NSData *arenaBefore=digest(owned.arena,owned.arenaBytes);codecEscaping=1;
+        if(!sigsetjmp(codecRecovery,1)){nvnQueueSubmitCommands(&queue,1,&handle);CHECK(0);}codecEscaping=0;
+        CHECK(codecCallbacks==1&&strstr(botw_graphics_last_error(),!strcmp(argv[1],"sentinel")?"descriptor slot index bounds":!strcmp(argv[1],"missing-pool")?"stale texture descriptor pool":"unbound texture descriptor"));
+        nvnQueueFinish(&queue);CHECK(dispatch_group_wait(allGPU,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0);
+        CHECK([arenaBefore isEqual:digest(owned.arena,owned.arenaBytes)]);for(unsigned i=0;i<32;i++)CHECK(memory[16448+i]==0xa5);for(unsigned i=0;i<16;i++)CHECK(memory[16512+i]==0xa5);
+        CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels)&&!memcmp(priorPixels,pixels,sizeof pixels));CHECK(!graphicsDepth&&!pendingError&&!pendingFatal);
+        char error[512];CHECK(botw_graphics_shutdown_checked(error,sizeof error));free(memory);puts("HANDLE_USE_REJECTED_WHOLE_BATCH_BEFORE_COPY_COUNTER_ARENA_AND_PIXELS_OK");return 0;
+      }
+      nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);''')
+        source = _depth_storage_capacity(METAL_SMOKE).replace('    nvnMemoryPoolFinalize(&pool);',
+            feature+'    nvnMemoryPoolFinalize(&pool);')
+        source = source.replace('#include <unistd.h>',r'''#include <unistd.h>
+#include <setjmp.h>
+static sigjmp_buf codecRecovery;static int codecEscaping,codecCallbacks;
+static void codecUseError(const char *message){if(codecEscaping){codecCallbacks++;siglongjmp(codecRecovery,1);}fprintf(stderr,"EXPECTED_OR_UNHANDLED %s\n",message);}
+''').replace('botw_graphics_init(NULL, NULL, valid)', 'botw_graphics_init(NULL, codecUseError, valid)')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory);graphics=ROOT/'native/botw_graphics'
+            harness=path/'handles.m';exe=path/'handles'
+            harness.write_text('#include "graphics.m"\n'+source)
+            built=subprocess.run(['xcrun','clang','-fobjc-arc','-fobjc-arc-exceptions','-fblocks',
+                '-Wall','-Wextra','-Werror','-Wno-unused-function','-I',str(graphics),str(harness),
+                '-framework','Foundation','-framework','Metal','-framework','QuartzCore','-o',str(exe)],
+                capture_output=True,text=True,timeout=120)
+            self.assertEqual(built.returncode,0,built.stdout+built.stderr)
+            for mode in ['valid','sentinel','missing-pool','unregistered']:
+                with self.subTest(mode=mode):
+                    run=subprocess.run([str(exe),mode],capture_output=True,text=True,timeout=30,
+                        env={**os.environ,'MTL_DEBUG_LAYER':'1'})
+                    if run.returncode==77:self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode,0,run.stdout+run.stderr)
+                    self.assertIn('GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK' if mode=='valid' else 'HANDLE_USE_REJECTED_WHOLE_BATCH_BEFORE_COPY_COUNTER_ARENA_AND_PIXELS_OK',run.stdout)
+                    self.assertIn('Metal API Validation Enabled',run.stderr)
+                    self.assertNotIn('failed assertion',run.stderr)
 
     def test_texture_handle_bit32_signed_low_word_and_descriptor_domain(self):
         self.run_graphics_probe('probe_texture_handle.c', 'TEXTURE_HANDLE_SIGN_EXTENSION_BIT32_AND_DOMAIN_OK')

@@ -873,7 +873,7 @@ _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute 
 _Static_assert(sizeof(VertexStream)==sizeof(NVNvertexStreamState),"stream ABI");
 _Static_assert(sizeof(DepthState)==sizeof(NVNdepthStencilState),"depth ABI");
 NVN(nvnDeviceGetTextureHandle,NVNtextureHandle,const NVNdevice *d,int texture,int sampler){
-    get(d,[BWDevice class]);if(texture<0||texture>0xfffff||sampler<0||sampler>0xfff){char detail[192];snprintf(detail,sizeof detail,"texture/sampler descriptor index texture=%d(0x%x) sampler=%d(0x%x)",texture,(unsigned)texture,sampler,(unsigned)sampler);fatal(detail);}
+    (void)d; /* Original base-v0 leaf is pure integer packing, not validation. */
     uint32_t low=(uint32_t)texture|((uint32_t)sampler<<20);
     /* Original BOTW leaf: SXTW(low32) | (1ULL << 32). */
     uint64_t upper=(low&UINT32_C(0x80000000))?UINT64_C(0xffffffff00000000):UINT64_C(0x100000000);

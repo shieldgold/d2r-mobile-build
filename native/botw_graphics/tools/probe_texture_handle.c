@@ -24,12 +24,11 @@ int main(void){
   uint64_t actual=nvnDeviceGetTextureHandle(&d,cases[i].texture,cases[i].sampler);
   if(actual!=cases[i].expected){fprintf(stderr,"case=%zu actual=%016" PRIx64 " expected=%016" PRIx64 "\n",i,actual,cases[i].expected);return 1;}
  }
- static const int invalid[][2]={{-1,0},{0x100000,0},{0,-1},{0,0x1000}};
- for(size_t i=0;i<sizeof invalid/sizeof *invalid;i++){
-  if(!sigsetjmp(jump,1)){(void)nvnDeviceGetTextureHandle(&d,invalid[i][0],invalid[i][1]);CHECK(0);}
-  CHECK(strstr(botw_graphics_last_error(),"texture/sampler descriptor index"));
-  char expected[192];snprintf(expected,sizeof expected,"texture=%d(0x%x) sampler=%d(0x%x)",invalid[i][0],(unsigned)invalid[i][0],invalid[i][1],(unsigned)invalid[i][1]);CHECK(strstr(botw_graphics_last_error(),expected));
- }
+ static const struct{int texture,sampler;uint64_t expected;} extended[]={
+  {-1,257,UINT64_MAX},{-1,0,UINT64_MAX},{0x100000,0,UINT64_C(0x100100000)},
+  {0,-1,UINT64_C(0xfffffffffff00000)},{0,0x1000,UINT64_C(0x100000000)},
+  {INT32_MIN,0,UINT64_C(0xffffffff80000000)}};
+ for(size_t i=0;i<sizeof extended/sizeof *extended;i++)CHECK(nvnDeviceGetTextureHandle(NULL,extended[i].texture,extended[i].sampler)==extended[i].expected);
  nvnDeviceFinalize(&d);botw_graphics_shutdown();CHECK(botw_graphics_init(NULL,error,NULL));botw_graphics_shutdown();
  puts("TEXTURE_HANDLE_SIGN_EXTENSION_BIT32_AND_DOMAIN_OK");return 0;
 }

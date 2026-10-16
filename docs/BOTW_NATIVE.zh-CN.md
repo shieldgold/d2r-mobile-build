@@ -253,6 +253,16 @@ base-v0 的原 Write/Read 与 vendor1.9 的多层坐标语义尚未证明相同�
 
 Size/Align/Init三项先真实失败，新增trace字段也有独立行为RED。相关storage+family组首次72项中71通过，唯一旧generic-target负例因3D已进入新正域而失败；将该负例迁至仍不支持的Cube后，1方法4子例定点通过（1.026秒），未宣称重跑72全绿。另增正常SetLevels/Layers(-1)经原无符号字段截断后，空/非空Read/Write八次受控拒，1项CPU通过（4.297秒）；没有伪称生产负count漏洞或行为RED。独立CPU先5项通过（4.416秒），最终增量1项8次public拒通过（4.240秒）；独立GPU2方法11个实际Metal validation模式通过（2.477秒、零跳过、无GPU sanitizer），覆盖跨GOB非零图案、padding、empty、swizzle、真3D反射和live/retired authority。最终7文件与GPU时生产/依赖精确相同，双独审CLOSED；freeze文件SHA256为 `0603406898785dfc2d17233d39b145c6e3e27169b7a4b43fc2a26990a3c3eea5`，native97/100保持。固定原游戏及后续整套结果另记。
 
+3D提交 `026265b` 已推送，普通Mac不再输出3D零大小查询，下一条为 `target=8 flags=0 format=0x25 width=4 height=4 depth=6 levels=1 samples=0 stride=0` 的Cube查询，packaged layout-set=false/bits0、GL及packaged data均空。随后仍由本桥GetTextureHandle额外准入拒绝texture=-1/sampler257。binary SHA256 为 `7c4f2fb92f14a74e570d1b94db7ce58df92b2b39478132fa52be0a94e6a1050f`，完整退出host_return=1，无游戏画面；证据位于 `outputs/botw-host39-mac-026265b/transfer-and-storage-evidence.json`。本中间版尚未本机固定全套或安装手机，手机仍为dc；最终连贯候选另跑完整流水线。
+
+独立原合同审计进一步确认GetTextureHandle为无device读取/无范围验证的纯编码叶函数，`low32 = uint32(texture) | (uint32(sampler)<<20)` 后符号扩展并置bit32，(-1,257)编码UINT64_MAX。当前编码本身已匹配，额外构造阶段准入与原SDK不同；原Bind只消费低32，现所有已支持消费者也按低20/高12解析，并在使用前核descriptor bounds、注册语义、device/map/witness与authority。原main存在texture=-1构造/clear来源及不筛texture的调用路径，但不能据此推断实际caller或Cube查询与该值的因果。下一批先恢复纯编码合同，保全部use-time验证、不采用上游dummy fallback。只读证据位于 `outputs/botw-texture-handle-audit/kernel-static-dc9/report.zh-CN.md`，未读取运行客体内容或执行原字节。
+
+组合句柄修复仅将GetTextureHandle额外device/range那一行替换为忽略device；低32 OR、可移植符号扩展、bit32及所有已支持consumer逐字节不变。整数输入保持完整32位与溢出碰撞，UINT64_MAX仍按低20/12解析为fffff/fff；实际槽位注册、bounds、pool/device/map/witness、shader反射及authority决定使用是否有效，没有新增sentinel特殊分支或dummy资源。两个CPU方法在旧源码编译成功后真实失败，修复后289个独立任意精度golden及五种device参数（含NULL、自有PROT_NONE和错误类型）通过，validator/VM/callback为0，registry/serial/lastError与无Metal初始化状态保持。
+
+最终定点5方法全部通过（8.190秒、零跳过，CPU2 ASan/UBSan，新增真实GPU4模式、旧公开codec和vertex/fragment/upperword18模式）。正常及真正注册最大槽的UINT64_MAX均能绘制；受控小pool的UMax、未绑定pool和未注册槽，在同batch前置copy/counter之后的draw预检中拒绝，真实Finish及有界all-inflight drain后arena、copy/counter canary与原像素均保持。GPU使用Metal validation、无GPU sanitizer。独立CPU2项通过（3.968秒），生产逆剥唯一替换行即精确还原026前的graphics SHA，其他consumer依赖保持；四文件freeze SHA256为 `9c8d72438f8c2b96060e3a3c364c37305d63339fc2db794f25d1acf22318e620`，native97/100不变。独立GPU与实际普通游戏结果另记，不把编码或合成像素当可玩验收。
+
+该codec的独立GPU新方法4模式全部通过（1.349秒、零跳过），实际Metal validation及counter capability查询完整结束，arena/copy/counter/RT不发布的负例已复核。四SHA及consumer依赖前后稳定，双独审CLOSED，GPU已释放供固定提交原游戏；没有为UINT64_MAX提供特殊成功或特殊拒绝。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

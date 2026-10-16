@@ -23,6 +23,14 @@ View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode
 
 公共 1D 回归在 `MTL_DEBUG_LAYER=1` 下验证四个不同非零 texel、宽 33 跨 16/64-byte GOB 的独立地址 oracle 与整个 allocation padding canary、实际 Metal 读回、`texture1d<float>` 描述符采样、所选 swizzle、反射维度拒绝、live/retired 私有权威、copied CPU_CACHED、Flush/Invalidate、stale generation、跨维/格式/RT/Window 拒绝。CPU ASan/UBSan 另核查询、GL 早返及多 mip/virtual 在对象与 registry 发布前拒绝。它们不证明原游戏的 Write-zero 原因、首帧或手机可玩。
 
+## 纹理句柄编码与使用验证
+
+固定 base-v0 `DeviceGetTextureHandle`（B1E7C..B1E88）和固定5f完整 `nvn_handle.h` 都是纯整数编码：先按32位计算 `texture | (sampler << 20)`，截断后符号扩展low32，再置bit32。输入不先掩成20/12位，不夹范围、不读取device，NULL或不可读device不改变该叶函数结果。现有可移植unsigned位运算保留；只移除原先宿主额外的device/range前置检查。`texture=-1,sampler=257`得到`UINT64_MAX`，解码时为texture1048575/sampler4095，不能声称仍引用sampler257或自动变成空纹理。溢出输入也可能按原编码碰撞到已注册槽。
+
+所有已支持Bind和draw consumer仍按unsigned low20/12解码，upper32不作额外canonical条件。整提交的descriptor pool/lifetime、index bounds、注册语义、device、当前物理映射、witness、shader type及private authority检查不变；`UINT64_MAX`没有专用dummy/fallback许可。在最大索引槽真正注册的合法描述符仍按同一规则使用，未注册、越界或未绑定pool则在GPU提交前拒绝。5f的特定1.9 unused-slot dummy策略不导入，D2R固定版本无combined-handle忠实实现，不能凭同名slot视为原合同。
+
+纯CPU ASan/UBSan用独立任意精度oracle核289组32位边界/符号/溢出组合，并核NULL、自有PROT_NONE、无效地址及错误类型device均不触header/validator/VM/callback，registry、serial和lastError不变。真实Metal Validation回归保有效纹理采样像素，另将copy+counter放在同batch错误draw前；UMax、未设pool及未注册槽拒绝后，真实Finish和有界all-inflight drain完成，copy/counter canary、arena及原渲染像素仍一致。这不是原游戏画面或Cube创建支持证明。
+
 ## 普通池的单切片 3D
 
 base-v0 target2 是非数组体积：Size/Alignment 复用完整 `nvn_tex`，mip 同时缩小 width/height/depth，`layout.layers=1`，不能再将 depth 乘作数组层。自动布局的 tileH 为0、tileD按体积深度选择；4×4×1 RGBA8 的 size/alignment 均512。新查询域限普通未块压缩 color、flags0/raw samples0、三轴1..2048及合法 mip 数，尺寸上限与 Apple [Metal Feature Set Tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf) 的3D三轴限制一致。原3D packaged W/H/D可改变布局，但现固定完整 vendor 不消费3D packaged H，本批显式拒绝任何 packaged layout、packagedData 和 GL 导入；GL name非0的Size仍早返0，不读取指针内容。Metadata 多深度/mip 可算，不等于 GPU 创建域。
@@ -39,7 +47,7 @@ base-v0 target3 的层数在 Builder `height`，空间高度固定1，`depth`保
 
 base-v0 Write的原静态分支从region的z/depth取image/layer；完整固定1.9 writer对1DArray从y/height取层。首批payload只接受两者共同可证的单层规范region：y=z=0、height=depth=1，x/width可选择局部范围。对正常已登记对象，在原get/lifetime/View和region校验后，规范坐标下height/depth各为0或1且任一extent为0时显式EMPTY，不触碰source/destination payload；特别depth0不会误按1.9的height1执行写入。其它region具名拒绝，不用未验证的坐标转换冒充完整多层ABI，也不声称原空调用没有任何内部映射副作用。CPU Read/Write、完整GOB apply/extract、上传、GPU读回及Flush/Invalidate复用现有模块和合法blit pitch。普通1D数组的采样View只允许同target、同格式、level0/layer0及已有swizzle；跨维、格式重解释、render attachment与Window/Present保持前拒。反射检查独立的`MTLTextureType1DArray`和scalar，不把shader资源数组属性当texture slice数。
 
-真实Metal Validation回归验证actual4texel、宽33跨GOB地址的全allocation padding canary、公共Write/Read/Flush/Invalidate、copied CPU_CACHED、原生`texture1d_array<float>`采样和swizzle、错误shader维度、private live/retired authority、跨维/RT/Window与未支持region前拒。DeviceGetTextureHandle仅在原数值guard失败时追加已经传入的texture/sampler十进制及十六进制值，原20/12-bit边界和handle编码不变；该错误本身不证明与Size0存在因果关系。
+真实Metal Validation回归验证actual4texel、宽33跨GOB地址的全allocation padding canary、公共Write/Read/Flush/Invalidate、copied CPU_CACHED、原生`texture1d_array<float>`采样和swizzle、错误shader维度、private live/retired authority、跨维/RT/Window与未支持region前拒。DeviceGetTextureHandle的整数编码与实际descriptor可用性按下节分离；此前对负索引的提前拒绝是宿主额外假设，已按原四指令更正，并不证明Size0与该索引的因果关系。
 
 ## 存储生命周期与一致性
 
