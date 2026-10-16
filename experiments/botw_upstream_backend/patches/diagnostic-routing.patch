@@ -1,0 +1,49 @@
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -6712,7 +6712,7 @@
+ // Game picture needed by the whole-window screenshot (front end window_shot; no longer does drawViewHierarchy on a Metal layer with the display link attached): at the next present, the present thread draws the same frame
+ // with the same encoding as the present (present_encode) into an offscreen texture of the same size as the swapchain, and after the GPU finishes hands out a CGImage in the completion callback (the callback does not block the present). Guarded by g_shotq_mu
+ static void (^g_grab_cb)(CGImageRef img);
+-void mtl_grab_next_present(void (^cb)(CGImageRef img)) { pthread_mutex_lock(&g_shotq_mu); g_grab_cb = [cb copy]; pthread_mutex_unlock(&g_shotq_mu); }
++void mtl_grab_next_present(void (^cb)(CGImageRef img)) { botw_backend_host_diagnostic_denied("mtl_grab_next_present"); pthread_mutex_lock(&g_shotq_mu); g_grab_cb = [cb copy]; pthread_mutex_unlock(&g_shotq_mu); }
+ static void grab_present(id<MTLTexture> src, const int crop[4], CGSize sz) {
+     pthread_mutex_lock(&g_shotq_mu); void (^cb)(CGImageRef) = g_grab_cb; g_grab_cb = nil; pthread_mutex_unlock(&g_shotq_mu);
+     if (!cb) return;
+@@ -6745,7 +6745,7 @@
+ static int g_burst_left, g_burst_n; static char g_burst_dir[700];
+ static id<MTLBuffer> g_burst_buf[BURST_MAX]; static id<MTLCommandBuffer> g_burst_cb[BURST_MAX]; static uint64_t g_burst_fr[BURST_MAX], g_burst_ns[BURST_MAX], g_burst_gns[BURST_MAX]; static uint32_t g_burst_px[BURST_MAX], g_burst_py[BURST_MAX];
+ static size_t g_burst_w, g_burst_h; static unsigned long g_burst_fmt;
+-void dm_gfx_burst(int n, const char *dir) { if (g_burst_left > 0 || n <= 0) return; if (n > BURST_MAX) n = BURST_MAX; strlcpy(g_burst_dir, dir, sizeof g_burst_dir); g_burst_n = n; g_burst_left = n; }
++void dm_gfx_burst(int n, const char *dir) { botw_backend_host_diagnostic_denied("dm_gfx_burst"); if (g_burst_left > 0 || n <= 0) return; if (n > BURST_MAX) n = BURST_MAX; strlcpy(g_burst_dir, dir, sizeof g_burst_dir); g_burst_n = n; g_burst_left = n; }
+ static void burst_grab(id<MTLTexture> src) {
+     uint64_t guest_ns(void);
+     int i = g_burst_n - g_burst_left; size_t dm_ = src.width, sh_ = src.height, c = sh_ * 6 / 10; if (c > dm_) c = dm_;
+@@ -6767,6 +6767,7 @@
+     }
+ }
+ void dm_gfx_shot_at(long k, const char *path) {
++    botw_backend_host_diagnostic_denied("dm_gfx_shot_at");
+     pthread_mutex_lock(&g_shotq_mu);
+     if (g_nshotq < SHOTQ_MAX) { g_shotq[g_nshotq].frame = g_present_n + (uint64_t)(k > 0 ? k : 0); strlcpy(g_shotq[g_nshotq].path, path, sizeof g_shotq[0].path); g_nshotq++; }
+     else MLOG("[ERROR] more than %d screenshot requests, dropping %s", SHOTQ_MAX, path);
+--- a/dm/gfx/nvn/botw_shader_observation.c
++++ b/dm/gfx/nvn/botw_shader_observation.c
+@@ -237,6 +237,7 @@
+ 
+ int botw_shader_observation_write(const char *path, const botw_shader_observation *observation,
+                                   char *error, size_t error_size) {
++    botw_backend_host_diagnostic_denied("botw_shader_observation_write");
+     if (error && error_size) error[0] = 0;
+     if (!path || path[0] != '/') return fail(error, error_size, "observation destination must be an absolute path outside a repository");
+     const char *slash = strrchr(path, '/');
+--- a/dm/gfx/nvn/nvn_cmd_audit.c
++++ b/dm/gfx/nvn/nvn_cmd_audit.c
+@@ -206,7 +206,7 @@
+     }
+     g_on = on;
+ }
+-int cmda_on(void) { pthread_once(&g_once, cmda_init); return g_on; }
++int cmda_on(void) { if (!botw_backend_compat_diagnostic_enabled()) return 0; pthread_once(&g_once, cmda_init); return g_on; }
+ 
+ static uint32_t tid(void) { return (uint32_t)pthread_mach_thread_np(pthread_self()); }
+ static unsigned hslot(const void *p, unsigned n) { uint64_t x = (uint64_t)(uintptr_t)p >> 3; x *= 0x9e3779b97f4a7c15ull; return (unsigned)(x >> 40) & (n - 1); }

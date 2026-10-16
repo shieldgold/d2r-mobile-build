@@ -2,6 +2,8 @@ name: Build BOTW generic iOS host
 on:
   push:
     paths:
+      - 'experiments/botw_upstream_backend/**'
+      - 'tests/test_botw_upstream_backend_compile.py'
       - 'native/botw_host/**'
       - 'native/botw_app/**'
       - 'native/botw_graphics/**'
@@ -45,6 +47,8 @@ on:
       - '.github/workflows/botw-native-ios.yml'
   pull_request:
     paths:
+      - 'experiments/botw_upstream_backend/**'
+      - 'tests/test_botw_upstream_backend_compile.py'
       - 'native/botw_host/**'
       - 'native/botw_app/**'
       - 'native/botw_graphics/**'
@@ -101,6 +105,19 @@ jobs:
         run: python3 scripts/source/select_xcode.py
       - name: Compile generic shell without game content
         run: python3 -m scripts.botw_native.build_ios_shell --output outputs/botw-ios-shell
+      - name: Compile complete upstream backend for iPhoneOS without execution
+        run: python3 experiments/botw_upstream_backend/scripts/build_compile_only.py --sdk iphoneos --output outputs/botw-upstream-iphoneos
+      - name: Preserve upstream iPhoneOS compile receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: BOTW-upstream-iphoneos-compile-receipts
+          path: |
+            outputs/botw-upstream-iphoneos/*.json
+            outputs/botw-upstream-iphoneos/*.stdout
+            outputs/botw-upstream-iphoneos/*.stderr
+          if-no-files-found: warn
+          retention-days: 7
       - name: Prepare isolated test dependencies
         run: |
           python3 -m venv .tools/botw-ci-venv

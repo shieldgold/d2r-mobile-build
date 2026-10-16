@@ -5,7 +5,9 @@ name a dmsh_xlate build and a spirv-cross binary.
 
 python3 test_botw_shader_build.py
 """
+import contextlib
 import importlib.util
+import io
 import hashlib
 import json
 import os
@@ -26,8 +28,9 @@ spec.loader.exec_module(bsb)
 C_RUNTIME_DIGEST = '1cf01bc1758a927a6b3dad6770774b446fb7f8c8a33fa9f4caba94ac013ce56b'
 
 
-def control(version, stage, c1_offset=0x100, code_size=0x180):
-    size = bsb.CONTROL_SIZES[version]
+def control(version, stage, c1_offset=0x100, code_size=0x180, size=None):
+    if size is None:
+        size = {9: 0x7d1, 14: 0x848}[version]
     c = bytearray(size)
     for off, value in ((0, 0x98761234), (4, 1), (8, version), (0x20, size), (0x700, c1_offset),
                        (0x704, code_size), (0x708, 0 if stage == 5 else 0x30), (0x714, stage)):
@@ -130,7 +133,7 @@ class Captures(unittest.TestCase):
         self.expect_error(key, 'cannot open')
 
     def test_control_contract(self):
-        for edit, text in (((8, 10), 'magic or version'), ((0x20, 0x7d0), 'control size'),
+        for edit, text in (((8, 10), 'magic or version'), ((0x20, 0x7d0), 'header says'),
                            ((0x708, 0x40), 'C1 bounds'), ((0x700, 0x188), 'C1 bounds'), ((0x714, 6), 'C1 bounds')):
             c = control(9, 0)
             struct.pack_into('<I', c, *edit)
@@ -139,6 +142,42 @@ class Captures(unittest.TestCase):
             self.assertIn(text, str(e.exception))
         with self.assertRaises(bsb.CaptureError):
             bsb.check_code(bsb.parse_control(bytes(control(9, 0))), bytes(code(sph_type=5)))
+
+    def test_variable_control_lengths(self):
+        for version, stage in ((9, 0), (14, 5)):
+            for size in (bsb.CONTROL_HEADER_SIZE, 0x3ac3, bsb.CONTROL_LIMIT):
+                ctl = control(version, stage, size=size)
+                cod = code(graphics=stage != 5)
+                key, digest = write_capture(self.dir, ctl, cod)
+                loaded = bsb.load_capture(self.dir, key)
+                self.assertEqual(loaded.fields['control_size'], size)
+                self.assertEqual(loaded.control, bytes(ctl))
+                self.assertEqual(loaded.sha256, digest)
+        ctl = control(9, 0, size=0x3ac3)
+        _, first = write_capture(self.dir, ctl, code())
+        self.assertEqual(first, '3a437479a5035ba706bc5a7817d14cd8331a241d93a5b074b1f4399160495d6b')
+        ctl[-1] ^= 1
+        _, second = write_capture(self.dir, ctl, code())
+        self.assertNotEqual(first, second)
+
+    def test_control_length_bounds(self):
+        for advertised in (bsb.CONTROL_HEADER_SIZE - 1, bsb.CONTROL_LIMIT + 1, 0xffffffff):
+            ctl = control(9, 0)
+            struct.pack_into('<I', ctl, 0x20, advertised)
+            with self.assertRaisesRegex(bsb.CaptureError, 'control size'):
+                bsb.parse_control(bytes(ctl))
+        ctl = control(9, 0, size=0x3ac3)
+        for malformed in (ctl[:-1], ctl + b'\0'):
+            with self.assertRaisesRegex(bsb.CaptureError, 'header says'):
+                bsb.parse_control(bytes(malformed))
+        with self.assertRaisesRegex(bsb.CaptureError, 'shorter'):
+            bsb.parse_control(bytes(bsb.CONTROL_HEADER_SIZE - 1))
+        key, _ = write_capture(self.dir, ctl, code())
+        path = Path(self.dir, key + '.control')
+        with path.open('r+b') as stream:
+            stream.truncate(bsb.CONTROL_LIMIT + 1)
+        with self.assertRaises(bsb.CaptureError):
+            bsb.load_capture(self.dir, key)
 
     def test_capture_listing(self):
         key, _ = write_capture(self.dir, control(9, 0), code())
@@ -171,6 +210,8 @@ struct spvDescriptorSetBuffer0
     sampler fp_t_tcb_8Smplr [[id(4)]];
     texture2d<float> fp_t_cb4_1C [[id(5)]];
     constant spvSupport* support_buffer [[id(6)]];
+    texture2d<float> fp_t_cb2_8 [[id(7)]];
+    sampler fp_t_cb2_8Smplr [[id(8)]];
 };
 
 struct main0_out
@@ -182,7 +223,8 @@ struct main0_out
 fragment main0_out main0(constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
 '''
 SYNTHETIC_RES = {'notes': [], 'cbufs': [], 'sbufs': [], 'images': [],
-                 'textures': [{'binding': 3, 'handle': 8, 'cbuf_slot': -1}, {'binding': 5, 'handle': 0x1c, 'cbuf_slot': 4}]}
+                 'textures': [{'binding': 3, 'handle': 8, 'cbuf_slot': -1}, {'binding': 5, 'handle': 0x1c, 'cbuf_slot': 4},
+                              {'binding': 7, 'handle': 8, 'cbuf_slot': 2}]}
 
 
 class FactsAndAnalysis(unittest.TestCase):
@@ -217,7 +259,9 @@ class FactsAndAnalysis(unittest.TestCase):
     def test_unknowns_without_facts(self):
         _, _, unknowns, conflicts, required, _ = bsb.analyze(self.cap, bsb.Facts(), SYNTHETIC_RES, SYNTHETIC_MSL)
         what = {u['what'] for u in unknowns}
-        self.assertEqual(what, {'fp_c3', 'fp_c2', 'fp_t_tcb_8', 'fp_t_tcb_8Smplr', 'fp_t_cb4_1C', 'output 0', 'output 2', 'device_state'})
+        # fp_c2 is declared but never read: nothing outside the driver tables, so it is resolved.
+        self.assertEqual(what, {'fp_c3', 'fp_t_tcb_8', 'fp_t_tcb_8Smplr', 'fp_t_cb2_8', 'fp_t_cb2_8Smplr',
+                                'fp_t_cb4_1C', 'output 0', 'output 2', 'device_state'})
         self.assertEqual(conflicts, [])
         self.assertEqual(required['constant_buffers'], {'3': {'binding': None}})
         self.assertEqual(required['textures'], {'8': {'slot': None, 'type': None}})
@@ -234,9 +278,12 @@ class FactsAndAnalysis(unittest.TestCase):
         self.assertEqual(by['fp_c1']['kind'], 'c1')
         self.assertEqual((by['fp_t_tcb_8']['kind'], by['fp_t_tcb_8']['reg']), ('tex', 1))
         self.assertEqual((by['fp_t_tcb_8Smplr']['kind'], by['fp_t_tcb_8Smplr']['reg']), ('samp_tex', 1))
+        # An explicit c2 handle names the same driver texture table entry as tcb.
+        self.assertEqual((by['fp_t_cb2_8']['kind'], by['fp_t_cb2_8']['reg']), ('tex', 1))
+        self.assertEqual((by['fp_t_cb2_8Smplr']['kind'], by['fp_t_cb2_8Smplr']['reg']), ('samp_tex', 1))
         self.assertEqual(by['support_buffer']['kind'], 'support')
         # Driver bank reads and bindless handles stay unknown even with facts.
-        self.assertEqual({u['what'] for u in unknowns}, {'fp_c2', 'fp_t_cb4_1C'})
+        self.assertEqual({u['what'] for u in unknowns}, {'fp_t_cb4_1C'})
         self.assertEqual((conflicts, unused), ([], []))
         refl = bsb.reflection(self.cap, 'synthetic', ('fragment', 'main0'), bindings, [], f, 'B')
         self.assertEqual(refl['schema'], bsb.REFLECTION_SCHEMA)
@@ -248,7 +295,7 @@ class FactsAndAnalysis(unittest.TestCase):
                        outputs={'0': 'sint', '2': 'uint'},
                        device_state={'window_origin_mode': 'lower_left', 'depth_mode': 'near_is_zero'})
         _, _, _, conflicts, _, unused = bsb.analyze(self.cap, f, SYNTHETIC_RES, SYNTHETIC_MSL)
-        self.assertEqual({c['what'] for c in conflicts}, {'fp_t_tcb_8', 'output 0'})
+        self.assertEqual({c['what'] for c in conflicts}, {'fp_t_tcb_8', 'fp_t_cb2_8', 'output 0'})
         self.assertEqual(unused, ['textures[9]'])
 
     def test_translator_notes_block(self):
@@ -256,10 +303,12 @@ class FactsAndAnalysis(unittest.TestCase):
         _, _, unknowns, _, _, _ = bsb.analyze(self.cap, bsb.Facts(), res, SYNTHETIC_MSL)
         self.assertIn('translator query fallback', {u['what'] for u in unknowns})
 
-    def test_job_never_passes_texture_tables(self):
-        f = self.facts(textures={'8': {'slot': 1, 'type': '2d'}}, outputs={'0': 'float'})
+    def test_job_passes_texture_types_by_table_index(self):
+        # Handle words 8 and 0xA are bytes 0x20 and 0x28 of the c2 table: translator indices 0 and 1.
+        f = self.facts(textures={'8': {'slot': 1, 'type': '2d'}, '10': {'slot': 2, 'type': 'cube'}}, outputs={'0': 'float'})
         job = bsb.make_job(self.cap, f, '/nonexistent', {'xlate_debug': False, 'xlate_reduced': False})
-        self.assertEqual((job['tex'], job['img'], job['fout'], job['stage']), ({}, {}, {'0': 'float'}, 'ps'))
+        self.assertEqual((job['tex'], job['img'], job['fout'], job['stage']), ({'0': '2d', '1': 'cube'}, {}, {'0': 'float'}, 'ps'))
+        self.assertEqual([bsb.xlate_table_index(h) for h in (8, 9, 7, 0x48)], [0, None, None, 32])
         self.assertEqual(job['c1'], self.cap.c1.hex())
         self.assertNotIn('device_state', job)
 
@@ -276,11 +325,74 @@ class FactsAndAnalysis(unittest.TestCase):
                 self.assertEqual(refl['device_state'], state)
 
 
+class FragmentRaster(unittest.TestCase):
+    def test_written_outputs_discard_and_sample_mask(self):
+        msl = '''struct main0_out
+{
+    float4 m_0 [[color(0)]];
+    float4 m_2 [[color(2)]];
+};
+fragment main0_out main0() { main0_out out = {}; if (x) discard_fragment(); return out; }
+'''
+        self.assertEqual(bsb.fragment_raster(msl), {'discard': 1, 'sample_mask': 0, 'colors': [0, 2]})
+        msl2 = 'struct main0_out\n{\n    float4 m_1 [[color(1)]];\n    uint gl_SampleMask [[sample_mask]];\n};\n'
+        self.assertEqual(bsb.fragment_raster(msl2), {'discard': 0, 'sample_mask': 1, 'colors': [1]})
+        self.assertEqual(bsb.fragment_raster('fragment void main0() {}')['colors'], [])
+
+
+class DriverBanks(unittest.TestCase):
+    def test_reads_inside_and_outside_the_filled_tables(self):
+        msl = '''int a = as_type<int>((*spvDescriptorSet0.fp_c2)._m0[5].z);
+float b = (*spvDescriptorSet0.fp_c2)._m0[8u].x;'''
+        self.assertEqual(bsb.driver_bank_reads(msl, 'fp_c2', 2, 1), ([0x50, 0x80], []))
+        self.assertEqual(bsb.driver_bank_reads('(*s.fp_c2)._m0[20].x', 'fp_c2', 2, 1), ([0x140], ['c2+0x140']))
+        self.assertEqual(bsb.driver_bank_reads('(*s.fp_c2)._m0[i].x', 'fp_c2', 2, 1), ([], ['dynamic index']))
+        compute = '(*s.cp_c0)._m0[38].x; (*s.cp_c0)._m0[49].y; (*s.cp_c0)._m0[65].x'
+        self.assertEqual(bsb.driver_bank_reads(compute, 'cp_c0', 0, 5), ([0x260, 0x310, 0x410], ['c0+0x410']))
+        self.assertEqual(bsb.driver_bank_reads('(*s.vp_c0)._m0[97].x', 'vp_c0', 0, 0), ([0x610], ['c0+0x610']))
+
+    def test_compute_uniform_pointers_and_reflection_reads(self):
+        with tempfile.TemporaryDirectory(prefix='botw_shader_drv_') as tmp:
+            key, _ = write_capture(tmp, control(14, 5, c1_offset=0x20, code_size=0x20), code(0x20, graphics=False))
+            cap = bsb.load_capture(tmp, key)
+            msl = '''struct spvDescriptorSetBuffer0
+{
+    device _1* cp_s0 [[id(0)]];
+    device _1* cp_s1 [[id(1)]];
+    constant _2* cp_c0 [[id(2)]];
+};
+int x = as_type<int>((*spvDescriptorSet0.cp_c0)._m0[38].x);
+'''
+            res = {'notes': [], 'textures': [], 'images': [], 'cbufs': [],
+                   'sbufs': [{'binding': 0, 'cb_slot': 0, 'cb_offset': 0x260 // 4, 'flags': 0},
+                             {'binding': 1, 'cb_slot': 0, 'cb_offset': 0x310 // 4, 'flags': 2}]}
+            bindings, _, unknowns, _, required, _ = bsb.analyze(cap, bsb.Facts(), res, msl)
+            self.assertEqual(required['uniform_pointers'], {str(0x260): {'binding': None}})
+            self.assertEqual(required['storage_buffers'], {str(0x310): {'slot': None}})
+            doc = {'schema': 'botw-shader-facts-v1', 'key': cap.key, 'sha256': cap.sha256, 'stage': 'compute',
+                   'provenance': 'synthetic', 'uniform_pointers': {str(0x260): {'binding': 5}},
+                   'storage_buffers': {str(0x310): {'slot': 0}}, 'compute': {'local_size': [1, 1, 1], 'shared_memory': 0}}
+            path = os.path.join(tmp, key + '.facts.json'); Path(path).write_text(json.dumps(doc))
+            f = bsb.load_facts(path, cap)
+            bindings, _, unknowns, conflicts, _, unused = bsb.analyze(cap, f, res, msl)
+            by = {b['msl_name']: b for b in bindings}
+            self.assertEqual((by['cp_s0']['kind'], by['cp_s0']['reg']), ('ubo_ptr', 5))
+            self.assertEqual((by['cp_s1']['kind'], by['cp_s1']['reg'], by['cp_s1']['rw']), ('sbuf', 0, True))
+            self.assertEqual((by['cp_c0']['kind'], by['cp_c0']['vec4_offsets']), ('drvcb', [0x260]))
+            self.assertEqual((unknowns, conflicts, unused), ([], [], []))
+            refl = bsb.reflection(cap, 'synthetic', ('kernel', 'main0'), bindings, [], f, 'B')
+            self.assertEqual(refl['drv_reads'], {'0': {'vec4_offsets': [0x260], 'dynamic': False}})
+            Path(path).write_text(json.dumps(dict(doc, stage='vertex')))
+            with self.assertRaises(bsb.FactsError):
+                bsb.load_facts(path, cap)
+
+
 class RunnablePublication(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='botw_shader_publish_')
-        self.root = os.path.join(self.tmp.name, 'botw-b-0123456789ab')
-        self.work = os.path.join(self.tmp.name, 'work')
+        base = os.path.realpath(self.tmp.name)  # builds record resolved output paths
+        self.root = os.path.join(base, 'botw-b-0123456789ab')
+        self.work = os.path.join(base, 'work')
         os.mkdir(self.root); os.mkdir(self.work)
         self.key = '0123456789abcdef'
         Path(self.work, self.key + '_b.metallib').write_bytes(b'MTLB synthetic metallib')
@@ -346,6 +458,143 @@ class RunnablePublication(unittest.TestCase):
         with self.assertRaises(bsb.ToolError):
             bsb.publish_ready(self.root, self.work, self.key, self.reflection, blocked, 'synthetic metal')
         self.assertFalse(blocked['runnable'])
+
+    def test_merge_replaces_only_rebuilt_keys(self):
+        old_a = {'key': 'a' * 16, 'status': 'ready'}
+        old_b = {'key': 'b' * 16, 'status': 'failed'}
+        bsb.write_json(os.path.join(self.root, 'manifest-build.json'),
+                       bsb.make_manifest('build', '0123456789ab', {}, {}, '/caps', '/facts', self.root, [old_b, old_a]))
+        new_b = {'key': 'b' * 16, 'status': 'ready'}
+        new_c = {'key': 'c' * 16, 'status': 'ready'}
+        merged = bsb.merge_results(self.root, '0123456789ab', [new_c, new_b])
+        self.assertEqual(merged, [old_a, new_b, new_c])
+        # A published build keeps its complete results in build-report.json; merge reads that.
+        bsb.write_json(os.path.join(self.root, 'build-report.json'),
+                       bsb.make_manifest('build', '0123456789ab', {}, {}, '/caps', '/facts', self.root, [old_a, old_b, new_c]))
+        self.assertEqual(bsb.merge_results(self.root, '0123456789ab', [new_b]), [old_a, new_b, new_c])
+        with self.assertRaises(bsb.ToolError):
+            bsb.merge_results(self.root, 'ffffffffffff', [new_b])
+
+    def test_publish_keeps_only_ready_results(self):
+        bsb.publish_ready(self.root, self.work, self.key, self.reflection, self.result, 'synthetic metal')
+        failed = {'key': 'f' * 16, 'status': 'failed', 'runnable': False,
+                  'errors': ['synthetic failure'], 'unknowns': [], 'conflicts': [], 'files': {}}
+        full = bsb.make_manifest('build', '0123456789ab', {}, {}, '/caps', '/facts', self.root,
+                                 [self.result, failed], argv=['synthetic'])
+        self.assertFalse(full['runnable'])
+        path = os.path.join(self.root, 'manifest-build.json')
+        bsb.write_json(path, full)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bsb.main(['publish', path]), 0)
+            published = json.loads(Path(path).read_text())
+            self.assertTrue(published['runnable'])
+            self.assertEqual([r['key'] for r in published['results']], [self.key])
+            self.assertEqual(published['published']['excluded'], {'f' * 16: 'failed'})
+            report = json.loads(Path(self.root, 'build-report.json').read_text())
+            self.assertEqual(len(report['results']), 2)
+            # Publishing again reads the full report, not the already reduced manifest.
+            self.assertEqual(bsb.main(['publish', path]), 0)
+            self.assertEqual(json.loads(Path(path).read_text())['published']['results'], 2)
+            # A published file that changed after the build is refused.
+            Path(self.root, self.key + '_b.metallib').write_bytes(b'MTLB changed')
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(bsb.main(['publish', path]), 2)
+
+
+PAD_MSL = '''struct main0_out
+{
+    float4 gl_Position [[position]];
+    float4 m_1 [[user(locn1)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]])
+{
+    main0_out out = {};
+    out.m_1 = float4(1.0);
+    return out;
+}
+'''
+
+
+class VertexPadding(unittest.TestCase):
+    def test_sph_input_locations(self):
+        with tempfile.TemporaryDirectory(prefix='botw_shader_pad_') as tmp:
+            cod = code(sph_type=5)
+            for word in range(6, 14):
+                struct.pack_into('<I', cod, 0x30 + 4 * word, 0)
+            struct.pack_into('<I', cod, 0x30 + 4 * 6, 0x0000ff00)   # attribute 1
+            struct.pack_into('<I', cod, 0x30 + 4 * 7, 0xaa000000)   # attribute 7
+            struct.pack_into('<I', cod, 0x30 + 4 * 13, 0x00010000)  # attribute 30
+            key, _ = write_capture(tmp, control(9, 1), cod)
+            self.assertEqual(bsb.sph_input_locations(bsb.load_capture(tmp, key)), {1, 7, 30})
+
+    def test_pad_vertex_outputs(self):
+        src, pad = bsb.pad_vertex_outputs(PAD_MSL, {1, 3, 7})
+        self.assertEqual(pad, [3, 7])
+        self.assertIn('    float4 dm_pad3 [[user(locn3)]];\n    float4 dm_pad7 [[user(locn7)]];\n};', src)
+        self.assertIn('main0_out out = {};\n    out.dm_pad3 = float4(0.0, 0.0, 0.0, 1.0);', src)
+        self.assertEqual(bsb.pad_vertex_outputs(PAD_MSL, {1}), (PAD_MSL, []))
+        self.assertEqual(bsb.pad_vertex_outputs('kernel void main0() {}', {1}), ('kernel void main0() {}', None))
+
+    def test_load_pairs(self):
+        with tempfile.TemporaryDirectory(prefix='botw_shader_pad_') as tmp:
+            p = Path(tmp, 'pairs.tsv')
+            p.write_text('# comment\n' + 'a' * 16 + '\t' + 'b' * 16 + '\n' + 'a' * 16 + '\t' + 'c' * 16 + '\n')
+            self.assertEqual(bsb.load_pairs(str(p)), {'a' * 16: {'b' * 16, 'c' * 16}})
+            p.write_text('A' * 16 + '\t' + 'b' * 16 + '\n')
+            with self.assertRaises(bsb.ToolError):
+                bsb.load_pairs(str(p))
+
+
+FAKE_XLATE = '''#!/usr/bin/env python3
+# Synthetic translator: fails every non-debug job whose key starts with "f",
+# and records the chunk it ran in.
+import json, os, sys
+jobs = json.load(open(sys.argv[1]))
+for job in jobs:
+    if job['key'].startswith('f') and not job['debug']:
+        print(f"[FAIL] {job['key']}: InvalidCastException: synthetic optimizer failure", file=sys.stderr)
+        continue
+    for ext in ('.spv', '.res.json'):
+        with open(os.path.join(sys.argv[2], job['key'] + ext), 'w') as f:
+            f.write(json.dumps({'chunk': os.path.basename(sys.argv[1]), 'debug': job['debug']}))
+'''
+
+
+class Translation(unittest.TestCase):
+    def test_parallel_chunks_and_debug_retry(self):
+        with tempfile.TemporaryDirectory(prefix='botw_shader_xlate_') as tmp:
+            exe = Path(tmp, 'fake_xlate')
+            exe.write_text(FAKE_XLATE)
+            exe.chmod(0o700)
+            work = os.path.join(tmp, 'work'); os.mkdir(work)
+            tools = bsb.Tools(xlate=str(exe))
+            keys = ['a000000000000000', 'b000000000000000', 'f000000000000000', 'c000000000000000']
+            jobs = [{'key': k, 'debug': False, 'reduced': False} for k in keys]
+            final, xerr, retries = bsb.translate_with_retry(tools, jobs, work, parallel=3)
+            self.assertEqual({k: v is None for k, v in xerr.items()}, dict.fromkeys(keys, True))
+            self.assertEqual(list(retries), ['f000000000000000'])
+            self.assertTrue(retries['f000000000000000']['recovered'])
+            self.assertIn('synthetic optimizer failure', retries['f000000000000000']['first_error']['translator_stderr'][0])
+            self.assertEqual([j['debug'] for j in final], [False, False, True, False])
+            # Chunks are jobs[i::3]: a and c share the first, b has the second, f the third;
+            # f is then retried on its own with debug enabled.
+            chunk = {k: json.loads(Path(work, k + '.res.json').read_text()) for k in keys}
+            self.assertEqual({k: v['chunk'] for k, v in chunk.items()},
+                             {'a000000000000000': 'jobs-0.json', 'b000000000000000': 'jobs-1.json',
+                              'f000000000000000': 'retry-0.json', 'c000000000000000': 'jobs-0.json'})
+            self.assertTrue(Path(work, 'jobs-2.json').exists())
+
+    def test_unrecovered_failure_is_reported(self):
+        with tempfile.TemporaryDirectory(prefix='botw_shader_xlate_') as tmp:
+            exe = Path(tmp, 'fake_xlate')
+            exe.write_text(FAKE_XLATE.replace("and not job['debug']", ''))
+            exe.chmod(0o700)
+            work = os.path.join(tmp, 'work'); os.mkdir(work)
+            _, xerr, retries = bsb.translate_with_retry(bsb.Tools(xlate=str(exe)),
+                                                        [{'key': 'f000000000000000', 'debug': False, 'reduced': False}], work)
+            self.assertFalse(retries['f000000000000000']['recovered'])
+            self.assertEqual(xerr['f000000000000000']['missing'], ['.spv', '.res.json'])
 
 
 class Cli(unittest.TestCase):

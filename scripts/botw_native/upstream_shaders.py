@@ -12,10 +12,11 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 
 VENDOR = Path(__file__).resolve().parents[2] / 'native/botw_resources/shader_toolchain'
-COMMIT = '5f673ae2ea4f90ad46403aa6fbe13537fb557271'
+COMMIT = '21f026e0c7fd9fee575a1bfa8d925553bb4db88e'
 STAGES = {'vertex': 0, 'fragment': 1, 'geometry': 2, 'tess_control': 3,
           'tess_evaluation': 4, 'compute': 5}
 HEX64 = re.compile(r'[0-9a-f]{64}')
@@ -70,8 +71,11 @@ def verify_vendor():
     if metadata.get('schema') != 1 or metadata.get('commit') != COMMIT:
         raise ValueError('unexpected pinned shader toolchain identity')
     files = metadata.get('files')
-    if not isinstance(files, dict) or not 360 <= len(files) <= 1000:
+    if not isinstance(files, dict) or len(files) != 374:
         raise ValueError('invalid pinned shader toolchain file manifest')
+    if (not isinstance(metadata.get('git_blobs'), dict) or
+            set(metadata['git_blobs']) != set(files)):
+        raise ValueError('incomplete pinned Git blob manifest')
     for name, digest in files.items():
         relative = Path(name)
         if (relative.is_absolute() or '..' in relative.parts or not isinstance(digest, str)
@@ -80,8 +84,12 @@ def verify_vendor():
         path = VENDOR / relative
         if not path.resolve().is_relative_to(VENDOR.resolve()):
             raise ValueError('shader toolchain source escapes vendor directory')
-        if hashlib.sha256(_read(path, 8 * 1024 * 1024)).hexdigest() != digest:
+        data = _read(path, 8 * 1024 * 1024)
+        if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError(f'pinned shader toolchain SHA256 mismatch: {name}')
+        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+        if metadata.get('git_blobs', {}).get(name) != blob:
+            raise ValueError(f'pinned shader toolchain Git blob mismatch: {name}')
     return {'commit': COMMIT, 'verified_files': len(files)}
 
 
@@ -136,7 +144,7 @@ def export_captures(inputs_directory, destination, *, max_records=100000,
             if not isinstance(row, dict) or row.get('stage') not in STAGES:
                 raise ValueError(f'invalid stage in extraction record {index}')
             payloads = {}
-            for kind, suffix, limit in [('control', '.control', 0x10000),
+            for kind, suffix, limit in [('control', '.control', tool.CONTROL_LIMIT),
                                          ('code', '.nvn', tool.CODE_LIMIT)]:
                 digest, name = row.get(kind + '_sha256'), row.get(kind + '_file')
                 if (not isinstance(digest, str) or not HEX64.fullmatch(digest)
@@ -190,14 +198,51 @@ def export_captures(inputs_directory, destination, *, max_records=100000,
     return report
 
 
+def strict_release_build(inputs_directory, captures_directory, facts_directory,
+                         derive_report_path, evidence_path, destination, *,
+                         xlate=None, spirv_cross=None, jobs=1):
+    """Admit and snapshot all inputs before the complete upstream build runs.
+
+    No probe/default/merge/subset escape is provided by this release entry point.
+    Upstream still checks translator source identity and every emitted resource.
+    Its raw CLI remains available separately for research.
+    """
+    from .shader_bindings import prepare_release
+    if type(jobs) is not int or not 1 <= jobs <= 256:
+        raise ValueError('release jobs must be an integer in 1..256')
+    tool = load_tool()
+    destination = Path(destination)
+    prepare_release(tool, inputs_directory, captures_directory, facts_directory,
+                    derive_report_path, evidence_path, destination)
+    arguments = ['build', str(destination / 'captures'), '--facts', str(destination / 'facts'),
+                 '--out', str(destination / 'build'), '--jobs', str(jobs)]
+    for flag, value in (('--xlate', xlate), ('--spirv-cross', spirv_cross)):
+        if value is not None:
+            arguments.extend((flag, str(value)))
+    return tool.main(arguments)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('verify-source', help='verify all pinned public source hashes')
     export = commands.add_parser('export', help='export hash-bound extraction inputs to fresh captures')
     export.add_argument('inputs'); export.add_argument('destination')
-    tool = commands.add_parser('tool', help='run the unmodified strict upstream build CLI')
+    tool = commands.add_parser('tool', help='raw upstream build CLI; research results are not release authority')
     tool.add_argument('arguments', nargs=argparse.REMAINDER)
+    for name in ('derive', 'extract'):
+        raw = commands.add_parser('raw-' + name, help=f'run the complete upstream {name} research CLI')
+        raw.add_argument('arguments', nargs=argparse.REMAINDER)
+    for name in ('strict-check', 'strict-prepare', 'strict-build'):
+        strict = commands.add_parser(name, help='require hash-bound base-v0 facts review for the whole batch')
+        for argument in ('inputs', 'captures', 'facts', 'derive_report', 'evidence'):
+            strict.add_argument(argument)
+        if name != 'strict-check':
+            strict.add_argument('destination')
+        if name == 'strict-build':
+            strict.add_argument('--xlate')
+            strict.add_argument('--spirv-cross')
+            strict.add_argument('--jobs', type=int, default=1)
     args = parser.parse_args(argv)
     try:
         if args.command == 'verify-source':
@@ -209,7 +254,25 @@ def main(argv=None):
                               'rejected': len(report['rejected']),
                               'report': str(Path(args.destination) / 'capture-sources.json')}, sort_keys=True))
             return int(bool(report['rejected']))
+        if args.command.startswith('strict-'):
+            from . import shader_bindings as gate
+            inputs = (args.inputs, args.captures, args.facts, args.derive_report, args.evidence)
+            if args.command == 'strict-build':
+                return strict_release_build(*inputs, args.destination, xlate=args.xlate,
+                                            spirv_cross=args.spirv_cross, jobs=args.jobs)
+            if args.command == 'strict-prepare':
+                result = gate.prepare_release(load_tool(), *inputs, args.destination)
+            else:
+                result = gate.check_release(load_tool(), *inputs)
+            print(json.dumps({'approved': result['approved'], 'profile': result['profile'],
+                              'captures': len(result['captures']),
+                              'input_manifest_sha256': result['input_manifest_sha256']}, sort_keys=True))
+            return 0
         arguments = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
+        if args.command in ('raw-extract', 'raw-derive'):
+            verify_vendor()
+            script = VENDOR / ('dm/gfx/tools/botw_shader_' + args.command[4:] + '.py')
+            return subprocess.run([sys.executable, '-B', str(script), *arguments], check=False).returncode
         return load_tool().main(arguments)
     except (ValueError, OSError) as exc:
         print(f'error: {exc}', file=sys.stderr)

@@ -31,6 +31,7 @@ tree; generated shader bytes never belong in the repository. This tool never
 writes shader_map.tsv or any other runtime table.
 """
 import argparse
+import concurrent.futures
 import datetime
 import hashlib
 import json
@@ -52,7 +53,10 @@ SCHEMA = 'botw-shader-v1'
 DOMAIN = SCHEMA.encode() + b'\0'
 SHADER_MAGIC = 0x98761234
 CODE_MAGIC = 0x12345678
-CONTROL_SIZES = {9: 0x7d1, 14: 0x848}
+CONTROL_VERSIONS = frozenset((9, 14))
+CONTROL_HEADER_SIZE = 0x718
+# Resource policy for opaque control tails, not a serialized format size.
+CONTROL_LIMIT = 1024 * 1024
 CODE_LIMIT = 16 * 1024 * 1024
 JSON_LIMIT = 1536
 FIELDS = ('version', 'stage', 'control_size', 'code_size', 'code_offset', 'c1_offset', 'c1_size')
@@ -61,6 +65,32 @@ STAGE_NAMES = {0: 'vertex', 1: 'fragment', 2: 'geometry', 3: 'tess_control', 4: 
 XLATE_STAGE = {0: 'vs', 1: 'ps', 5: 'cs'}
 KEY_RE = re.compile(r'[0-9a-f]{16}')
 HEX64_RE = re.compile(r'[0-9a-f]{64}')
+
+# Constant bank holding the NVN driver texture handle table.
+NVN_TEXTURE_BANK = 2
+# Driver bank tables the replay layer fills from the current bindings (nvn_mtl.m, NVN_RB_DRV0 / NVN_RB_DRV2), as byte
+# ranges per bank and stage: c0 holds each stage's storage buffer table (address, size per 16 bytes) and, for compute,
+# the uniform buffer pointer table at 0x210; c2 holds the texture handle table at 0x20 + 8 r. These are the values the
+# NVN driver writes on hardware, so a shader may read them as data.
+DRIVER_TABLES = {0: {0: [(0x110, 0x210)], 1: [(0x510, 0x610)], 5: [(0x210, 0x410)]},
+                 2: {0: [(0x20, 0x120)], 1: [(0x20, 0x120)], 5: [(0x20, 0x120)]}}
+UNIFORM_POINTER_TABLE = (0x210, 0x310)   # compute: uniform buffer r's address at c0 + 0x210 + 16 r
+
+
+def driver_bank_reads(msl, name, bank, stage):
+    """16-byte rows of driver bank `bank` the MSL reads through resource `name`, and the reads outside the tables
+    the replay fills (dynamic indices included)."""
+    rows, outside = set(), []
+    tables = DRIVER_TABLES.get(bank, {}).get(stage, [])
+    for m in re.finditer(r'%s\)\._m0\[([^\]]+)\]' % re.escape(name), msl):
+        idx = m.group(1).rstrip('u')
+        if not idx.isdigit():
+            outside.append('dynamic index'); continue
+        off = int(idx) * 16
+        rows.add(off)
+        if not any(lo <= off and off + 16 <= hi for lo, hi in tables):
+            outside.append(f'c{bank}+{off:#x}')
+    return sorted(rows), sorted(set(outside))
 
 # nvn_refl.h limits.
 REFL_MAX_BINDINGS = 64
@@ -277,12 +307,12 @@ def canonical_capture_json(key, sha256, fields, control_sha256, code_sha256):
 
 def parse_control(control):
     """Applies the runtime acceptance checks and returns the seven hashed fields."""
-    if len(control) < 0x718:
+    if len(control) < CONTROL_HEADER_SIZE:
         raise CaptureError(f'control is {len(control)} bytes, shorter than the 0x718-byte header')
     version, size = u32(control, 8), u32(control, 0x20)
-    if u32(control, 0) != SHADER_MAGIC or u32(control, 4) != 1 or version not in CONTROL_SIZES:
+    if u32(control, 0) != SHADER_MAGIC or u32(control, 4) != 1 or version not in CONTROL_VERSIONS:
         raise CaptureError('unsupported shader control magic or version')
-    if size != CONTROL_SIZES[version]:
+    if not CONTROL_HEADER_SIZE <= size <= CONTROL_LIMIT:
         raise CaptureError(f'unexpected shader control size {size:#x} for version {version}')
     if len(control) != size:
         raise CaptureError(f'control file has {len(control)} bytes, header says {size}')
@@ -357,7 +387,7 @@ def load_capture(directory, key):
         raise CaptureError('key is not the first 16 digits of sha256')
     if meta['control_file'] != key + '.control' or meta['code_file'] != key + '.code':
         raise CaptureError('control_file / code_file do not name this capture')
-    control = read_regular(os.path.join(directory, key + '.control'), max(CONTROL_SIZES.values()))
+    control = read_regular(os.path.join(directory, key + '.control'), CONTROL_LIMIT)
     code = read_regular(os.path.join(directory, key + '.code'), CODE_LIMIT)
     if sha256_hex(control) != meta['control_sha256']:
         raise CaptureError('control_sha256 does not match the control file')
@@ -427,6 +457,7 @@ class Facts:
         self.path, self.sha256, self.provenance = path, sha256, provenance
         self.constant_buffers, self.textures, self.images, self.storage_buffers = {}, {}, {}, {}
         self.attributes, self.outputs, self.compute, self.device_state = {}, {}, None, None
+        self.uniform_pointers = {}
 
 
 def load_facts(path, capture):
@@ -436,7 +467,7 @@ def load_facts(path, capture):
     except CaptureError as e:
         raise FactsError(str(e))
     top = {'schema', 'key', 'sha256', 'stage', 'provenance', 'constant_buffers', 'textures', 'images',
-           'storage_buffers', 'attributes', 'outputs', 'compute', 'device_state'}
+           'storage_buffers', 'uniform_pointers', 'attributes', 'outputs', 'compute', 'device_state'}
     _object(doc, 'facts', top, ('schema', 'key', 'sha256', 'stage', 'provenance'))
     if doc['schema'] != FACTS_SCHEMA:
         raise FactsError(f'schema must be {FACTS_SCHEMA}')
@@ -469,6 +500,13 @@ def load_facts(path, capture):
         off = _index(k, 'storage_buffers', 0, 0xffff)
         _object(v, f'storage_buffers[{k}]', ('slot',), ('slot',))
         f.storage_buffers[off] = _slot(v, 'slot', f'storage_buffers[{k}]')
+    values = _map(doc, 'uniform_pointers')
+    if values and capture.stage_name != 'compute':
+        raise FactsError('uniform_pointers facts apply only to compute shaders')
+    for k, v in values.items():
+        off = _index(k, 'uniform_pointers', 0, 0xffff)
+        _object(v, f'uniform_pointers[{k}]', ('binding',), ('binding',))
+        f.uniform_pointers[off] = _slot(v, 'binding', f'uniform_pointers[{k}]')
     for table, lo_hi, stage in (('attributes', 31, 'vertex'), ('outputs', 7, 'fragment')):
         values = _map(doc, table)
         if values and capture.stage_name != stage:
@@ -668,11 +706,22 @@ MTL_SCALAR = {3: 'float', 4: 'float', 5: 'float', 6: 'float', 16: 'float', 17: '
 
 # Translation and analysis --------------------------------------------------
 
+XLATE_TEX_BASE = 0x20  # must equal TexBase in dmsh_xlate/Program.cs
+
+
+def xlate_table_index(handle):
+    """Handle-table index dmsh_xlate computes for a handle (TexSlot), or None outside the table."""
+    byte = (handle & 0x3fff) * 4
+    return (byte - XLATE_TEX_BASE) // 8 if byte >= XLATE_TEX_BASE and (byte - XLATE_TEX_BASE) % 8 == 0 else None
+
+
 def make_job(capture, facts, code_path, options):
     job = {'key': capture.key, 'stage': XLATE_STAGE[capture.stage], 'code': code_path, 'c1': capture.c1.hex(),
-           # Texture and image facts are not passed: Program.cs resolves them only through the
-           # D2R handle table window (c[2] 0x168 / 0x568), which is not a BotW fact.
-           'tex': {}, 'img': {},
+           # Texture and image types answer the translator's type queries for instructions that do not encode
+           # the dimension. dmsh_xlate keys them by driver handle-table index ((byte - 0x20) / 8).
+           'tex': {str(i): f['type'] for h, f in sorted(facts.textures.items()) if (i := xlate_table_index(h)) is not None},
+           'img': {str(i): {'type': f['type'], 'fmt': f['format']} for h, f in sorted(facts.images.items())
+                   if (i := xlate_table_index(h)) is not None},
            'attr': {str(k): v for k, v in sorted(facts.attributes.items())},
            'fout': {str(k): v for k, v in sorted(facts.outputs.items())},
            'debug': options['xlate_debug'], 'reduced': options['xlate_reduced']}
@@ -684,25 +733,53 @@ def make_job(capture, facts, code_path, options):
     return job
 
 
-def translate(tools, jobs, work):
-    """Runs one translator process over all jobs. Returns {key: error or None}."""
+def translate(tools, jobs, work, parallel=1, tag='jobs'):
+    """Runs up to `parallel` translator processes over disjoint job chunks.
+    Returns {key: error or None}."""
     argv, _ = tools.xlate_argv()
-    job_path = os.path.join(work, 'jobs.json')
-    write_json(job_path, jobs)
-    r = run(argv + [job_path, work], 1800)
-    stderr = r.stderr.decode('utf-8', 'replace').splitlines()
-    out = {}
-    for job in jobs:
-        key = job['key']
-        lines = [ln for ln in stderr if key in ln]
-        missing = [s for s in ('.spv', '.res.json') if not os.path.exists(os.path.join(work, key + s))]
-        out[key] = None if not lines and not missing else {'missing': missing, 'translator_stderr': lines}
-    return out
+    chunks = [jobs[i::parallel] for i in range(max(1, parallel))]
+    chunks = [c for c in chunks if c]
+
+    def one(i):
+        job_path = os.path.join(work, f'{tag}-{i}.json')
+        write_json(job_path, chunks[i])
+        r = run(argv + [job_path, work], 3600)
+        stderr = r.stderr.decode('utf-8', 'replace').splitlines()
+        out = {}
+        for job in chunks[i]:
+            key = job['key']
+            lines = [ln for ln in stderr if key in ln]
+            missing = [s for s in ('.spv', '.res.json') if not os.path.exists(os.path.join(work, key + s))]
+            out[key] = None if not lines and not missing else {'missing': missing, 'translator_stderr': lines}
+        return out
+
+    with concurrent.futures.ThreadPoolExecutor(max(1, len(chunks))) as ex:
+        merged = {}
+        for part in ex.map(one, range(len(chunks))):
+            merged.update(part)
+    return merged
+
+
+def translate_with_retry(tools, jobs, work, parallel=1):
+    """The translator's AST optimizer rejects some programs that it translates
+    with DebugMode on (optimizer skipped). Failed jobs are retried once with
+    debug enabled; DebugMode does not change semantics. Returns (jobs as finally
+    translated, {key: error or None}, {key: retry record})."""
+    xerr = translate(tools, jobs, work, parallel)
+    retry = [dict(job, debug=True) for job in jobs if xerr[job['key']] and not job['debug']]
+    if not retry:
+        return jobs, xerr, {}
+    first = {job['key']: xerr[job['key']] for job in retry}
+    xerr.update(translate(tools, retry, work, parallel, 'retry'))
+    by_key = {job['key']: job for job in retry}
+    records = {k: {'debug': True, 'first_error': first[k], 'recovered': xerr[k] is None} for k in by_key}
+    return [by_key.get(job['key'], job) for job in jobs], xerr, records
 
 
 def tex_handle(name):
     """MSL resource name -> (kind, handle, cbuf) for Ryujinx texture/image names."""
-    m = re.fullmatch(r'[a-z]+_([ti])\w*?_(?:cb(\d+)|tcb)_([0-9A-F]+)(Smplr)?', name)
+    # Images carry the translator's GLSL format name after the handle (empty for an unknown format).
+    m = re.fullmatch(r'[a-z]+_([ti])\w*?_(?:cb(\d+)|tcb)_([0-9A-F]+)(?:_[a-z0-9]*)?(Smplr)?', name)
     if not m:
         return None
     kind = 'samp' if m.group(4) else ('img' if m.group(1) == 'i' else 'tex')
@@ -713,13 +790,13 @@ def analyze(capture, facts, res, msl):
     """Resolves every MSL binding, vertex input and fragment output against explicit
     facts. Returns (bindings, unknowns, conflicts, required, used)."""
     unknowns, conflicts = [], []
-    required = {'constant_buffers': {}, 'textures': {}, 'images': {}, 'storage_buffers': {},
+    required = {'constant_buffers': {}, 'textures': {}, 'images': {}, 'storage_buffers': {}, 'uniform_pointers': {},
                 'attributes': {}, 'outputs': {}}
     # Facts files always need these identity fields; a probe lists them for convenience.
     required_identity = {'schema': FACTS_SCHEMA, 'key': capture.key, 'sha256': capture.sha256,
                          'stage': capture.stage_name, 'provenance': None}
     used = {'constant_buffers': set(), 'textures': set(), 'images': set(), 'storage_buffers': set(),
-            'attributes': set(), 'outputs': set()}
+            'uniform_pointers': set(), 'attributes': set(), 'outputs': set()}
     for note in res.get('notes', []):
         unknowns.append({'what': 'translator query fallback', 'detail': 'translator answered a query with a default',
                          'raw_note': note})
@@ -753,7 +830,11 @@ def analyze(capture, facts, res, msl):
                 e['bank'] = 1
             elif n in (0, 2):
                 e.update(kind='drvcb', bank=n)
-                unknown(f'reads NVN driver constant bank c{n}; the BotW driver bank layout is not established')
+                reads, outside = driver_bank_reads(msl, name, n, capture.stage)
+                if outside:
+                    unknown(f'reads NVN driver constant bank c{n} outside the tables the replay fills: {", ".join(outside)}')
+                else:
+                    e['vec4_offsets'] = reads
             else:
                 e['kind'] = 'cbuf'
                 used['constant_buffers'].add(n)
@@ -772,6 +853,15 @@ def analyze(capture, facts, res, msl):
             else:
                 off = b['cb_offset'] * 4
                 e['c0_offset'] = off
+                if capture.stage == 5 and UNIFORM_POINTER_TABLE[0] <= off < UNIFORM_POINTER_TABLE[1]:
+                    # Compute reads uniform buffers through device pointers in c0.
+                    used['uniform_pointers'].add(off)
+                    if off in facts.uniform_pointers:
+                        e.update(kind='ubo_ptr', reg=facts.uniform_pointers[off])
+                    else:
+                        required['uniform_pointers'][str(off)] = {'binding': None}
+                        unknown(f'uniform buffer pointer at c0+{off:#x} has no NVN uniform binding fact')
+                    continue
                 used['storage_buffers'].add(off)
                 if off in facts.storage_buffers:
                     e['reg'] = facts.storage_buffers[off]
@@ -781,7 +871,10 @@ def analyze(capture, facts, res, msl):
         elif th:
             kind, handle, cbuf = th
             e['handle'] = handle
-            if cbuf is not None:
+            # An explicit c2 handle (texture and sampler both in bank 2) reads the
+            # NVN driver texture handle table, exactly like the implicit tcb form;
+            # dmsh_xlate's TexSlot applies the same rule.
+            if cbuf is not None and cbuf != NVN_TEXTURE_BANK:
                 e['kind'] = '?'
                 unknown(f'bindless handle read from constant buffer c{cbuf}; no binding rule is established')
                 continue
@@ -863,11 +956,63 @@ def analyze(capture, facts, res, msl):
     if len(capture.c1) > REFL_MAX_C1:
         unknowns.append({'what': 'c1', 'detail': f'C1 segment is {len(capture.c1)} bytes, above the nvn_refl limit {REFL_MAX_C1}'})
     unused = []
-    for table in ('constant_buffers', 'textures', 'images', 'storage_buffers', 'attributes', 'outputs'):
+    for table in ('constant_buffers', 'textures', 'images', 'storage_buffers', 'uniform_pointers', 'attributes', 'outputs'):
         for k in sorted(set(getattr(facts, table)) - used[table]):
             unused.append(f'{table}[{k}]')
     required = dict(required_identity, **{k: v for k, v in required.items() if v})
     return bindings, vertex_inputs, unknowns, conflicts, required, unused
+
+
+def sph_input_locations(capture):
+    """Generic attributes a fragment shader reads: SPH words 6..13 are the input
+    map, 8 bits per attribute (Ryujinx ShaderHeader.ImapTypes); nonzero = read.
+    The translated MSL inputs are exactly [[user(locn<attribute>)]]."""
+    base = capture.fields['code_offset']
+    return {i for i in range(32) if u32(capture.code, base + 4 * (6 + (i >> 2))) >> ((i & 3) * 8) & 0xff}
+
+
+def load_pairs(path):
+    """pairs.tsv (vertex key <TAB> pixel key) -> {vertex key: {pixel keys}}."""
+    pairs = {}
+    with open(path) as f:
+        for ln in f:
+            if ln.strip() and not ln.startswith('#'):
+                v, q = ln.split()
+                if not KEY_RE.fullmatch(v) or not KEY_RE.fullmatch(q):
+                    raise ToolError(f'{path}: invalid pair line {ln.strip()!r}')
+                pairs.setdefault(v, set()).add(q)
+    return pairs
+
+
+def pad_vertex_outputs(msl, want):
+    """Adds the outputs a vertex shader's paired fragment shaders read but it does
+    not write, as float4(0, 0, 0, 1), the default Ryujinx gives an unwritten
+    attribute when it links stages. Metal refuses a pipeline whose fragment input
+    is not a vertex output. Returns (msl, padded locations) or (msl, None) when
+    the MSL does not have the expected shape."""
+    i = msl.find('struct main0_out\n{\n')
+    j = msl.find('\n};', i) if i >= 0 else -1
+    if i < 0 or j < 0:
+        return msl, None
+    have = {int(x) for x in re.findall(r'\[\[user\(locn(\d+)\)\]\]', msl[i:j])}
+    miss = sorted(set(want) - have)
+    if not miss:
+        return msl, []
+    if msl.count('main0_out out = {};') != 1:
+        return msl, None
+    msl = msl[:j] + ''.join(f'\n    float4 dm_pad{n} [[user(locn{n})]];' for n in miss) + msl[j:]
+    k = msl.find('main0_out out = {};') + len('main0_out out = {};')
+    return msl[:k] + ''.join(f'\n    out.dm_pad{n} = float4(0.0, 0.0, 0.0, 1.0);' for n in miss) + msl[k:], miss
+
+
+def fragment_raster(msl):
+    """Static facts of a fragment shader the replay layer uses (nvn_refl.m raster): the colour outputs it writes
+    (attachments it does not write get a zero write mask), whether it may discard and whether it writes the sample
+    mask. Port of nxnative's dmsh_build.py raster_facts for fragment shaders."""
+    out = re.search(r'struct main0_out\s*\{(.*?)\};', msl, re.S)
+    body = out.group(1) if out else ''
+    return {'discard': int('discard_fragment' in msl), 'sample_mask': int('sample_mask' in body),
+            'colors': sorted({int(x) for x in re.findall(r'\[\[color\((\d+)\)\]\]', body)})}
 
 
 def spirv_to_msl(tools, spv, msl):
@@ -913,7 +1058,10 @@ def reflection(capture, chain, entry, bindings, vertex_inputs, facts, route):
         'sha256': capture.sha256, 'source': 'capture:' + capture.key, 'stage': XLATE_STAGE[capture.stage],
         'entry': entry[1] if entry else 'main0', 'msl_entry_kind': entry[0] if entry else None,
         'threadgroup_size': facts.compute['local_size'] if facts.compute else None,
-        'c1': capture.c1.hex(), 'notes': [], 'drv_reads': {}, 'drv_unfillable': [],
+        'c1': capture.c1.hex(), 'notes': [],
+        'drv_reads': {str(b['bank']): {'vec4_offsets': b['vec4_offsets'], 'dynamic': False}
+                      for b in bindings if b.get('kind') == 'drvcb' and 'vec4_offsets' in b},
+        'drv_unfillable': [],
         'bindings': [{k: v for k, v in b.items() if k != 'unknown'} for b in bindings],
         'vertex_inputs': vertex_inputs,
         'facts_sha256': facts.sha256,
@@ -1000,7 +1148,75 @@ def make_manifest(mode, chain, options, tools, captures, facts, output, results,
     }
 
 
+def merge_results(root, chain, rebuilt):
+    """Earlier results of the same chain in root, with the rebuilt keys replaced."""
+    source = next((p for p in (os.path.join(root, 'build-report.json'), os.path.join(root, 'manifest-build.json'))
+                   if os.path.exists(p)), None)
+    if not source:
+        raise ToolError(f'--merge: {root} has no earlier build manifest')
+    with open(source) as f:
+        previous = json.load(f)
+    if previous.get('schema') != MANIFEST_SCHEMA or previous.get('mode') != 'build' or previous.get('chain') != chain:
+        raise ToolError(f'--merge: {source} is not a build of chain {chain}')
+    fresh = {r['key'] for r in rebuilt}
+    merged = [r for r in previous['results'] if r.get('key') not in fresh] + list(rebuilt)
+    return sorted(merged, key=lambda r: r.get('key') or '')
+
+
+def cmd_publish(a):
+    """Writes a runnable manifest-build.json holding only the ready results of a
+    build. The complete build manifest is kept as build-report.json, which is
+    also the source when publish runs again."""
+    path = os.path.realpath(a.manifest)
+    root = os.path.dirname(path)
+    if os.path.basename(path) != 'manifest-build.json':
+        raise ToolError('publish takes the manifest-build.json of a build output directory')
+    report_path = os.path.join(root, 'build-report.json')
+    source = report_path if os.path.exists(report_path) else path
+    with open(source) as f:
+        full = json.load(f)
+    if full.get('schema') != MANIFEST_SCHEMA or full.get('mode') != 'build' or full.get('output') != root:
+        raise ToolError(f'{source} is not a build manifest for {root}')
+    wanted = set(read_keys(a)) or None
+    ready, excluded = [], {}
+    for r in full['results']:
+        key = r.get('key')
+        if wanted is not None and key not in wanted:
+            continue
+        if not result_is_runnable(r, root):
+            excluded[key] = r.get('status')
+            continue
+        for kind in ('metallib', 'json'):
+            if file_sha256(r['files'][kind]['path']) != r['files'][kind]['sha256']:
+                raise ToolError(f'{r["files"][kind]["path"]} changed after the build')
+        ready.append(r)
+    manifest = make_manifest('build', full['chain'], full['options'], full['tools'], full['captures'], full['facts'],
+                             root, ready, argv=full.get('argv'))
+    if not manifest['runnable']:
+        raise ToolError('no runnable results to publish')
+    manifest['published'] = {'report': report_path, 'results': len(full['results']), 'ready': len(ready),
+                             'excluded': excluded}
+    if source == path:
+        write_json(report_path, full)
+    write_json(path, manifest)
+    print(f'published {len(ready)} ready shader(s) of {len(full["results"])}; {len(excluded)} excluded; '
+          f'full report: {report_path}')
+    return 0
+
+
 # Commands -------------------------------------------------------------------
+
+def read_keys(a):
+    """Keys from the positional list plus an optional --keys-file (one per line)."""
+    keys = list(getattr(a, 'keys', None) or [])
+    if getattr(a, 'keys_file', None):
+        with open(a.keys_file) as f:
+            keys += [ln.split()[0] for ln in f if ln.strip() and not ln.startswith('#')]
+    for k in keys:
+        if not KEY_RE.fullmatch(k):
+            raise ToolError(f'invalid shader key {k!r}')
+    return keys
+
 
 def select_keys(captures, keys):
     complete, incomplete = capture_keys(captures)
@@ -1070,6 +1286,10 @@ def cmd_build(a):
         raise ToolError('runnable builds require --facts; use --probe for non-runnable diagnostics')
     out = make_private_dir(a.out, 'output directory')
     options = {'xlate_debug': a.xlate_debug, 'xlate_reduced': a.xlate_reduced}
+    pairs = {}
+    if a.pairs:
+        pairs = load_pairs(a.pairs)
+        options['pairs_sha256'] = file_sha256(a.pairs)  # padded vertex shaders depend on the pair table
     tools = Tools(a.xlate, a.spirv_cross, 'xcrun' if not a.probe else a.metal, os.path.join(out, '.tools'))
     tools.probe_xlate()
     tools.probe_spirv_cross()
@@ -1080,7 +1300,7 @@ def cmd_build(a):
     mode = 'probe' if a.probe else 'build'
     root = os.path.join(out, f'probe-{chain}' if a.probe else f'botw-b-{chain}')
     os.makedirs(root, mode=0o700, exist_ok=True)
-    keys = select_keys(a.captures, a.keys)
+    keys = select_keys(a.captures, read_keys(a))
     print(f'{mode}: {len(keys)} shader(s), chain {chain}, metal backend {tools.metal or "none"} -> {root}')
 
     results, captures, facts_of, jobs = {}, {}, {}, []
@@ -1114,8 +1334,11 @@ def cmd_build(a):
             code_path = os.path.join(work, key + '.code.bin')
             write_atomic(code_path, c.translator_code)
             jobs.append(make_job(c, facts_of[key], code_path, options))
-        xerr = translate(tools, jobs, work) if jobs else {}
-        for job in jobs:
+        jobs, xerr, retries = translate_with_retry(tools, jobs, work, a.jobs) if jobs else ([], {}, {})
+        for key, retry in retries.items():
+            results[key]['translator_retry'] = retry
+
+        def finish(job):
             key = job['key']
             c, f, r = captures[key], facts_of[key], results[key]
             dest = os.path.join(root, key) if a.probe else work
@@ -1124,17 +1347,33 @@ def cmd_build(a):
                 r['status'] = 'failed'
                 r['errors'].append('translation failed')
                 r['translator'] = xerr[key]
-                continue
+                return
             spv, res_path = os.path.join(work, key + '.spv'), os.path.join(work, key + '.res.json')
-            res = json.load(open(res_path))
+            with open(res_path) as fp:
+                res = json.load(fp)
             msl = os.path.join(dest, key + ('.metal' if a.probe else '_b.metal'))
             err = spirv_to_msl(tools, spv, msl)
             if err:
                 r['status'] = 'failed'
                 r['errors'].append(f'spirv-cross: {err}')
-                continue
+                return
             os.chmod(msl, 0o600)
-            src = open(msl).read()
+            with open(msl) as fp:
+                src = fp.read()
+            pad = []
+            if c.stage == 0 and key in pairs:
+                want = set()
+                for partner in sorted(pairs[key]):
+                    try:
+                        want |= sph_input_locations(load_capture(a.captures, partner))
+                    except CaptureError as e:
+                        r['errors'].append(f'paired fragment shader {partner}: {e}')
+                src, pad = pad_vertex_outputs(src, want)
+                if pad is None:
+                    r['errors'].append('cannot pad vertex outputs: unexpected MSL shape')
+                elif pad:
+                    write_atomic(msl, src)
+                    r['vs_pad'] = pad
             bindings, vin, unknowns, conflicts, required, unused = analyze(c, f, res, src)
             r['unknowns'] += unknowns
             r['conflicts'] = conflicts
@@ -1163,6 +1402,10 @@ def cmd_build(a):
             if r.get('metal') and not r['metal']['ok']:
                 r['errors'].append('metal compilation failed')
             refl = reflection(c, chain, entry, bindings, vin, f, 'probe' if a.probe else 'B')
+            refl['translator_options'] = {'debug': job['debug'], 'reduced': job['reduced']}
+            refl['vs_pad'] = pad or []
+            if c.stage == 1:
+                refl['raster'] = fragment_raster(src)
             if a.probe:
                 refl.update(runnable=False, unknowns=r['unknowns'], conflicts=conflicts, required_facts=required,
                             metal=r.get('metal'), translator_notes=res.get('notes', []))
@@ -1172,19 +1415,28 @@ def cmd_build(a):
                 r['files']['probe_json'] = path
                 r['required_facts'] = required
                 r['status'] = 'failed' if r['errors'] else 'probe'
-                continue
+                return
             if r['errors'] or r['unknowns'] or conflicts:
                 r['status'] = 'failed'
-                continue
+                return
             # Every gate passed: publish the runnable triple.
             publish_ready(root, work, key, refl, r, tools.identity['metal']['xcrun_metal'])
+
+        with concurrent.futures.ThreadPoolExecutor(max(1, a.jobs)) as ex:
+            list(ex.map(finish, jobs))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
+    ordered = [results[k] for k in keys]
+    report_path = os.path.join(root, 'build-report.json')
+    if a.merge and not a.probe:
+        ordered = merge_results(root, chain, ordered)
     manifest = make_manifest(mode, chain, options, tools.identity,
                              os.path.realpath(a.captures), os.path.realpath(a.facts) if a.facts else None,
-                             root, [results[k] for k in keys])
+                             root, ordered)
     write_json(os.path.join(root, f'manifest-{mode}.json'), manifest)
+    if not a.probe and os.path.exists(report_path):
+        os.unlink(report_path)  # manifest-build.json is the complete build again; publish starts from it
     failed = 0
     for key in keys:
         r = results[key]
@@ -1240,10 +1492,24 @@ def main(argv=None):
                    help='probe Metal backend (runnable builds always require xcrun)')
     b.add_argument('--xlate-debug', action='store_true', help='keep translator DebugMode (skips its AST optimizer)')
     b.add_argument('--xlate-reduced', action='store_true', help='relaxed precision (NoContraction only where required)')
+    b.add_argument('-j', '--jobs', type=int, default=os.cpu_count() or 4,
+                   help='parallel translator processes and per-shader spirv-cross / Metal workers')
+    b.add_argument('--keys-file', help='file with one capture key per line (added to the positional keys)')
+    b.add_argument('--merge', action='store_true',
+                   help='keep the earlier results of this chain in the output and replace only the rebuilt keys')
+    b.add_argument('--pairs', help='pairs.tsv from botw_shader_extract.py: pad vertex outputs that paired '
+                                   'fragment shaders read')
     tool_args(b)
+    u = sub.add_parser('publish', help='write a runnable manifest of the ready results of a build',
+                       description='Rewrites <out>/botw-b-<chain>/manifest-build.json to hold only ready, '
+                                   'digest-checked results, keeping the complete manifest as build-report.json.')
+    u.add_argument('manifest', help='manifest-build.json of a build')
+    u.add_argument('keys', nargs='*', help='publish only these keys')
+    u.add_argument('--keys-file', help='file with one capture key per line')
     a = p.parse_args(argv)
     try:
-        return {'validate': cmd_validate, 'facts': cmd_facts, 'tools': cmd_tools, 'build': cmd_build}[a.cmd](a)
+        return {'validate': cmd_validate, 'facts': cmd_facts, 'tools': cmd_tools, 'build': cmd_build,
+                'publish': cmd_publish}[a.cmd](a)
     except ToolError as e:
         print(f'error: {e}', file=sys.stderr)
         return 2

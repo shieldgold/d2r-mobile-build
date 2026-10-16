@@ -1,0 +1,2021 @@
+{
+  "schema": "botw-complete-upstream-experiment-v1",
+  "upstream_repository": "https://github.com/TommyLau/botw-mobile",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "upstream_file_count": 63,
+  "complete_backend_closure_count": 58,
+  "component_file_count_including_lock": 75,
+  "files": {
+    "README.zh-CN.md": {
+      "sha256": "80479f83fced814324b63fc7546085f317efc7d327eaff969dee0f047e49f48c",
+      "bytes": 5061,
+      "role": "reproducibility documentation or driver"
+    },
+    "UPSTREAM_DIFF.zh-CN.md": {
+      "sha256": "08964f4eb991580165a8b190c43adf1b8c28593021aa2e52f499f62fb1873c7f",
+      "bytes": 2875,
+      "role": "new 21f CPU diagnostic gate test or upgrade provenance documentation"
+    },
+    "adapter/compat_policy.h": {
+      "sha256": "32004ea2ab9f2e4659416b069e16dfb9428bb3916deecdb2857591c81fd6aaf2",
+      "bytes": 732,
+      "role": "thin host service or compatibility policy, not renderer core"
+    },
+    "adapter/host_adapter.c": {
+      "sha256": "0bae97394246d11ef9dbec5bfd760d5928085d4c85fbc6029cf88f56cecb290c",
+      "bytes": 8484,
+      "role": "thin host service or compatibility policy, not renderer core"
+    },
+    "adapter/host_adapter.h": {
+      "sha256": "6df013b88f445656fa6f0165d876959bc6ee51dc495026b33950e40f385fb174",
+      "bytes": 2235,
+      "role": "thin host service or compatibility policy, not renderer core"
+    },
+    "adapter/runtime_binding.c": {
+      "sha256": "ce3eb4a0c0c88f8a4e512ade9936909ae9e364df54355918e8fa9b6cab37cd17",
+      "bytes": 509,
+      "role": "thin host service or compatibility policy, not renderer core"
+    },
+    "patches/diagnostic-routing.patch": {
+      "sha256": "249d56a66c9d96f0b6a7e431ae464e787121b6fe9465a4796a430752eab29d1c",
+      "bytes": 3832,
+      "role": "four diagnostic-entry guards, applied only in build output"
+    },
+    "scripts/build_compile_only.py": {
+      "sha256": "60e0848381b1d0a98e37fd12bbdfc944cfa188bd318435ebb9b65c4e9903c8e2",
+      "bytes": 8458,
+      "role": "reproducibility documentation or driver"
+    },
+    "tests/cmd_audit_disabled_probe.c": {
+      "sha256": "0b4e3d39fa3f2942b4794bfcfae28c785bf7d62a865ddb91e209c0a197ac4b07",
+      "bytes": 2024,
+      "role": "new 21f CPU diagnostic gate test or upgrade provenance documentation"
+    },
+    "tests/host_adapter_probe.c": {
+      "sha256": "b5ef7a312614e849e8936adf3765aa82576edaf3d2f88050ff6ca21fac9323e3",
+      "bytes": 7554,
+      "role": "owned CPU/link-only verification, not actual backend execution"
+    },
+    "tests/link_only_entry.c": {
+      "sha256": "ef3f0954b79a2ba360cc94381d1e5712674fb397dd5922b9c772d0a8669af7ea",
+      "bytes": 107,
+      "role": "owned CPU/link-only verification, not actual backend execution"
+    },
+    "upstream/LICENSE": {
+      "sha256": "5811600bb8fc4522d3310e8e0e637a1bb14b7c64412f8cfc6234872eb53129b9",
+      "bytes": 1065,
+      "role": "original_license",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e98c7620fff706c032c62d120eef265c4d9ee408"
+    },
+    "upstream/dm/gfx/nvn/botw_buffer.c": {
+      "sha256": "87f1faabc5437f549256bed265e10e03743db103c3ecf90d511dfd6595b77c6f",
+      "bytes": 4517,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "78a6d7af57efed044fdd7ab19047bd788c97381a"
+    },
+    "upstream/dm/gfx/nvn/botw_sampler_reduction.c": {
+      "sha256": "8913b5e6a7f913d603391e7a141bb0dd2d37597c797c424c9d771c14bbe1403b",
+      "bytes": 2204,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f188f1d8c5566d575533db4db0887a826be564db"
+    },
+    "upstream/dm/gfx/nvn/botw_shader.c": {
+      "sha256": "537645f13f04110ad7a443e8da7b6f2567a8be99663b16f28b8f91eed4c8bc34",
+      "bytes": 17054,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f25de9abb12e4b1a105c2f93cacb8a79c843327c"
+    },
+    "upstream/dm/gfx/nvn/botw_shader.h": {
+      "sha256": "825df5cfd9bb10c627e0495833882ffd13942bb0027af744150e318805ec475d",
+      "bytes": 1569,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8c8963abbd397b149648b8dc13a832cd9aa2ee12"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_manifest.h": {
+      "sha256": "5291c3056392d112098e86db0453a1a3007503e12c2d198d16f1e9cae2dcaad0",
+      "bytes": 1995,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "4fabc91d365fa58299fce9b6f072b61ce3ae6d08"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_manifest.m": {
+      "sha256": "155e3fe8fedfa1691cd40d1cd5521a1a4738ca9b5995a14033f751723de289a1",
+      "bytes": 16074,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2e0267992485ac1976b7619184b937b097ff5a68"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_observation.c": {
+      "sha256": "e595385ed464f89ff7b614685146cd52b4d9923afe71927ac36850a7efe66ea9",
+      "bytes": 14489,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "234dac91e242e2b23d1d9f09822240ee7dadb5be"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_observation.h": {
+      "sha256": "e7549678f66757e90b16aee60b4373db1e29baeb2b96332c8aa936d5be7cf212",
+      "bytes": 3558,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "3159827025e56e6cdb305e3a22860941288bb3ae"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_runtime.h": {
+      "sha256": "fd6f29eb431c19d0339207d025ad60ef2a28af33d739e91b5680a7ba515b99d6",
+      "bytes": 3177,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e9aff5a1b9174f40dabf761fda1066d9542a82b3"
+    },
+    "upstream/dm/gfx/nvn/botw_shader_runtime.m": {
+      "sha256": "81acb10d4251e248d975e9339447bf26d8376f51445e1a30f817471ff25deb7b",
+      "bytes": 7436,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "db4a7407dbaf813f77cebf49bf2c53d907a65593"
+    },
+    "upstream/dm/gfx/nvn/botw_storage_class.c": {
+      "sha256": "a0d77b1ab1ec64ad0a657798c79cb90081106cdfa50ccf229441e0147e3e3257",
+      "bytes": 2031,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c34ee71caf780d18ef03663832d5315aa9ec7b7c"
+    },
+    "upstream/dm/gfx/nvn/dmsh_chain.h": {
+      "sha256": "8d7fb2f03f6a8ab7fb8e8720f5bd2da8414f9981c21e5e575cb9b50574113b68",
+      "bytes": 235,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5de92f0394b3d7d6f9ceb265db15802b31c130f5"
+    },
+    "upstream/dm/gfx/nvn/hle_nvn.c": {
+      "sha256": "25dee0ce39ce821eac537a88cf80d2b1b5bf31a90fdfcab0317f529791b85e9f",
+      "bytes": 157683,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8fd069cb814468e94c285f9d4327873471cec21d"
+    },
+    "upstream/dm/gfx/nvn/include/nvn.h": {
+      "sha256": "51c3fab2156a95ac907d973c2a916f8cedf588f743f2b6c17ca0b57d989ba7b9",
+      "bytes": 89923,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "08e66978c7f097654ce1bfd61166e7694248d6a9"
+    },
+    "upstream/dm/gfx/nvn/nvn_builtin.h": {
+      "sha256": "7b9d24cc391b2ca0fdfe4ab087fce167cd9e95a86c76fa51ef691888261e0426",
+      "bytes": 2396,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "714fd340a97edfecda21271b4c2ff56ea72c2b85"
+    },
+    "upstream/dm/gfx/nvn/nvn_clock.h": {
+      "sha256": "af7d2dd346edb125424b85892730f686e0569878e648b742af6e0a906dc785b4",
+      "bytes": 702,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "cb31c086d428bbaf48bd5cb8a9fc8c8377e3a299"
+    },
+    "upstream/dm/gfx/nvn/nvn_cmd_audit.c": {
+      "sha256": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9",
+      "bytes": 34943,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f46ea1d318d8f164f3fdc60a704e5e2a9a47a720"
+    },
+    "upstream/dm/gfx/nvn/nvn_cmd_audit.h": {
+      "sha256": "ca6517d544e2a9ae10eb4f3f3fd79420a9fac14d3ff05f869d63ab55740b36e8",
+      "bytes": 4098,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c990c6014c0c86ff349b11ec5d6b45773e5eb011"
+    },
+    "upstream/dm/gfx/nvn/nvn_count.h": {
+      "sha256": "eebefa966311326ce506d09c5f391de4a261e7baf32895f026c666e30bdfa904",
+      "bytes": 65,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "d2c154e010ce2d5e9dfb68aa00d39b355d70e626"
+    },
+    "upstream/dm/gfx/nvn/nvn_cover.h": {
+      "sha256": "a45e3e26e995c9960abbe1b9cd82e1dd5e8d1ab9c29953276b833bc657adb2e7",
+      "bytes": 2973,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8fcbd99df51b60158ed7f2e2cfa5872a5ef5a543"
+    },
+    "upstream/dm/gfx/nvn/nvn_dirty.c": {
+      "sha256": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75",
+      "bytes": 16720,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "21e2520e1d3ef481a5f08239e2ace993aa258624"
+    },
+    "upstream/dm/gfx/nvn/nvn_dirty.h": {
+      "sha256": "d1b9aee7cff3bee7ff055b1aaaded0ff90f83d9412754c716e62fc0394c3c4b3",
+      "bytes": 2959,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "4b03b583cb1f2c59d666f24037c313167283ce10"
+    },
+    "upstream/dm/gfx/nvn/nvn_dtex.c": {
+      "sha256": "c837f78b59e9b415890334ae70508489ce2beada6fe64ccd46d290d2c8cf8099",
+      "bytes": 15586,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "34411240b12082d8ec88b6c974fd47aab46183d2"
+    },
+    "upstream/dm/gfx/nvn/nvn_dtex.h": {
+      "sha256": "37961c6d17ff5c266c76a834349710ada8903072f7fb04083b1577ce7feb28c1",
+      "bytes": 5174,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "f455f080271ce271275514d5cee8e7801c164a29"
+    },
+    "upstream/dm/gfx/nvn/nvn_entry.S": {
+      "sha256": "f018457948f0c5a81c48213d51e7d9cef729dbc35fc97fed2f38e6557ce5db55",
+      "bytes": 2458,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fc28766a0ad2a84fe45834e93a6cef8202886c5a"
+    },
+    "upstream/dm/gfx/nvn/nvn_handle.h": {
+      "sha256": "43713a4659f7ca3756ad07454b689503b128d108c0d014e788f861102e8a9968",
+      "bytes": 858,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "1e3eabc950f425b96475ad5db0da98ad20de320d"
+    },
+    "upstream/dm/gfx/nvn/nvn_hmap.h": {
+      "sha256": "ae32d0081cf9313ca6511cdfd636e29e6acf60d2a3871f9f455a874ed2f52d7b",
+      "bytes": 3825,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0c51d1cd1b9e0a425eee102288211273d178cd72"
+    },
+    "upstream/dm/gfx/nvn/nvn_mtl.h": {
+      "sha256": "306ba5f5d2df220ff96850cb709174613d91bd6f6c14285958352e2eb79ba248",
+      "bytes": 3320,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c3ac5ba371e1019fa81a2ef85126cdbb3d847e98"
+    },
+    "upstream/dm/gfx/nvn/nvn_mtl.m": {
+      "sha256": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb",
+      "bytes": 636813,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5a7d93bc2ecaa8466cb4679344c3cfd604a65bfe"
+    },
+    "upstream/dm/gfx/nvn/nvn_obj.h": {
+      "sha256": "5078f832ff41314026425ced4c7121833d95b798cb06ff7320a49077a56c1584",
+      "bytes": 18518,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "1d6c53ae413d71c427d0098302d4a16a2866077f"
+    },
+    "upstream/dm/gfx/nvn/nvn_pace.h": {
+      "sha256": "2c63e64304a46b961cf09dce35504e4877471f124119f606130ab4a59e8d73fd",
+      "bytes": 1761,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0aa86c8c888d3f7a10820a9035f10d192cac7fcc"
+    },
+    "upstream/dm/gfx/nvn/nvn_protos.h": {
+      "sha256": "117f7a3805226319cfbb31da84d968e231a09382cdf8869c44bb74081c471f05",
+      "bytes": 46504,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "b7b8dde26aebf4d2ff73e2a84c56dd86f6be9e93"
+    },
+    "upstream/dm/gfx/nvn/nvn_pso_skey.h": {
+      "sha256": "17a07f06bf8904803a28b062118cbb8f3ba45325a4e462b60cd80375f5efd2d5",
+      "bytes": 2061,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0b280f9ca6c6ebd1723c66115f26eee47772ffe0"
+    },
+    "upstream/dm/gfx/nvn/nvn_refl.h": {
+      "sha256": "ac05e9c2325dad07920ca64bb64e3fd038e15d4e745a146161f2eaa3461054cb",
+      "bytes": 4359,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "6c0aa18b293cf3745a66bc7cf9b007671421c5c0"
+    },
+    "upstream/dm/gfx/nvn/nvn_refl.m": {
+      "sha256": "7dd58622312854e15f231aecadab3eace049f01049810c23907aa8b20946b002",
+      "bytes": 8041,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "a6ef9fcf810e46b915e1491b75b8bc6e13d3a758"
+    },
+    "upstream/dm/gfx/nvn/nvn_rtex.inc": {
+      "sha256": "91f43914ad4426aa00df3fbcb58feb33f058d4ab4d8570422788db6261b40566",
+      "bytes": 17148,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "171c25bb0ebf80956535ac5c122c65c0c8eb04f3"
+    },
+    "upstream/dm/gfx/nvn/nvn_serial.c": {
+      "sha256": "f9a4a861c6e2360ed57adb729ebee82023fe573f8f198a9cead404037bcee248",
+      "bytes": 210,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "bff4adc03c86e30215e6fa44c8cc6632c41e2f67"
+    },
+    "upstream/dm/gfx/nvn/nvn_tex.c": {
+      "sha256": "b29c713909e77b784064b096037d71a1073faa116bb7826d8451914de9f18e44",
+      "bytes": 7369,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "8ec16e870e3d8df690ab62150d9ecb44343ae8db"
+    },
+    "upstream/dm/gfx/nvn/nvn_tex.h": {
+      "sha256": "3e5ca71fdfb6d9f2bd06fd277d64947bebd906d918a4af55a702836eb9e21c3f",
+      "bytes": 2097,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e115643f38d1e6b63eb669dcd14e11bb57c96d45"
+    },
+    "upstream/dm/gfx/nvn/nvn_texflush.c": {
+      "sha256": "cf2a5ad0ebfb67b5769666dff8d8327f59228d9084ab356378d3b88c695d388f",
+      "bytes": 7656,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "39b062863edef159916572e4a7ba35219bd96012"
+    },
+    "upstream/dm/gfx/nvn/nvn_texflush.h": {
+      "sha256": "6129cee00316d867e3b62646977beec48a29ef4e7c24c106400fd09802cbf71a",
+      "bytes": 2120,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fca7e75b8eadea2149de08617aed2cabffeceb9d"
+    },
+    "upstream/dm/gfx/nvn/nvn_texown.c": {
+      "sha256": "a867a2265fc151d6e22d0363046a99a9df4935883d408db1e96fdff0fceac6ea",
+      "bytes": 6222,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "c5be9408b594de651763ea256d13f07d26196f20"
+    },
+    "upstream/dm/gfx/nvn/nvn_texown.h": {
+      "sha256": "671c0d2be9dc4ba335166c14c6386b4c03fbfd1eecf4672be2667edb3d228c5e",
+      "bytes": 3029,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0f4d831da457f805742d02db24a8db1eb3e3c315"
+    },
+    "upstream/dm/gfx/nvn/nvn_texwrite.c": {
+      "sha256": "b7b7ada9d95e8c146f2c0bedd2c8815a6d5af762bc840dc4130f0e40804aa2c2",
+      "bytes": 12905,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "7423fb44307925b6749c812a599e843cdbb1c46b"
+    },
+    "upstream/dm/gfx/nvn/nvn_texwrite.h": {
+      "sha256": "88303b341dc9f88ccca43b04b3c15552f4d7529930ba10857acd11c209bfe8c3",
+      "bytes": 2647,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "dba0bc4187fcbc87e6b09980d7a263ad8d124c10"
+    },
+    "upstream/dm/gfx/nvn/nvn_thunks.S": {
+      "sha256": "99e14e026381e481337340d78e1196e5fa064660e0ea6a0be8bbd65ef686e305",
+      "bytes": 158981,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5abadb5f8cefef98e58a81714c173b6b84bebc0e"
+    },
+    "upstream/dm/gfx/nvn/nvn_vpool.c": {
+      "sha256": "102bcffbe3cce5ea94ac11cad410b95b088244d4779981086434a3ff901dbf46",
+      "bytes": 19063,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "888adb12a1d372de74cf28401ad86104f4fa8317"
+    },
+    "upstream/dm/gfx/nvn/nvn_vpool.h": {
+      "sha256": "13a7ac6cba262cb24a3aa5e6d3ad68385e9eab9ac2e89ab466ce48d38c8fc45c",
+      "bytes": 6890,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "2ad6649f0bec3c92209accbac7d3923d39a238fb"
+    },
+    "upstream/dm/gfx/nvn/rt_range_check.inc": {
+      "sha256": "45435f633e474d6e5088b7ea31b65fa7a842e1a62b9a429f075726b7217edaa0",
+      "bytes": 10941,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "6cea440aad19cac94b8ac259910eb1d8e724932a"
+    },
+    "upstream/dm/gfx/tex/nvn_bcdec.c": {
+      "sha256": "b7a2b86ebb0ddedbb2a63bd1eff3dc82ddd9e2c4b833dc3f140dd6cd308be55f",
+      "bytes": 3169,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5244d45e5529182d3f16e02f961c38b5d0f94003"
+    },
+    "upstream/dm/gfx/tex/nvn_bcdec.h": {
+      "sha256": "bb792aabd6ab20ac737f30cc93f193e2a9b73ae777bae5165f38016f1271793e",
+      "bytes": 897,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "5776e1a431998f15c60cbf4b9773e4a8dfafc098"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle.c": {
+      "sha256": "ad5cfde4084b0c72b917f449d25137aef3c808c0a0e157e58353d540f2e887c1",
+      "bytes": 4182,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "99ce3130a21597ef68402dcc1d74d10d07e6b420"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle.h": {
+      "sha256": "ec38832cdd9517411b4a6b77c351b74881b4328f4b94dc0971e1511fb4995e4a",
+      "bytes": 1871,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "ea525671fe86b9823b232e01661f9f4e9112bf49"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle_gpu.h": {
+      "sha256": "3a9534ad951107c30996d49f29e41f8b18e7d9618a034cbd6681887da84e7cd2",
+      "bytes": 898,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "0b2695625ba057f204d1df4f3a00255bd6db3dfb"
+    },
+    "upstream/dm/gfx/tex/nvn_deswizzle_gpu.m": {
+      "sha256": "c1de5d71322eb62be8894ff67e029035f5992527501caa8e6f90c68406f11abd",
+      "bytes": 4526,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "137ed78debe31497d065d69fa54f2c017dde3a0d"
+    },
+    "upstream/dm/gfx/tex/nvn_fmt_mtl.c": {
+      "sha256": "7c885cec28fd7b5ab46c672bc080fca45d14c5e5bbfb38828aeaf00b40d26107",
+      "bytes": 6863,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "e03ddb7a544c0458162d4bd67c4f257b97318b72"
+    },
+    "upstream/dm/gfx/tex/nvn_fmt_mtl.h": {
+      "sha256": "3b99314b12eac5a4dce61c60024e32d7e23fe9f829c70501413843a271375c93",
+      "bytes": 972,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "18f1c852035060ee2e10bddab8f8220190434cea"
+    },
+    "upstream/dm/host/dm.h": {
+      "sha256": "a189e8c9daa00f8e8b0354ccd0005dd4850b399a2a206d1ce4b2d8773bbdb507",
+      "bytes": 8771,
+      "role": "external_host_declarations",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "ea6b8160c1adad60a35f17e184537054fdd26109"
+    },
+    "upstream/dm/host/front.h": {
+      "sha256": "79ce08f9ece0e430a81628178970efc2bc285e45d7b02563f3909ff3e3622c75",
+      "bytes": 3561,
+      "role": "external_host_declarations",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "fcd90f6577d19b71a73a0984302ffc999560d15e"
+    },
+    "upstream/dm/host/hle.h": {
+      "sha256": "a30e181f6b7551bdc4096fca7fad2db504c7c0623e623e36a5dbf4512f263aa3",
+      "bytes": 9267,
+      "role": "external_host_declarations",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "41968c54382f4126f23fb99da9e9ec784fb88e42"
+    },
+    "upstream/dm/third_party/bcdec/LICENSE": {
+      "sha256": "2414c782587f6e96661cb0d19d752432ddecfcc1a221b4cb12bc2253a54dc5ac",
+      "bytes": 2564,
+      "role": "original_license",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "78e53f197c01c91da1c2564eb45ea29e40177606"
+    },
+    "upstream/dm/third_party/bcdec/bcdec.h": {
+      "sha256": "134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189",
+      "bytes": 79434,
+      "role": "complete_backend_closure",
+      "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+      "git_blob_sha1": "553c3ec5a8b99082956f6b2118d508ae384feb23"
+    }
+  },
+  "translation_units": [
+    "dm/gfx/nvn/botw_buffer.c",
+    "dm/gfx/nvn/botw_sampler_reduction.c",
+    "dm/gfx/nvn/botw_shader.c",
+    "dm/gfx/nvn/botw_shader_manifest.m",
+    "dm/gfx/nvn/botw_shader_observation.c",
+    "dm/gfx/nvn/botw_shader_runtime.m",
+    "dm/gfx/nvn/botw_storage_class.c",
+    "dm/gfx/nvn/hle_nvn.c",
+    "dm/gfx/nvn/nvn_cmd_audit.c",
+    "dm/gfx/nvn/nvn_dirty.c",
+    "dm/gfx/nvn/nvn_dtex.c",
+    "dm/gfx/nvn/nvn_entry.S",
+    "dm/gfx/nvn/nvn_mtl.m",
+    "dm/gfx/nvn/nvn_refl.m",
+    "dm/gfx/nvn/nvn_serial.c",
+    "dm/gfx/nvn/nvn_tex.c",
+    "dm/gfx/nvn/nvn_texflush.c",
+    "dm/gfx/nvn/nvn_texown.c",
+    "dm/gfx/nvn/nvn_texwrite.c",
+    "dm/gfx/nvn/nvn_thunks.S",
+    "dm/gfx/nvn/nvn_vpool.c",
+    "dm/gfx/tex/nvn_bcdec.c",
+    "dm/gfx/tex/nvn_deswizzle.c",
+    "dm/gfx/tex/nvn_deswizzle_gpu.m",
+    "dm/gfx/tex/nvn_fmt_mtl.c"
+  ],
+  "target": "arm64-apple-macos15.0",
+  "DM_NVN_M3": 1,
+  "runtime_manifest_policy": "explicit full validated manifest before any backend use; compile intended path is not runtime validation",
+  "frameworks": [
+    "Foundation",
+    "Metal",
+    "QuartzCore",
+    "CoreVideo",
+    "ImageIO",
+    "UniformTypeIdentifiers",
+    "CoreGraphics"
+  ],
+  "patched_source_sha256": {
+    "dm/gfx/nvn/nvn_mtl.m": "2b488b7e48b9c059026e856558fad1bf729845894d2bc1f5ee3302d0ae180233",
+    "dm/gfx/nvn/botw_shader_observation.c": "59c34fafd8c18787d20eeefa3b669e87dd7707e9f8954c79b109c649beae8871",
+    "dm/gfx/nvn/nvn_cmd_audit.c": "ba698cf49d2ee40f3b44b7133cf8ccc80d185694585936ab2d4e232d040afa13"
+  },
+  "patch_base_sha256": {
+    "dm/gfx/nvn/nvn_mtl.m": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb",
+    "dm/gfx/nvn/botw_shader_observation.c": "e595385ed464f89ff7b614685146cd52b4d9923afe71927ac36850a7efe66ea9",
+    "dm/gfx/nvn/nvn_cmd_audit.c": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9"
+  },
+  "external_compile_declarations": {
+    "native/botw_host/runtime.h": {
+      "sha256": "f2ef90950f264d32cc6b1940c459d98635af375fe69689e7adb649af28016ee2",
+      "purpose": "runtime_binding.c actual two host APIs; compiled only, implementations not linked"
+    }
+  },
+  "external_implementation_reference_not_linked": {
+    "native/botw_host/runtime.c": {
+      "sha256": "e6b57833840645c61afd824aa3db9ec19bed4925d216c181dc1681aa6b4748b0",
+      "symbols": [
+        "botw_host_prepare_guest_write",
+        "botw_host_register_memory_tracking"
+      ],
+      "note": "runtime.c includes kernel/services/address/input/resource headers; none is linked by this experiment"
+    }
+  },
+  "forbidden_backend_references": [
+    "_backtrace",
+    "_backtrace_symbols_fd",
+    "_abort",
+    "_exit",
+    "__exit",
+    "_getenv"
+  ],
+  "cpu_modes": [
+    "invalid-install",
+    "manifest-reject",
+    "forward",
+    "legacy-fault",
+    "legacy-prepare",
+    "prepare-failure",
+    "registration-failure",
+    "policy",
+    "diagnostic-denied",
+    "callback-return-aborts",
+    "concurrency"
+  ],
+  "cpu_expected_exits": {
+    "callback-return-aborts": -6
+  },
+  "policy_review": {
+    "getenv_callsites": [
+      {
+        "path": "dm/gfx/nvn/botw_sampler_reduction.c",
+        "line": 23,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader.c",
+        "line": 164,
+        "expression": "const char *path = getenv(\"DM_SHADER_CAPTURE\");",
+        "effects": {
+          "DM_SHADER_CAPTURE": {
+            "value": null,
+            "effect": "!path||!*path early return1 before any snapshot file operation"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader.c",
+        "line": 347,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader_observation.c",
+        "line": 30,
+        "expression": "const char *value = getenv(name);",
+        "effects": {
+          "<exact_zero(name)>": {
+            "value": "not called in disabled observation mode",
+            "effect": "parent environment returns0 before required-key loop; its five names also forced0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader_observation.c",
+        "line": 35,
+        "expression": "const char *output = getenv(\"DM_SHADER_OBSERVATION\");",
+        "effects": {
+          "DM_SHADER_OBSERVATION": {
+            "value": null,
+            "effect": "!output||!*output early return0 before observation reads/allocations/write; direct writer also guarded"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader_observation.c",
+        "line": 36,
+        "expression": "const char *sha = getenv(\"DM_SHADER_OBSERVATION_SHA256\");",
+        "effects": {
+          "DM_SHADER_OBSERVATION_SHA256": {
+            "value": null,
+            "effect": "sha absent, output absent => return0 before selector validation or program/binding observation"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_shader_runtime.m",
+        "line": 50,
+        "expression": "g_mode = botw_shader_runtime_select(getenv(BOTW_SHADER_MANIFEST_ENV), &manifest, &error);",
+        "effects": {
+          "DM_BOTW_SHADER_MANIFEST": {
+            "value": "owned validated absolute manifest path",
+            "effect": "must use full manifest validator; no unset/legacy fallback"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_storage_class.c",
+        "line": 18,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/botw_storage_class.c",
+        "line": 23,
+        "expression": "const char *policy = getenv(\"DM_BOTW_POOL_POLICY\");",
+        "effects": {
+          "DM_BOTW_POOL_POLICY": {
+            "value": null,
+            "effect": "!policy calls explicit class_unsupported; no fake ordinary0x100 policy"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 71,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 96,
+        "expression": "g_log = getenv(\"DM_NVN_LOG\") != NULL;",
+        "effects": {
+          "DM_NVN_LOG": {
+            "value": null,
+            "effect": "presence false; no object-creation logs"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 564,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 975,
+        "expression": "static int cs_on(void) { if (g_cs.on < 0) g_cs.on = getenv(\"DM_NVN_CMDSTAT\") != NULL; return g_cs.on; }",
+        "effects": {
+          "DM_NVN_CMDSTAT": {
+            "value": null,
+            "effect": "presence false; no command statistics output"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1237,
+        "expression": "const char *stop = getenv(\"DM_STOP_ON_UNIMPL\");",
+        "effects": {
+          "DM_STOP_ON_UNIMPL": {
+            "value": "1",
+            "effect": "nonzero string selects _exit3; policy routes it to host error, not success0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1505,
+        "expression": "const char *e = getenv(\"DM_NVN_SYNC\"); g_x_sync = e && atoi(e);",
+        "effects": {
+          "DM_NVN_SYNC": {
+            "value": null,
+            "effect": "e&&atoi(e) false; functional async translation default, not disabled or lifecycle-validated"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1603,
+        "expression": "if (getenv(\"DM_NVN_PROF\"))",
+        "effects": {
+          "DM_NVN_PROF": {
+            "value": null,
+            "effect": "presence false; no timing wrapper redirection"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1662,
+        "expression": "if (pace < 0) { const char *e = getenv(\"DM_DETCLOCK_PACE\"), *d = getenv(\"DM_DETCLOCK\"); step = d ? strtoull(d, 0, 0) : 0; pace = e && atoi(e) && step; }",
+        "effects": {
+          "DM_DETCLOCK_PACE": {
+            "value": null,
+            "effect": "e&&atoi(e)&&step false; no deterministic pacing"
+          },
+          "DM_DETCLOCK": {
+            "value": null,
+            "effect": "step0, so no synthetic pacing"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1682,
+        "expression": "const char *e = getenv(\"DM_NVN_FRAMES\"); if (e) nframes = atoi(e);",
+        "effects": {
+          "DM_NVN_FRAMES": {
+            "value": "0",
+            "effect": "atoi(e): 0 disables first-frame call-name list; every300 host counters remain"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1683,
+        "expression": "const char *c = getenv(\"DM_NVN_TSV_CALLS\"); if (c) calls = atoi(c);   //0 = write only the @ timing rows (pulling files from a real device has a size limit, and the call-count rows take about 2/3)",
+        "effects": {
+          "DM_NVN_TSV_CALLS": {
+            "value": null,
+            "effect": "calls remains1 but g_tsv staysNULL; no TSV file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1684,
+        "expression": "const char *t = getenv(\"DM_NVN_TSV\"); if (t && !(g_tsv = fopen(t, \"w\"))) LOG(\"[ERROR] cannot open %s\", t);",
+        "effects": {
+          "DM_NVN_TSV": {
+            "value": null,
+            "effect": "t false before fopen, no TSV file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1708,
+        "expression": "static long cap = -1; if (cap < 0) { const char *e = getenv(\"DM_MEM_CAP_GB\"); cap = e ? atol(e) : DM_MEM_CAP_DEFAULT_GB; }",
+        "effects": {
+          "DM_MEM_CAP_GB": {
+            "value": "0",
+            "effect": "atol(e), then cap>0: 0 disables upstream host watchdog; current host policy remains separate"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1797,
+        "expression": "static int slow_on(void) { if (g_slow < 0) g_slow = getenv(\"DM_SLOWFRAME\") != NULL; return g_slow; }",
+        "effects": {
+          "DM_SLOWFRAME": {
+            "value": null,
+            "effect": "presence false, no slowframe logging"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1844,
+        "expression": "static int rt_comp_fixed_ms(void) { static int v = -2; if (v == -2) { const char *e = getenv(\"DM_RT_COMP\"); v = e && *e && strcmp(e, \"auto\") ? atoi(e) : -1; } return v; }   // −1 = auto",
+        "effects": {
+          "DM_RT_COMP": {
+            "value": null,
+            "effect": "e absent yields -1 auto; render optimization forced off by RT_AB0/TBDR0"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1876,
+        "expression": "const char *e = getenv(\"DM_PRESENT_HZ\"); g_hz = e ? atoi(e) : 60; g_hz_auto = !e && scr > 0;",
+        "effects": {
+          "DM_PRESENT_HZ": {
+            "value": null,
+            "effect": "e absent chooses original60/actual-screen auto pacing, not proof of present/lifecycle integration"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1886,
+        "expression": "const char *m = getenv(\"DM_PRESENT_INTERVAL\"); g_display_mode = m ? !strcmp(m, \"display\") : 0;",
+        "effects": {
+          "DM_PRESENT_INTERVAL": {
+            "value": null,
+            "effect": "m absent yields mode0 functional original present; not diagnostic read"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/hle_nvn.c",
+        "line": 1980,
+        "expression": "static int on = -1; if (on < 0) { const char *e = getenv(\"DM_LONGFRAME\"); on = !(e && !strcmp(e, \"0\")); }",
+        "effects": {
+          "DM_LONGFRAME": {
+            "value": "0",
+            "effect": "!(e && !strcmp(e,\"0\")): 0 disables long-frame logs"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_cmd_audit.c",
+        "line": 198,
+        "expression": "const char *e = getenv(\"DM_NVN_CMD_AUDIT\"); int on = e && *e && strcmp(e, \"0\");",
+        "effects": {
+          "DM_NVN_CMD_AUDIT": {
+            "value": null,
+            "effect": "e&&*e&&strcmp0 false; independent cmda_on patch returns0 even before pthread_once/dlsym"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_cmd_audit.c",
+        "line": 199,
+        "expression": "const char *t = getenv(\"DM_NVN_CMD_AUDIT_TRACE\"); g_trace = on && t ? atol(t) : 0;",
+        "effects": {
+          "DM_NVN_CMD_AUDIT_TRACE": {
+            "value": null,
+            "effect": "on&&t false; independent cmda_on gate prevents config and event diagnostic readers"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 187,
+        "expression": "if (g_res_census < 0) g_res_census = getenv(\"DM_RES_CENSUS\") != NULL;",
+        "effects": {
+          "DM_RES_CENSUS": {
+            "value": null,
+            "effect": "presence false; no extended resource census"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 271,
+        "expression": "const char *path = getenv(\"DM_NVN_BF_WANT\");",
+        "effects": {
+          "DM_NVN_BF_WANT": {
+            "value": null,
+            "effect": "missing path returns before fopen"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 310,
+        "expression": "if (!getenv(\"DM_UDC_SELFTEST\")) return;",
+        "effects": {
+          "DM_UDC_SELFTEST": {
+            "value": null,
+            "effect": "!getenv returns before GPU selftest work"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 338,
+        "expression": "const char *link = getenv(\"DM_PRESENT_LINK\");",
+        "effects": {
+          "DM_PRESENT_LINK": {
+            "value": "0",
+            "effect": "atoi(e): 0 disables upstream independent display-link; lifecycle adapter still needed"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 340,
+        "expression": "const char *latency = getenv(\"DM_PRESENT_LATENCY\");",
+        "effects": {
+          "DM_PRESENT_LATENCY": {
+            "value": null,
+            "effect": "latency absent preserves original positive latency; not diagnostic capture"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 342,
+        "expression": "g_res_check_on = getenv(\"DM_RES_CHECK\") != NULL;",
+        "effects": {
+          "DM_RES_CHECK": {
+            "value": null,
+            "effect": "presence false; no argument-residency diagnostic logs"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 416,
+        "expression": "if (leak < 0) leak = getenv(\"DM_TEST_LEAK_GPU\") != NULL;",
+        "effects": {
+          "DM_TEST_LEAK_GPU": {
+            "value": null,
+            "effect": "presence false; no synthetic leaked resource"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 633,
+        "expression": "if (on < 0) { on = getenv(\"DM_NVN_PASSGPU_SERIAL\") != NULL; if (on) { ev = [g_dev newEvent]; MLOG(\"DM_NVN_PASSGPU_SERIAL: passes serialized (for measurement; timings inflated)\"); } }",
+        "effects": {
+          "DM_NVN_PASSGPU_SERIAL": {
+            "value": null,
+            "effect": "presence false; no serialization diagnostic event"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 747,
+        "expression": "static int bootprof(void) { static int v = -1; if (v < 0) v = getenv(\"DM_BOOTPROF\") != NULL; return v; }",
+        "effects": {
+          "DM_BOOTPROF": {
+            "value": null,
+            "effect": "presence false; no boot profiling"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 794,
+        "expression": "if (g_ub_n < 0) { g_ub_n = 0; const char *e = getenv(\"DM_NVN_UB\"), *n = getenv(\"DM_NVN_UB_N\"); if (n && atoi(n) >= 60) g_ub_N = atoi(n);",
+        "effects": {
+          "DM_NVN_UB": {
+            "value": null,
+            "effect": "e absent yields measurement count0; no alternating measurement"
+          },
+          "DM_NVN_UB_N": {
+            "value": null,
+            "effect": "n absent leaves inert measurement default because UB disabled"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1051,
+        "expression": "static int dirtycheck(void) { static int v = -1; if (v < 0) v = getenv(\"DM_NVN_DIRTYCHECK\") != NULL; return v; }",
+        "effects": {
+          "DM_NVN_DIRTYCHECK": {
+            "value": null,
+            "effect": "presence false; no diagnostic full-pool hash"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1059,
+        "expression": "if (v < 0) { const char *e = getenv(\"DM_TEST_NO_BC\"); v = (e && *e && strcmp(e, \"0\")) || ![g_dev supportsBCTextureCompression];",
+        "effects": {
+          "DM_TEST_NO_BC": {
+            "value": null,
+            "effect": "e false; only real supportsBCTextureCompression remains; functional conversion capability not disabled"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1251,
+        "expression": "static int lost_at = -2; static uint64_t batch_n; if (lost_at == -2) { const char *e = getenv(\"DM_TEST_UP_LOST\"); lost_at = e ? atoi(e) : -1; } int fake_lost = dsts.count && lost_at > 0 && (int)++batch_n == lost_at;",
+        "effects": {
+          "DM_TEST_UP_LOST": {
+            "value": null,
+            "effect": "e absent yields lost_at=-1; fake_lost false"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1332,
+        "expression": "g_up_blocks_new++; if (g_up_block) { g_up_swaps++; g_up_swap_bytes += g_up_block_size; if (!g_up_old) g_up_old = [NSHashTable weakObjectsHashTable]; [g_up_old addObject:g_up_block]; static int leak = -1; if (leak < 0) leak = getenv(\"DM_TEST_UP_LEAK\") != NULL;   //test switch DM_TEST_UP_LEAK=1: do not retire the old block, as before the fix (for comparison, to measure the leak)",
+        "effects": {
+          "DM_TEST_UP_LEAK": {
+            "value": null,
+            "effect": "presence false; normal retirement remains"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1573,
+        "expression": "{ static int on = -1, n; if (on < 0) on = getenv(\"DM_NVN_ALIASLOG\") != NULL;",
+        "effects": {
+          "DM_NVN_ALIASLOG": {
+            "value": null,
+            "effect": "presence gate false before nvn_texown_find/alias details logging"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1628,
+        "expression": "static int all = -1; if (all < 0) all = getenv(\"DM_MEM_STAT_ALL\") != NULL;   //For measurement: printed every time, uncapped",
+        "effects": {
+          "DM_MEM_STAT_ALL": {
+            "value": null,
+            "effect": "presence false; original capped host-only memory reports remain, not guest memory scan"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1678,
+        "expression": "static int zskip_on(void) { if (g_zskip_env < 0) { const char *e = getenv(\"DM_NVN_ZSKIP\"); g_zskip_env = !e || strcmp(e, \"0\"); } return g_zskip_env && tbdr_on(); }",
+        "effects": {
+          "DM_NVN_ZSKIP": {
+            "value": "0",
+            "effect": "!e || strcmp(e,\"0\"): 0 makes zskip false"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1713,
+        "expression": "static long a0 = -2, a1; if (a0 == -2) { const char *e = getenv(\"DM_NVN_PASSDUMP\"); a0 = e ? atol(e) : -1; a1 = e && strchr(e, '-') ? atol(strchr(e, '-') + 1) : a0; }",
+        "effects": {
+          "DM_NVN_PASSDUMP": {
+            "value": null,
+            "effect": "e absent yields a0=-1; passdump false before packet logs/readbacks"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1739,
+        "expression": "if (g_use < 0) { const char *e = getenv(\"DM_GFXUSE\"); g_use = USE_OFF;",
+        "effects": {
+          "DM_GFXUSE": {
+            "value": null,
+            "effect": "e absent keeps USE_OFF; no file or atexit(use_exit) registration"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1816,
+        "expression": "const char *e = getenv(\"DM_NVN_PASSGPU\"); g_pg = 0;",
+        "effects": {
+          "DM_NVN_PASSGPU": {
+            "value": null,
+            "effect": "e absent keeps g_pg0; no GPU timing diagnostic allocation"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1979,
+        "expression": "if (g_udc_ab < 0) { const char *e = getenv(\"DM_NVN_UNWRITTEN_DC\"); g_udc_ab = !(e && !strcmp(e, \"0\"));",
+        "effects": {
+          "DM_NVN_UNWRITTEN_DC": {
+            "value": "0",
+            "effect": "!(e && !strcmp(e,\"0\")): 0 makes omission false"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1980,
+        "expression": "const char *a = getenv(\"DM_NVN_UDC_AB\"); if (a && !strcmp(a, \"1\")) { g_udc_ab = 0; g_udc_ab_on = 0; } }",
+        "effects": {
+          "DM_NVN_UDC_AB": {
+            "value": null,
+            "effect": "a absent prevents AB switching; UNWRITTEN_DC0 already disables optimizer"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 1992,
+        "expression": "static int tbdr_env(void) { static int v = -1; if (v < 0) { const char *e = getenv(\"DM_NVN_TBDR\"), *r = getenv(\"DM_NVN_RULER\"); v = !(e && !strcmp(e, \"0\")); g_ruler_truth = r && !strcmp(r, \"1\"); if (!v) MLOG(\"DM_NVN_TBDR=0: all TBDR optimizations off (for equivalence reference)\"); } return v; }",
+        "effects": {
+          "DM_NVN_TBDR": {
+            "value": "0",
+            "effect": "!(e && !strcmp(e,\"0\")): 0 makes all TBDR optimizations false"
+          },
+          "DM_NVN_RULER": {
+            "value": null,
+            "effect": "r absent makes ruler_truth false; no ruler sentinel diagnostic"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2034,
+        "expression": "static int rt_range_on(void) { static int v = -1; if (v < 0) { const char *e=getenv(\"DM_NVN_RT_RANGE\"); v=e && !strcmp(e,\"1\"); } return v; }   //Narrow candidate, off by default",
+        "effects": {
+          "DM_NVN_RT_RANGE": {
+            "value": null,
+            "effect": "e&&is1 false; range diagnostic paths not reached"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2077,
+        "expression": "const char *p = getenv(\"DM_XV_FILE\"); if (!p || !*p) return;",
+        "effects": {
+          "DM_XV_FILE": {
+            "value": null,
+            "effect": "!p||!*p returns before file operations"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2101,
+        "expression": "const char *p = getenv(\"DM_XV_FILE\"); if (p && *p) { FILE *f = fopen(p, \"a\"); if (f) { fprintf(f, \"%016llx\\t%s\\t%llu\\n\", (unsigned long long)e->tag, why, (unsigned long long)g_stat_pass); fclose(f); } }",
+        "effects": {
+          "DM_XV_FILE": {
+            "value": null,
+            "effect": "!p||!*p returns before file operations"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2111,
+        "expression": "static int xv_on(void) { static int off = -1; if (off < 0) { const char *e = getenv(\"DM_NVN_XV\"); off = e && !strcmp(e, \"0\"); } return !off && tbdr_on(); }",
+        "effects": {
+          "DM_NVN_XV": {
+            "value": "0",
+            "effect": "off=e && !strcmp(e,\"0\"); return !off: 0 disables ledger optimization"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2263,
+        "expression": "static int enc_label_on(void) { static int v = -1; if (v < 0) { const char *e = getenv(\"DM_NVN_ENC_LABEL\"); v = e && atoi(e); } return v; }",
+        "effects": {
+          "DM_NVN_ENC_LABEL": {
+            "value": null,
+            "effect": "e&&atoi(e) false; no encoder diagnostic labels"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2354,
+        "expression": "static int probe = -1; if (probe < 0) { probe = getenv(\"DM_NVN_LOADPROBE\") ? atoi(getenv(\"DM_NVN_LOADPROBE\")) : 0; if (probe) MLOG(\"DM_NVN_LOADPROBE: load-skippable attachments are cleared to a sentinel color and read back for checking\"); }",
+        "effects": {
+          "DM_NVN_LOADPROBE": {
+            "value": null,
+            "effect": "conditional expression yields0; no sentinel clear/readback"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2572,
+        "expression": "const char *e = getenv(\"DM_NVN_SHMAP\");",
+        "effects": {
+          "DM_NVN_SHMAP": {
+            "value": null,
+            "effect": "manifest mode returns before getenv; legacy map not read"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2573,
+        "expression": "const char *m = getenv(\"DM_MSL_DIR\");",
+        "effects": {
+          "DM_MSL_DIR": {
+            "value": null,
+            "effect": "manifest mode returns before getenv; legacy directory not read"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2681,
+        "expression": "const char *path = getenv(\"DM_PSO_RECORD\");",
+        "effects": {
+          "DM_PSO_RECORD": {
+            "value": null,
+            "effect": "path absent prevents fopen"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2695,
+        "expression": "const char *u = getenv(\"DM_PSO_USER\"), *save = getenv(\"DM_SAVE\");",
+        "effects": {
+          "DM_PSO_USER": {
+            "value": null,
+            "effect": "u absent and SAVE absent yieldsnil; manifest gate also returnsNULL before file"
+          },
+          "DM_SAVE": {
+            "value": null,
+            "effect": "save absent yieldsnil pso_user path; no default artifact file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 2897,
+        "expression": "const char *e = getenv(\"DM_BOTW_SHADER_MISSING\");",
+        "effects": {
+          "DM_BOTW_SHADER_MISSING": {
+            "value": null,
+            "effect": "e absent yields v=0, so shader missing stops by default; no skip fallback"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 3497,
+        "expression": "if (nk < 0) { nk = 0; const char *e = getenv(\"DM_NVN_HILITE\");",
+        "effects": {
+          "DM_NVN_HILITE": {
+            "value": null,
+            "effect": "e absent leaves nk0; no diagnostic highlight"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 3703,
+        "expression": "const char *e = getenv(\"DM_PSO_MANIFEST\");",
+        "effects": {
+          "DM_PSO_MANIFEST": {
+            "value": "off",
+            "effect": "explicit off and manifest-mode early return both prohibit legacy background warm-up"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 3888,
+        "expression": "static uint64_t bl_pass[6]; static int bl_all = -1; if (bl_all < 0) bl_all = getenv(\"DM_NVN_PASSDUMP_ALL\") != NULL;   //Record on every new encode (otherwise only the first time per pass per stage)",
+        "effects": {
+          "DM_NVN_PASSDUMP_ALL": {
+            "value": null,
+            "effect": "presence false; no all-pass records"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 3906,
+        "expression": "static const char *cbd; static int cbd_init; if (!cbd_init) { cbd = getenv(\"DM_NVN_CBDUMP\"); cbd_init = 1; }",
+        "effects": {
+          "DM_NVN_CBDUMP": {
+            "value": null,
+            "effect": "cbd=NULL; no constant-buffer content diagnostic file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 4742,
+        "expression": "static int fz_check_on(void) { static int v = -1; if (v < 0) v = getenv(\"DM_NVN_FUSE_CHECK\") != NULL; return v; }",
+        "effects": {
+          "DM_NVN_FUSE_CHECK": {
+            "value": null,
+            "effect": "presence false; no equivalence readback"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 4809,
+        "expression": "static void defer_env(void) { const char *x = getenv(\"DM_NVN_DEFER_AB\"), *e = getenv(\"DM_NVN_DEFER\"); g_defer_env_ab = x && !strcmp(x, \"1\"); g_defer_env_off = e && !strcmp(e, \"0\"); }",
+        "effects": {
+          "DM_NVN_DEFER_AB": {
+            "value": null,
+            "effect": "x absent makes ABfalse; DEFER0 disables optimizer"
+          },
+          "DM_NVN_DEFER": {
+            "value": "0",
+            "effect": "g_defer_env_off=e && !strcmp(e,\"0\"): 0 turns defer off"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5360,
+        "expression": "if (g_bloom_q < 0) { const char *e = getenv(\"DM_NVN_BLOOM_Q\"); g_bloom_q = !e || strcmp(e, \"0\"); }",
+        "effects": {
+          "DM_NVN_BLOOM_Q": {
+            "value": "0",
+            "effect": "!e || strcmp(e,\"0\"): 0 makes bloom-quarter false"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5532,
+        "expression": "static const char *neg; static int ng = -1; if (ng < 0) { neg = getenv(\"DM_NVN_RULER_NEG\"); ng = neg && *neg; }",
+        "effects": {
+          "DM_NVN_RULER_NEG": {
+            "value": null,
+            "effect": "neg absent makes negative control false"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5548,
+        "expression": "if (nsk < 0) { nsk = 0; for (const char *q = getenv(\"DM_NVN_SKIP_FS\"); q && *q && nsk < 16; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) { size_t n = strcspn(q, \",\"); if (n > 16) n = 16; memcpy(sk[nsk], q, n); sk[nsk++][n] = 0; }",
+        "effects": {
+          "DM_NVN_SKIP_FS": {
+            "value": null,
+            "effect": "q=NULL; nsk0; no shader draw skipping"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5554,
+        "expression": "{ static int small = -1; if (small < 0) { const char *e = getenv(\"DM_NVN_SKIP_SMALL\"); small = e ? atoi(e) : 0; if (small) MLOG(\"DM_NVN_SKIP_SMALL: dropping draws with target width ≤ %d (diagnostic, image incorrect)\", small); }",
+        "effects": {
+          "DM_NVN_SKIP_SMALL": {
+            "value": null,
+            "effect": "e absent makes small0; no small-target draw skipping"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5559,
+        "expression": "{ static int nofxaa = -1; static uint64_t fx_from, fx_to; if (nofxaa < 0) { const char *e = getenv(\"DM_NVN_NOFXAA\"); nofxaa = e && !strcmp(e, \"1\"); if (nofxaa) MLOG(\"DM_NVN_NOFXAA=1: skipping FXAA\"); }",
+        "effects": {
+          "DM_NVN_NOFXAA": {
+            "value": null,
+            "effect": "e&&is1 false; no FXAA skipping"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5738,
+        "expression": "{ static int tg; if (!tg) { tg = 1; const char *e = getenv(\"DM_TEST_GHOST\"); float v[8];   //Test switch DM_TEST_GHOST=px,py,gx,gy,gw,gh,cx,cy (normalized; press point, grid, center of the drag-follow image): turns on the drag-follow image directly without going through the front end (for Mac host screenshot verification)",
+        "effects": {
+          "DM_TEST_GHOST": {
+            "value": null,
+            "effect": "e absent; no synthetic drag-follow state"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 5743,
+        "expression": "static uint64_t last_pass = ~0ull; static int all = -1; if (all < 0) all = getenv(\"DM_NVN_PASSDUMP_ALL\") != NULL;",
+        "effects": {
+          "DM_NVN_PASSDUMP_ALL": {
+            "value": null,
+            "effect": "presence false; no all-pass records"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6340,
+        "expression": "static int frz_wanted(void) { if (g_frz_on < 0) { const char *e = getenv(\"DM_NVN_TEST_FRZ\"); g_frz_on = e && atoi(e); if (g_frz_on) MLOG(\"DM_NVN_TEST_FRZ: world freeze state bit overridden by test switch (always on)\"); } tbdr_on(); return g_frz_on > 0 && tbdr_on() && g_ruler_truth <= 0; }",
+        "effects": {
+          "DM_NVN_TEST_FRZ": {
+            "value": null,
+            "effect": "e&&atoi(e) false, so no world-freeze override"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6366,
+        "expression": "static void rt_toggle_poll(void) { static int tg = -1; if (tg < 0) { const char *e = getenv(\"DM_RT_AB_TOGGLE\"); tg = e ? atoi(e) : 0; (void)rt_want(); }   //On first call also read DM_RT_AB (on a real device the world-freeze bit is set to 0 very early, so frz_op is not necessarily called)   // test: switch back and forth between A / B every tg seconds by wall clock",
+        "effects": {
+          "DM_RT_AB_TOGGLE": {
+            "value": null,
+            "effect": "e absent tg0; no wallclock AB toggling"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6379,
+        "expression": "int mtl_fps_target(void) { static int env = -2; if (env == -2) { const char *e = getenv(\"DM_FPS\"); env = e ? atoi(e) : -1; if (env != 30 && env != 60) env = -1; else MLOG(\"DM_FPS=%d: frame rate pinned by test switch\", env); }",
+        "effects": {
+          "DM_FPS": {
+            "value": null,
+            "effect": "e absent env=-1; no test-pinned rate; normal backend pacing still pending lifecycle verification"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6395,
+        "expression": "static int rt_want_raw(void) { static int forced; if (g_rt.env < 0) { const char *e = getenv(\"DM_RT_AB\"); g_rt.env = e ? atoi(e) : 0; forced = e != NULL; if (e) MLOG(\"DM_RT_AB=%d: render path pinned by environment variable (for testing; the custom page switch no longer applies)\", g_rt.env); }",
+        "effects": {
+          "DM_RT_AB": {
+            "value": "0",
+            "effect": "e?atoi(e):0: 0 forces original render path, not extrapolation"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6493,
+        "expression": "{ static int dbg = -1, n; if (dbg < 0) dbg = getenv(\"DM_RT_DBG\") != NULL; if (dbg && n < 4000 && g_rt.ds_ser) { n++; MLOG(\"[rtdbg] frame boundary pass %llu previous segment state %d identified main pass %d copied %d extrapolated %d fx %d ldr %d hoist %d fz %d defer %d/%d\", g_stat_pass, was, g_rt.main_seen, g_rt.copied, g_rt.ex_done, g_rt.fx_state, g_rt.have_ldr, g_hoist_n, g_fz.active, defer_has_active(), g_defer_replaying); } }",
+        "effects": {
+          "DM_RT_DBG": {
+            "value": null,
+            "effect": "presence false; no RT diagnostic logs"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6520,
+        "expression": "else { uint64_t s_; int lv, sl; rt_sub(r, 8, &s_, &lv, &sl); static int neg = -1; if (neg < 0) neg = getenv(\"DM_NVN_TEST_FRZ_NEG\") != NULL;   //Negative control: the full frame is drawn with the UI stencil as usual, and old pixels must be exposed when the panel shrinks",
+        "effects": {
+          "DM_NVN_TEST_FRZ_NEG": {
+            "value": null,
+            "effect": "presence false; no negative-control rendering"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6534,
+        "expression": "static int dump_all = -1; if (dump_all < 0) dump_all = getenv(\"DM_NVN_PASSDUMP_ALL\") != NULL;",
+        "effects": {
+          "DM_NVN_PASSDUMP_ALL": {
+            "value": null,
+            "effect": "presence false; no all-pass records"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6781,
+        "expression": "const char *e = getenv(\"DM_NVN_SHOT_OUT\"); int w = 0, h = 0; char sep = 0, extra = 0;",
+        "effects": {
+          "DM_NVN_SHOT_OUT": {
+            "value": null,
+            "effect": "missing output dimensions alone does not disable direct capture; all direct screenshot entries explicitly guarded"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6819,
+        "expression": "if (g_ruler_truth && getenv(\"DM_NVN_RULER\") && !strcmp(getenv(\"DM_NVN_RULER\"), \"1\") && ok) { static int shots; if (++shots == 2) g_ruler_pending = 1; }",
+        "effects": {
+          "DM_NVN_RULER": {
+            "value": null,
+            "effect": "r absent makes ruler_truth false; no ruler sentinel diagnostic"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6820,
+        "expression": "if (g_defer_ab >= 0 && getenv(\"DM_NVN_DEFER_AB\") && !strcmp(getenv(\"DM_NVN_DEFER_AB\"), \"1\") && ok) { static int shots; if (++shots == 2) { g_defer_ab_on = 1; MLOG(\"DM_NVN_DEFER_AB: second screenshot written, enabling deferred pass merge\"); } }",
+        "effects": {
+          "DM_NVN_DEFER_AB": {
+            "value": null,
+            "effect": "x absent makes ABfalse; DEFER0 disables optimizer"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6821,
+        "expression": "if (g_udc_ab >= 0 && getenv(\"DM_NVN_UDC_AB\") && !strcmp(getenv(\"DM_NVN_UDC_AB\"), \"1\") && ok) {",
+        "effects": {
+          "DM_NVN_UDC_AB": {
+            "value": null,
+            "effect": "a absent prevents AB switching; UNWRITTEN_DC0 already disables optimizer"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6833,
+        "expression": "if (g_td_frame == -2) { const char *e = getenv(\"DM_NVN_TEXDUMP\"), *c = e ? strchr(e, ':') : NULL; g_td_frame = c ? atol(e) : -1; g_td_path = c ? c + 1 : NULL; g_td_list = [NSMutableArray array]; }",
+        "effects": {
+          "DM_NVN_TEXDUMP": {
+            "value": null,
+            "effect": "e absent g_td_frame=-1; dump returns before resource readback/file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6868,
+        "expression": "for (const char *q = getenv(\"DM_NVN_TEXRAW\"); q && *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) {",
+        "effects": {
+          "DM_NVN_TEXRAW": {
+            "value": null,
+            "effect": "q=NULL so no raw texture loop"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6884,
+        "expression": "for (const char *q = getenv(\"DM_NVN_TEXDUMP_SER\"); q && *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) {",
+        "effects": {
+          "DM_NVN_TEXDUMP_SER": {
+            "value": null,
+            "effect": "q=NULL, serial list loop does not execute; parent dump disabled too"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6895,
+        "expression": "if (getenv(\"DM_NVN_SNAPRAW\")) {   //Also save the raw bytes (converting an HDR target to an 8-bit image truncates; first-line text header: width height format bytes-per-row)",
+        "effects": {
+          "DM_NVN_SNAPRAW": {
+            "value": null,
+            "effect": "presence false; no raw attachment save"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 6934,
+        "expression": "if (g_ts_n < 0) { g_ts_n = 0; const char *e = getenv(\"DM_NVN_TEXSNAP\");",
+        "effects": {
+          "DM_NVN_TEXSNAP": {
+            "value": null,
+            "effect": "e absent leaves g_ts_n0; no snapshot note/after capture"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 7146,
+        "expression": "if (rl < 0) { const char *e = getenv(\"DM_NVN_REGLUM\"), *c = e ? strchr(e, ':') : NULL;",
+        "effects": {
+          "DM_NVN_REGLUM": {
+            "value": null,
+            "effect": "e absent rl0; no regional readback or file"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 7169,
+        "expression": "nshot = 0; const char *e = getenv(\"DM_NVN_SHOT\"), *c = e ? strchr(e, ':') : NULL;",
+        "effects": {
+          "DM_NVN_SHOT": {
+            "value": null,
+            "effect": "e absent nshot0; no frame screenshot loop; direct entry guarded"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_mtl.m",
+        "line": 7443,
+        "expression": "if (at < 0) { at = 0; const char *e = getenv(\"DM_TEST_LINK_STALL\"); if (e && sscanf(e, \"%lf,%lf\", &at, &dur) == 2 && at > 0 && dur > 0) { t0 = now; st = 1; } else at = 0; }",
+        "effects": {
+          "DM_TEST_LINK_STALL": {
+            "value": null,
+            "effect": "e absent sets st0; no test pause/resume"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/nvn_rtex.inc",
+        "line": 78,
+        "expression": "if (getenv(\"DM_RT_TEST_NOPSO\")) return 0;   //Test: pretend this device cannot build the extrapolation pipeline (verifies the whole run falls back to the original drawing method)",
+        "effects": {
+          "DM_RT_TEST_NOPSO": {
+            "value": null,
+            "effect": "presence false; no fake pipeline creation failure"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/rt_range_check.inc",
+        "line": 15,
+        "expression": "if(g_rr_checking||g_rr_active||!rt_range_on()||!getenv(\"DM_NVN_RT_RANGE_CHECK\")||!passdump()||g_fz.active||!R.has_rt||R.rt.n!=1||!R.rt.depth||R.clear_c[0]||R.clear_d||R.clear_s)return;",
+        "effects": {
+          "DM_NVN_RT_RANGE_CHECK": {
+            "value": null,
+            "effect": "!getenv is true in first guard: no reference copy/readback/TSV"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/rt_range_check.inc",
+        "line": 36,
+        "expression": "if(!ranged||g_rr_n!=2||g_rr_bad||g_rr_dirty!=nvn_dirty_now() || g_rr_reg!=g_reg_gen || g_rr_ser!=g_ser_gen || g_rr_resets!=1 || !g_rr_vis[0] || !g_rr_vis[1] || !g_rr_s[0].s.ds.dt || g_rr_s[0].s.ds.dw || g_rr_s[0].s.ds.st || !g_rr_s[1].s.ds.dt || g_rr_s[1].s.ds.dw || g_rr_s[1].s.ds.st){NSString *p=[@(getenv(\"DM_NVN_RT_RANGE_CHECK\")) stringByAppendingPathComponent:@\"SKIP.tsv\"];FILE *f=fopen(p.UTF8String,\"a\");if(f){fprintf(f,\"%llu\\t%d\\t%d\\t%d\\t%d\\t%d\\t%d\\t%d\\n\",(unsigned long long)g_rr_frame,ranged,g_rr_n,g_rr_bad,g_rr_dirty!=nvn_dirty_now(),g_rr_resets,g_rr_vis[0]!=nil,g_rr_vis[1]!=nil);fclose(f);}g_rr_initial[0]=g_rr_initial[1]=nil;return;}",
+        "effects": {
+          "DM_NVN_RT_RANGE_CHECK": {
+            "value": null,
+            "effect": "!getenv is true in first guard: no reference copy/readback/TSV"
+          }
+        }
+      },
+      {
+        "path": "dm/gfx/nvn/rt_range_check.inc",
+        "line": 53,
+        "expression": "uint64_t frame=g_rr_frame;unsigned vc=g_rr_s[1].indexed?g_rr_s[1].di.count:g_rr_s[1].dw.count;NSUInteger n=c.width*c.height;NSString *out=@(getenv(\"DM_NVN_RT_RANGE_CHECK\"));",
+        "effects": {
+          "DM_NVN_RT_RANGE_CHECK": {
+            "value": null,
+            "effect": "!getenv is true in first guard: no reference copy/readback/TSV"
+          }
+        }
+      }
+    ],
+    "direct_diagnostic_entry_guards": [
+      "mtl_grab_next_present",
+      "dm_gfx_burst",
+      "dm_gfx_shot_at",
+      "botw_shader_observation_write"
+    ],
+    "constructors": {
+      "nvn_nops_register": "host slot table + inherited noops; no GPU/thread. Semantic noops remain an activation blocker",
+      "ub_sub_register": "assigns host function pointers only",
+      "bp_t0": "host mach_absolute_time/timebase only"
+    },
+    "atexit": "use_exit registration inside USE_FILE activation; DM_GFXUSE NULL keeps USE_OFF before registration",
+    "background_work": {
+      "translation_thread": "functional queue path; not started by constructors; lifecycle/cleanup not integrated",
+      "warm_worker": "manifest mode returns before background dispatch; explicit PSO_MANIFEST=off as defense",
+      "burst_disk_thread": "direct burst entry denied before arguments or state, so g_burst_left remains0",
+      "display_link_thread": "DM_PRESENT_LINK=0 prevents upstream independent link; host lifecycle adapter pending",
+      "present_thread": "functional backend present path, not started by constructors; no activation in this component"
+    },
+    "wait_report": "registration stores callback only; no auto invocation or guest state reader",
+    "module_of": "owned immutable module name/base/size lookup only; builtin_get has no callsite in fixed5f and manifest program path bypasses legacy. Do not expose D2R dispatch helpers",
+    "snapshot_diagnostic": "no such function in complete54source; normal botw_shader_snapshot is functional bounded shader input and optional file capture blocked",
+    "host_only_default_reports": "dump_frame every300 host counters and capped mtl_mem_stat remain; they read host counts/task info, not guest content. First-call name list and LONGFRAME disabled",
+    "remaining_activation_blockers": [
+      "current base-v0 ABI mismatch; first verify lawful1.9 resources, otherwise audit52.32 accessors",
+      "checked dirty complete-module host port",
+      "segmented NoCopy and allACK retirement",
+      "vpool rawkind/wholebatch bounds/witness/authority",
+      "inherited semantic noops/dummy/nil success replacement",
+      "real guest callback error escape lock/ARC/cleanup",
+      "complete actual shader facts/manifest and current frontend lifecycle"
+    ],
+    "cmd_audit_policy_gate": "cmda_on returns0 via immutable host policy before pthread_once; dlsym thr_cur_handle/module_of/svc_thread_dump/framecount never called by audit. Mandatory header/record/safe-read funcs preserved and tested on self-owned records",
+    "dynamic_lookup_paths": {
+      "command_audit": "five-line cmda_init on branch unreachable after cmda_on policy0; CPU dlsym spy0",
+      "ub_var": "only called when DM_NVN_UB parsed nonempty classes; valueNULL keeps count0 and returns before ub_var"
+    },
+    "new_environment_keys": [
+      "DM_BOTW_SHADER_MISSING",
+      "DM_NVN_ALIASLOG",
+      "DM_NVN_CMD_AUDIT",
+      "DM_NVN_CMD_AUDIT_TRACE",
+      "DM_NVN_TEXDUMP_SER",
+      "DM_SHADER_OBSERVATION_SHA256"
+    ],
+    "latest_pin_diagnostics_reviewed": true
+  },
+  "activation": false,
+  "production_source_count_unchanged": 98,
+  "backend_execution_forbidden": true,
+  "old_pin_backup": {
+    "commit": "5f673ae2ea4f90ad46403aa6fbe13537fb557271",
+    "file_count": 69,
+    "source_lock_sha256": "dfee2537fe25694a09a06cd7712d5fd7c43db72d59340c9d51e834e243e3510f",
+    "original_runtime_not_active": true
+  },
+  "upstream_git_tree_sha256": "bee040fc9a4e93b30bc06b5564b546b0d18904ee9e4a2ea5eda9da99a7c3ee4c",
+  "source_upgrade_diff": {
+    "dm/gfx/nvn/botw_buffer.c": {
+      "old_sha256": "87f1faabc5437f549256bed265e10e03743db103c3ecf90d511dfd6595b77c6f",
+      "new_sha256": "87f1faabc5437f549256bed265e10e03743db103c3ecf90d511dfd6595b77c6f"
+    },
+    "dm/gfx/nvn/botw_sampler_reduction.c": {
+      "old_sha256": "8913b5e6a7f913d603391e7a141bb0dd2d37597c797c424c9d771c14bbe1403b",
+      "new_sha256": "8913b5e6a7f913d603391e7a141bb0dd2d37597c797c424c9d771c14bbe1403b"
+    },
+    "dm/gfx/nvn/botw_shader.c": {
+      "old_sha256": "aed41ffa3f175ee691d675409c9f0969fba159c8010ff178cc78850bf516ac5e",
+      "new_sha256": "537645f13f04110ad7a443e8da7b6f2567a8be99663b16f28b8f91eed4c8bc34"
+    },
+    "dm/gfx/nvn/botw_shader.h": {
+      "old_sha256": "825df5cfd9bb10c627e0495833882ffd13942bb0027af744150e318805ec475d",
+      "new_sha256": "825df5cfd9bb10c627e0495833882ffd13942bb0027af744150e318805ec475d"
+    },
+    "dm/gfx/nvn/botw_shader_manifest.h": {
+      "old_sha256": "399a2385ba015340ea633257e98480c8714e5ec996ee2d7997e25dfa4b3bcac3",
+      "new_sha256": "5291c3056392d112098e86db0453a1a3007503e12c2d198d16f1e9cae2dcaad0"
+    },
+    "dm/gfx/nvn/botw_shader_manifest.m": {
+      "old_sha256": "501b1287879003d450b1b9f1ee6b315f7869f00e71135d1c8a230623e1e7a603",
+      "new_sha256": "155e3fe8fedfa1691cd40d1cd5521a1a4738ca9b5995a14033f751723de289a1"
+    },
+    "dm/gfx/nvn/botw_shader_observation.c": {
+      "old_sha256": "46149a7e8e92bdbda13a973591aec25ce65c83ec8297a244ec3480b24e6c7879",
+      "new_sha256": "e595385ed464f89ff7b614685146cd52b4d9923afe71927ac36850a7efe66ea9"
+    },
+    "dm/gfx/nvn/botw_shader_observation.h": {
+      "old_sha256": "a490a139e6b31cad452a06b7f22079149ca3d1867470f18775513ecb54536696",
+      "new_sha256": "e7549678f66757e90b16aee60b4373db1e29baeb2b96332c8aa936d5be7cf212"
+    },
+    "dm/gfx/nvn/botw_shader_runtime.h": {
+      "old_sha256": "fd6f29eb431c19d0339207d025ad60ef2a28af33d739e91b5680a7ba515b99d6",
+      "new_sha256": "fd6f29eb431c19d0339207d025ad60ef2a28af33d739e91b5680a7ba515b99d6"
+    },
+    "dm/gfx/nvn/botw_shader_runtime.m": {
+      "old_sha256": "81acb10d4251e248d975e9339447bf26d8376f51445e1a30f817471ff25deb7b",
+      "new_sha256": "81acb10d4251e248d975e9339447bf26d8376f51445e1a30f817471ff25deb7b"
+    },
+    "dm/gfx/nvn/botw_storage_class.c": {
+      "old_sha256": "a0d77b1ab1ec64ad0a657798c79cb90081106cdfa50ccf229441e0147e3e3257",
+      "new_sha256": "a0d77b1ab1ec64ad0a657798c79cb90081106cdfa50ccf229441e0147e3e3257"
+    },
+    "dm/gfx/nvn/dmsh_chain.h": {
+      "old_sha256": "8d7fb2f03f6a8ab7fb8e8720f5bd2da8414f9981c21e5e575cb9b50574113b68",
+      "new_sha256": "8d7fb2f03f6a8ab7fb8e8720f5bd2da8414f9981c21e5e575cb9b50574113b68"
+    },
+    "dm/gfx/nvn/hle_nvn.c": {
+      "old_sha256": "3786f1c734e7b2d5ef403a28b936a068be1b45e03a2bb9fa763ade728794ba5f",
+      "new_sha256": "25dee0ce39ce821eac537a88cf80d2b1b5bf31a90fdfcab0317f529791b85e9f"
+    },
+    "dm/gfx/nvn/include/nvn.h": {
+      "old_sha256": "e72be964171dde6df24f02cd77df241e321ba922777f807992358a071789bfb0",
+      "new_sha256": "51c3fab2156a95ac907d973c2a916f8cedf588f743f2b6c17ca0b57d989ba7b9"
+    },
+    "dm/gfx/nvn/nvn_builtin.h": {
+      "old_sha256": "7b9d24cc391b2ca0fdfe4ab087fce167cd9e95a86c76fa51ef691888261e0426",
+      "new_sha256": "7b9d24cc391b2ca0fdfe4ab087fce167cd9e95a86c76fa51ef691888261e0426"
+    },
+    "dm/gfx/nvn/nvn_clock.h": {
+      "old_sha256": "af7d2dd346edb125424b85892730f686e0569878e648b742af6e0a906dc785b4",
+      "new_sha256": "af7d2dd346edb125424b85892730f686e0569878e648b742af6e0a906dc785b4"
+    },
+    "dm/gfx/nvn/nvn_cmd_audit.c": {
+      "old_sha256": null,
+      "new_sha256": "a005e9046a76e27687c63d8af258488aad7fdb13524c97cee8f04752360ec0a9"
+    },
+    "dm/gfx/nvn/nvn_cmd_audit.h": {
+      "old_sha256": null,
+      "new_sha256": "ca6517d544e2a9ae10eb4f3f3fd79420a9fac14d3ff05f869d63ab55740b36e8"
+    },
+    "dm/gfx/nvn/nvn_count.h": {
+      "old_sha256": "eebefa966311326ce506d09c5f391de4a261e7baf32895f026c666e30bdfa904",
+      "new_sha256": "eebefa966311326ce506d09c5f391de4a261e7baf32895f026c666e30bdfa904"
+    },
+    "dm/gfx/nvn/nvn_cover.h": {
+      "old_sha256": "a45e3e26e995c9960abbe1b9cd82e1dd5e8d1ab9c29953276b833bc657adb2e7",
+      "new_sha256": "a45e3e26e995c9960abbe1b9cd82e1dd5e8d1ab9c29953276b833bc657adb2e7"
+    },
+    "dm/gfx/nvn/nvn_dirty.c": {
+      "old_sha256": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75",
+      "new_sha256": "7a7950e2d3dccda0a1a1004735548451467b51b1e9bbed0f5d4ce0aa97c86e75"
+    },
+    "dm/gfx/nvn/nvn_dirty.h": {
+      "old_sha256": "d1b9aee7cff3bee7ff055b1aaaded0ff90f83d9412754c716e62fc0394c3c4b3",
+      "new_sha256": "d1b9aee7cff3bee7ff055b1aaaded0ff90f83d9412754c716e62fc0394c3c4b3"
+    },
+    "dm/gfx/nvn/nvn_dtex.c": {
+      "old_sha256": null,
+      "new_sha256": "c837f78b59e9b415890334ae70508489ce2beada6fe64ccd46d290d2c8cf8099"
+    },
+    "dm/gfx/nvn/nvn_dtex.h": {
+      "old_sha256": null,
+      "new_sha256": "37961c6d17ff5c266c76a834349710ada8903072f7fb04083b1577ce7feb28c1"
+    },
+    "dm/gfx/nvn/nvn_entry.S": {
+      "old_sha256": "f018457948f0c5a81c48213d51e7d9cef729dbc35fc97fed2f38e6557ce5db55",
+      "new_sha256": "f018457948f0c5a81c48213d51e7d9cef729dbc35fc97fed2f38e6557ce5db55"
+    },
+    "dm/gfx/nvn/nvn_handle.h": {
+      "old_sha256": "43713a4659f7ca3756ad07454b689503b128d108c0d014e788f861102e8a9968",
+      "new_sha256": "43713a4659f7ca3756ad07454b689503b128d108c0d014e788f861102e8a9968"
+    },
+    "dm/gfx/nvn/nvn_hmap.h": {
+      "old_sha256": "ae32d0081cf9313ca6511cdfd636e29e6acf60d2a3871f9f455a874ed2f52d7b",
+      "new_sha256": "ae32d0081cf9313ca6511cdfd636e29e6acf60d2a3871f9f455a874ed2f52d7b"
+    },
+    "dm/gfx/nvn/nvn_mtl.h": {
+      "old_sha256": "5bda864e63ced1268f5ef39a7c82b81f227f22bf974103d0bda8dcc088d058cc",
+      "new_sha256": "306ba5f5d2df220ff96850cb709174613d91bd6f6c14285958352e2eb79ba248"
+    },
+    "dm/gfx/nvn/nvn_mtl.m": {
+      "old_sha256": "54b282a9902004984cebff54a77f872d4ea06d36f03f64e8610c879473afd8fd",
+      "new_sha256": "77f716b43c12c95929fdf8b0a75f61686e720169cbe49fa9ca4302c13db8afbb"
+    },
+    "dm/gfx/nvn/nvn_obj.h": {
+      "old_sha256": "7b11f2ee236e60a2e5be91b0aa1da1026c62b78bc1477a4a462e803e946f733c",
+      "new_sha256": "5078f832ff41314026425ced4c7121833d95b798cb06ff7320a49077a56c1584"
+    },
+    "dm/gfx/nvn/nvn_pace.h": {
+      "old_sha256": "2c63e64304a46b961cf09dce35504e4877471f124119f606130ab4a59e8d73fd",
+      "new_sha256": "2c63e64304a46b961cf09dce35504e4877471f124119f606130ab4a59e8d73fd"
+    },
+    "dm/gfx/nvn/nvn_protos.h": {
+      "old_sha256": "a80b7293f3cdc915436e12c92958286e7ee5847717c2692410e6aee7d0ae396f",
+      "new_sha256": "117f7a3805226319cfbb31da84d968e231a09382cdf8869c44bb74081c471f05"
+    },
+    "dm/gfx/nvn/nvn_pso_skey.h": {
+      "old_sha256": "17a07f06bf8904803a28b062118cbb8f3ba45325a4e462b60cd80375f5efd2d5",
+      "new_sha256": "17a07f06bf8904803a28b062118cbb8f3ba45325a4e462b60cd80375f5efd2d5"
+    },
+    "dm/gfx/nvn/nvn_refl.h": {
+      "old_sha256": "6dbf15423dc79dfcfda17eaa07c8ccf26f78d4a896174d96940a24cd219db4bf",
+      "new_sha256": "ac05e9c2325dad07920ca64bb64e3fd038e15d4e745a146161f2eaa3461054cb"
+    },
+    "dm/gfx/nvn/nvn_refl.m": {
+      "old_sha256": "c27763595a95cb9a1b23cfc3c753ade9ed592d29a03108001d9c101e95b1cdb2",
+      "new_sha256": "7dd58622312854e15f231aecadab3eace049f01049810c23907aa8b20946b002"
+    },
+    "dm/gfx/nvn/nvn_rtex.inc": {
+      "old_sha256": "91f43914ad4426aa00df3fbcb58feb33f058d4ab4d8570422788db6261b40566",
+      "new_sha256": "91f43914ad4426aa00df3fbcb58feb33f058d4ab4d8570422788db6261b40566"
+    },
+    "dm/gfx/nvn/nvn_serial.c": {
+      "old_sha256": "f9a4a861c6e2360ed57adb729ebee82023fe573f8f198a9cead404037bcee248",
+      "new_sha256": "f9a4a861c6e2360ed57adb729ebee82023fe573f8f198a9cead404037bcee248"
+    },
+    "dm/gfx/nvn/nvn_tex.c": {
+      "old_sha256": "b29c713909e77b784064b096037d71a1073faa116bb7826d8451914de9f18e44",
+      "new_sha256": "b29c713909e77b784064b096037d71a1073faa116bb7826d8451914de9f18e44"
+    },
+    "dm/gfx/nvn/nvn_tex.h": {
+      "old_sha256": "3e5ca71fdfb6d9f2bd06fd277d64947bebd906d918a4af55a702836eb9e21c3f",
+      "new_sha256": "3e5ca71fdfb6d9f2bd06fd277d64947bebd906d918a4af55a702836eb9e21c3f"
+    },
+    "dm/gfx/nvn/nvn_texflush.c": {
+      "old_sha256": "cf2a5ad0ebfb67b5769666dff8d8327f59228d9084ab356378d3b88c695d388f",
+      "new_sha256": "cf2a5ad0ebfb67b5769666dff8d8327f59228d9084ab356378d3b88c695d388f"
+    },
+    "dm/gfx/nvn/nvn_texflush.h": {
+      "old_sha256": "6129cee00316d867e3b62646977beec48a29ef4e7c24c106400fd09802cbf71a",
+      "new_sha256": "6129cee00316d867e3b62646977beec48a29ef4e7c24c106400fd09802cbf71a"
+    },
+    "dm/gfx/nvn/nvn_texown.c": {
+      "old_sha256": "654b5794a9d778d6784389cbe1b14188755d731c65cf7ac7398d8e6afb1e7ab8",
+      "new_sha256": "a867a2265fc151d6e22d0363046a99a9df4935883d408db1e96fdff0fceac6ea"
+    },
+    "dm/gfx/nvn/nvn_texown.h": {
+      "old_sha256": "171a31d29a0d33e1993f1e813e5897e0d1a59a5c85f6c91400378a32cadb5648",
+      "new_sha256": "671c0d2be9dc4ba335166c14c6386b4c03fbfd1eecf4672be2667edb3d228c5e"
+    },
+    "dm/gfx/nvn/nvn_texwrite.c": {
+      "old_sha256": "b7b7ada9d95e8c146f2c0bedd2c8815a6d5af762bc840dc4130f0e40804aa2c2",
+      "new_sha256": "b7b7ada9d95e8c146f2c0bedd2c8815a6d5af762bc840dc4130f0e40804aa2c2"
+    },
+    "dm/gfx/nvn/nvn_texwrite.h": {
+      "old_sha256": "88303b341dc9f88ccca43b04b3c15552f4d7529930ba10857acd11c209bfe8c3",
+      "new_sha256": "88303b341dc9f88ccca43b04b3c15552f4d7529930ba10857acd11c209bfe8c3"
+    },
+    "dm/gfx/nvn/nvn_thunks.S": {
+      "old_sha256": "99e14e026381e481337340d78e1196e5fa064660e0ea6a0be8bbd65ef686e305",
+      "new_sha256": "99e14e026381e481337340d78e1196e5fa064660e0ea6a0be8bbd65ef686e305"
+    },
+    "dm/gfx/nvn/nvn_vpool.c": {
+      "old_sha256": "102bcffbe3cce5ea94ac11cad410b95b088244d4779981086434a3ff901dbf46",
+      "new_sha256": "102bcffbe3cce5ea94ac11cad410b95b088244d4779981086434a3ff901dbf46"
+    },
+    "dm/gfx/nvn/nvn_vpool.h": {
+      "old_sha256": "13a7ac6cba262cb24a3aa5e6d3ad68385e9eab9ac2e89ab466ce48d38c8fc45c",
+      "new_sha256": "13a7ac6cba262cb24a3aa5e6d3ad68385e9eab9ac2e89ab466ce48d38c8fc45c"
+    },
+    "dm/gfx/nvn/rt_range_check.inc": {
+      "old_sha256": "45435f633e474d6e5088b7ea31b65fa7a842e1a62b9a429f075726b7217edaa0",
+      "new_sha256": "45435f633e474d6e5088b7ea31b65fa7a842e1a62b9a429f075726b7217edaa0"
+    },
+    "dm/gfx/tex/nvn_bcdec.c": {
+      "old_sha256": "b7a2b86ebb0ddedbb2a63bd1eff3dc82ddd9e2c4b833dc3f140dd6cd308be55f",
+      "new_sha256": "b7a2b86ebb0ddedbb2a63bd1eff3dc82ddd9e2c4b833dc3f140dd6cd308be55f"
+    },
+    "dm/gfx/tex/nvn_bcdec.h": {
+      "old_sha256": "bb792aabd6ab20ac737f30cc93f193e2a9b73ae777bae5165f38016f1271793e",
+      "new_sha256": "bb792aabd6ab20ac737f30cc93f193e2a9b73ae777bae5165f38016f1271793e"
+    },
+    "dm/gfx/tex/nvn_deswizzle.c": {
+      "old_sha256": "ad5cfde4084b0c72b917f449d25137aef3c808c0a0e157e58353d540f2e887c1",
+      "new_sha256": "ad5cfde4084b0c72b917f449d25137aef3c808c0a0e157e58353d540f2e887c1"
+    },
+    "dm/gfx/tex/nvn_deswizzle.h": {
+      "old_sha256": "ec38832cdd9517411b4a6b77c351b74881b4328f4b94dc0971e1511fb4995e4a",
+      "new_sha256": "ec38832cdd9517411b4a6b77c351b74881b4328f4b94dc0971e1511fb4995e4a"
+    },
+    "dm/gfx/tex/nvn_deswizzle_gpu.h": {
+      "old_sha256": "3a9534ad951107c30996d49f29e41f8b18e7d9618a034cbd6681887da84e7cd2",
+      "new_sha256": "3a9534ad951107c30996d49f29e41f8b18e7d9618a034cbd6681887da84e7cd2"
+    },
+    "dm/gfx/tex/nvn_deswizzle_gpu.m": {
+      "old_sha256": "c1de5d71322eb62be8894ff67e029035f5992527501caa8e6f90c68406f11abd",
+      "new_sha256": "c1de5d71322eb62be8894ff67e029035f5992527501caa8e6f90c68406f11abd"
+    },
+    "dm/gfx/tex/nvn_fmt_mtl.c": {
+      "old_sha256": "7c885cec28fd7b5ab46c672bc080fca45d14c5e5bbfb38828aeaf00b40d26107",
+      "new_sha256": "7c885cec28fd7b5ab46c672bc080fca45d14c5e5bbfb38828aeaf00b40d26107"
+    },
+    "dm/gfx/tex/nvn_fmt_mtl.h": {
+      "old_sha256": "3b99314b12eac5a4dce61c60024e32d7e23fe9f829c70501413843a271375c93",
+      "new_sha256": "3b99314b12eac5a4dce61c60024e32d7e23fe9f829c70501413843a271375c93"
+    },
+    "dm/third_party/bcdec/bcdec.h": {
+      "old_sha256": "134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189",
+      "new_sha256": "134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189"
+    },
+    "dm/host/dm.h": {
+      "old_sha256": "a189e8c9daa00f8e8b0354ccd0005dd4850b399a2a206d1ce4b2d8773bbdb507",
+      "new_sha256": "a189e8c9daa00f8e8b0354ccd0005dd4850b399a2a206d1ce4b2d8773bbdb507"
+    },
+    "dm/host/front.h": {
+      "old_sha256": "79ce08f9ece0e430a81628178970efc2bc285e45d7b02563f3909ff3e3622c75",
+      "new_sha256": "79ce08f9ece0e430a81628178970efc2bc285e45d7b02563f3909ff3e3622c75"
+    },
+    "dm/host/hle.h": {
+      "old_sha256": "a30e181f6b7551bdc4096fca7fad2db504c7c0623e623e36a5dbf4512f263aa3",
+      "new_sha256": "a30e181f6b7551bdc4096fca7fad2db504c7c0623e623e36a5dbf4512f263aa3"
+    },
+    "LICENSE": {
+      "old_sha256": "5811600bb8fc4522d3310e8e0e637a1bb14b7c64412f8cfc6234872eb53129b9",
+      "new_sha256": "5811600bb8fc4522d3310e8e0e637a1bb14b7c64412f8cfc6234872eb53129b9"
+    },
+    "dm/third_party/bcdec/LICENSE": {
+      "old_sha256": "2414c782587f6e96661cb0d19d752432ddecfcc1a221b4cb12bc2253a54dc5ac",
+      "new_sha256": "2414c782587f6e96661cb0d19d752432ddecfcc1a221b4cb12bc2253a54dc5ac"
+    }
+  },
+  "version_alignment": {
+    "current_baseline": "base-v0 NVN52.32",
+    "upstream_profile": "BotW1.9.0 NVN55.15",
+    "preferred_next_step": "verify user-provided lawful1.9 resources against fixed upstream profile before version-specific rewrites",
+    "resource_match_proven": false,
+    "base52_accessor_status": "fallback compatibility route, not required rewrite before checking matching1.9"
+  },
+  "iphoneos_target": "arm64-apple-ios18.0",
+  "iphoneos_compile_policy": {
+    "availability_diagnostics": "errors",
+    "backend_executed": false,
+    "CPU_probes_executed": false,
+    "scope": "compile/link only; no IPA or device execution"
+  }
+}

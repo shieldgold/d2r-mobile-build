@@ -1,7 +1,7 @@
 // Original Switch shaders (Maxwell machine code) → SPIR-V (the Ryujinx.Graphics.Shader translator), for route B's offline metallib build.
 // Difference from Ryujinx.ShaderTools: the translator's "queries" are answered truthfully rather than always with defaults -
-//   texture type / image format / vertex attribute type / fragment output type / compute thread group size come from the job file (given by the PC reflection paired via the mapping table; same slot number = same resource);
-//   window origin upper-left, depth 0..1 (measured from the game: nvnDeviceSetWindowOriginMode / SetDepthMode).
+//   texture type / image format / vertex attribute type / fragment output type / compute thread group size come from the job file (BotW shader facts, keyed by handle-table slot);
+//   window origin and guest depth mode measured from nvnDeviceSetWindowOriginMode / SetDepthMode.
 // Usage: dmsh_xlate <job.json> <output dir>
 //   Job: [{ "key", "stage": "vs|ps|cs", "code": machine code file (graphics = 0x50-byte SPH + instructions, compute = instructions),
 //           "tex": { "slot": "2d|2darray|cube|cubearray|3d|buffer|1d|1darray|2dms|2dmsarray", ... }, "img": { "slot": { "type", "fmt" } },
@@ -19,7 +19,10 @@ using System.Text.Json.Nodes;
 
 static class SwshXlate
 {
-    const int TexBase = 0x168, SampBase = 0x568;   // byte base of NVN separate texture / sampler handles in c[2] (8 bytes per slot; full measurement in dm/gfx/tools/maxwell_refs.py)
+    // Byte base of the NVN driver texture handle table in c[2] (8 bytes per slot) for BotW 1.9.0: established facts map
+    // handle words 8, 10, 12, 14 to slots 0..3. The job's "tex" / "img" maps are keyed by (byte - TexBase) / 8.
+    // SampBase only bounds the texture window; BotW uses combined handles.
+    const int TexBase = 0x20, SampBase = 0x568;
 
     sealed class Accessor : IGpuAccessor
     {
@@ -93,6 +96,9 @@ static class SwshXlate
             if (f == null) { Notes.Add($"image handle {handle:X} slot {slot} has no PC format, assuming R8G8B8A8Unorm"); return TextureFormat.R8G8B8A8Unorm; }
             return Enum.TryParse(f, true, out TextureFormat tf) ? tf : TextureFormat.R8G8B8A8Unorm;
         }
+        // Metal can select clip versus clamp behavior, but it cannot select the guest -W..W
+        // clip-space depth convention. Tell the translator to convert it to Metal's 0..W range.
+        public bool QueryHostSupportsDepthClipControl() => false;
         int Local(int i) => _job["local"] is JsonArray a && a.Count > i ? (int)a[i] : 1;
         public int QueryComputeLocalSizeX() => Local(0);
         public int QueryComputeLocalSizeY() => Local(1);

@@ -27,7 +27,9 @@
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**，已保留数据更新并普通启动完整3D适配候选 `b7bd5a2`，PID1181。固定本机完整1041项中1040通过、1项条件跳过，iOS/Linux精确head CI均成功，官方工件核98项源码后本机组装签名。较早两份普通采样没有返回或游戏帧；后续独立observation-3现已完整取得host_return=1，首个实际错误为 `nvnMemoryPoolInitialize: Metal memory pool allocation failed`，具体分支与请求大小尚未知。本次没有出现此前32³纹理的generic拒绝，但不能仅凭并发首错变化声称所有3D初始化通过。UID、14,420,017,152字节RomFS大小及mtime、shader清单与权限仍保留，资源无重传或完整重哈希。尚不能游玩，继续核验该分配失败，再验真实画面、操作、音频、游戏存档和重开。
+当前目标是用户更换后的 **iPhone 12 / iOS 18.1**。当前安装 `3aaca29` 显式诊断版，argv仅 `--observe-graphics-lock`，PID1215；固定本机1055项中1054通过、1项条件跳过，精确head双CI成功，官方98项源码工件核验、组装签名后保数据更新。四个有界宿主锁样本已取齐，generation变化且包含idle，不支持同一轮持续持锁跨采样的解释；217.463秒完整采样无host_return/新error/真实帧，约600秒只查metadata仍无frame，后者不冒充重读boot内容。随后3a的observation-4已完整host_return=1，实际首错是 `nvnMemoryPoolInitialize: Memory pool CPU snapshot allocation failed`，在Metal工厂之前；与此前b7的Metal allocation generic首错不同，不能据此认为旧问题已修。正常日志的footprint287821504、resident350535680、available1912090944仅为当次advisory，不保证连续分配成功也不证明OOM。UID、14,420,017,152字节RomFS大小mtime、shader与权限均保留。**尚不能游玩**。
+
+后续主线已纠正为最新完整上游host、NVN和shader工具链，平台差异通过薄适配接入，见[完整后端计划](superpowers/plans/2026-10-16-complete-upstream-backend.md)。当前手机图形核心仍有本地子集实现，37个shader只覆盖内置UI/字体；kernel/IPC/HID也不能统称整模块移植。旧上游5f已落后98提交；本次完整源码锁定21f，其启动记录达到开场文字，但没有菜单或可玩验收。新上游面向1.9/SDK20.5.22/NVN55.15，不能套用到当前base-v0/NVN52.32。完整工具与隔离后端的编译通过不代表已经替换手机生产实现。
 
 此前 `c2b4db8` 取得原始逻辑堆和根堆，进入十三个工作线程，受控停在 `nvnMemoryPoolInitialize` 的 physical NoCopy backing 准入：120 MiB 请求向外取整为125,845,504字节，首个RW VM leaf只剩60,850,176字节，具体分支为 `vm_span`。该次完整日志有host_return=1，同一PID在启动约125.1秒后的系统进程查询中仍存活；这仅是该次观察区间，不是当前版本停止点、整次运行峰值或VM分裂来源证明。
 

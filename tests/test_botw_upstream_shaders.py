@@ -50,9 +50,15 @@ class UpstreamShaderTests(unittest.TestCase):
 
     def test_vendor_source_and_mit_provenance_are_pinned(self):
         report = adapter.verify_vendor()
-        self.assertEqual(report['commit'], '5f673ae2ea4f90ad46403aa6fbe13537fb557271')
-        self.assertGreater(report['verified_files'], 360)
+        self.assertEqual(report['commit'], '21f026e0c7fd9fee575a1bfa8d925553bb4db88e')
+        self.assertEqual(report['verified_files'], 374)
         self.assertTrue((adapter.VENDOR / 'LICENSE').read_text().startswith('MIT License'))
+
+    def test_complete_extract_derive_and_nso_dependency_modules_are_preserved(self):
+        for name in ('dm/gfx/tools/botw_shader_extract.py', 'dm/gfx/tools/botw_shader_derive.py',
+                     'dm/gfx/tools/botw_yaz0.c', 'dm/verify/nsoimg.py',
+                     'dm/gfx/tests/test_botw_shader_extract.py', 'dm/gfx/tests/test_botw_shader_derive.py'):
+            self.assertTrue((adapter.VENDOR / name).is_file(), name)
 
     def test_export_matches_upstream_digest_and_source_hashes(self):
         row = inputs(self.path / 'inputs')
@@ -149,7 +155,7 @@ class UpstreamShaderTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(adapter.VENDOR / 'dm/gfx/tests/test_botw_shader_build.py')],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('Ran 26 tests', result.stderr)
+        self.assertIn('Ran 38 tests', result.stderr)
 
 
 if __name__ == '__main__':
