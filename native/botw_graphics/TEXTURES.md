@@ -4,7 +4,7 @@
 
 ## 原版 ABI 与范围
 
-原版 base SDK 的 82 个相关入口中，78 个已有真实实现，其中两项 StorageClass 实现已确证的 pitch 和普通未压缩 color 分支；现代头文件中另外两项 Strided 读写也有实际实现。以下四个 driver/sparse/ZCull 查询保留具名拒绝：
+原版 base SDK 的 82 个相关入口中，78 个已有真实实现，其中两项 StorageClass 实现已确证的 pitch、普通未压缩 color 和有限单采样 depth 分支；现代头文件中另外两项 Strided 读写也有实际实现。以下四个 driver/sparse/ZCull 查询保留具名拒绝：
 
 - `nvnTextureBuilderGetSparseTileLayout`、`nvnTextureGetSparseTileLayout`
 - `nvnTextureBuilderGetZCullStorageSize`、`nvnTextureGetZCullStorageSize`
@@ -53,14 +53,27 @@ GPU 私有的最新内容建立 `texown` claim。别名纹理、buffer 地址以
 
 BuilderGetStorageClass 与 TextureGetStorageClass 共用纯元数据规则：target 为 BUFFER 或 flags 含 `0x10/0x40` 任一位时返回 `0x100`。这来自原版 base-v0 SDK 的独立分支：raw kind 为 0，最终编码为 `0x100 | rawKind`。Builder 查询允许尚未 SetStorage；该分支与 format、维度、samples、device 和 pool 均无关，不因 Metal 尚不支持该格式而拒绝，也不会调用 Metal。它不代表 GPU 创建能力；BUFFER 的存储尺寸/类别可查，当前 GPU BUFFER texture 创建仍明确拒绝。
 
-非 pitch 路径仅在 `COMPRESSIBLE` 位清除、format 属于原版有效普通颜色集合时返回 `0x1fe`。固定原版 `subsdk0` 的格式记录宽 `0x34`，`+0x30` 的有效字段非零且 `+0xe/+0xf` 的 depth/stencil 位数均为零者，在本桥声明的 `0x01..0x9c` 中恰有 113 项：`01..18`、`22..30`、`37..50`、`6d..9c`。37 个原记录有效字段为零的格式、6 个 depth/stencil 格式和越界枚举不进入此路径。准入来自原版 traits，独立于 Metal 格式映射，不会因为宿主尚不支持某个格式而改变 storage metadata。
+非 pitch 路径仅在 `COMPRESSIBLE` 位清除、format 属于原版有效普通颜色集合时返回 `0x1fe`。固定原版 `subsdk0` 的格式记录宽 `0x34`，`+0x30` 的有效字段非零且 `+0xe/+0xf` 的 depth/stencil 位数均为零者，在本桥声明的 `0x01..0x9c` 中恰有 113 项：`01..18`、`22..30`、`37..50`、`6d..9c`。37 个原记录有效字段为零的格式、6 个 depth/stencil 格式和越界枚举不进入普通 color 路径。准入来自原版 traits，独立于 Metal 格式映射，不会因为宿主尚不支持某个格式而改变 storage metadata。
 
 此值由原调用链证明：`BuilderGetStorageClass` 的非压缩分支向 `b6900` 传压缩请求 0；普通颜色参数经 `NvRmGpuDeviceChooseKind` 到 HAL `31294`，选择 vtable `+0x68`。原版 RTTI 标明 GK100 与 GM200 两套 HAL 均将该槽指向 `316c0`，其完整函数只返回 `0xfe`；Builder 最后编码 `0x100 | rawKind`。该路径仍要求有效的 device provider；本桥先核 raw 地址精确对应 registry 中的 live BWDevice，再检查 header 可读且 serial 身份一致。null、未初始化、已 finalize、外来地址、不可读内存或复制了存活 serial 的伪对象均明确拒绝。pool 和 SetStorage 不属于此前置条件，getter 不调用 Metal。
 
 该普通颜色结果不随 samples、尺寸、其余 target 或不相关 flags 改变；samples 和 fast-clear 虽先构造参数，最终常量槽不消费它们。BUFFER 和 linear 仍先走 pitch 规则；`DEPTH16_PREFER_FAST_CLEAR` 的类别选择作用属于 depth 路径。metadata 查询因此不会限制 GPU 创建范围：不支持的 MSAA、3D、BC 解码和 sparse 等仍由原 Initialize/映射入口独立拒绝。这里的未压缩指未请求 GPU 硬件压缩，和 BC/ASTC 数据块压缩格式不同。
 
-Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。硬件压缩请求、depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
+Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。硬件压缩请求、下述已证子域之外的 depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
 
 两个现代 RawStorageClass、sparse 和 ZCull 仍未开放；后续 physical/virtual pool 与 MapVirtual 的有限接入范围见 [MEMORY_POOLS.md](MEMORY_POOLS.md)。公开固定上游的 RawStorageClass=1 没有本目标 ABI 证明；其 ordinary-pool `0x100` adapter 也明确属于实验策略。本桥不采用这些未经证明的替代答案。原字节合成 oracle 验证 288 组 pitch Builder、256 组 Texture 已保存 raw byte，以及 4 个需要原生 ChooseKind 的分支边界；这些仅证明元数据，不证明 driver 映射或游戏运行。
 
-`tests/test_botw_storage_class.py` 将这两类 metadata 与 GPU 能力分别验证：113 个原有效颜色格式覆盖 samples、target 和不相关 flags，每种可写/真实只读页面各 10,170 次，保留 canary；实际 Metal 私有/linear 纹理 getter 覆盖初始化快照和生命周期。原表无效格式、depth/fast-clear、压缩请求及无效 device 都受控拒绝；metadata 成功后不支持的 GPU 创建仍拒绝。该验证不表示游戏已跨过下一停点或可玩。
+`tests/test_botw_storage_class.py` 将各类 metadata 与 GPU 能力分别验证：113 个原有效颜色格式覆盖 samples、target 和不相关 flags，每种可写/真实只读页面各 10,170 次，保留 canary；实际 Metal 私有/linear 纹理 getter 覆盖初始化快照和生命周期。原表无效格式、未支持的 depth samples/压缩请求及无效 device 都受控拒绝；metadata 成功后不支持的 GPU 创建仍拒绝。该验证不表示游戏已跨过下一停点或可玩。
+
+
+## Base-v0 单采样 depth 的查询合同
+
+新增的 `texture_storage_policy.h` 只适配原版 metadata。固定 `subsdk0` 的有效格式记录与 GK100/GM200 两个 HAL 的完整无压缩分支共同证明：原始 samples 字段为 0、没有 `COMPRESSIBLE` 时，`DEPTH16/DEPTH24/DEPTH32F/DEPTH24_STENCIL8/DEPTH32F_STENCIL8`（`0x32..0x36`）的 raw kind 分别为 `1/0x46/0x7b/0x46/0xc3`，编码 class 分别为 `0x101/0x146/0x17b/0x146/0x1c3`。原始 samples 为 1 或 2 已涉及原多采样布局，不能当作 samples 为 0 的同义值。S8（`0x31`）的两个 HAL 结果不同，StorageClass 仍拒绝；其旧 StorageSize/StorageAlignment 行为本批没有扩大或收窄。
+
+BUFFER 或 flags `0x50` 的 pitch 分支仍优先，不读取 provider。其余五格式的 class 查询要求精确 live device。原 ChooseKind 的无压缩子分支不消费 target 或 fast-clear 参数；除了决定 pitch 的 `0x50`、决定压缩的 `0x8` 外，其余 flags 不改变此 metadata 结果，包括 `DEPTH16_PREFER_FAST_CLEAR`。这不放行相应的实际 GPU 创建。原 Builder Size 在 GL name 非零时先返回 0；新 depth Size 保留此前置短路，不读 provider 或计算 layout。原 Class/Alignment 不消费 GL name，仍按各自 provider 合同查询。packagedData 对这三项 metadata 是不解引用的 opaque 指针，不能据此创建或导入 GPU 资源。组合深度格式、GL/packaged GPU 导入、fast-clear GPU 创建和虚拟 depth 映射保留原明确拒绝。
+
+这五格式的 StorageAlignment 与已实现的 device query `0x3a` 共用 `pool_policy.mappingPageBytes`（65536）。StorageSize 在既有完整上游 GOB 布局之后，检查溢出并将 allocation size 向该页取整；mip/layer extent、GOB payload、上传和别名范围继续使用原 layout，不把 allocation padding 当成 texel。Initialize 校验 pool-relative offset 的 64KiB 对齐，不要求 Host39 的 CPU 虚拟地址绝对 64KiB 对齐。成功初始化的 Texture 保存 64 位 size 快照；原 getter 的 `ldr w0,[x0,+0x78]` 则以有符号 int 返回低 32 位，桥使用显式可移植的位投影。后续修改 Builder 不改变 Texture 的 class 或 size，原 pool/device/generation 生命周期仍有效。
+
+metadata class `0x101` 等不会开放 MapVirtual、vendor 或 GPU resolver 的 raw kind 集合。本批这些路径仍只接受已证 `0x100/0x1fe`。MapVirtual 正常 policy 拒绝信息追加已快照请求的 index 和 storageClass，失败不发布映射或代际。每轮图形生命周期前四个已成功 publish 的 physical pool 输出 `physical_pool_initialized=true kind=... flags=... bytes=... segments=...`，不含地址或内容、不追加 VM 查询；失败不计数，完整 shutdown/init 后重置。此 trace 才能独立证明对应 pool 的发布成功，旧错误消失本身不足以作此结论。
+
+测试对五格式分别验证 class/alignment/size、真实只读 Builder/canary、raw samples/压缩边界、大小和多层/mip rounding、64 位 Builder size 与 int getter 的位投影、普通 DEPTH16/DEPTH32F 对象快照及 stale pool；真实 Metal NoCopy 的销毁 ACK 与图形重建验证 trace 上限和 reset。它们不证明原游戏首帧、当前手机已跨过下一停点或可玩。

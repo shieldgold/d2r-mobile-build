@@ -22,8 +22,10 @@ static TextureView textureView(const NVNtextureView *raw){TextureView v={0};if(r
 static TextureView *textureViewWrite(NVNtextureView *raw){textureMemory(raw,sizeof(TextureView),YES);return (TextureView*)raw;}
 static void textureOut(void *p,size_t n){if(!p||(memoryAccessValidator&&!memoryAccessValidator(p,n,1)))fatal("texture getter output is not writable");texturePrepareWrite(p,n);}
 #include "../botw_host/protected_copy.h"
+#include "texture_storage_policy.h"
 static void textureEnsureMapping(BWTexture *t,const char *reason);
 static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView view,BOOL attachment);
+static void textureStorageDevice(const NVNdevice *raw);
 /* Selected views can outlive their descriptor entry or object-table record in
  * recorded commands. Weak tracking finds all wrappers without extending them. */
 static NSHashTable<BWTexture *> *textureReferences;
@@ -72,11 +74,17 @@ static int textureLinearLayout(const TextureBuilder *b,BWLinearLayout *layout){
     return bw_linear_layout(&policy,b->flags,b->width,b->height,b->stride,nvn_fmt_bpb(b->format,NULL,NULL),layout);
 }
 static size_t textureBytes(const TextureBuilder *b){
+    unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
+    if(!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)&&!depthStorage)return 0;
+    if(depthStorage&&b->glName)return 0; /* Original Builder Size bf1d4..bf1e0. */
     BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
     if((b->target!=NVN_TEXTURE_TARGET_2D&&!array)||b->width<1||b->height<1||b->width>16384||b->height>16384||b->depth<1||b->depth>(array?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
     unsigned dimension=MAX(b->width,b->height),levels=1;while(dimension>1){dimension>>=1;levels++;}if((unsigned)b->levels>levels)return 0;
     if(b->flags&(0x10|0x40)){BWLinearLayout layout;return textureLinearLayout(b,&layout)?layout.size:0;}
-    nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.size;
+    nvn_texdesc d=textureDescriptor(b);nvn_texlayout l;nvn_tex_layout(&d,&l);
+    if(depthStorage){textureStorageDevice(b->device);size_t rounded=0;
+        return bw_texture_storage_round_size(l.size,bw_pool_policy().mappingPageBytes,&rounded)?rounded:0;}
+    return l.size;
 }
 NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return b.width>0&&bytes?(size_t)b.width*bytes:0;}return textureBytes(&b);}
 /* Original base-v0 0x34-byte format records: +0x30 is nonzero and +0xe/+0xf
@@ -101,13 +109,18 @@ static void textureStorageDevice(const NVNdevice *raw){
  * still requires a live device provider; no pool or Metal creation is needed. */
 static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
     if(b->target==NVN_TEXTURE_TARGET_BUFFER||(b->flags&0x50))return 0x100;
+    unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)){
+        textureStorageDevice(b->device);return 0x100|depthKind;
+    }
     if(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&textureOrdinaryStorageFormat(b->format)){
         textureStorageDevice(b->device);return 0x1fe;
     }
     char detail[256];snprintf(detail,sizeof detail,"texture storage class requires unimplemented native ChooseKind target=%u flags=0x%x format=0x%x samples=%d source=base-v0-storage-metadata",b->target,b->flags,b->format,b->samples);fatal(detail);
 }
 NVN(nvnTextureBuilderGetStorageClass,NVNstorageClass,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);return textureMetadataStorageClass(&b);}
-NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
+NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}
+    if(bw_texture_depth_storage_format(b.format)){(void)textureMetadataStorageClass(&b);return bw_pool_policy().mappingPageBytes;}
+    if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureViewSetDefaults,void,NVNtextureView *raw){memset(textureViewWrite(raw),0,sizeof(TextureView));}
 NVN(nvnTextureViewSetLevels,void,NVNtextureView *raw,int base,int count){TextureView *v=textureViewWrite(raw);v->flags|=1;v->baseLevel=base;v->numLevels=count;}
 NVN(nvnTextureViewSetLayers,void,NVNtextureView *raw,int base,int count){TextureView *v=textureViewWrite(raw);v->flags|=2;v->minLayer=base;v->numLayers=count;}
@@ -201,6 +214,8 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return report("Texture component conversion is not implemented");
     BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return report("texture device/pool mismatch");
     if(!size||b->offset<0||!range(b->offset,size,pool.size))return report("Texture storage bounds");
+    unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)&&
+        (size_t)b->offset%bw_pool_policy().mappingPageBytes)return report("Texture depth storage offset is not aligned to native mapping page");
     BOOL linear=!!(b->flags&(0x10|0x40));BWLinearLayout linearLayout={0};
     if(linear){
         if(pool.kind!=BW_POOL_VIRTUAL&&!pool.coherent)return report("linear textures require coherent no-copy pool storage");
@@ -210,7 +225,7 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     }
     if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))return report("texture object memory is not writable");texturePrepareWrite(raw,sizeof *raw);validateObjectStorage(raw,sizeof *raw);
     for(NSValue *v in objectSpans.allValues){NSRange r=v.rangeValue;if(memoryOverlap(raw,sizeof *raw,(void*)r.location,r.length))return report("texture object overlaps live NVN object");}
-    BWTexture *t=[BWTexture new];t.metadata=*b;t.descriptor=textureDescriptor(b);nvn_texlayout layout;nvn_texdesc td=t.descriptor;nvn_tex_layout(&td,&layout);t.layout=layout;
+    BWTexture *t=[BWTexture new];t.metadata=*b;t.storageSize=size;t.descriptor=textureDescriptor(b);nvn_texlayout layout;nvn_texdesc td=t.descriptor;nvn_tex_layout(&td,&layout);t.layout=layout;
     if(linear){td.stride=(uint32_t)linearLayout.stride;t.descriptor=td;layout.size=layout.layer_size=linearLayout.size;layout.align=(uint32_t)linearLayout.alignment;t.layout=layout;}
     t.blockLinear=!(td.flags&0x10);t.depth=b->format>=NVN_FORMAT_DEPTH16&&b->format<=NVN_FORMAT_DEPTH32F_STENCIL8;
     if(t.depth&&b->format!=NVN_FORMAT_DEPTH16&&b->format!=NVN_FORMAT_DEPTH32F)return report("Combined depth/stencil storage not implemented");
@@ -219,7 +234,7 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     (void)textureMappingKind(*b,pool);
     /* Virtual initialization records metadata even before MapVirtual. Actual
      * GPU use resolves the current map and creates the matching real resource. */
-    if(pool.kind!=BW_POOL_VIRTUAL){BWPoolRange *mapping=poolResolve(pool,t.offset,size,-1,"texture initialization");textureCheckStorageAlias(t,mapping);t.texture=textureMakeBase(t,mapping);if(!t.texture)return report("Metal texture creation failed");t.mapping=mapping;}
+    if(pool.kind!=BW_POOL_VIRTUAL){BWPoolRange *mapping=poolResolve(pool,t.offset,t.layout.size,-1,"texture initialization");textureCheckStorageAlias(t,mapping);t.texture=textureMakeBase(t,mapping);if(!t.texture)return report("Metal texture creation failed");t.mapping=mapping;}
     put(raw,t);t.identity=((BWObject*)raw)->serial;textureRememberReference(t);return 1;
 }
 static char texturePendingKey;
@@ -292,7 +307,7 @@ TEXTURE_FIELD(Stride,ptrdiff_t,stride)
 NVN(nvnTextureGetSwizzle,void,const NVNtexture *raw,NVNtextureSwizzle *r,NVNtextureSwizzle *g,NVNtextureSwizzle *b,NVNtextureSwizzle *a){TextureBuilder m=textureObject(raw).metadata;textureSwizzleOut(m.swizzle,r,g,b,a);}
 NVN(nvnTextureGetMemoryPool,NVNmemoryPool*,const NVNtexture *raw){return textureObject(raw).rawPool;}
 NVN(nvnTextureGetMemoryOffset,ptrdiff_t,const NVNtexture *raw){return textureObject(raw).offset;}
-NVN(nvnTextureGetStorageSize,int,const NVNtexture *raw){return (int)textureObject(raw).layout.size;}
+NVN(nvnTextureGetStorageSize,int,const NVNtexture *raw){return bw_texture_storage_size32(textureObject(raw).storageSize);}
 NVN(nvnTextureGetTextureAddress,NVNtextureAddress,const NVNtexture *raw){BWTexture *t=textureObject(raw);return t.pool.gpuBase+t.offset;}
 NVN(nvnTextureGetDebugID,uint64_t,const NVNtexture *raw){BWTexture *t=textureObject(raw);return (t.pool.device.flags&NVN_DEVICE_FLAG_DEBUG_ENABLE)?t.identity:0;}
 NVN(nvnTextureCompare,NVNboolean,const NVNtexture *a,const NVNtexture *b){BWTexture *x=textureObject(a),*y=textureObject(b);TextureBuilder p=x.metadata,q=y.metadata;return x.pool==y.pool&&x.offset==y.offset&&!memcmp(&p.flags,&q.flags,0x34)&&p.stride==q.stride&&p.packaged==q.packaged;}
@@ -328,7 +343,7 @@ static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView v,BOOL att
 static BWTexture *textureSelected(BWTexture *base,TextureView v,BOOL attachment){
     id<MTLTexture> resource=textureMakeSelected(base,v,attachment);
     unsigned level=(v.flags&1)?v.baseLevel:0;int format=(v.flags&4)?v.format:base.format;
-    BWTexture *t=[BWTexture new];t.base=base;t.texture=resource;t.mapping=base.mapping;t.selection=v;t.selectedAttachment=attachment;t.pool=base.pool;t.poolGeneration=base.poolGeneration;t.device=base.device;t.metadata=base.metadata;t.format=format;t.width=MAX(1,base.width>>level);t.height=MAX(1,base.height>>level);t.depth=base.depth;t.descriptor=base.descriptor;t.layout=base.layout;
+    BWTexture *t=[BWTexture new];t.base=base;t.texture=resource;t.mapping=base.mapping;t.selection=v;t.selectedAttachment=attachment;t.pool=base.pool;t.poolGeneration=base.poolGeneration;t.device=base.device;t.metadata=base.metadata;t.storageSize=base.storageSize;t.format=format;t.width=MAX(1,base.width>>level);t.height=MAX(1,base.height>>level);t.depth=base.depth;t.descriptor=base.descriptor;t.layout=base.layout;
     textureRememberReference(t);return t;
 }
 NVN(nvnTextureGetViewOffset,ptrdiff_t,const NVNtexture *raw,const NVNtextureView *view){BWTexture *t=textureObject(raw);TextureView v=textureView(view);unsigned level=(v.flags&1)?v.baseLevel:0,layer=(v.flags&2)?v.minLayer:0;if(level>=t.descriptor.levels||layer>=t.layout.layers)fatal("texture view offset bounds");nvn_texdesc d=t.descriptor;return nvn_tex_level_offset(&d,level)+layer*t.layout.layer_size;}

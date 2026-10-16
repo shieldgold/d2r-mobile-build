@@ -45,6 +45,15 @@ class VirtualPoolGPUTests(unittest.TestCase):
         self.assertNotIn('failed assertion', result.stderr)
         if name == 'nocopy-entry-metadata':
             print(result.stderr, end='')
+        if name == 'physical-trace':
+            records = [line for line in result.stderr.splitlines()
+                       if 'physical_pool_initialized=' in line]
+            self.assertEqual(records, [
+                '[botw graphics] physical_pool_initialized=true kind=1 flags=0x189 bytes=65536 segments=1'
+            ] * 5)
+
+    def test_physical_trace_capped_per_graphics_lifecycle_and_reset_after_real_ack(self):
+        self.mode('physical-trace')
 
     def test_real_vm_segments_copy_all_three_nonzero_patterns_and_ack_before_unmap(self):
         self.mode('segments-copy')

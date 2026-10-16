@@ -36,6 +36,11 @@ class MemoryPoolAdapterCPUTests(unittest.TestCase):
         self.assertIn('POOL_ADAPTER_CPU_OK', result.stdout)
         self.assertNotIn('ERROR: AddressSanitizer', result.stderr)
         self.assertNotIn('runtime error:', result.stderr)
+        if mode == 'physical-trace':
+            self.assertEqual(result.stderr.splitlines(), [
+                '[botw graphics] physical_pool_initialized=true kind=1 flags=0x189 bytes=65536 segments=1'
+            ] * 4)
+    def test_physical_success_trace_is_published_only_and_capped_without_extra_vm_queries(self): self.run_mode('physical-trace')
     def test_completed_synthetic_record_bookkeeping_is_bounded(self): self.run_mode('bounded-records')
     def test_real_adjacent_rw_leaves_get_distinct_legal_buffers(self): self.run_mode('segments-real')
     def test_all_segment_metadata_is_validated_before_any_resource(self): self.run_mode('segments-metadata')

@@ -109,6 +109,10 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 
 该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38824544740) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38824544713)，在当前手机保留数据安装并普通启动为 PID **1024**；启动的可执行路径与本次安装收据一致，完整 boot.log 恰好新增一次 bootstrap。手机再次在同一 `vm_span` 分支受控 `host_return=1`，SDK 堆、根堆、线程及最大读取与前版一致，28.2 秒及 125.1 秒的系统查询均仍见同 PID；没有原游戏绘制呈现日志。RomFS 大小及修改时间、原 UID 字节与权限、shader manifest 均保留。完整动态报告位于 `outputs/botw-ios-c2b4db8-iphone12/device-run-report.json`；全部可玩验收仍为 false。
 
+`4d9ff08` 为 physical pool 的每个实际 VM leaf 分别建立合法 NoCopy resource，完整范围校验先于资源创建；CPU canonical identity 与单段 GPU 绑定分层，全部 segment 的实际析构回执完成后才允许归还 backing。ordinary 保持单 buffer 和明确的 copied/deferred 边界，完整合同见 `native/botw_graphics/MEMORY_POOLS.md`。最终同源定点验证 91 项通过，固定全回归 **828 项，827 通过、1 项硬件条件跳过**，源码快照保持一致。普通 Mac 此次受控返回 1 的首个图形停止点改为 `nvnTextureBuilderGetStorageClass`：`target=1 flags=0 format=0x32 samples=0`，不再出现旧 physical `vm_span` 错误；仍进入十三个线程、最大读取 143,743,378 字节，没有游戏绘制呈现日志。该日志没有 physical publish 成功记录，不能仅凭不同线程的停止顺序独立断言某个 120 MiB pool 已初始化成功。原 SDK 静态核验确认 `0x32` 为 DEPTH16。完整 Mac 动态报告位于 `outputs/botw-host39-mac-4d9ff08/ordinary-admission-evidence.json`。
+
+该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38826490640) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38826490659)，在当前手机保留数据更新并启动为 PID **1033**；可执行路径与本次安装一致，完整 boot.log 保留原前缀并恰好新增一次 bootstrap。手机独立复现上述 DEPTH16 查询停止点，`host_return=1`；SDK 堆、根堆、线程数和最大读取均与前版一致，26.8 秒的系统查询仍见该 PID。RomFS 大小及修改时间、UID 原字节与权限、shader manifest 均保持，完整报告位于 `outputs/botw-ios-4d9ff08-iphone12/device-run-report.json`。尚需补齐深度纹理存储查询及后续真实 GPU 路径；全部可玩验收保持 false。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

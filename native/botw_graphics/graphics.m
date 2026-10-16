@@ -85,6 +85,7 @@
 @property(strong) id<MTLTexture> texture;
 @property(strong) BWPool *pool;
 @property size_t offset, stride;
+@property uint64_t storageSize;
 @property TextureBuilder metadata;
 @property(strong) BWDevice *device;
 @property NVNmemoryPool *rawPool;
@@ -465,7 +466,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
     objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];depthStates=[NSMutableDictionary new];
-    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;
+    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
     return 1;

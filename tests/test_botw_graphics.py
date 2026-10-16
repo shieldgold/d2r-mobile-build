@@ -551,8 +551,8 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         resources = resources.replace('nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);', 'nvnQueueSubmitCommands(pass?&secondQueue:&queue,1,&handle);nvnQueueFinish(pass?&secondQueue:&queue);')
         source = METAL_SMOKE.replace('int main(int argc, char **argv)', helper+'int main(int argc, char **argv)')
         source = source.replace('    nvnMemoryPoolFinalize(&pool);', resources+'    nvnMemoryPoolFinalize(&pool);')
-        # A depth attachment at 8192 requires the resource fixture's 16-KiB pool.
-        source = source.replace('page*2', 'page*4')
+        # The native depth allocation and pool-relative offset each need 64KiB.
+        source = _depth_storage_capacity(source).replace('page*2', 'page*4')
         self.compile_render_probe(source, [('', 'GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK', True)])
         storage = STORAGE_FEATURE.replace('3,gpu+1024,', '3,sliceAddress(&device,&pool,1024,sizeof instances),')
         storage = storage.replace('NVNbufferRange writable={gpu+1280,48}', 'NVNbufferRange writable={sliceAddress(&device,&pool,1280,48),48}')
@@ -569,7 +569,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         feature = feature.replace('NVN_SHADER_STAGE_VERTEX,5,gpu+768,', 'NVN_SHADER_STAGE_VERTEX,5,(uintptr_t)uniformMemory,')
         feature = feature.replace('nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=',
                                   'nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);nvnMemoryPoolFinalize(&uniformPool);handle=')
-        source = METAL_SMOKE.replace('page*2','page*4').replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
+        source = _depth_storage_capacity(METAL_SMOKE).replace('page*2','page*4').replace('    nvnMemoryPoolFinalize(&pool);', feature+'    nvnMemoryPoolFinalize(&pool);')
         self.compile_render_probe(source, [('', 'stale buffer address pool generation', False)])
 
     def test_unused_uniform_and_storage_pool_lifetimes_do_not_reject_unrelated_draw(self):
@@ -612,7 +612,7 @@ static uint64_t sliceAddress(NVNdevice *device,NVNmemoryPool *pool,ptrdiff_t off
         self.compile_render_probe(source, [('', 'CULL_BOTH_PRESERVES_REAL_VERTEX_STORAGE_WRITES_OK', True)])
 
     def test_upstream_depth_ranges_bias_masks_front_back_and_winding_reach_gpu_pixels(self):
-        source = METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);', DEPTH_RASTER_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
+        source = _depth_storage_capacity(METAL_SMOKE).replace('    nvnMemoryPoolFinalize(&pool);', DEPTH_RASTER_FEATURE + '    nvnMemoryPoolFinalize(&pool);')
         source = source.replace('return float4(p[v],0,1);', 'return float4(p[v],.25,1);')
         self.compile_render_probe(source, [('', 'UPSTREAM_DEPTH_RANGE_BIAS_FACE_WINDING_REAL_PIXELS_OK', True)])
 
@@ -1627,7 +1627,7 @@ RESOURCE_FEATURE = r"""
     CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,resourceMSL,"rf",fb,3));
     CHECK(nvnProgramSetShaders(&program,2,sd));
     NVNtexture depth;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);
-    nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,8192);
+    nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,65536);
     CHECK(nvnTextureInitialize(&depth,&tb));
     NVNdepthStencilState ds;nvnDepthStencilStateSetDefaults(&ds);nvnDepthStencilStateSetDepthTestEnable(&ds,1);
     nvnDepthStencilStateSetDepthWriteEnable(&ds,1);nvnDepthStencilStateSetDepthFunc(&ds,NVN_DEPTH_FUNC_LESS);
@@ -1650,7 +1650,13 @@ RESOURCE_FEATURE = r"""
     CHECK(botw_graphics_presented_frame_count()==0); /* Offscreen work is not a presented game frame. */
     puts("GPU_VERTEX_UNIFORM_SAMPLER_BLOCK_LINEAR_DEPTH_OK");
 """
-RESOURCE_SMOKE = METAL_SMOKE.replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
+def _depth_storage_capacity(source):
+    # Keep the page*2 token available to deliberate downstream arena variants.
+    # Native depth needs one 64KiB allocation at pool-relative offset 64KiB.
+    return source.replace('page*2', '((page*2)>131072?(page*2):131072)')
+
+
+RESOURCE_SMOKE = _depth_storage_capacity(METAL_SMOKE).replace("    nvnMemoryPoolFinalize(&pool);", RESOURCE_FEATURE + "    nvnMemoryPoolFinalize(&pool);")
 
 COMMAND_MEMORY_CALLBACKS = r"""
 static int callbackCount;static unsigned char *controlBase;
@@ -1900,7 +1906,7 @@ DEPTH_RASTER_FEATURE = r"""
     API(nvnPolygonStateSetDefaults);API(nvnPolygonStateSetCullFace);API(nvnPolygonStateSetFrontFace);API(nvnPolygonStateSetPolygonMode);API(nvnPolygonStateSetPolygonOffsetEnables);API(nvnCommandBufferBindPolygonState);
     API(nvnDepthStencilStateSetDefaults);API(nvnDepthStencilStateSetDepthTestEnable);API(nvnDepthStencilStateSetDepthWriteEnable);API(nvnDepthStencilStateSetDepthFunc);API(nvnCommandBufferBindDepthStencilState);API(nvnCommandBufferClearDepthStencil);
     API(nvnCommandBufferSetDepthRange);API(nvnCommandBufferSetPolygonOffsetClamp);
-    NVNtexture z;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,8192);CHECK(nvnTextureInitialize(&z,&tb));
+    NVNtexture z;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetSize2D(&tb,4,4);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_DEPTH32F);nvnTextureBuilderSetStorage(&tb,&pool,65536);CHECK(nvnTextureInitialize(&z,&tb));
     unsigned red[9]={0};
     for(unsigned test=0;test<9;test++){
       NVNpolygonState raster;nvnPolygonStateSetDefaults(&raster);nvnPolygonStateSetPolygonMode(&raster,NVN_POLYGON_MODE_FILL);

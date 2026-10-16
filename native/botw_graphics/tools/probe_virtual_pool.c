@@ -120,6 +120,18 @@ int main(int argc,char **argv){
     BOOL segmented=!strncmp(mode,"segments-",9);size_t hostPage=(size_t)getpagesize();
     if(segmented){VP_CHECK(vm_inherit(mach_task_self(),(vm_address_t)(p+hostPage),hostPage,VM_INHERIT_NONE)==KERN_SUCCESS);VP_CHECK(vpOwnedVMLeaves(p,page*2)==3);}
     NVNdeviceBuilder db;NVNdevice device;vp_nvnDeviceBuilderSetDefaults(&db);VP_CHECK(vp_nvnDeviceInitialize(&device,&db));
+    if(!strcmp(mode,"physical-trace")){
+        NVNmemoryPool traced;unsigned notifications=vpNotifications;
+        for(unsigned i=0;i<6;i++){VP_CHECK(vpPool(&traced,&device,p,page,0x189));vp_nvnMemoryPoolFinalize(&traced);}
+        VP_CHECK(vpNotifications==notifications);
+        if(!sigsetjmp(vpJump,1)){vpPool(&traced,&device,NULL,page,0x189);VP_CHECK(0);}
+        VP_CHECK(vpNotifications==notifications+1);
+        char error[512];VP_CHECK(botw_graphics_shutdown_checked(error,sizeof error)&&!error[0]);
+        VP_CHECK(botw_graphics_init(NULL,vpError,NULL));vp_nvnDeviceBuilderSetDefaults(&db);VP_CHECK(vp_nvnDeviceInitialize(&device,&db));
+        VP_CHECK(vpPool(&traced,&device,p,page,0x189));vp_nvnMemoryPoolFinalize(&traced);
+        VP_CHECK(vpNotifications==notifications+1&&botw_graphics_shutdown_checked(error,sizeof error)&&!error[0]);
+        VP_CHECK(!munmap(p,page*2)&&!munmap(q,page*2)&&!munmap(out,page*2));puts("VIRTUAL_POOL_REAL_GPU_physical-trace_OK");return 0;
+    }
     NVNmemoryPool physical,other,virtualPool,destination;VPSegmentDevice *segmentDevice=nil;
     if(segmented){segmentDevice=[VPSegmentDevice new];segmentDevice.real=gpu;gpu=(id<MTLDevice>)segmentDevice;}
     if(!strcmp(mode,"segments-partial-nil")){

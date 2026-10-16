@@ -38,6 +38,8 @@ static void poolNoteCommitted(id<MTLCommandBuffer> cb);
 static void poolDrainGPU(void);
 static void poolShutdownPools(void);
 static BOOL poolEnsureOrdinaryBacking(BWPool *pool,const char **failure);
+/* Serial graphics-lock state; reset only on a fresh graphics initialization. */
+static unsigned poolPhysicalSuccessTraceCount;
 /* Consumer-owner callbacks. They never hold a CPU vpool lease. Mapping guard
  * runs before drain/publish and must reject unsupported private/code authority. */
 static void poolPrepareGPUWrite(BWPoolRange *range);

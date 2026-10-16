@@ -225,6 +225,9 @@ NVN(nvnMemoryPoolInitialize,NVNboolean,NVNmemoryPool *raw,const NVNmemoryPoolBui
     if(kind!=BW_POOL_VIRTUAL&&textureTrackingAvailable){char detail[256];if(nvn_dirty_add_range_checked(p.memory,p.size,detail,sizeof detail)){
             return report("texture memory tracking: %s",detail);}p.tracked=YES;}
     put(raw,p);p.generation=((BWObject*)raw)->serial;p.live=YES;[pools addObject:p];published=YES;
+    if(kind==BW_POOL_PHYSICAL&&poolPhysicalSuccessTraceCount<4){poolPhysicalSuccessTraceCount++;
+        fprintf(stderr,"[botw graphics] physical_pool_initialized=true kind=%u flags=0x%x bytes=%zu segments=%zu\n",
+            (unsigned)p.kind,(unsigned)p.flags,p.size,(size_t)p.segments.count);}
     [poolUnpublishedPools removeObjectIdenticalTo:p];return 1;
     }@finally{if(!published)poolDiscardUnpublished(p);}
 }
@@ -280,7 +283,7 @@ NVN(nvnMemoryPoolMapVirtual,NVNboolean,NVNmemoryPool *raw,int count,const NVNmap
     for(int i=0;i<count;i++){
         BWPool *p=original[i].physicalPool?poolGuestObject(original[i].physicalPool,[BWPool class]):nil;
         if(p&&(!poolHostLive(p)||p.retiring||p.kind!=BW_POOL_PHYSICAL||!p.registered||p.device!=v.device))return report("MapVirtual physical pool lifetime/device");
-        if(!bw_pool_mapping_request_valid(&policy,&original[i],v.size,p.size,(unsigned)p.flags))return report("MapVirtual request class/page/bounds/flags");
+        if(!bw_pool_mapping_request_valid(&policy,&original[i],v.size,p.size,(unsigned)p.flags))return report("MapVirtual request class/page/bounds/flags index=%d storageClass=0x%x",i,(unsigned)original[i].storageClass);
         native[i].physicalPool=p?(const NVNmemoryPool*)(__bridge const void*)p:NULL;
     }
     poolGuardMappingChange(v,original,count);poolDrainGPU();
