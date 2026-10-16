@@ -147,6 +147,10 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 该小批四个相关模块共 **100 项通过、零跳过**，35.358 秒，涵盖完整 vendor 基线和事务、CPU Map/别名/代际、GPU 物化前拒绝及初始化错误上下文。初始四项行为 RED 与中途“只开放 identity 会误入 GPU resolver”的独立 RED 均单独保留；未实现 24 位深度转换，未将这些测试计作原游戏 GPU 消费或可玩证明。
 
+该批提交 `429bf9e` 后普通 Mac 原游戏已通过 Map `0x146`，下一首个停止点为 `nvnMemoryPoolMapVirtual index=0 storageClass=0x1c3`；本次错误只暴露映射类别，不能据此确认实际纹理创建或消费。`mac_host_return=1`、`mac_process_exit=1`、`frontend_resources_released=false`，无游戏呈现。binary SHA256 为 `ccf3190f9dfceeee1eceaf1aaf93b7deee3654849b1df163ac71426db2eb4a63`，报告位于 `outputs/botw-host39-mac-429bf9e/ordinary-admission-evidence.json`。本批只依据相关测试和独立审查验证，未重跑固定全套，也未另行安装手机；手机当前已验证版本仍为 `3a22d53`，不混用两版执行证据。
+
+下一小批将精确 `0x1C3→rawC3 / ZF32_X24S8` 纳入相同 Map/CPU identity 合同；raw46/C3 互为不同 kind，相邻区间不合并，不能取得跨 kind 的连续 lease。GPU 对两者分别在身份验证后、backing 物化前具名拒绝，包含 expected=-1；C3 不替代 raw7B，也不开放 D32FS8/stencil 创建或转换。三组相关模块共 **65 项通过、零跳过**，30.522 秒，保留完整 vendor 算法与原随机/并发压力测试。初始 C3 未准入和中间仅开放 identity 后误入 GPU resolver 的行为 RED 均保留，修复后两个 CPU/前拒 mode 表驱动验证46/C3；它们不构成原游戏 GPU 消费或可玩验收。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

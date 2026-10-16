@@ -63,7 +63,7 @@ int nvn_vpool_virt_finalize(const void *owner);
 // nothing is mutated. Requests apply in order, so a later overlapping request wins. Every
 // request needs voff and size to be multiples of NVN_VPOOL_PAGE; zero-size requests are
 // rejected as NVN_VPOOL_INVALID because their native meaning is unverified. Mapping requests
-// also need poff to be a page multiple and storage class 0, 0x100, 0x1fe, 0x101, 0x17b or 0x146. Unmap requests
+// also need poff to be a page multiple and storage class 0, 0x100, 0x1fe, 0x101, 0x17b, 0x146 or 0x1c3. Unmap requests
 // (physicalPool == NULL) ignore physicalOffset and storageClass.
 // count == 0 succeeds on a live virtual pool without reading reqs. err (optional) receives an
 // English description of the first failing request.

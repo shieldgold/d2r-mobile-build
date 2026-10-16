@@ -29,7 +29,7 @@ Metal NoCopy还要求真实宿主页对齐、连续的单一VM allocation和正�
 
 ## 完整模块与薄port
 
-`vendor/botw-vpool/SOURCE.json` 固定来源和每项port，完整保留interval、批事务、lease、generation、tombstone及差分/并发测试。原baseline的class0/100和unmap忽略class/physicalOffset仍由baseline测试覆盖；native薄adapter的纯校验只接受100/raw0、1FE/rawFE、101/raw1、17B/raw7B和146/raw46，unmap的physicalOffset必须0且不消费storageClass。未知class不因为physical COMPRESSIBLE就放行。
+`vendor/botw-vpool/SOURCE.json` 固定来源和每项port，完整保留interval、批事务、lease、generation、tombstone及差分/并发测试。原baseline的class0/100和unmap忽略class/physicalOffset仍由baseline测试覆盖；native薄adapter的纯校验只接受100/raw0、1FE/rawFE、101/raw1、17B/raw7B、146/raw46和1C3/rawC3，unmap的physicalOffset必须0且不消费storageClass。未知class不因为physical COMPRESSIBLE就放行。
 
 port保留span的raw kind，使不同kind不能coalesce或被判断为同一个连续GPU消费范围。strict reservation失败不发布owner/token/generation，并清理未publish宿主reservation。旧入口仍覆盖原fallback行为；strict窗口属于桥接 host 策略，不是 A14 GPU VA 位宽实测。
 
@@ -94,16 +94,16 @@ Finalize 先置 retiring，等待所有已提交 GPU 工作，完成 checked dir
 
 ## 精确无压缩深度映射
 
-完整 vendor registry 新增101/raw1与17B/raw7B，复用原 interval、batch transaction、lease、generation、physicalID和tombstone算法。原 class0 仅留 standalone baseline 兼容；生产 adapter不接受0或裸1/7B，也不接受107/186等真正硬压缩kind、1C3等尚未登记的深度标签；146仅按下节登记CPU元数据，不提供GPU表示。kind继续参与合并/连续性，末项非法或任一scratch分配失败均不发布任何span/generation。unmap、重映和physical地址复用不能复活旧代际。
+完整 vendor registry 新增101/raw1与17B/raw7B，复用原 interval、batch transaction、lease、generation、physicalID和tombstone算法。原 class0 仅留 standalone baseline 兼容；生产 adapter不接受0或裸1/7B，也不接受107/186等真正硬压缩kind；146和1C3仅按下节登记CPU元数据，不提供GPU表示。kind继续参与合并/连续性，末项非法或任一scratch分配失败均不发布任何span/generation。unmap、重映和physical地址复用不能复活旧代际。
 
 `poolTryIdentity(...,-1)` 仅供CPU canonical alias、64KiB Map权威guard及cache失效，不是GPU许可。GPU buffer、代码、descriptor、vertex/uniform/storage和copy仍需raw0；counter另需ordinary coherent CPU可写池，不能写typed virtual深度。只有texture family的受限depth selector请求raw1/7B，且实际GPU范围仍必须同physical、同kind、连续并落在单个合法NoCopy segment。64KiB reservation/offset校验是pool-relative合同，不要求Host39 canonical CPU VA绝对64KiB对齐；texel权威和GPU上传仍只覆盖完整GOB payload，不把reservation padding当纹理字节。
 
 D16/D32F的private GPU写权威继续拒绝受影响remap和raw0别名读写；Finalize后的retired权威也不能由重新标为raw0绕过。物理Finalize清理texture/selected/descriptor/recorded-view缓存后等待全部真实NoCopy deallocator ACK，原quarantine与checked shutdown合同不变。真实GPU用例验证typed kind错误、跨segment及typed-as-buffer在前置counter/clear之后仍使整批零发布，并以Finish/drain后的CPU、arena与counter canary判断；CPU模块测试另验证typed lease/别名、末项错误、两个分配失败点、unmap/remap ABA与带宿主页bias的physical重注册。
 
-## 146/raw46 仅 Map 与 CPU 元数据
+## 146/raw46 与 1C3/rawC3 仅 Map 与 CPU 元数据
 
-固定双HAL把raw samples0的D24与D24S8都归为普通raw46（公开libnx命名NvKind_Z24S8）；Map请求146本身不能区分format。生产decoder只精确接受146，完整vendor模块保留raw46于span/lease、合并比较和事务rollback；裸46、其它prefix或硬压缩kind不会因低字节相同放行。CPUidentity允许显式46或canonical -1，并继续核physicalID/代际、别名、连续范围、64KiB Map权威guard和Finalize失效；virtual public CPU Map仍返回NULL。
+固定双HAL把raw samples0的D24与D24S8都归为普通raw46（公开libnx命名NvKind_Z24S8）；Map请求146本身不能区分format。同一原分支把D32FS8归为rawC3（NvKind_ZF32_X24S8）。生产decoder只精确接受146/1C3，完整vendor模块保留raw46/C3于span/lease、合并比较和事务rollback；裸46/C3、其它prefix或硬压缩kind不会因低字节相同放行。CPUidentity允许各自精确kind或canonical -1，并继续核physicalID/代际、别名、连续范围、64KiB Map权威guard和Finalize失效；virtual public CPU Map仍返回NULL。
 
-GPU域没有随标签扩展：`poolTryResolve`在CPUidentity成功后、任何deferred NoCopy物化或segment/Metal绑定前具名拒绝raw46，包括expected=-1。buffer/代码/descriptor/counter仍守raw0/ordinary规则，颜色与D16/D32F的FE/1/7B不变；D24/combined creator及所有24bit导入/回写仍拒绝。Map不读、不转换、不上传guest payload，不能据其成功声称D24/D24S8 Metal资源已可用。
+GPU域没有随标签扩展：`poolTryResolve`在CPUidentity成功后、任何deferred NoCopy物化或segment/Metal绑定前具名拒绝raw46与rawC3，包括expected=-1。buffer/代码/descriptor/counter仍守raw0/ordinary规则，颜色与D16/D32F的FE/1/7B不变；D24/combined creator及所有24bit/combined导入与回写仍拒绝。Map不读、不转换、不上传guest payload，不能据其成功声称D24/D24S8/D32FS8 Metal资源已可用。
 
-CPU回归区分Map登记与GPU物化：146精确解码/lease字节、混合kind不合并、alias、末项非法与两个分配失败点零发布、unmap及physical ABA、Finalize全部ACK与旧identity失效；GPU resolver的46/-1拒绝检查无新resource分配或batch cache发布。原NoCopy/authority/整提交合同与完整上游随机及四reader压力测试继续复用。
+CPU回归区分Map登记与GPU物化：146/1C3表驱动精确解码/lease字节、46与C3互为wrong-kind及混合不合并、alias、末项非法与两个分配失败点零发布、unmap及physical ABA、Finalize全部ACK与旧identity失效；GPU resolver的46/C3各自精确kind与-1拒绝检查无新resource分配或batch cache发布。原NoCopy/authority/整提交合同与完整上游随机及四reader压力测试继续复用。

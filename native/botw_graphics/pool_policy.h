@@ -58,6 +58,7 @@ static inline int bw_pool_storage_class_kind(NVNstorageClass storageClass,unsign
     if(storageClass==0x101){*kind=1;return 1;}
     if(storageClass==0x17b){*kind=0x7b;return 1;}
     if(storageClass==0x146){*kind=0x46;return 1;}
+    if(storageClass==0x1c3){*kind=0xc3;return 1;}
     return 0;
 }
 static inline int bw_pool_mapping_request_valid(const BWPoolPolicy *policy,
