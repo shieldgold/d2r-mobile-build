@@ -1,0 +1,98 @@
+{
+  "schema": "botw-base-v0-sync-wait-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "scope": "Only fresh never-fenced SyncWait return classification. No change or claim about fenced waits, queue ordering, timeout policy or gameplay causality.",
+  "module": {
+    "name": "subsdk0",
+    "source_sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000"
+  },
+  "original_primary_driver": {
+    "procedure_table": "0x1c8848",
+    "SyncInitialize": {
+      "index": 330,
+      "name": "nvnSyncInitialize",
+      "targets": [
+        "0xbd7ac",
+        "0x9f23c"
+      ]
+    },
+    "SyncWait": {
+      "index": 332,
+      "name": "nvnSyncWait",
+      "targets": [
+        "0xbdaf4",
+        "0x9f6d0"
+      ]
+    },
+    "actual_RELATIVE_targets_verified": true
+  },
+  "spans": {
+    "initializer": {
+      "offset": "0xbd7ac",
+      "bytes": 28,
+      "sha256": "1a465e4e6f4b88070496ee570da16a2f8c0a4258f59f8f038cbc1b4f84d08131",
+      "meaning": "zero32 bytes then store device and state0 at+8; boolean1"
+    },
+    "wait_dispatch": {
+      "offset": "0xbdaf4",
+      "bytes": 84,
+      "sha256": "b949f2570bcae05946b3aa0938a02611fc81bf9f8b650ddefc492df2ee9613bf",
+      "meaning": "load state+8, initialize return3 and signed-relative jump dispatch"
+    },
+    "state_jump_table": {
+      "offset": "0x1661ec",
+      "bytes": 16,
+      "sha256": "ecc70791835a7f29a0db74591add2b45dd49fa64831a72a740c07ebbdced43c6",
+      "meaning": "state0 target is direct return epilogue"
+    },
+    "return_epilogue": {
+      "offset": "0xbddf0",
+      "bytes": 36,
+      "sha256": "994d01aa8ace6a57326df1e715480d7f719490b5db9b04086d022c93d7972060",
+      "meaning": "return original preset w25=3"
+    },
+    "fenced_timeout_conversion": {
+      "offset": "0xbdb94",
+      "bytes": 80,
+      "sha256": "fbd27117403e86de677ba7efdcaf92bc9d67a8face17a0c2d211f78f69a16152",
+      "meaning": "timeout input divided1000 into internal deadline; UINT64_MAX special"
+    },
+    "fenced_normal_wait_conversion": {
+      "offset": "0xbdc7c",
+      "bytes": 28,
+      "sha256": "cea71823388bd4566625c28c138a3d2d2d70a5b039b8e4b26fbc32d7a9dea8ce",
+      "meaning": "remaining deadline multiplied1000 before original wait"
+    }
+  },
+  "contracts": {
+    "fresh_state": 0,
+    "state_targets": [
+      "0xbddf0",
+      "0xbdb48",
+      "0xbdb64",
+      "0xbdbe4"
+    ],
+    "fresh_wait_result": 3,
+    "fresh_wait_result_name": "NVN_SYNC_WAIT_RESULT_FAILED",
+    "fresh_wait_timeout": "Any uint64 timeout is ignored on the state0 direct-return path; no device wait/callback occurs.",
+    "native_old_difference": "Current upstream SyncInitialize sets fenced0 and SyncWait returns TIMEOUT_EXPIRED2; fixed primary52 returns FAILED3.",
+    "normal_enums": {
+      "already_signaled": 0,
+      "condition_satisfied": 1,
+      "timeout_expired": 2,
+      "failed": 3
+    },
+    "required_fix": "Only the unfenced return changes2 to3; object layout, fenced branch0/1/2 and timeout argument forwarding remain original.",
+    "runtime_causality": "Static API result mismatch only; no assertion of actual SyncWait execution or fatal-Break cause."
+  },
+  "timeout_review": {
+    "input_signature": "uint64_t; native forwards to mtl_wait timeout_ns unchanged after first nonblocking check.",
+    "fixed_arithmetic": "((timeout>>3)*0x20c49ba5e353f7cf>>64)>>4, consistent with division1000; remaining internal deadline is multiplied1000 before the underlying wait.",
+    "infinite": "Fixed original explicitly handles UINT64_MAX as infinite. This slice does not alter existing native1-hour clamp.",
+    "evidence_limit": "Original platform clock callback table points into runtime-constructed BSS, omitted by initialized_image. Its clock-unit implementation was not read/inferred from process state. No timeout-unit inversion is established."
+  },
+  "guest_or_gpu_executed": false,
+  "runtime_state_inspected": false
+}

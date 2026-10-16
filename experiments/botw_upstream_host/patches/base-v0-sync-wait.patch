@@ -1,0 +1,16 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -976,10 +976,11 @@
+ // Fence = "all commands previously submitted to the queue have completed": record the fence value of the most recent submit
+ NVN(nvnQueueFenceSync, void, NVNqueue *q, NVNsync *s, NVNsyncCondition c, int f) { (void)q; (void)c; (void)f; ((sync_t *)s)->fenced = 1; ((sync_t *)s)->fence = x_fence(); }
+ 
+-// A sync object that was never fenced waits until timeout, as on a real device; a fenced one is released only after the GPU has actually completed up to that fence value
++// Fixed base-v0 NVN 52 returns FAILED for a never-fenced sync. Fenced syncs
++// retain the original wait for actual GPU completion up to their fence value.
+ NVN(nvnSyncWait, NVNsyncWaitResult, const NVNsync *s, uint64_t timeout) {
+     const sync_t *o = (const sync_t *)s;
+-    if (!o->fenced) return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
++    if (!o->fenced) return NVN_SYNC_WAIT_RESULT_FAILED;
+     if (mtl_wait(o->fence, 0)) return NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED;
+     return mtl_wait(o->fence, timeout) ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
+ }
