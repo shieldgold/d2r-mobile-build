@@ -34,6 +34,31 @@ void botw_graphics_shutdown(void);
  * external resource holders release their references. Legacy void shutdown
  * remains available, but is not a safe ownership-release test for the runtime. */
 int botw_graphics_shutdown_checked(char *error, size_t capacity);
+/* Optional host-only lock observation. Enable before the first serialized
+ * graphics call in this process; late enable returns 0 without reporting an
+ * error. Default off, process-lifetime opt-in. This never changes lock policy.
+ * The reader takes no graphics/lifecycle lock and makes at most two attempts.
+ * IDLE means no published hold, not proof that pthread_mutex_lock would return.
+ * Non-HELD names/owner/start are zero; DISABLED/UNSTABLE/UNAVAILABLE clear all
+ * fields. Clock/thread-ID failure or counter exhaustion stays UNAVAILABLE.
+ * Names are bounded copies of bridge-owned static literals only.
+ * Callers supply host-owned output storage; no guest validator is consulted. */
+typedef enum {
+    BOTW_GRAPHICS_LOCK_OBSERVATION_DISABLED=0,
+    BOTW_GRAPHICS_LOCK_OBSERVATION_IDLE=1,
+    BOTW_GRAPHICS_LOCK_OBSERVATION_HELD=2,
+    BOTW_GRAPHICS_LOCK_OBSERVATION_UNSTABLE=3,
+    BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE=4
+} botw_graphics_lock_observation_status;
+typedef struct {
+    /* lifecycle counts successful init; generation never resets. Times are
+     * host CLOCK_MONOTONIC nanoseconds, independent of guest clock units. */
+    uint64_t lifecycle,generation,owner_thread_id,acquired_ns,sampled_ns;
+    char outer_entry[96],active_entry[96];
+} botw_graphics_lock_observation;
+int botw_graphics_enable_lock_observation(void);
+botw_graphics_lock_observation_status botw_graphics_read_lock_observation(
+    botw_graphics_lock_observation *out);
 /* Host-only, profile-gated value-storage move. No guest byte reads, copy or
  * reservations occur here. The caller copies with its original SDK routine
  * outside the graphics lock, then commits or aborts the single-use token.

@@ -105,11 +105,11 @@ static int textureMoveAbort(const botw_graphics_texture_move_token *token,char *
 #define BW_TEXTURE_MOVE_CHECKED(Name,Parameters,Operation) \
  int Name Parameters { \
     if(graphicsDepth)return textureMoveReject(error,capacity,"texture storage transfer requires an outermost host call"); \
-    graphicsBegin();const char *previous=currentEntry;currentEntry=#Name;int result=0;if(error&&capacity)error[0]=0; \
+    const char *observation=graphicsBeginEntry(#Name);const char *previous=currentEntry;currentEntry=#Name;int result=0;if(error&&capacity)error[0]=0; \
     @autoreleasepool{@try{result=(Operation);} \
       @catch(BWGraphicsFailure *failure){(void)failure;textureMoveReject(error,capacity,lastError);} \
       @catch(NSException *exception){textureMoveReject(error,capacity,exception.reason.UTF8String?:"native texture storage transfer exception");}} \
-    pendingError=NO;pendingFatal=NO;currentEntry=previous;graphicsEnd();return result; \
+    pendingError=NO;pendingFatal=NO;currentEntry=previous;graphicsEndEntry(observation);return result; \
  }
 BW_TEXTURE_MOVE_CHECKED(botw_graphics_texture_move_preflight,(const void *source,void *destination,size_t bytes,botw_graphics_texture_move_token *token,char *error,size_t capacity),textureMovePreflight(source,destination,bytes,token,error,capacity))
 BW_TEXTURE_MOVE_CHECKED(botw_graphics_texture_move_commit,(const botw_graphics_texture_move_token *token,char *error,size_t capacity),textureMoveCommit(token,error,capacity))

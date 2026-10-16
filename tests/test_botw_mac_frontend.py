@@ -11,6 +11,7 @@ HOST = r'''
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include "runtime.h"
+#include "graphics.h"
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -19,6 +20,15 @@ HOST = r'''
 #include <unistd.h>
 static unsigned ticks;
 static unsigned input_ticks;
+int botw_graphics_enable_lock_observation(void) {
+    if (getenv("BOTW_MAC_TEST_OBSERVATION_ENABLE_FAIL")) return 0;
+    puts("synthetic_lock_observation_enabled=true");
+    return 1;
+}
+__attribute__((weak))
+botw_graphics_lock_observation_status botw_graphics_read_lock_observation(botw_graphics_lock_observation *out) {
+    (void)out; return BOTW_GRAPHICS_LOCK_OBSERVATION_DISABLED;
+}
 static void diagnose_window(const char *phase) {
     assert(NSThread.isMainThread);
     NSApplication *app = NSApplication.sharedApplication;
@@ -89,6 +99,7 @@ class MacFrontendTests(unittest.TestCase):
         cls.binary = folder / 'botw-mac'
         command = ['xcrun', 'clang', '-std=c11', '-mmacosx-version-min=14.0', '-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                    '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'native/botw_host'),
+                   '-I', str(ROOT / 'native/botw_graphics'),
                    str(ROOT / 'native/botw_app/mac_main.m'), str(stub), '-framework', 'AppKit',
                    '-framework', 'QuartzCore', '-framework', 'Metal', '-o', str(cls.binary)]
         result = subprocess.run(command, text=True, capture_output=True)
@@ -104,6 +115,7 @@ class MacFrontendTests(unittest.TestCase):
         environment = dict(os.environ)
         environment.pop('BOTW_MAC_TEST_CLOSE', None)
         environment.pop('BOTW_MAC_TEST_CONFIG_FAIL', None)
+        environment.pop('BOTW_MAC_TEST_OBSERVATION_ENABLE_FAIL', None)
         environment.update(env)
         try:
             return subprocess.run([str(self.binary), *arguments], capture_output=True, text=True,
@@ -135,6 +147,27 @@ class MacFrontendTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('address_space_configuration_failed', result.stderr)
         self.assertNotIn('synthetic_host_entered', result.stdout)
+        self.assertNotIn('synthetic_lock_observation_enabled', result.stdout)
+
+    def test_explicit_lock_observation_is_enabled_before_host_setup(self):
+        result = self.run_frontend(self.build.name, '--observe-graphics-lock',
+                                   BOTW_MAC_TEST_CONFIG_FAIL='1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('synthetic_lock_observation_enabled=true', result.stdout)
+        self.assertNotIn('mac_window_ready', result.stdout)
+        self.assertNotIn('synthetic_host_entered', result.stdout)
+        for arguments in [(self.build.name, '--unknown'),
+                          (self.build.name, '--observe-graphics-lock', '--extra')]:
+            result = self.run_frontend(*arguments)
+            self.assertEqual(result.returncode, 64, result.stdout + result.stderr)
+            self.assertNotIn('synthetic_lock_observation_enabled', result.stdout)
+        rejected = self.run_frontend(self.build.name, '--observe-graphics-lock',
+                                     BOTW_MAC_TEST_CONFIG_FAIL='1',
+                                     BOTW_MAC_TEST_OBSERVATION_ENABLE_FAIL='1')
+        self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
+        self.assertIn('address_space_configuration_failed', rejected.stderr)
+        self.assertIn('enabled=false reason=pre_start_enable_rejected', rejected.stderr)
+        self.assertNotIn('mac_window_ready', rejected.stdout)
 
     @unittest.skipUnless(os.environ.get('BOTW_RUN_WINDOW_TESTS') == '1', 'requires an active WindowServer session')
     def test_startup_failure_and_window_close_exit_without_destroying_live_guest(self):

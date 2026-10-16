@@ -23,6 +23,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <math.h>
 #include <mach/mach.h>
 #include "vendor/nvn/nvn_tex.c"
@@ -308,6 +310,95 @@ static _Thread_local const char *currentEntry;
 static pthread_mutex_t graphicsLock=PTHREAD_MUTEX_INITIALIZER;
 static _Thread_local unsigned graphicsDepth;
 static _Thread_local BOOL pendingError,pendingFatal;
+/* One metadata writer, always under graphicsLock. All sampled payload is
+ * atomic as well as the sequence: a seqlock around plain fields would still
+ * be a C data race. The reader never touches TLS or graphics-owned objects. */
+_Static_assert(ATOMIC_LLONG_LOCK_FREE==2&&ATOMIC_LONG_LOCK_FREE==2&&ATOMIC_POINTER_LOCK_FREE==2&&
+    ATOMIC_INT_LOCK_FREE==2&&ATOMIC_BOOL_LOCK_FREE==2,"lock observation requires lock-free scalars");
+static struct {
+    _Atomic uint64_t sequence,lifecycle,generation,owner,acquired;
+    _Atomic uintptr_t outer,active;
+    atomic_bool held,unavailable;
+    /* bit0 opt-in; bit1 frozen by the first serialized graphics entry. */
+    atomic_uint configuration;
+} graphicsObservation;
+static _Thread_local const char *graphicsObservationOuter,*graphicsObservationActive;
+static BOOL graphicsObservationEnabled(void){return (atomic_load(&graphicsObservation.configuration)&1)!=0;}
+int botw_graphics_enable_lock_observation(void){
+    unsigned expected=0;
+    if(atomic_compare_exchange_strong(&graphicsObservation.configuration,&expected,1))return 1;
+    return expected==1;
+}
+static BOOL graphicsObservationClock(uint64_t *out){
+    struct timespec ts;
+    if(clock_gettime(CLOCK_MONOTONIC,&ts)||ts.tv_sec<0||ts.tv_nsec<0||ts.tv_nsec>=1000000000||
+       (uint64_t)ts.tv_sec>(UINT64_MAX-(uint64_t)ts.tv_nsec)/UINT64_C(1000000000)){
+        atomic_store(&graphicsObservation.unavailable,true);return NO;
+    }
+    *out=(uint64_t)ts.tv_sec*UINT64_C(1000000000)+(uint64_t)ts.tv_nsec;return YES;
+}
+static BOOL graphicsObservationWriteBegin(void){
+    if(!graphicsObservationEnabled()||atomic_load(&graphicsObservation.unavailable))return NO;
+    uint64_t sequence=atomic_load(&graphicsObservation.sequence);
+    if((sequence&1)||sequence>=UINT64_MAX-1){atomic_store(&graphicsObservation.unavailable,true);return NO;}
+    atomic_store(&graphicsObservation.sequence,sequence+1);return YES;
+}
+static void graphicsObservationWriteEnd(void){atomic_fetch_add(&graphicsObservation.sequence,1);}
+static void graphicsObservationAcquired(void){
+    if(!graphicsObservationEnabled()||atomic_load(&graphicsObservation.unavailable))return;
+    uint64_t owner=0,now=0,generation=atomic_load(&graphicsObservation.generation);
+    if(generation==UINT64_MAX||pthread_threadid_np(NULL,&owner)||!owner){atomic_store(&graphicsObservation.unavailable,true);return;}
+    if(!graphicsObservationClock(&now)||!graphicsObservationWriteBegin())return;
+    atomic_store(&graphicsObservation.generation,generation+1);
+    atomic_store(&graphicsObservation.owner,owner);atomic_store(&graphicsObservation.acquired,now);
+    atomic_store(&graphicsObservation.outer,(uintptr_t)graphicsObservationOuter);
+    atomic_store(&graphicsObservation.active,(uintptr_t)graphicsObservationActive);
+    atomic_store(&graphicsObservation.held,true);graphicsObservationWriteEnd();
+}
+static void graphicsObservationReleased(void){
+    if(!graphicsObservationWriteBegin())return;
+    atomic_store(&graphicsObservation.held,false);atomic_store(&graphicsObservation.owner,0);
+    atomic_store(&graphicsObservation.acquired,0);atomic_store(&graphicsObservation.outer,0);
+    atomic_store(&graphicsObservation.active,0);graphicsObservationWriteEnd();
+}
+static void graphicsObservationNameChanged(void){
+    if(!graphicsObservationWriteBegin())return;
+    atomic_store(&graphicsObservation.active,(uintptr_t)graphicsObservationActive);graphicsObservationWriteEnd();
+}
+static void graphicsObservationNewLifecycle(void){
+    if(!graphicsObservationEnabled()||atomic_load(&graphicsObservation.unavailable))return;
+    uint64_t lifecycle=atomic_load(&graphicsObservation.lifecycle);
+    if(lifecycle==UINT64_MAX){atomic_store(&graphicsObservation.unavailable,true);return;}
+    if(!graphicsObservationWriteBegin())return;
+    atomic_store(&graphicsObservation.lifecycle,lifecycle+1);graphicsObservationWriteEnd();
+}
+static void graphicsObservationCopyName(char out[96],uintptr_t address){
+    const char *name=(const char*)address;if(!name)return;
+    for(size_t i=0;i<95&&name[i];i++)out[i]=name[i];
+}
+botw_graphics_lock_observation_status botw_graphics_read_lock_observation(botw_graphics_lock_observation *out){
+    if(!out)return BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE;
+    memset(out,0,sizeof *out);
+    if(!graphicsObservationEnabled())return BOTW_GRAPHICS_LOCK_OBSERVATION_DISABLED;
+    if(atomic_load(&graphicsObservation.unavailable))return BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE;
+    for(unsigned attempt=0;attempt<2;attempt++){
+        uint64_t sequence=atomic_load(&graphicsObservation.sequence);if(sequence&1)continue;
+        botw_graphics_lock_observation value={0};
+        value.lifecycle=atomic_load(&graphicsObservation.lifecycle);value.generation=atomic_load(&graphicsObservation.generation);
+        bool held=atomic_load(&graphicsObservation.held);
+        value.owner_thread_id=atomic_load(&graphicsObservation.owner);value.acquired_ns=atomic_load(&graphicsObservation.acquired);
+        uintptr_t outer=atomic_load(&graphicsObservation.outer),active=atomic_load(&graphicsObservation.active);
+        if(!graphicsObservationClock(&value.sampled_ns))return BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE;
+        if(sequence!=atomic_load(&graphicsObservation.sequence))continue;
+        if(atomic_load(&graphicsObservation.unavailable))return BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE;
+        if(held){
+            if(value.sampled_ns<value.acquired_ns){atomic_store(&graphicsObservation.unavailable,true);return BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE;}
+            graphicsObservationCopyName(value.outer_entry,outer);graphicsObservationCopyName(value.active_entry,active);
+        }else{value.owner_thread_id=0;value.acquired_ns=0;}
+        *out=value;return held?BOTW_GRAPHICS_LOCK_OBSERVATION_HELD:BOTW_GRAPHICS_LOCK_OBSERVATION_IDLE;
+    }
+    return BOTW_GRAPHICS_LOCK_OBSERVATION_UNSTABLE;
+}
 @interface BWGraphicsFailure : NSException
 @end
 @implementation BWGraphicsFailure
@@ -315,15 +406,26 @@ static _Thread_local BOOL pendingError,pendingFatal;
 /* Public calls serialize all object tables, recording state and GPU submission.
  * Errors unwind internally first. The host callback may siglongjmp, so it must
  * run after ARC locals/pools drain and the outermost graphics lock is released. */
-static void graphicsBegin(void){
-    if(graphicsDepth++==0){pthread_mutex_lock(&graphicsLock);pendingError=NO;pendingFatal=NO;}
+static const char *graphicsBeginEntry(const char *entry){
+    const char *previous=graphicsObservationActive;
+    if(graphicsDepth++==0){
+        if(!(atomic_load(&graphicsObservation.configuration)&2))atomic_fetch_or(&graphicsObservation.configuration,2);
+        pthread_mutex_lock(&graphicsLock);pendingError=NO;pendingFatal=NO;
+        graphicsObservationOuter=graphicsObservationActive=entry;graphicsObservationAcquired();
+    }else{graphicsObservationActive=entry;graphicsObservationNameChanged();}
+    return previous;
 }
+static void __attribute__((unused)) graphicsBegin(void){(void)graphicsBeginEntry("<host>");}
 static void graphicsEnd(void){
     if(--graphicsDepth)return;
     botw_graphics_error callback=errorCallback;BOOL notify=pendingError,terminate=pendingFatal;
-    pendingError=NO;pendingFatal=NO;pthread_mutex_unlock(&graphicsLock);
+    pendingError=NO;pendingFatal=NO;graphicsObservationReleased();graphicsObservationOuter=graphicsObservationActive=NULL;pthread_mutex_unlock(&graphicsLock);
     if(notify&&callback)callback(lastError);
     if(terminate)abort();
+}
+static void graphicsEndEntry(const char *previous){
+    if(graphicsDepth>1){graphicsObservationActive=previous;graphicsObservationNameChanged();}
+    graphicsEnd();
 }
 static id<MTLRenderPipelineState> presentPipeline;
 static char completionKey;
@@ -530,6 +632,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;textureInitContextReset();textureTransferBeginLifecycle();
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
+    graphicsObservationNewLifecycle();
     return 1;
 }
 static void shutdownGraphicsImpl(void) {
@@ -1160,11 +1263,11 @@ NVN(nvnQueuePresentTexture,void,NVNqueue *q,NVNwindow *raw,int index){BWQueue *q
     @catch(BWGraphicsFailure *failure){(void)failure;} \
     @catch(NSException *exception){report("Native graphics exception: %s",exception.reason.UTF8String);pendingFatal=YES;}
 #define WRAP_VALUE(scope,name,ret,parameters,operation) \
-    scope ret name parameters {ret value={0};graphicsBegin();const char *previous=currentEntry;currentEntry=#name; \
-        @autoreleasepool{@try{value=(operation);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();return value;}
+    scope ret name parameters {ret value={0};const char *observation=graphicsBeginEntry(#name);const char *previous=currentEntry;currentEntry=#name; \
+        @autoreleasepool{@try{value=(operation);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEndEntry(observation);return value;}
 #define WRAP_VOID(scope,name,parameters,operation) \
-    scope void name parameters {graphicsBegin();const char *previous=currentEntry;currentEntry=#name; \
-        @autoreleasepool{@try{operation;}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();}
+    scope void name parameters {const char *observation=graphicsBeginEntry(#name);const char *previous=currentEntry;currentEntry=#name; \
+        @autoreleasepool{@try{operation;}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEndEntry(observation);}
 #define NVN_VALUE(name,ret,parameters,arguments) WRAP_VALUE(static,w_##name,ret,parameters,h_##name arguments) \
     _Static_assert(__builtin_types_compatible_p(__typeof__(&w_##name),NVNT_##name),"NVN wrapper signature: " #name);
 #define NVN_VOID(name,parameters,arguments) WRAP_VOID(static,w_##name,parameters,h_##name arguments) \
@@ -1177,14 +1280,14 @@ WRAP_VALUE(,botw_graphics_init,int,(void *layer,botw_graphics_error error,botw_g
  * owner. It cannot reuse NVN's callback/abort error boundary during teardown. */
 int botw_graphics_shutdown_checked(char *error,size_t capacity){
     if(graphicsDepth){if(error&&capacity)snprintf(error,capacity,"graphics shutdown requires an outermost host call");return 0;}
-    graphicsBegin();const char *previous=currentEntry;currentEntry="botw_graphics_shutdown_checked";int success=0;
+    const char *observation=graphicsBeginEntry("botw_graphics_shutdown_checked");const char *previous=currentEntry;currentEntry="botw_graphics_shutdown_checked";int success=0;
     @autoreleasepool{@try{shutdownGraphicsImpl();success=1;}
         @catch(BWGraphicsFailure *failure){(void)failure;}
         @catch(NSException *exception){report("Native graphics shutdown exception: %s",exception.reason.UTF8String);}}
     if(error&&capacity)snprintf(error,capacity,"%s",success?"":lastError);
     /* There was no outer transaction. Suppress only this cleanup call's flags;
      * graphicsEnd releases serialization without invoking the guest boundary. */
-    pendingError=NO;pendingFatal=NO;currentEntry=previous;graphicsEnd();return success;
+    pendingError=NO;pendingFatal=NO;currentEntry=previous;graphicsEndEntry(observation);return success;
 }
 WRAP_VOID(,botw_graphics_shutdown,(void),shutdownGraphicsImpl())
 static void textureTrackingRegistration(botw_graphics_memory_tracking_registration registration){if(pools.count)fatal("texture tracking must be configured before pools");if(!registration||nvn_dirty_configure_registration(registration))fatal("texture memory tracking registration failed");textureTrackingAvailable=YES;}
@@ -1194,9 +1297,9 @@ WRAP_VOID(,botw_graphics_set_command_memory_invoker,(botw_graphics_command_memor
 /* Platform calls may run under the runtime lifecycle lock. Never dispatch a
  * host error here, including Objective-C exceptions from the layer. */
 #define PLATFORM_VALUE(name,parameters,operation) \
-    int name parameters {int value=0;graphicsBegin(); \
+    int name parameters {int value=0;const char *observation=graphicsBeginEntry(#name); \
         @autoreleasepool{@try{value=(operation);}@catch(NSException *exception){platformReject(exception.reason.UTF8String);}} \
-        graphicsEnd();return value;}
+        graphicsEndEntry(observation);return value;}
 PLATFORM_VALUE(botw_graphics_platform_initialize,(void),platformInitializeImpl())
 PLATFORM_VALUE(botw_graphics_platform_open_default_display,(uintptr_t *out),platformOpenDisplayImpl(out))
 PLATFORM_VALUE(botw_graphics_platform_create_layer,(uintptr_t display,uintptr_t *out),platformCreateLayerImpl(display,out))
@@ -1210,7 +1313,7 @@ WRAP_VALUE(,botw_graphics_register_shader_with_profile,int,(const void *control,
 WRAP_VALUE(,botw_graphics_register_shader_scratch_proof,int,(const void *control,size_t cs,const void *code,size_t ds,NVNshaderStage stage,const void *spirv,size_t bytes),registerScratchProofImpl(control,cs,code,ds,stage,spirv,bytes))
 WRAP_VALUE(,botw_graphics_read_texture,int,(const NVNtexture *texture,void *pixels,size_t bytes),readTextureImpl(texture,0,0,pixels,bytes))
 WRAP_VALUE(,botw_graphics_read_texture_subresource,int,(const NVNtexture *texture,unsigned level,unsigned layer,void *pixels,size_t bytes),readTextureImpl(texture,level,layer,pixels,bytes))
-#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){graphicsBegin();const char *previous=currentEntry;currentEntry=#name;@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEnd();abort();}
+#define NVN_UNSUPPORTED(name) __attribute__((noreturn)) static void unsupported_##name(void){const char *observation=graphicsBeginEntry(#name);const char *previous=currentEntry;currentEntry=#name;@autoreleasepool{@try{fatal(#name);}CATCH_GRAPHICS_FAILURE}currentEntry=previous;graphicsEndEntry(observation);abort();}
 #include "unsupported.inc"
 #undef NVN_UNSUPPORTED
 static void *lookupNVNImpl(const char *name){if(!name)return NULL;

@@ -54,11 +54,13 @@ static void invokeRecordingCallback(NVNcommandBuffer *raw,BWCommands *cmd,NVNcom
     if(!callback)fatal("CPU recording memory exhausted without a memory callback");if(!invoke)fatal("CPU recording memory callback requires a protected host invoker");
     uint64_t generation=cmd.generation;void *data=cmd.callbackData;char message[512]={0};int success=0;
     unsigned depth=graphicsDepth;BOOL oldError=pendingError,oldFatal=pendingFatal;const char *entry=currentEntry;
-    cmd.callbackActive=YES;cmd.callbackOwner=pthread_self();graphicsDepth=0;pendingError=NO;pendingFatal=NO;currentEntry=NULL;pthread_mutex_unlock(&graphicsLock);
+    const char *observationOuter=graphicsObservationOuter,*observationActive=graphicsObservationActive;
+    cmd.callbackActive=YES;cmd.callbackOwner=pthread_self();graphicsDepth=0;pendingError=NO;pendingFatal=NO;currentEntry=NULL;
+    graphicsObservationReleased();graphicsObservationOuter=graphicsObservationActive=NULL;pthread_mutex_unlock(&graphicsLock);
     /* The host adapter contains every guest escape. @finally additionally
      * restores the lock if a native adapter throws an Objective-C exception. */
     @try{success=invoke(callback,raw,event,minimum,data,message,sizeof message);}
-    @finally{pthread_mutex_lock(&graphicsLock);graphicsDepth=depth;pendingError=oldError;pendingFatal=oldFatal;currentEntry=entry;cmd.callbackActive=NO;}
+    @finally{pthread_mutex_lock(&graphicsLock);graphicsDepth=depth;pendingError=oldError;pendingFatal=oldFatal;currentEntry=entry;cmd.callbackActive=NO;graphicsObservationOuter=observationOuter;graphicsObservationActive=observationActive;graphicsObservationAcquired();}
     message[sizeof message-1]=0;
     if(!success){char detail[640];snprintf(detail,sizeof detail,"protected command memory callback failed: %s",message[0]?message:"host did not provide a diagnostic");fatal(detail);}
     if(commandState(raw,NO)!=cmd||!cmd.recording||cmd.generation!=generation)fatal("command buffer identity/generation changed during memory callback");

@@ -4,6 +4,7 @@
 #import <QuartzCore/CADisplayLink.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include "runtime.h"
+#include "graphics.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -15,6 +16,52 @@
 extern void botw_host_display_tick(double target_timestamp_seconds);
 
 static char *game_root; /* Process lifetime, including detached guest threads. */
+static BOOL observe_graphics_lock;
+static BOOL lock_observation_started;
+static unsigned lock_observations_emitted; /* Dedicated serial observer queue only. */
+static dispatch_queue_t lock_observation_queue;
+
+static const char *lock_observation_status_name(botw_graphics_lock_observation_status status) {
+    switch (status) {
+        case BOTW_GRAPHICS_LOCK_OBSERVATION_DISABLED: return "disabled";
+        case BOTW_GRAPHICS_LOCK_OBSERVATION_IDLE: return "idle";
+        case BOTW_GRAPHICS_LOCK_OBSERVATION_HELD: return "held";
+        case BOTW_GRAPHICS_LOCK_OBSERVATION_UNSTABLE: return "unstable";
+        default: return "unavailable";
+    }
+}
+static void log_host_lock_observation(void) {
+    if (!observe_graphics_lock || lock_observations_emitted >= 4) return;
+    unsigned sample = ++lock_observations_emitted;
+    botw_graphics_lock_observation value = {0};
+    botw_graphics_lock_observation_status status = botw_graphics_read_lock_observation(&value);
+    BOOL payload = status == BOTW_GRAPHICS_LOCK_OBSERVATION_IDLE || status == BOTW_GRAPHICS_LOCK_OBSERVATION_HELD;
+    if (status == BOTW_GRAPHICS_LOCK_OBSERVATION_HELD && value.sampled_ns < value.acquired_ns) {
+        status = BOTW_GRAPHICS_LOCK_OBSERVATION_UNAVAILABLE; payload = NO;
+    }
+    fprintf(stderr, "host_graphics_lock_observation sample=%u status=%s", sample, lock_observation_status_name(status));
+    if (payload) {
+        uint64_t held = status == BOTW_GRAPHICS_LOCK_OBSERVATION_HELD ? value.sampled_ns - value.acquired_ns : 0;
+        fprintf(stderr, " lifecycle=%llu generation=%llu owner=%llu acquired_ns=%llu sampled_ns=%llu held_ns=%llu outer=%.*s active=%.*s",
+            (unsigned long long)value.lifecycle, (unsigned long long)value.generation,
+            (unsigned long long)value.owner_thread_id, (unsigned long long)value.acquired_ns,
+            (unsigned long long)value.sampled_ns, (unsigned long long)held,
+            (int)sizeof value.outer_entry, value.outer_entry, (int)sizeof value.active_entry, value.active_entry);
+    }
+    fprintf(stderr, " gameplay_verified=false\n"); fflush(stderr);
+}
+static void start_host_lock_observations(void) {
+    if (!observe_graphics_lock || lock_observation_started) return;
+    lock_observation_started = YES;
+    lock_observation_queue = dispatch_queue_create("local.botw.host-lock-observation", DISPATCH_QUEUE_SERIAL);
+    /* Finite host diagnostics only. This queue never drives display, VI or input. */
+    const int64_t delays[] = {10, 30, 90, 180};
+    for (unsigned i = 0; i < sizeof delays / sizeof delays[0]; ++i) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delays[i] * NSEC_PER_SEC), lock_observation_queue, ^{
+            log_host_lock_observation();
+        });
+    }
+}
 static void host_event(const char *message) {
     fprintf(stdout, "%s\n", message); fflush(stdout);
 }
@@ -91,6 +138,7 @@ static void *run_guest(void *unused) {
     if (!self.displayLink) { host_event("error=mac_display_link_unavailable"); exit_process(1); }
     [self.displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     host_event("mac_window_ready=true width=1280 height=720 display_clock=NSView.CADisplayLink");
+    start_host_lock_observations();
     pthread_attr_t attributes; pthread_t thread;
     int result = pthread_attr_init(&attributes);
     if (result) { host_event("error=mac_pthread_attr_init_failed"); exit_process(1); }
@@ -128,14 +176,21 @@ static void *run_guest(void *unused) {
 static BOTWMacDelegate *application_delegate; /* NSApplication's delegate is weak. */
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--help")) {
-        puts("Usage: botw-mac ROOT\nROOT contains the prepared botw/ modules and local resource backends."); return 0;
+        puts("Usage: botw-mac ROOT [--observe-graphics-lock]\nROOT contains the prepared botw/ modules and local resource backends."); return 0;
     }
-    if (argc != 2 || argv[1][0] == '-') { fprintf(stderr, "Usage: botw-mac ROOT\n"); return 64; }
+    if ((argc != 2 && argc != 3) || argv[1][0] == '-' ||
+        (argc == 3 && strcmp(argv[2], "--observe-graphics-lock"))) {
+        fprintf(stderr, "Usage: botw-mac ROOT [--observe-graphics-lock]\n"); return 64;
+    }
     game_root = realpath(argv[1], NULL);
     if (!game_root) { fprintf(stderr, "error=mac_root_unavailable: %s\n", strerror(errno)); return 66; }
     struct stat info;
     if (stat(game_root, &info) || !S_ISDIR(info.st_mode)) {
         fprintf(stderr, "error=mac_root_is_not_directory\n"); free(game_root); return 66;
+    }
+    if (argc == 3) {
+        observe_graphics_lock = botw_graphics_enable_lock_observation() != 0;
+        if (!observe_graphics_lock) fprintf(stderr, "host_graphics_lock_observation enabled=false reason=pre_start_enable_rejected\n");
     }
     if (botw_host_set_address_space(39)) {
         fprintf(stderr, "error=mac_address_space_configuration_failed\n"); free(game_root); return 1;
