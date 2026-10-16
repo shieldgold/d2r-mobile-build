@@ -256,42 +256,42 @@ static void textureRetirePoolReferences(BWPool *pool){
 }
 /* Existing entrypoint-error context from the validated Builder snapshot only.
  * No address, texture data, extra validator, or VM query is evaluated here. */
-static int textureInitializeRejected(const TextureBuilder *b,const char *reason){
-    return report("%s target=%u flags=0x%x format=0x%x samples=%d",reason,(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->samples);
+static int textureInitializeRejected(BWTextureInitToken attempt,const TextureBuilder *b,const char *reason){
+    return textureInitReturnedFalse(attempt,report("%s target=%u flags=0x%x format=0x%x samples=%d",reason,(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->samples));
 }
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
-    TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;
-    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return textureInitializeRejected(b,"Texture hardware compression/layout request is not implemented for this format/flags/samples");
+    textureInitEntry();TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;BWTextureInitToken attempt=textureInitAttempt(raw,b);
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureCompressionGPU(b))return textureInitializeRejected(attempt,b,"Texture hardware compression/layout request is not implemented for this format/flags/samples");
     BWDevice *device=get(b->device,[BWDevice class]);
-    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
-    uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return textureInitializeRejected(b,"Texture format requires an unimplemented conversion/BC decoder");
-    if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");
-    for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return report("Texture component conversion is not implemented");
-    BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return report("texture device/pool mismatch");
-    if(!size||b->offset<0||!range(b->offset,size,pool.size))return report("Texture storage bounds");
+    if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return textureInitReturnedFalse(attempt,report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data"));
+    uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return textureInitializeRejected(attempt,b,"Texture format requires an unimplemented conversion/BC decoder");
+    if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return textureInitReturnedFalse(attempt,report("ASTC textures require Metal Apple2 family support"));
+    for(unsigned i=0;i<4;i++)if(swz[i]!=i+NVN_SWZ_R)return textureInitReturnedFalse(attempt,report("Texture component conversion is not implemented"));
+    BWPool *pool=get(b->pool,[BWPool class]);size_t size=textureBytes(b);if(!pool.live||pool.device!=device)return textureInitReturnedFalse(attempt,report("texture device/pool mismatch"));
+    if(!size||b->offset<0||!range(b->offset,size,pool.size))return textureInitReturnedFalse(attempt,report("Texture storage bounds"));
     unsigned depthKind=0;if((bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)||
         ((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_depth_storage_format(b->format)&&textureDepthSelected(b,&depthKind)))&&
-        (size_t)b->offset%bw_pool_policy().mappingPageBytes)return report("Texture depth storage offset is not aligned to native mapping page");
+        (size_t)b->offset%bw_pool_policy().mappingPageBytes)return textureInitReturnedFalse(attempt,report("Texture depth storage offset is not aligned to native mapping page"));
     BOOL linear=!!(b->flags&(0x10|0x40));BWLinearLayout linearLayout={0};
     if(linear){
-        if(pool.kind!=BW_POOL_VIRTUAL&&!pool.coherent)return report("linear textures require coherent no-copy pool storage");
-        if(!textureLinearLayout(b,&linearLayout)||(size_t)b->offset%linearLayout.alignment)return report("Invalid linear texture stride/offset/alignment");
+        if(pool.kind!=BW_POOL_VIRTUAL&&!pool.coherent)return textureInitReturnedFalse(attempt,report("linear textures require coherent no-copy pool storage"));
+        if(!textureLinearLayout(b,&linearLayout)||(size_t)b->offset%linearLayout.alignment)return textureInitReturnedFalse(attempt,report("Invalid linear texture stride/offset/alignment"));
         NSUInteger alignment=[gpu minimumLinearTextureAlignmentForPixelFormat:(MTLPixelFormat)format];
-        if(!alignment||linearLayout.stride%alignment)return report("Invalid linear texture Metal backing alignment");
+        if(!alignment||linearLayout.stride%alignment)return textureInitReturnedFalse(attempt,report("Invalid linear texture Metal backing alignment"));
     }
-    if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))return report("texture object memory is not writable");texturePrepareWrite(raw,sizeof *raw);validateObjectStorage(raw,sizeof *raw);
-    for(NSValue *v in objectSpans.allValues){NSRange r=v.rangeValue;if(memoryOverlap(raw,sizeof *raw,(void*)r.location,r.length))return report("texture object overlaps live NVN object");}
+    if(memoryAccessValidator&&!memoryAccessValidator(raw,sizeof *raw,1))return textureInitReturnedFalse(attempt,report("texture object memory is not writable"));texturePrepareWrite(raw,sizeof *raw);validateObjectStorage(raw,sizeof *raw);
+    for(NSValue *v in objectSpans.allValues){NSRange r=v.rangeValue;if(memoryOverlap(raw,sizeof *raw,(void*)r.location,r.length))return textureInitReturnedFalse(attempt,report("texture object overlaps live NVN object"));}
     BWTexture *t=[BWTexture new];t.metadata=*b;t.storageSize=size;t.descriptor=textureDescriptor(b);nvn_texlayout layout;nvn_texdesc td=t.descriptor;nvn_tex_layout(&td,&layout);t.layout=layout;
     if(linear){td.stride=(uint32_t)linearLayout.stride;t.descriptor=td;layout.size=layout.layer_size=linearLayout.size;layout.align=(uint32_t)linearLayout.alignment;t.layout=layout;}
     t.blockLinear=!(td.flags&0x10);t.depth=b->format>=NVN_FORMAT_DEPTH16&&b->format<=NVN_FORMAT_DEPTH32F_STENCIL8;
-    if(t.depth&&b->format!=NVN_FORMAT_DEPTH16&&b->format!=NVN_FORMAT_DEPTH32F)return report("Combined depth/stencil storage not implemented");
-    if(t.depth&&b->target==NVN_TEXTURE_TARGET_2D_ARRAY)return report("Array depth texture semantics are not yet validated");
+    if(t.depth&&b->format!=NVN_FORMAT_DEPTH16&&b->format!=NVN_FORMAT_DEPTH32F)return textureInitReturnedFalse(attempt,report("Combined depth/stencil storage not implemented"));
+    if(t.depth&&b->target==NVN_TEXTURE_TARGET_2D_ARRAY)return textureInitReturnedFalse(attempt,report("Array depth texture semantics are not yet validated"));
     t.pool=pool;t.device=device;t.kindPolicy=device.textureKindPolicy;t.poolGeneration=pool.generation;t.rawPool=b->pool;t.offset=b->offset;t.stride=linear?linearLayout.stride:b->stride;t.width=b->width;t.height=b->height;t.format=b->format;
     (void)textureMappingKind(*b,pool);
     /* Virtual initialization records metadata even before MapVirtual. Actual
      * GPU use resolves the current map and creates the matching real resource. */
-    if(pool.kind!=BW_POOL_VIRTUAL){BWPoolRange *mapping=poolResolve(pool,t.offset,t.layout.size,-1,"texture initialization");textureCheckStorageAlias(t,mapping);t.texture=textureMakeBase(t,mapping);if(!t.texture)return report("Metal texture creation failed");t.mapping=mapping;}
-    put(raw,t);t.identity=((BWObject*)raw)->serial;textureRememberReference(t);return 1;
+    if(pool.kind!=BW_POOL_VIRTUAL){BWPoolRange *mapping=poolResolve(pool,t.offset,t.layout.size,-1,"texture initialization");textureCheckStorageAlias(t,mapping);t.texture=textureMakeBase(t,mapping);if(!t.texture)return textureInitReturnedFalse(attempt,report("Metal texture creation failed"));t.mapping=mapping;}
+    put(raw,t);t.identity=((BWObject*)raw)->serial;textureInitPublished(attempt,t.identity);textureRememberReference(t);return 1;
 }
 static char texturePendingKey;
 static NSMutableDictionary *texturePendingRecord(BWTexture *t,id<MTLCommandBuffer> cb,BOOL create){

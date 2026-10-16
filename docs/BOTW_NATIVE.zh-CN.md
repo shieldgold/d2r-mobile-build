@@ -149,7 +149,17 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 该批提交 `429bf9e` 后普通 Mac 原游戏已通过 Map `0x146`，下一首个停止点为 `nvnMemoryPoolMapVirtual index=0 storageClass=0x1c3`；本次错误只暴露映射类别，不能据此确认实际纹理创建或消费。`mac_host_return=1`、`mac_process_exit=1`、`frontend_resources_released=false`，无游戏呈现。binary SHA256 为 `ccf3190f9dfceeee1eceaf1aaf93b7deee3654849b1df163ac71426db2eb4a63`，报告位于 `outputs/botw-host39-mac-429bf9e/ordinary-admission-evidence.json`。本批只依据相关测试和独立审查验证，未重跑固定全套，也未另行安装手机；手机当前已验证版本仍为 `3a22d53`，不混用两版执行证据。
 
+`429bf9e` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38836936522) 和 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38836936534) 后续均成功，精确 head 已核验；这些结果没有改变上述原游戏停止点或手机版本。
+
 下一小批将精确 `0x1C3→rawC3 / ZF32_X24S8` 纳入相同 Map/CPU identity 合同；raw46/C3 互为不同 kind，相邻区间不合并，不能取得跨 kind 的连续 lease。GPU 对两者分别在身份验证后、backing 物化前具名拒绝，包含 expected=-1；C3 不替代 raw7B，也不开放 D32FS8/stencil 创建或转换。三组相关模块共 **65 项通过、零跳过**，30.522 秒，保留完整 vendor 算法与原随机/并发压力测试。初始 C3 未准入和中间仅开放 identity 后误入 GPU resolver 的行为 RED 均保留，修复后两个 CPU/前拒 mode 表驱动验证46/C3；它们不构成原游戏 GPU 消费或可玩验收。
+
+提交 `179e3a9` 的普通 Mac 原游戏已越过上述映射停止点，实际首个 fatal 改为 `nvnTextureWriteTexels` 的 `BWTexture serial=0 actual=<none>`，`mac_host_return=1`、`mac_process_exit=1`，没有游戏呈现证据。binary SHA256 为 `98599b3ee59a2595b3a0d64ad8884f0e0e2d797d0d043f2f8dee98607a7cd00f`，报告位于 `outputs/botw-host39-mac-179e3a9/ordinary-admission-evidence.json`。本次 stderr 没有前序 Texture Initialize 失败行；现有 `report()` 本来就会输出 stderr 并触发错误回调，不能以此认定出现过被后续错误掩盖的初始化失败，也不能据此归因于 D24 或断言初始化从未调用。该版尚未安装手机，实际对象传递原因继续核验。
+
+`179e3a9` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38837378033) 和 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38837377969) 均成功，精确 head 已核验；原游戏和手机的验收结论保持按各自实际版本记录。
+
+为核验对象传递，后续诊断只保存宿主拥有的最近四条初始化记录和饱和计数：API 已传入的 raw 指针值、已验证 Builder 的四个标量、put 已发布的 serial，以及 started/returned_false/published 状态。BWTexture 校验失败时最多输出四次，每行最多四条历史；复用 get 原已读的 key/可读性，不增加游戏内存、对象头、栈或 VM 查询。成功初始化不输出；正常返回、原错误文字、回调和支持域保持。最近四条未命中只写 not_retained；异常中断不伪装为 FALSE。完整成功的图形初始化/关闭重置记录，checked shutdown 失败保留。
+
+该诊断相关 43 项测试先全部通过（9.661 秒）；随后独立行为 RED 发现发布标记应紧随既有 put/identity，而不能放在可能异常的引用登记之后。修正后最终 **8 项 CPU 测试通过**（5.175 秒），覆盖12个自有 native 模式，包括同/异 raw、零 serial、未验证 Builder、已验证后异常、原回调/错误保持、日志及环容量、成功/失败关闭和 UINT64 饱和。它们使用 fake Metal 工厂，不创建真实 GPU 设备或命令；该批用于定位，尚未证明或修复原游戏对象失效根因。
 
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 

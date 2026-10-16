@@ -378,6 +378,54 @@ static int report(const char *format, ...) {
     fprintf(stderr,"[botw graphics] %s\n",lastError);
     pendingError=YES;return 0;
 }
+/* Bounded host-owned normal-API history. These values come only from API
+ * arguments, the already validated Builder snapshot and put's assigned serial.
+ * Absence from this ring means not retained, never "never called". */
+#define BW_TEXTURE_LIFECYCLE_CAPACITY 4
+typedef enum {BW_TEXTURE_INIT_STARTED,BW_TEXTURE_INIT_RETURNED_FALSE,BW_TEXTURE_INIT_PUBLISHED} BWTextureInitResult;
+typedef struct {const void *raw;uint64_t sequence,serial;uint32_t target,flags,format;int32_t samples;BWTextureInitResult result;} BWTextureInitRecord;
+typedef struct {unsigned slot;uint64_t sequence;} BWTextureInitToken;
+static struct {uint64_t entryCalls,validatedAttempts,publishedSuccesses,sequence;unsigned next,count,dumps;BOOL saturated;BWTextureInitRecord records[BW_TEXTURE_LIFECYCLE_CAPACITY];} textureInitContext;
+static void textureInitContextReset(void){memset(&textureInitContext,0,sizeof textureInitContext);}
+static void textureInitIncrement(uint64_t *value){if(*value<UINT64_MAX)(*value)++;}
+static void textureInitEntry(void){textureInitIncrement(&textureInitContext.entryCalls);}
+static BWTextureInitToken textureInitAttempt(const void *raw,const TextureBuilder *b){
+    textureInitIncrement(&textureInitContext.validatedAttempts);
+    /* Stop retaining at sequence exhaustion, rather than reuse a token which
+     * could still identify an interrupted/nested attempt. Counts saturate too. */
+    if(textureInitContext.sequence==UINT64_MAX){textureInitContext.saturated=YES;return (BWTextureInitToken){0,0};}
+    unsigned slot=textureInitContext.next;uint64_t sequence=++textureInitContext.sequence;
+    textureInitContext.next=(slot+1)%BW_TEXTURE_LIFECYCLE_CAPACITY;
+    if(textureInitContext.count<BW_TEXTURE_LIFECYCLE_CAPACITY)textureInitContext.count++;
+    textureInitContext.records[slot]=(BWTextureInitRecord){raw,sequence,0,(uint32_t)b->target,(uint32_t)b->flags,(uint32_t)b->format,b->samples,BW_TEXTURE_INIT_STARTED};
+    return (BWTextureInitToken){slot,sequence};
+}
+static int textureInitReturnedFalse(BWTextureInitToken token,int value){
+    if(token.sequence&&textureInitContext.records[token.slot].sequence==token.sequence)textureInitContext.records[token.slot].result=BW_TEXTURE_INIT_RETURNED_FALSE;
+    return value;
+}
+static void textureInitPublished(BWTextureInitToken token,uint64_t serialValue){
+    textureInitIncrement(&textureInitContext.publishedSuccesses);
+    if(token.sequence&&textureInitContext.records[token.slot].sequence==token.sequence){BWTextureInitRecord *r=&textureInitContext.records[token.slot];r->result=BW_TEXTURE_INIT_PUBLISHED;r->serial=serialValue;}
+}
+static void textureInitContextDump(const void *raw,uint64_t key,BOOL serialReadable){
+    if(textureInitContext.dumps>=BW_TEXTURE_LIFECYCLE_CAPACITY)return;textureInitContext.dumps++;
+    unsigned first=(textureInitContext.next+BW_TEXTURE_LIFECYCLE_CAPACITY-textureInitContext.count)%BW_TEXTURE_LIFECYCLE_CAPACITY;BOOL same=NO;
+    for(unsigned i=0;i<textureInitContext.count;i++)if(textureInitContext.records[(first+i)%BW_TEXTURE_LIFECYCLE_CAPACITY].raw==raw)same=YES;
+    char line[2048]={0};size_t used=0;
+#define TEXTURE_CONTEXT_APPEND(...) do{int n=snprintf(line+used,sizeof line-used,__VA_ARGS__);if(n>0)used+=MIN((size_t)n,sizeof line-used-1);}while(0)
+    TEXTURE_CONTEXT_APPEND("texture_lifecycle_context bridge_init_entry_calls=%llu validated_init_attempts=%llu published_successes=%llu history_saturated=%s queried_raw=%p ",(unsigned long long)textureInitContext.entryCalls,(unsigned long long)textureInitContext.validatedAttempts,(unsigned long long)textureInitContext.publishedSuccesses,textureInitContext.saturated?"true":"false",raw);
+    if(serialReadable)TEXTURE_CONTEXT_APPEND("observed_serial=0x%llx ",(unsigned long long)key);else TEXTURE_CONTEXT_APPEND("observed_serial=unreadable ");
+    TEXTURE_CONTEXT_APPEND("match=%s recent_count=%u",same?"retained":"not_retained",textureInitContext.count);
+    for(unsigned i=0;i<textureInitContext.count;i++){
+        BWTextureInitRecord *r=&textureInitContext.records[(first+i)%BW_TEXTURE_LIFECYCLE_CAPACITY];
+        const char *state=r->result==BW_TEXTURE_INIT_PUBLISHED?"published":r->result==BW_TEXTURE_INIT_RETURNED_FALSE?"returned_false":"started";
+        TEXTURE_CONTEXT_APPEND(" record%u={raw=%p sequence=%llu result=%s serial=0x%llx target=%u flags=0x%x format=0x%x samples=%d}",i,r->raw,(unsigned long long)r->sequence,state,(unsigned long long)r->serial,r->target,r->flags,r->format,r->samples);
+    }
+#undef TEXTURE_CONTEXT_APPEND
+    /* Do not report: get's unchanged fatal owns lastError/pending/callback. */
+    fprintf(stderr,"[botw graphics] %s\n",line);
+}
 __attribute__((noreturn)) static void fatal(const char *name) {
     report("Unsupported or invalid NVN operation: %s",name);pendingFatal=YES;
     @throw [[BWGraphicsFailure alloc] initWithName:@"BWGraphicsFailure" reason:nil userInfo:nil];
@@ -420,11 +468,11 @@ static void put(void *raw,id value) {
 static id get(const void *raw,Class expected) {
     uint64_t key=0;char detail[384];
     if(raw&&memoryAccessValidator&&!memoryAccessValidator(raw,sizeof key,0)){
-        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=<unreadable> actual=<none>",class_getName(expected),raw);fatal(detail);
+        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=<unreadable> actual=<none>",class_getName(expected),raw);if(expected==[BWTexture class])textureInitContextDump(raw,0,NO);fatal(detail);
     }
     if(raw)memcpy(&key,raw,sizeof key);id value=raw?objects[@(key)]:nil;
     if(!value||![value isKindOfClass:expected]){
-        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=0x%llx actual=%s",class_getName(expected),raw,(unsigned long long)key,value?class_getName([value class]):"<none>");fatal(detail);
+        snprintf(detail,sizeof detail,"object lifetime/type expected=%s raw=%p serial=0x%llx actual=%s",class_getName(expected),raw,(unsigned long long)key,value?class_getName([value class]):"<none>");if(expected==[BWTexture class])textureInitContextDump(raw,key,raw!=NULL);fatal(detail);
     }
     return value;
 }
@@ -473,7 +521,7 @@ static int initializeGraphicsImpl(void *layer,botw_graphics_error error,botw_gra
     commandQueue=[gpu newCommandQueue]; if(!commandQueue){gpu=nil;return report("No Metal command queue");}
     allGPU=dispatch_group_create();replacePresentation([BWPresentation new]);
     objects=[NSMutableDictionary new];objectSpans=[NSMutableDictionary new];handles=[NSMutableDictionary new]; pipelines=[NSMutableDictionary new];depthStates=[NSMutableDictionary new];
-    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;
+    pools=[NSMutableArray new]; shaders=[NSMutableArray new]; serial=0;poolPhysicalSuccessTraceCount=0;textureInitContextReset();
     displayLayer=(__bridge CAMetalLayer *)layer;
     if(displayLayer){displayLayer.device=gpu;displayLayer.pixelFormat=MTLPixelFormatBGRA8Unorm;displayLayer.framebufferOnly=NO;}
     return 1;
@@ -486,7 +534,7 @@ static void shutdownGraphicsImpl(void) {
     nvn_texown_reset_quiescent();nvn_texflush_reset_quiescent();
     objects=nil;objectSpans=nil;handles=nil;pipelines=nil;depthStates=nil;pools=nil;shaders=nil;presentPipeline=nil;
     platformInitialized=NO;platformDisplay=0;platformLayer=0;
-    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);
+    displayLayer=nil;commandQueue=nil;gpu=nil;memoryValidator=NULL;memoryAccessValidator=NULL;commandMemoryInvoker=NULL;allGPU=nil;replacePresentation(nil);textureInitContextReset();
 }
 /* The runtime owns guest output validation and the real kernel event. Keep
  * these failures return-only: its lifecycle mutex must never be bypassed by

@@ -79,6 +79,169 @@ int main(void) {
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
+@unittest.skipUnless(platform.system() == 'Darwin' and shutil.which('xcrun'),
+                     'Darwin Objective-C CPU harness required; no Metal device is created')
+class TextureLifecycleContextCPUTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory(prefix='botw-texture-lifecycle-')
+        cls.addClassCleanup(cls.directory.cleanup)
+        folder = Path(cls.directory.name)
+        source = folder / 'lifecycle.m'
+        graphics = ROOT / 'native/botw_graphics'
+        source.write_text(r"""
+#import <Metal/Metal.h>
+@interface LifecycleThrowReferences:NSObject @end
+@implementation LifecycleThrowReferences
+- (void)addObject:(id)object{(void)object;@throw [NSException exceptionWithName:@"LifecycleReferenceFailure" reason:@"owned reference fixture" userInfo:nil];}
+@end
+@interface LifecycleCPUDevice:NSObject @end
+@implementation LifecycleCPUDevice
+- (id<MTLCommandQueue>)newCommandQueue{return (id<MTLCommandQueue>)[NSObject new];}
+@end
+static id<MTLDevice> lifecycleCPUDevice(void){return (id<MTLDevice>)[LifecycleCPUDevice new];}
+#define MTLCreateSystemDefaultDevice lifecycleCPUDevice
+#include "graphics.m"
+#undef MTLCreateSystemDefaultDevice
+#include <setjmp.h>
+static sigjmp_buf recovery;
+static unsigned notifications,accessCalls;
+static BOOL recoverNow;
+static const void *deniedAddress;
+static void captureError(const char *error){(void)error;notifications++;if(recoverNow)siglongjmp(recovery,1);}
+static int accessMetadata(const void *address,size_t bytes,int write){(void)bytes;(void)write;accessCalls++;return address!=deniedAddress;}
+#define CHECK(x) do{if(!(x)){fprintf(stderr,"LIFECYCLE_CPU_CHECK line%d %s\n",__LINE__,#x);return 91;}}while(0)
+static NVNdevice rawDevice;
+static NVNmemoryPool rawPool;
+static int beginHost(void){
+ CHECK(botw_graphics_init(NULL,captureError,NULL));CHECK([(id)gpu isKindOfClass:[LifecycleCPUDevice class]]);
+ BWDevice *device=[[BWDevice alloc]initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR_DEPTH];put(&rawDevice,device);
+ BWPool *pool=[BWPool new];pool.kind=BW_POOL_VIRTUAL;pool.device=device;pool.live=YES;pool.size=65536;pool.flags=0x221;put(&rawPool,pool);pool.generation=((BWObject*)&rawPool)->serial;
+ return 0;
+}
+static NVNtextureBuilder ownedBuilder(void){NVNtextureBuilder raw={0};TextureBuilder *b=(TextureBuilder*)&raw;b->device=&rawDevice;b->pool=&rawPool;b->target=NVN_TEXTURE_TARGET_2D;b->format=NVN_FORMAT_RGBA8;b->width=b->height=b->depth=b->levels=1;for(unsigned i=0;i<4;i++)b->swizzle[i]=i+NVN_SWZ_R;return raw;}
+static int badWrite(NVNtexture *raw){
+ unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureWriteTexels(raw,NULL,NULL,NULL);CHECK(0);}recoverNow=NO;
+ CHECK(notifications==before+1&&strstr(lastError,"entry=nvnTextureWriteTexels: Unsupported or invalid NVN operation: object lifetime/type expected=BWTexture"));
+ CHECK(!graphicsDepth&&!pendingError&&!pendingFatal);CHECK(pthread_mutex_trylock(&graphicsLock)==0);pthread_mutex_unlock(&graphicsLock);return 0;
+}
+int main(int argc,char **argv){@autoreleasepool{
+ CHECK(argc==2);CHECK(!beginHost());const char *mode=argv[1];NVNtexture raw={0},other={0};NVNtextureBuilder builder=ownedBuilder();
+ memoryAccessValidator=accessMetadata;
+ if(!strcmp(mode,"none")){CHECK(!badWrite(&raw));CHECK(accessCalls==1);}
+ else if(!strcmp(mode,"false")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->flags=8;b->format=0;CHECK(!w_nvnTextureInitialize(&raw,&builder));CHECK(notifications==1&&((BWObject*)&raw)->serial==0);CHECK(strstr(lastError,"Texture hardware compression/layout request is not implemented for this format/flags/samples target=1 flags=0x8 format=0x0 samples=0"));unsigned before=accessCalls;CHECK(!badWrite(&raw)&&accessCalls==before+1);CHECK(notifications==2);
+ }else if(!strcmp(mode,"success")){CHECK(w_nvnTextureInitialize(&raw,&builder));CHECK(!notifications&&((BWObject*)&raw)->serial!=0);}
+ else if(!strcmp(mode,"post-publish-exception")){
+  textureReferences=(NSHashTable*)[LifecycleThrowReferences new];recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&raw,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==1&&((BWObject*)&raw)->serial!=0);CHECK(strstr(lastError,"Native graphics exception: owned reference fixture"));CHECK(!badWrite(&other)&&notifications==2);
+ }else if(!strcmp(mode,"same-zero")||!strcmp(mode,"different")){
+  CHECK(w_nvnTextureInitialize(&raw,&builder));CHECK(!notifications);printf("PUBLISHED_RAW=%p PUBLISHED_SERIAL=0x%llx OTHER_RAW=%p\n",&raw,(unsigned long long)((BWObject*)&raw)->serial,&other);
+  if(!strcmp(mode,"same-zero")){memset(&raw,0,sizeof raw);CHECK(!badWrite(&raw));}else CHECK(!badWrite(&other));
+ }else if(!strcmp(mode,"started")||!strcmp(mode,"invalid-builder")){
+  if(!strcmp(mode,"started")){((TextureBuilder*)&builder)->device=(NVNdevice*)(uintptr_t)0xdeadbeef000;deniedAddress=((TextureBuilder*)&builder)->device;}else deniedAddress=&builder;
+  recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&raw,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==1&&((BWObject*)&raw)->serial==0);
+  if(!strcmp(mode,"invalid-builder"))CHECK(accessCalls==1);unsigned before=accessCalls;deniedAddress=NULL;CHECK(!badWrite(&raw)&&accessCalls==before+1);CHECK(notifications==2);
+ }else if(!strcmp(mode,"unreadable-object")){
+  size_t page=getpagesize();void *inaccessible=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(inaccessible!=MAP_FAILED);deniedAddress=inaccessible;CHECK(!badWrite(inaccessible));CHECK(accessCalls==1&&strstr(lastError,"serial=<unreadable>"));deniedAddress=NULL;CHECK(!munmap(inaccessible,page));
+ }else if(!strcmp(mode,"wrap-cap")){
+  NVNtexture textures[6]={0};for(unsigned i=0;i<6;i++)CHECK(w_nvnTextureInitialize(&textures[i],&builder));CHECK(!notifications);for(unsigned i=0;i<5;i++)CHECK(!badWrite(&raw));CHECK(notifications==5);
+ }else if(!strcmp(mode,"reset")){
+  CHECK(w_nvnTextureInitialize(&raw,&builder));CHECK(!botw_graphics_init(NULL,captureError,NULL));CHECK(notifications==1);CHECK(!badWrite(&other));
+  BWPool *quarantined=[BWPool new];quarantined.kind=BW_POOL_ORDINARY;quarantined.retiring=YES;dispatch_group_t group=dispatch_group_create();dispatch_group_enter(group);objc_setAssociatedObject(quarantined,&poolBorrowedLifetimeKey,group,OBJC_ASSOCIATION_RETAIN_NONATOMIC);poolUnpublishedPools=[NSMutableArray arrayWithObject:quarantined];
+  unsigned before=notifications;char error[256];CHECK(!botw_graphics_shutdown_checked(error,sizeof error));CHECK(strstr(error,"borrowed Metal backing still retained")&&notifications==before);CHECK(!badWrite(&other));dispatch_group_leave(group);CHECK(botw_graphics_shutdown_checked(error,sizeof error));CHECK(!beginHost());CHECK(!badWrite(&other));
+ }else if(!strcmp(mode,"saturated")){
+#ifdef BW_TEXTURE_LIFECYCLE_CAPACITY
+  textureInitContext.sequence=UINT64_MAX-1;textureInitContext.entryCalls=textureInitContext.validatedAttempts=textureInitContext.publishedSuccesses=UINT64_MAX-1;
+  CHECK(w_nvnTextureInitialize(&raw,&builder));uint64_t first=((BWObject*)&raw)->serial;CHECK(w_nvnTextureInitialize(&other,&builder));CHECK(textureInitContext.count==1&&textureInitContext.saturated&&textureInitContext.records[0].serial==first);NVNtexture missing={0};CHECK(!badWrite(&missing));
+#else
+  CHECK(!badWrite(&raw));
+#endif
+ }else CHECK(0);
+ CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!gpu&&!commandQueue);printf("TEXTURE_LIFECYCLE_CPU_OK mode=%s callbacks=%u no_real_gpu=true\n",mode,notifications);return 0;
+}}
+""")
+        cls.executable = folder / 'lifecycle'
+        build = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+            '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+            '-Wno-unused-function', '-O1', '-g', '-fsanitize=address,undefined',
+            '-I', str(graphics), str(source), '-framework', 'Foundation',
+            '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(cls.executable)],
+            capture_output=True, text=True, timeout=120)
+        if build.returncode:
+            raise AssertionError(build.stdout + build.stderr)
+
+    def mode(self, mode):
+        result = subprocess.run([str(self.executable), mode], capture_output=True,
+                                text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('TEXTURE_LIFECYCLE_CPU_OK', result.stdout)
+        self.assertNotIn('runtime error:', result.stderr)
+        self.assertNotIn('ERROR: AddressSanitizer', result.stderr)
+        return [s for s in result.stderr.splitlines()
+                if s.startswith('[botw graphics] texture_lifecycle_context ')], result
+
+    def test_no_init_entry_has_no_retained_history_and_preserves_one_callback(self):
+        lines, _ = self.mode('none')
+        self.assertEqual(len(lines), 1)
+        self.assertIn('bridge_init_entry_calls=0 validated_init_attempts=0 published_successes=0', lines[0])
+        self.assertIn('match=not_retained', lines[0])
+
+    def test_false_and_interrupted_attempts_have_distinct_states_without_extra_reads(self):
+        for mode, state, validated in [('false', 'returned_false', 1), ('started', 'started', 1),
+                                       ('invalid-builder', None, 0)]:
+            with self.subTest(mode=mode):
+                lines, _ = self.mode(mode)
+                self.assertEqual(len(lines), 1)
+                self.assertIn(f'bridge_init_entry_calls=1 validated_init_attempts={validated} published_successes=0', lines[0])
+                if state:
+                    self.assertIn('result=' + state, lines[0])
+                else:
+                    self.assertIn('recent_count=0', lines[0])
+
+    def test_success_only_records_owned_metadata_without_new_output(self):
+        lines, result = self.mode('success')
+        self.assertEqual(lines, [])
+        self.assertEqual(result.stderr, '')
+
+    def test_published_same_zeroed_raw_and_different_raw_are_not_conflated(self):
+        for mode, match in [('same-zero', 'retained'), ('different', 'not_retained'), ('post-publish-exception', 'not_retained')]:
+            with self.subTest(mode=mode):
+                lines, _ = self.mode(mode)
+                self.assertEqual(len(lines), 1)
+                self.assertIn('bridge_init_entry_calls=1 validated_init_attempts=1 published_successes=1', lines[0])
+                self.assertIn('match=' + match, lines[0])
+                self.assertIn('result=published', lines[0])
+                self.assertIn('observed_serial=0x0', lines[0])
+
+    def test_unreadable_header_uses_original_get_readability_without_retry(self):
+        lines, _ = self.mode('unreadable-object')
+        self.assertEqual(len(lines), 1)
+        self.assertIn('observed_serial=unreadable', lines[0])
+        self.assertIn('recent_count=0', lines[0])
+
+    def test_four_recent_records_and_four_failure_dumps_are_bounded(self):
+        lines, _ = self.mode('wrap-cap')
+        self.assertEqual(len(lines), 4)
+        for line in lines:
+            self.assertIn('bridge_init_entry_calls=6 validated_init_attempts=6 published_successes=6', line)
+            self.assertIn('recent_count=4', line)
+            self.assertEqual(line.count('result=published'), 4)
+
+    def test_failed_init_and_shutdown_preserve_history_then_success_resets(self):
+        lines, _ = self.mode('reset')
+        self.assertEqual(len(lines), 3)
+        for line in lines[:2]:
+            self.assertIn('bridge_init_entry_calls=1 validated_init_attempts=1 published_successes=1', line)
+        self.assertIn('bridge_init_entry_calls=0 validated_init_attempts=0 published_successes=0', lines[-1])
+
+    def test_saturated_sequence_stops_recording_instead_of_reusing_tokens(self):
+        lines, _ = self.mode('saturated')
+        self.assertEqual(len(lines), 1)
+        self.assertIn('bridge_init_entry_calls=18446744073709551615 validated_init_attempts=18446744073709551615 published_successes=18446744073709551615', lines[0])
+        self.assertIn('history_saturated=true', lines[0])
+        self.assertIn('recent_count=1', lines[0])
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal host objects')
 class StorageClassTests(unittest.TestCase):
     @classmethod

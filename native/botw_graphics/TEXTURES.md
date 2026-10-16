@@ -119,3 +119,10 @@ color 路径仍使用 class100/1FE；下节新增精确101/17B深度映射。显
 Map146/raw46与1C3/rawC3新增范围仅CPU登记与canonical身份解析，GPU物化显式拒绝，creator域仍只有已证D16/D32F。D24和D24S8共用该标签，实际普通调用失败时，Initialize原有COMP/layout及format/conversion错误只追加已验证Builder快照的target、flags、format、samples标量；不额外扫描内存、查询VM或读取payload，不打印地址。它用于区分真正的format，不从Map146反推其中一种。
 
 iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byte GOB可直接blit。固定完整上游存在可复用的depth/stencil aspect/view/clear/sample模块，但pkg/import/copy链没有完整D24/D24S8双向codec。原24bit packing/unused byte、归一化与GPU写后量化/回写、combined双aspect一致性以及近阈值比较/bias/equality必须另成可验证合同，本批不根据精度升级注释宣称行为等价或提前实现。
+
+
+## 有界宿主初始化上下文
+
+`TextureInitialize`只在宿主保存入口次数、已验证Builder快照次数和已发布成功次数；最近四条保存原API传入的raw指针值、既有快照target/flags/format/samples、started/returned_false/published状态以及成功put已分配的serial。成功调用不新增日志，异常中断不标为FALSE；计数饱和，序列耗尽停止记录，不复用仍可能存活的token。
+
+只有原`get(..., BWTexture)`确实失败时，`texture_lifecycle_context`才输出这些宿主元数据和get已经取得的serial/可读性，每行最多四条、每图形生命周期最多四行。它不再读取对象头、Builder、payload或栈，不新增validator/VM查询，不改变原BOOL、错误文本、fatal、pending flags或回调。成功图形初始化与成功shutdown清空；失败或重入的checked shutdown保留。`match=not_retained`只表示最近四槽没有该raw，不能称从未调用；相同raw曾成功而现serial为0也不自动区分Finalize、主动清零或其它对象传递错误。原游戏根因仍须取实际正常调用证据，不能由后续WriteTexels失败猜定D24或combined格式。
