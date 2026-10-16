@@ -183,6 +183,16 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 原版 Compare 的静态实现只按值比较，main 已有先清零0xC0再在赋值前 Compare 的正常占位路径。后续 Compare-only 适配仅对 key0 输入，在正常接口功能内安全读取原实际比较的 +8..97 字段；全部语义空时，双空为 true、空与有效登记纹理为 false。两边均分类，非空未登记、错误类型、未知 serial 与 stale pool 仍拒绝；不发布对象或 serial，不开放读写/Finalize/GPU 生命周期。比较字段的读取不输出内容、不作诊断扫描，未读原未比较的0xC0尾部。有效对象会在键预读后再经过原 get，两次8字节检查的计数已明确测试；双有效的旧比较算法不改。7项新增测试在365基线编译成功后有6项真实行为失败、1项旧有效副本行为通过，修复后相关23项 CPU 全部通过（6.650秒），独立23项同样通过（6.669秒），均用 ASan/UBSan、ARC exceptions 和 fake Metal。独立静态逆剥精确还原365生产源；四个来源SHA稳定。此时原游戏的零 serial 是否满足语义空字段仍待后续普通运行验证，不能仅凭首字断言。
 
+提交 `dff132d` 的普通 Mac 原游戏已不再出现上述 Compare fatal，首个停止点改为尚未实现的 `nvnSamplerBuilderSetLodBias`；本次无零大小查询和对象校验失败上下文。此结果支持该适配已使运行继续，但本次未记录 Compare 的实际分支、对象字段内容或 LOD bias 数值。binary SHA256 为 `7655eb25ad231097e6817d06e69c68f09f6f786a501eaa9d315459d4781a94f0`，报告位于 `outputs/botw-host39-mac-dff132d/ordinary-admission-evidence.json`，host_return=1，仍无游戏呈现或可玩验收。
+
+`dff132d` 固定全套 **906项，905通过、1个原硬件条件跳过**，196.848秒；632个来源文件前后逐项SHA稳定，source manifest SHA256 为 `0731fe0bdb50b78de1e1c798e36663f5c1722ee3c8b3371d5d8458bd95abf373`。检查仍不构成游戏画面、操作、音频或存档验收。
+
+`dff132d` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38842321625) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38842321543) 均成功，精确 head 已核验。该版已保数据更新到 iPhone 12 / iOS 18.1 并普通启动 PID1077，executable 匹配本次安装；启动标记28→29、旧日志前缀逐字节保留。手机首个 fatal 同 Mac 为 `nvnSamplerBuilderSetLodBias`，没有 Compare 对象失败或零大小查询行；LOD bias 值仍未记录。签名 IPA 19,142,210 字节，SHA256 为 `fbfb8935d720a33f028810fe343a082666ade7a5098263af2ce5116cf993fff3`。RomFS 大小/mtime、UID、shader清单及权限分别核验保留，未重传 RomFS；累计日志32,018,620字节由分块reader完整核验，旧日志未截断。本次仍 host_return=1，没有游戏呈现或可玩验收。证据位于 `outputs/botw-ios-dff132d-iphone12/device-run-report.json`。
+
+采样器整族薄适配依据固定 base-v0 的 Defaults、参数、Compare 与原编码器静态合同，修正 Builder 字段偏移、默认值和保留区域，实现35个原参数/对象入口。原37入口中的 DebugLabel、DebugID 仍未实现，LodSnap 与 BuilderGetDevice 也未因其他版本而新增。Setter/Getter 保留原浮点与 border 位值；对象保存不可变参数，Compare 保持严格登记对象语义，Finalize 在移除登记前核验可写，未扩空对象规则。LOD clamp 按原编码投影到 [0,15] 的 Q8，原参数仍保留；GPU 各向异性首域仅1/2/4/8/16，border wrap 和非 average reduction 保持拒绝。两套完整上游 sampler 虽保存 bias，但未把它消费到 Metal；当前 iOS18/A14 无对应 sampler-state bias 功能，非零 bias 必须在 Metal 创建与发布前具名拒绝，不能静默置零。仅正负零准入，按位检查避免 FPCR.FZ 把非零 subnormal 当零；实际游戏 bias 数值尚未观测。
+
+最终 freeze3 的相关采样器20项全部通过（5.934秒，含7个真实 Metal 模式），独立公共接口复核3项方法通过（6.777秒，含11次实际 Metal validation 运行与1个 CPU 模式），独立最小 CPU 增量3项通过（4.677秒）；非零 subnormal 的同一旧源码真实失败探针，在修复后确认拒绝、Metal 创建数不增加且正常回调。较早83项相关回归绑定 freeze1，不作为 freeze3 全套结果；后续固定提交需另跑全套。8个来源 SHA 在两次独审前后稳定，manifest SHA256 为 `47e93436d967e21f1fd0885fdda056f7a504429b713bc72cdce6ebc2719a90b6`。新增 sampler include 后生产 native 文件95个，既有100文件上限与来源 schema 不改；iOS 工作流对新测试的 push/pull_request 均有精确触发路径。以上是合成接口验证，未替代原游戏或手机可玩验收。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

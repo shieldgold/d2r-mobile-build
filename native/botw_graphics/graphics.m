@@ -223,6 +223,7 @@
 @interface BWSampler : NSObject
 @property(strong) BWDevice *device;
 @property(strong) id<MTLSamplerState> state;
+@property(copy) NSData *parameters;
 @end
 @implementation BWSampler
 @end
@@ -861,9 +862,7 @@ NVN(nvnCommandBufferDrawArrays,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,in
 NVN(nvnCommandBufferDrawArraysInstanced,void,NVNcommandBuffer *c,NVNdrawPrimitive mode,int first,int count,int baseInstance,int instances){if((mode!=NVN_DRAW_PRIMITIVE_TRIANGLES&&mode!=NVN_DRAW_PRIMITIVE_TRIANGLE_STRIP)||first<0||count<0||baseInstance<0||instances<0)fatal("nvnCommandBufferDrawArraysInstanced primitive/instance range");record(c,@{@"op":@"draw",@"primitive":@(mode==NVN_DRAW_PRIMITIVE_TRIANGLES?MTLPrimitiveTypeTriangle:MTLPrimitiveTypeTriangleStrip),@"first":@(first),@"count":@(count),@"baseInstance":@(baseInstance),@"instances":@(instances)});}
 NVN(nvnCommandBufferSetViewport,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetViewport bounds");record(c,@{@"op":@"viewport",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
 NVN(nvnCommandBufferSetScissor,void,NVNcommandBuffer *c,int x,int y,int w,int h){if(x<0||y<0||w<0||h<0)fatal("nvnCommandBufferSetScissor bounds");record(c,@{@"op":@"scissor",@"x":@(x),@"y":@(y),@"w":@(w),@"h":@(h)});}
-typedef struct { NVNdevice *device; int min,mag,wrap[3],compareMode,compareFunc; float lodMin,lodMax,aniso; } SamplerBuilder;
 typedef ds_st DepthState;
-_Static_assert(sizeof(SamplerBuilder)<=sizeof(NVNsamplerBuilder),"sampler builder ABI");
 _Static_assert(sizeof(VertexAttribute)==sizeof(NVNvertexAttribState),"attribute ABI");
 _Static_assert(sizeof(VertexStream)==sizeof(NVNvertexStreamState),"stream ABI");
 _Static_assert(sizeof(DepthState)==sizeof(NVNdepthStencilState),"depth ABI");
@@ -938,16 +937,7 @@ NVN(nvnTexturePoolFinalize,void,NVNtexturePool *p){get(p,[BWDescriptors class]);
 NVN(nvnSamplerPoolFinalize,void,NVNsamplerPool *p){get(p,[BWDescriptors class]);removeObject(p);}
 NVN(nvnTexturePoolRegisterTexture,void,const NVNtexturePool *raw,int index,const NVNtexture *texture,const NVNtextureView *view){BWDescriptors *p=get(raw,[BWDescriptors class]);if(p.sampler||index<0||index>=p.count)fatal("texture descriptor index/view bounds/type");if(!p.pool.live||objects[@(p.pool.generation)]!=p.pool)fatal("stale texture descriptor pool");descriptorStore(p,(unsigned)index,textureSelected(textureObject(texture),textureView(view),NO));}
 NVN(nvnSamplerPoolRegisterSampler,void,const NVNsamplerPool *raw,int index,const NVNsampler *sampler){BWDescriptors *p=get(raw,[BWDescriptors class]);if(!p.sampler||index<0||index>=p.count)fatal("sampler descriptor index/type");descriptorStore(p,(unsigned)index,get(sampler,[BWSampler class]));}
-NVN(nvnSamplerBuilderSetDefaults,void,NVNsamplerBuilder *raw){memset(raw,0,sizeof *raw);SamplerBuilder *b=(SamplerBuilder*)raw;b->min=NVN_MIN_FILTER_NEAREST_MIPMAP_LINEAR;b->mag=NVN_MAG_FILTER_LINEAR;b->wrap[0]=b->wrap[1]=b->wrap[2]=NVN_WRAP_MODE_REPEAT;b->compareFunc=NVN_COMPARE_FUNC_LESS;b->lodMin=-1000;b->lodMax=1000;b->aniso=1;}
-NVN(nvnSamplerBuilderSetDevice,void,NVNsamplerBuilder *b,NVNdevice *d){((SamplerBuilder*)b)->device=d;}
-NVN(nvnSamplerBuilderSetMinMagFilter,void,NVNsamplerBuilder *raw,NVNminFilter min,NVNmagFilter mag){((SamplerBuilder*)raw)->min=min;((SamplerBuilder*)raw)->mag=mag;}
-NVN(nvnSamplerBuilderSetWrapMode,void,NVNsamplerBuilder *raw,NVNwrapMode s,NVNwrapMode t,NVNwrapMode r){SamplerBuilder *b=(SamplerBuilder*)raw;b->wrap[0]=s;b->wrap[1]=t;b->wrap[2]=r;}
-NVN(nvnSamplerBuilderSetLodClamp,void,NVNsamplerBuilder *raw,float min,float max){((SamplerBuilder*)raw)->lodMin=min;((SamplerBuilder*)raw)->lodMax=max;}
-NVN(nvnSamplerBuilderSetMaxAnisotropy,void,NVNsamplerBuilder *raw,float a){((SamplerBuilder*)raw)->aniso=a;}
-NVN(nvnSamplerBuilderSetCompare,void,NVNsamplerBuilder *raw,NVNcompareMode m,NVNcompareFunc f){((SamplerBuilder*)raw)->compareMode=m;((SamplerBuilder*)raw)->compareFunc=f;}
-static MTLSamplerAddressMode wrapMode(int value){switch(value){case NVN_WRAP_MODE_REPEAT:return MTLSamplerAddressModeRepeat;case NVN_WRAP_MODE_MIRRORED_REPEAT:return MTLSamplerAddressModeMirrorRepeat;case NVN_WRAP_MODE_CLAMP_TO_EDGE:return MTLSamplerAddressModeClampToEdge;case NVN_WRAP_MODE_MIRROR_CLAMP_TO_EDGE:return MTLSamplerAddressModeMirrorClampToEdge;default:fatal("sampler wrap mode requires unimplemented border semantics");}}
-NVN(nvnSamplerInitialize,NVNboolean,NVNsampler *raw,const NVNsamplerBuilder *builder){const SamplerBuilder *b=(const SamplerBuilder*)builder;get(b->device,[BWDevice class]);if(b->min<0||b->min>5||b->mag<0||b->mag>1||b->lodMax<b->lodMin||b->aniso<1||b->aniso>16||b->compareMode>1||b->compareFunc<1||b->compareFunc>8)return report("invalid sampler state");MTLSamplerDescriptor *d=[MTLSamplerDescriptor new];d.minFilter=(b->min&1)?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;d.magFilter=b->mag?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;d.mipFilter=b->min<2?MTLSamplerMipFilterNotMipmapped:b->min<4?MTLSamplerMipFilterNearest:MTLSamplerMipFilterLinear;d.sAddressMode=wrapMode(b->wrap[0]);d.tAddressMode=wrapMode(b->wrap[1]);d.rAddressMode=wrapMode(b->wrap[2]);d.lodMinClamp=MAX(0,b->lodMin);d.lodMaxClamp=MAX(0,b->lodMax);d.maxAnisotropy=b->aniso;d.compareFunction=b->compareMode?(MTLCompareFunction)(b->compareFunc-1):MTLCompareFunctionNever;BWSampler *sampler=[BWSampler new];sampler.device=get(b->device,[BWDevice class]);sampler.state=[gpu newSamplerStateWithDescriptor:d];if(!sampler.state)return report("Metal sampler creation failed");put(raw,sampler);return 1;}
-NVN(nvnSamplerFinalize,void,NVNsampler *s){get(s,[BWSampler class]);removeObject(s);}
+#include "sampler_family.inc"
 NVN(nvnVertexAttribStateSetDefaults,void,NVNvertexAttribState *s){memset(s,0,sizeof *s);}
 NVN(nvnVertexAttribStateSetFormat,void,NVNvertexAttribState *s,NVNformat format,ptrdiff_t offset){if((unsigned)format>255||offset<0||offset>=1<<20)fatal("vertex attribute format/offset");((VertexAttribute*)s)->format=format;((VertexAttribute*)s)->offset=offset;}
 NVN(nvnVertexAttribStateSetStreamIndex,void,NVNvertexAttribState *s,int stream){if(stream<0||stream>=15)fatal("vertex stream index");((VertexAttribute*)s)->stream=stream;}

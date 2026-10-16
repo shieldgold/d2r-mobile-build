@@ -137,3 +137,28 @@ TextureCompare implementations also separate value equality from serial/cache
 lifetime, but their private 1.9 tex_t layout is not imported or applied to the
 base-v0 opaque object. Existing registered-value comparison is retained; this
 adapter does not create a fallback texture or import upstream rendering stubs.
+
+Sampler parameter family (sampler_family.inc and generic Metal mapping):
+https://github.com/TommyLau/botw-mobile
+Commit 5f673ae2ea4f90ad46403aa6fbe13537fb557271
+https://github.com/jhaizhou-ops/d2r-mobile
+Commit 9de307ecaff42b3c9d45e58992c848ee89b8f6a1
+Original complete families: dm/gfx/nvn/hle_nvn.c sampler setters/defaults/
+initialize/finalize (BOTW also Compare), nvn_obj.h sampler parameter objects,
+and nvn_mtl.m mtl_reg_samp/samp_by_id. Copyright (c) 2026 jhaizhou, MIT notice
+reproduced above. Their private 1.9 layouts and silent dropping of nonzero LOD
+bias are not imported. The thin base-v0 POD/getter/Compare adapter follows the
+independently audited fixed SDK BC180..BCD5C functions. The host keeps immutable
+parameters outside the opaque serial object, validates unsupported materialized
+states before publication and preserves retained descriptor lifetimes.
+The complete existing ARRAY_FEATURE fixture in test_botw_graphics.py is reused
+for real mip/layer pixel checks; local sampler variants add bias rejection,
+implicit-LOD clamp selection and retained-descriptor snapshot checks.
+Register interpretation references the author-maintained envytools project:
+commit f102b82381f3f11cee113d16374c87091db039d9, rnndb/g80_defs.xml:166..179,
+and pinned deko3d 350f2b00a3e76ecd4f00191f8c5d6544ffbcb9db sampler control
+block/generator. No new register algorithm source is imported. These sources
+establish named anisotropy encodings, not a promise of cross-GPU pixel identity.
+Apple primary API availability and feature tables establish that current
+A14/iOS18 and M3 cannot use the newer sampler-level lodBias property. A shader
+instruction bias operand alone is not an implementation of sampler-state bias.
