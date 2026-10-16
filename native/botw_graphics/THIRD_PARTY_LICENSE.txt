@@ -182,3 +182,18 @@ texture_transfer.inc is a local bounded host-metadata adapter; no game bytes,
 native codec, or upstream fragment is embedded. Its real-GPU regression reuses
 the complete existing ARRAY_FEATURE in test_botw_graphics.py for independent
 two-layer/three-mip pixels, with local storage-transfer and private-target cases.
+
+The first 1D-array adapter reuses the complete pinned nvn_tex, nvn_deswizzle,
+nvn_texwrite and nvn_texflush modules already licensed above. Fixed base-v0
+layout and both complete upstream Metal families use target3 with layers in
+height and spatial height1. Upstream's generic pkg_upload_ also reuses height
+as texel rows and cannot be copied as a correct multi-layer uploader. The local
+bridge keeps its normalized geometry and limits actual creation to one layer
+and one mip. Base-v0 Write's z/depth and upstream 1.9's y/height region rules
+are accepted only in their proven single-layer intersection. No new layout,
+codec or multi-layer region conversion is imported. Existing complete public
+1D write/read and sampler fixtures are reused for native Type1DArray coverage.
+Apple MSL specification section6.13.2 and official texture/descriptor type and
+arrayLength documentation supply platform/type/no-mip constraints, not an
+assertion of untested A14 game rendering. No original executable bytes appear
+in these tests or this source adaptation.

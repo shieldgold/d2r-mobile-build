@@ -28,6 +28,7 @@ int main(void){
  for(size_t i=0;i<sizeof invalid/sizeof *invalid;i++){
   if(!sigsetjmp(jump,1)){(void)nvnDeviceGetTextureHandle(&d,invalid[i][0],invalid[i][1]);CHECK(0);}
   CHECK(strstr(botw_graphics_last_error(),"texture/sampler descriptor index"));
+  char expected[192];snprintf(expected,sizeof expected,"texture=%d(0x%x) sampler=%d(0x%x)",invalid[i][0],(unsigned)invalid[i][0],invalid[i][1],(unsigned)invalid[i][1]);CHECK(strstr(botw_graphics_last_error(),expected));
  }
  nvnDeviceFinalize(&d);botw_graphics_shutdown();CHECK(botw_graphics_init(NULL,error,NULL));botw_graphics_shutdown();
  puts("TEXTURE_HANDLE_SIGN_EXTENSION_BIT32_AND_DOMAIN_OK");return 0;

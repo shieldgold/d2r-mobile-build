@@ -13,7 +13,7 @@
 
 View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode 保留完整 32 位。未设置的 getter 仍写出存储值并返回 false。Compare 忽略未设置字段和 padding。采样和命令记录持有按值快照，随后改变 guest View 不能改变已登记的描述符或已录命令。
 
-实际 GPU 路径包含下述受限 1D，以及已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。数组显式单层视图可作为 2D render target；采样视图支持 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。未验证的 3D/cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
+实际 GPU 路径包含下述受限 1D/1D-array，以及已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。2D数组显式单层视图可作为 2D render target；采样视图支持各自准入域内的 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。未验证的 3D/cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
 
 ## 普通池的非数组 1D
 
@@ -22,6 +22,16 @@ View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode
 真实资源为 `MTLTextureType1D`。Apple [MSL 规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.1（2026-06-04 版，第 243–244 页，SHA256 `41538b30d2f1140a5b2a0c84ce0a9f7b67bf0c707e224cfea0bfe5a44aa26cf5`）限制 native 1D 不使用 mipmap，因此不把上游直接赋多级 descriptor 的代码当作 GPU 支持证明。采样视图只保持 1D、原格式和 level0，允许已有 swizzle；跨 1D/2D 的 CPU View 和采样 View、GPU 格式重解释、render attachment 与 Window/Present 都在不兼容 Metal 操作前拒绝。CPU View 的同 block 字节格式合同仍由完整 write planner 检查，不新增转换。上传与读回保留原合法非零 blit row/image pitch、origin y=z=0 和 size height=depth=1；不把 replaceRegion 的 pitch 习惯套到 blit API。
 
 公共 1D 回归在 `MTL_DEBUG_LAYER=1` 下验证四个不同非零 texel、宽 33 跨 16/64-byte GOB 的独立地址 oracle 与整个 allocation padding canary、实际 Metal 读回、`texture1d<float>` 描述符采样、所选 swizzle、反射维度拒绝、live/retired 私有权威、copied CPU_CACHED、Flush/Invalidate、stale generation、跨维/格式/RT/Window 拒绝。CPU ASan/UBSan 另核查询、GL 早返及多 mip/virtual 在对象与 registry 发布前拒绝。它们不证明原游戏的 Write-zero 原因、首帧或手机可玩。
+
+## 普通池的单层 1D 数组
+
+base-v0 target3 的层数在 Builder `height`，空间高度固定1，`depth`保持1；它不是2D数组或3D。Size/Alignment复用完整 `nvn_tex` 的dim1分层布局，mip仅随width缩小，layer stride按GOB对齐，最终乘height。查询允许已验证范围内的多层和mip，层数2048是本桥明确上限；actual `width=4,height=depth=levels=1,RGBA8` 的size/alignment均512。packaged布局仍仅允许已验证W=D0、H0..5的形状元数据；GL name非0的Size早0，packagedData指针保持拒绝，不读取其内容。
+
+首个实际GPU域仅ordinary pool、单层、单mip、flags0、raw samples0、非块压缩且精确恒等映射的普通color，宽度上限16384；depth/compressed/linear/COMPRESSIBLE/virtual及多层创建继续在Metal或对象发布前拒绝。真正资源为 `MTLTextureType1DArray`，`arrayLength=1`、空间height1，绝不替换成1D/2D类型。Apple [MTLTextureDescriptor.arrayLength](https://developer.apple.com/documentation/metal/mtltexturedescriptor/arraylength) 明确数组层数1..2048合法；[MSL规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.2要求1DArray无mip，采样为`texture1d_array<T>.sample(s,floatCoord,uintLayer)`，不使用level重载。此API/语言支持不是A14原游戏验收。
+
+base-v0 Write的原静态分支从region的z/depth取image/layer；完整固定1.9 writer对1DArray从y/height取层。首批payload只接受两者共同可证的单层规范region：y=z=0、height=depth=1，x/width可选择局部范围。对正常已登记对象，在原get/lifetime/View和region校验后，规范坐标下height/depth各为0或1且任一extent为0时显式EMPTY，不触碰source/destination payload；特别depth0不会误按1.9的height1执行写入。其它region具名拒绝，不用未验证的坐标转换冒充完整多层ABI，也不声称原空调用没有任何内部映射副作用。CPU Read/Write、完整GOB apply/extract、上传、GPU读回及Flush/Invalidate复用现有模块和合法blit pitch。普通1D数组的采样View只允许同target、同格式、level0/layer0及已有swizzle；跨维、格式重解释、render attachment与Window/Present保持前拒。反射检查独立的`MTLTextureType1DArray`和scalar，不把shader资源数组属性当texture slice数。
+
+真实Metal Validation回归验证actual4texel、宽33跨GOB地址的全allocation padding canary、公共Write/Read/Flush/Invalidate、copied CPU_CACHED、原生`texture1d_array<float>`采样和swizzle、错误shader维度、private live/retired authority、跨维/RT/Window与未支持region前拒。DeviceGetTextureHandle仅在原数值guard失败时追加已经传入的texture/sampler十进制及十六进制值，原20/12-bit边界和handle编码不变；该错误本身不证明与Size0存在因果关系。
 
 ## 存储生命周期与一致性
 

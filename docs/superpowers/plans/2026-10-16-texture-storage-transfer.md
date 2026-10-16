@@ -104,14 +104,14 @@ PYTHONPATH=scripts:tests .tools/botw-venv/bin/python -m unittest -v \
 - [x] reviewer 先核固定原控制流、普通旁路、来源/version gate、故障清理及资源所有权合同，再核代码可维护性、token 边界、线程和异常行为。
 - [x] 用最终冻结来源 SHA 运行最窄独立 CPU/GPU 检查。审查报告区分 fake Metal、真实 Metal、原游戏和手机。
 - [x] 核对 native 来源计数仍不超过100、来源 schema 保持，CI push/pull_request 均覆盖新增测试。
-- [ ] root 对实际 changed set（含未跟踪新文件）逐项核对；只 stage 两个 owner 和 root 的明确路径。单元验证及独审完成后提交并推送 `botw-archive/codex/botw-native-preflight`。
+- [x] root 对实际 changed set（含未跟踪新文件）逐项核对；只 stage 两个 owner 和 root 的明确路径。单元验证及独审完成后提交并推送 `botw-archive/codex/botw-native-preflight`。实际提交为 `bfd9c8241f56020b41f4b4d0b3d4a2ba6415c5ac`，14个明确路径、11个 owner SHA 与 native97 已核对。
 
 ## Task 5：固定提交原游戏与手机验收
 
-- [ ] 从精确提交构建普通 Mac 前端，验证 binary、200个本地输入 SHA 和原 RomFS 链接后运行原游戏；完整收进程退出，再读取保存日志。
+- [x] 从精确提交构建普通 Mac 前端，验证 binary、200个本地输入 SHA 和原 RomFS 链接后运行原游戏；完整收进程退出，再读取保存日志。bfd 实际触发一次所有权迁移，旧重叠消失；下一个零大小查询为一维数组，随后停止在描述符索引检查，没有可玩画面，继续主线。
 - [ ] 若出现第一帧，先核验真实图像、操作、声音和存档重开，不让全套 GPU 测试争用设备。若仍有 fatal，记录新的实际边界并继续主线。
-- [ ] 执行固定源码全套检查和精确 head 的 iOS/Linux CI；只使用官方核验通用工件，本机加入固定私有 Guest 后签名。
-- [ ] 对当前连接的 iPhone12/iOS18.1 原应用保数据更新。分别核验安装位置、普通启动、新日志前缀、UID、RomFS 大小/mtime、shader 清单和权限。
-- [ ] 继续使用分块日志证据工具，不截断现有累计日志。安装、启动、合成测试和合成像素都不作为可玩验收。
+- [x] 执行固定源码全套检查和精确 head 的 iOS/Linux CI；只使用官方核验通用工件，本机加入固定私有 Guest 后签名。bfd固定957项（956通过、1硬件条件跳过）及两CI均成功。
+- [x] 对当前连接的 iPhone12/iOS18.1 原应用保数据更新。分别核验安装位置、普通启动、新日志前缀、UID、RomFS 大小/mtime、shader 清单和权限。bfd普通启动PID1093，真机同样实际完成一次转移，随后停止在描述符索引检查。
+- [x] 继续使用分块日志证据工具，不截断现有累计日志。安装、启动、合成测试和合成像素都不作为可玩验收。bfd累计日志38,532,611字节完整核验，资源保留；继续一维数组及后续实际停止点主线。
 
 按用户既有“继续开发并安装到新手机”的授权在本会话执行，不另开用户任务或等待重复许可。步骤完成后更新复核记录；本计划不替代实际结果。

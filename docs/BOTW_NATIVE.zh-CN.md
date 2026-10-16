@@ -217,6 +217,18 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 独立运行时13项 CPU 通过（2.425秒，O2、无 sanitizer），owner 另以 ASan/UBSan 验证13个模式（编译及运行合计5.879秒），均完整退出；生产 C 摘要函数对固定本地 v4 磁盘映像的4段上下文核验成功，两输入 SHA 前后稳定，此项不是实际游戏执行。独立图形11项通过（6.430秒、零跳过，CPU9 ASan/UBSan与GPU2方法/4模式，均实际 Metal validation）；两组独审 CLOSED，11个来源 SHA 稳定，联合 native97。原游戏实际加载及手机运行结果另记。
 
+提交 `bfd9c82` 的普通 Mac 原游戏实际记录一次 `texture_value_storage_transferred=true bytes=192 index=1`，旧重叠 fatal 消失。新的一条正常零大小查询为 `target=3 flags=0 format=0x25 width=4 height=1 depth=1 levels=1 samples=0 stride=0`、GL name 与 packaged data 均为空；target3 是一维数组，非3D。随后首个 fatal 为 `nvnDeviceGetTextureHandle` 的 descriptor index 检查；尚未记录实际索引，未证明零大小查询与该停止点的具体因果。binary SHA256 为 `a1a69620e465847f74dc4847b7ad2cf11a5398675bf836510b93355a2f2bd9ca`，证据位于 `outputs/botw-host39-mac-bfd9c82/transfer-and-storage-evidence.json`。仍 host_return=1，无游戏呈现或可玩验收，后续按原一维数组完整布局合同核验，不放宽索引 guard。
+
+`bfd9c82` 固定全套 **957项，956通过、1个原硬件条件跳过**，215.633秒；639个来源文件前后逐项SHA稳定，source manifest SHA256 为 `46bb1264a9f607ebc178ce5afc9446018d4b999992e42cba87be2ee8f5aa88c5`。手机此时已验证版本仍为ca，后续通用构建和安装结果另记。
+
+`bfd9c82` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38846560670) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38846560675) 均成功，精确 head 已核验。native97 的同版通用宿主已本机组装、签名并保数据更新到 iPhone12 / iOS18.1，普通启动 PID1093，executable 匹配本次安装；启动标记31→32，旧日志逐字节保持。手机实际记录一次 `texture_value_storage_transferred=true bytes=192 index=1`，并同 Mac 记录 target3 的单层一维数组零大小查询；首个 fatal 为 DeviceGetTextureHandle 的 descriptor index，未记录实际索引，不推断具体因果。签名 IPA 19,153,469字节，SHA256 为 `9901ffecaf71b2723c89c8aeb671210708fed49d4e33b793314c06bb850a2091`。RomFS 大小/mtime、UID、shader清单和权限均核验保留，未重传资源；累计日志38,532,611字节经流式完整校验，既有日志未截断。仍 host_return=1，无游戏呈现或可玩验收，报告位于 `outputs/botw-ios-bfd9c82-iphone12/device-run-report.json` 和 `policy-and-transfer-evidence.json`。
+
+一维数组适配继续复用完整 layout、texwrite、deswizzle 与 flush 模块：原 base-v0 与两固定上游均以 Builder.height 表示层数、空间高度固定1，每层独立 GOB 与512字节对齐；实际4×1层/单级 format25 的 Size/Align 均512。CPU 元数据在明确支持范围内可计算合法 mip 与多层，GPU 首域仅 ordinary、普通未压缩精确颜色格式、flags0、raw samples0、height=depth=levels1，真实创建 `MTLTextureType1DArray`、arrayLength1，不偷换其他维数。[Apple MSL 规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §2.9 明确 iOS 普通1DArray语言域，§6.13.2 单列其无 mip；这不替代 A14 实际创建和像素验收。GPU view 只同 target/format、level0/layer0；virtual、多层、多 mip、RT/present、跨维和格式重解释保持前拒。packaged 参数仅旧 W=D0/H0..5 的原有效 H0 交集，未把未记录字段断言为0。
+
+base-v0 的原 Write/Read 与 vendor1.9 的多层坐标语义尚未证明相同，因此仅规范单层 y=z0、height/depth各0..1；正常有效对象、View 和 region 检查后，任一 extent0不搬 payload。特别 height1/depth0由 host 显式判空，不能套 vendor 的 height 判层；坏对象、负数、多层不因空区域被放行。已保存初始合法空域被 guard 拒绝的真实失败，再修复并完成12项相关回归（13.271秒），覆盖新CPU查询/初始化、旧1D、公开上传/采样与 handle边界。独立 GPU 两项方法11个实际模式通过（2.410秒，均实际 Metal validation、无 GPU sanitizer），包含33宽跨GOB、类型反射、同维 view、copied cache 和 authority。DeviceGetTextureHandle 仅在原失败路径追加正常参数的十进制/十六进制索引，原 guard 和20/12位 handle算法不改。8个来源已冻结，native仍97；实际游戏后续索引与手机GPU行为另记，不把合成结果当可玩验收。
+
+一维数组独立 CPU3项通过（4.191秒，ASan/UBSan、fake Metal、无GPU），并核对空域在 snapshot/prepare/drain/encoder 前返回；双独审 CLOSED，8个来源 SHA 前后精确一致。冻结文件 SHA256 为 `6769484fd60f7676181a0c28ac4d1242bca0551648c2b3a02cb872b809ad0d74`，其中 paths payload 摘要为 `9f7a0d3ccea3432559af3489cc79e8531617e103b03b9497ebdd92b91bb1b392`，两者口径不同。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

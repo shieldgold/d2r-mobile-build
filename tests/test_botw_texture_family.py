@@ -11,6 +11,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class TextureFamilyTests(unittest.TestCase):
+    def test_single_layer_1d_array_public_writes_readback_and_explicit_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / 'texture-1d-array'
+            graphics = ROOT / 'native/botw_graphics'
+            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+                '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'),
+                str(graphics / 'tools/probe_texture_family.c'), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(executable)],
+                capture_output=True, text=True, timeout=120)
+            self.assertEqual(built.returncode, 0, built.stdout+built.stderr)
+            for mode in ['1da', '1da-wide', '1da-boundaries', '1da-cached', '1da-empty']:
+                with self.subTest(mode=mode):
+                    run = subprocess.run([str(executable), mode], capture_output=True, text=True,
+                        timeout=60, env={**os.environ, 'MTL_DEBUG_LAYER': '1'})
+                    if run.returncode == 77:
+                        self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+                    self.assertIn('TEXTURE_1D_ARRAY_SINGLE_LAYER_', run.stdout)
+                    self.assertIn('Metal API Validation Enabled', run.stderr)
+                    self.assertNotIn('failed assertion', run.stderr)
+
     def test_non_array_1d_uses_real_private_texture_and_preserves_explicit_boundaries(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / 'texture-1d'
@@ -34,7 +56,7 @@ class TextureFamilyTests(unittest.TestCase):
                     self.assertIn('TEXTURE_1D_', run.stdout)
                     self.assertNotIn('failed assertion', run.stderr)
 
-    def test_non_array_1d_descriptor_sampling_type_guard_and_private_alias_authority(self):
+    def _one_dimensional_descriptor_probe(self, array=False):
         import test_botw_graphics as baseline
         from unittest.mock import patch
         feature = r'''
@@ -63,6 +85,11 @@ class TextureFamilyTests(unittest.TestCase):
 '''
         source = baseline.METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);',
             feature + '    nvnMemoryPoolFinalize(&pool);')
+        if array:
+            source = source.replace('NVN_TEXTURE_TARGET_1D', 'NVN_TEXTURE_TARGET_1D_ARRAY')
+            source = source.replace('wrong?"texture2d":"texture1d"', 'wrong?"texture2d":"texture1d_array"')
+            source = source.replace('"(float((uint(p.x)*32u)/3u)+.5f)/33.0f":"p.x/4.0f"',
+                                    '"(float((uint(p.x)*32u)/3u)+.5f)/33.0f,0u":"p.x/4.0f,0u"')
         original_run = subprocess.run
         def checked_run(*args, **kwargs):
             result = original_run(*args, **kwargs)
@@ -77,6 +104,12 @@ class TextureFamilyTests(unittest.TestCase):
                 ('1d-wrong-shader-type', 'shader texture type differs', False),
                 ('1d-live-authority', 'texture storage authority', False),
                 ('1d-retired-authority', 'texture storage authority', False)])
+
+    def test_non_array_1d_descriptor_sampling_type_guard_and_private_alias_authority(self):
+        self._one_dimensional_descriptor_probe()
+
+    def test_single_layer_1d_array_uses_native_array_shader_type_and_layer_zero(self):
+        self._one_dimensional_descriptor_probe(array=True)
 
     def test_native_builder_view_and_pool_lifetime(self):
         with tempfile.TemporaryDirectory() as directory:
