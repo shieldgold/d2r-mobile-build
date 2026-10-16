@@ -13,7 +13,8 @@ BASELINE=os.environ.get('BOTW_NORMAL_API_STATUS_BASELINE')=='1'
 NAMES=('SetHeapSize','SetMemoryPermission','SetMemoryAttribute','MapMemory','UnmapMemory','QueryMemory','CreateThread','StartThread',
        'CreateTransferMemory','CloseHandle','WaitSynchronization','GetInfo','ConnectToNamedPort','SendSyncRequest',
        'NvnMemoryPoolInitialize','NvnQueueAcquireTexture','NvnCommandBufferInitialize',
-       'NvnBufferInitialize','WaitProcessWideKeyAtomic','WaitForAddress')
+       'NvnBufferInitialize','WaitProcessWideKeyAtomic','WaitForAddress',
+       'AccountOpenPreselectedUser','AccountGetUserId','AccountListAllUsers')
 CAPACITY='[botw whole-host] heap_plan heap_bytes=671088640 root_bytes=637534208\n'
 
 
@@ -71,7 +72,12 @@ class NormalApiStatus(OwnedRunner,unittest.TestCase):
     def test_buffer_and_wait_apis_append_after_all_seventeen_original_values(self):
         self.assertEqual(self.run_owned(self.logger,'buffer-wait-apis'), ''.join(
             '[botw whole-host] api='+name+' result='+outcome+'\n'
-            for name in NAMES[17:] for outcome in ('ok','error')))
+            for name in NAMES[17:20] for outcome in ('ok','error')))
+
+    def test_account_result_apis_append_after_all_twenty_original_values(self):
+        self.assertEqual(self.run_owned(self.logger,'account-apis'), ''.join(
+            '[botw whole-host] api='+name+' result='+outcome+'\n'
+            for name in NAMES[20:] for outcome in ('ok','error')))
 
     def test_invalid_api_or_outcome_never_logs(self):self.assertEqual(self.run_owned(self.logger,'invalid'),'')
     def test_failed_write_and_duplicate_preserve_errno(self):self.assertEqual(self.run_owned(self.logger,'write-failure'),'')

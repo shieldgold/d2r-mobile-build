@@ -269,13 +269,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "d59a2a304fccbcfb3c82094c60ec835957524f7181b4d32bcaba7bf9aa21938b",
-      "bytes": 6792,
+      "sha256": "9ae3d0dcece42b48c962d8b76065bd358e8fba40617f58a9b6e2ba9204d01043",
+      "bytes": 6929,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "6cf7ddd05b66462534e74d39c92cc446adb0ed7315a63024f230cdc3118476db",
-      "bytes": 2509,
+      "sha256": "5ac51807f66a71554ad6c91f70af0e978994ee9faef776ab7829e997a8a0a759",
+      "bytes": 2639,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -623,6 +623,11 @@
       "bytes": 8325,
       "role": "thin-adapter-or-verification"
     },
+    "patches/normal-account-result-status.patch": {
+      "sha256": "3a5453d86a7a4cf8367f3f4d4f83f841e6a586749920842db7595792d2383b63",
+      "bytes": 3767,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/normal-api-status.patch": {
       "sha256": "772c7cd225b8f0df2675ecda26acad3b8c09eff6b4fa80b9de5dfb369bbaca28",
       "bytes": 2200,
@@ -763,6 +768,11 @@
       "bytes": 8908,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_account_result_status_probe.c": {
+      "sha256": "8dcd9574e38c25a99e0aed007bc74c48c3699f34657cd12436abec33d261b89b",
+      "bytes": 4558,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_address_space_probe.c": {
       "sha256": "3de8598ef3d3ac914a6de3439d27b917fcf069da8935769bff3d8be0cc1adaca",
       "bytes": 6498,
@@ -884,8 +894,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_normal_api_status_probe.c": {
-      "sha256": "598008f9095ca18737dd4e1528a2e1a032854ffff0e9b76da1a2917dc7692b60",
-      "bytes": 15730,
+      "sha256": "2dcb2a73a42ad7090c33bb21c21e2d2f5468f4f895c9fd6a5a9fe90ade958761",
+      "bytes": 16664,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_nvn_version_probe.c": {
@@ -1756,7 +1766,8 @@
     "patches/normal-wait-status.patch",
     "patches/base-v0-stack-allocator.patch",
     "patches/base-v0-debug-pad.patch",
-    "patches/base-v0-account-open.patch"
+    "patches/base-v0-account-open.patch",
+    "patches/normal-account-result-status.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1774,7 +1785,7 @@
     "dm/gfx/nvn/nvn_mtl.m": "2bcd5d0c200ec4370ac03d28a9eee612b716b3ba2b4c2752e48f2159b2ca46c3",
     "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
     "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
-    "dm/host/botw_account.c": "799547950ca3918ca5357cb2b2fab99f62cf61a68803c993be39d2fb2f5a5ab7",
+    "dm/host/botw_account.c": "bfc9344704a6c01a6e031c306a44f2cc2b28ae681fa3df2e310aeb9b0dec226c",
     "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
     "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",
     "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",

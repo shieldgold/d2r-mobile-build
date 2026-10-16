@@ -52,7 +52,8 @@ class WholeAccountOpen(unittest.TestCase):
                    '-Wno-format', '-Wno-unused-function', '-pthread', '-fsanitize=address,undefined',
                    '-fno-sanitize-recover=all', '-fsanitize-ignorelist=' + str(ignore),
                    '-I', str(cls.source), '-I', str(cls.source / 'dm/host'), '-I', str(cls.work),
-                   str(COMPONENT / 'tests/whole_account_open_probe.c'), '-o', str(cls.binary)]
+                   '-I', str(COMPONENT / 'adapter'), str(COMPONENT / 'tests/whole_account_open_probe.c'),
+                   str(COMPONENT / 'adapter/whole_policy.c'), '-o', str(cls.binary)]
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(result.stdout + result.stderr)

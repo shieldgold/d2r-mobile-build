@@ -255,7 +255,7 @@ int main(int argc,char **argv) {
         const botw_whole_host_api appended[]={BOTW_HOST_API_NVN_BUFFER_INITIALIZE,
             BOTW_HOST_API_WAIT_PROCESS_WIDE_KEY_ATOMIC,BOTW_HOST_API_WAIT_FOR_ADDRESS};
         for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)assert((unsigned)appended[i]==17+i);
-        assert(BOTW_HOST_API_COUNT==20);
+        assert(BOTW_HOST_API_COUNT==23);
         for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)for(unsigned n=0;n<3;n++) {
             errno=ENOTTY;
             botw_whole_host_api_result(appended[i],BOTW_HOST_API_OK);
@@ -264,7 +264,22 @@ int main(int argc,char **argv) {
             assert(errno==ENOTTY);
         }
         botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
-        assert(atomic_load(&writes)==6&&BOTW_HOST_API_COUNT==20);
+        assert(atomic_load(&writes)==6&&BOTW_HOST_API_COUNT==23);
+    } else if(!strcmp(argv[1],"account-apis")) {
+        assert((unsigned)BOTW_HOST_API_WAIT_FOR_ADDRESS==19);
+        const botw_whole_host_api appended[]={BOTW_HOST_API_ACCOUNT_OPEN_PRESELECTED_USER,
+            BOTW_HOST_API_ACCOUNT_GET_USER_ID,BOTW_HOST_API_ACCOUNT_LIST_ALL_USERS};
+        for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)assert((unsigned)appended[i]==20+i);
+        assert(BOTW_HOST_API_COUNT==23);
+        for(unsigned i=0;i<sizeof appended/sizeof *appended;i++)for(unsigned n=0;n<3;n++) {
+            errno=ENOTTY;
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_OK);
+            botw_whole_host_api_result(appended[i],BOTW_HOST_API_ERROR);
+            botw_whole_host_api_result(appended[i],(botw_whole_host_api_outcome)2);
+            assert(errno==ENOTTY);
+        }
+        botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_OK);
+        assert(atomic_load(&writes)==6);
     } else if(!strcmp(argv[1],"invalid")) {
         errno=ENOTTY;botw_whole_host_api_result((botw_whole_host_api)-1,BOTW_HOST_API_OK);
         botw_whole_host_api_result(BOTW_HOST_API_COUNT,BOTW_HOST_API_ERROR);

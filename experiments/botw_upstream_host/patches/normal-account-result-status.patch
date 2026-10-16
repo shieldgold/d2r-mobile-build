@@ -1,0 +1,71 @@
+--- a/dm/host/botw_account.c
++++ b/dm/host/botw_account.c
+@@ -2,6 +2,8 @@
+ #define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
+ #include "botw_account.h"
++#include "whole_policy.h"
++#include <errno.h>
+ #include <stdatomic.h>
+ #include <stddef.h>
+ 
+@@ -30,7 +32,7 @@
+     atomic_store(&g_account_user_open, 1);
+     return 1;
+ }
+-HLE_FORCE("_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE", "BotW: resolve a local user handle", Result, botw_account_get_uid, botw_uid *out, const botw_user_handle *handle) {
++static Result botw_account_get_uid_impl(botw_uid *out, const botw_user_handle *handle) {
+     if (!atomic_load(&g_account_initialized) || !out || !handle) return RES_FAIL;
+     botw_user_handle value;
+     memcpy(&value, handle, sizeof value);
+@@ -38,6 +40,14 @@
+     dm_guest_write_prepare(out, sizeof *out);
+     memcpy(out, &botw_local_uid, sizeof *out);
+     return RES_OK;
++}
++HLE_FORCE("_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE", "BotW: resolve a local user handle", Result, botw_account_get_uid, botw_uid *out, const botw_user_handle *handle) {
++    Result result = botw_account_get_uid_impl(out, handle);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_ACCOUNT_GET_USER_ID,
++                              result == RES_OK ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
+ }
+ HLE_FORCE("_ZN2nn7account12PopOpenUsersEPiPNS0_10UserHandleEi", "BotW: transfer the local startup user", void, botw_account_pop_users, int *count, botw_user_handle *out, int capacity) {
+     if (!atomic_load(&g_account_initialized) || !count || capacity < 0 || (capacity > 0 && !out))
+@@ -49,7 +59,7 @@
+     dm_guest_write_prepare(count, sizeof *count);
+     *count = available;
+ }
+-HLE_FORCE("_ZN2nn7account12ListAllUsersEPiPNS0_3UidEi", "BotW: enumerate the local profile", Result, botw_account_list_users, int *count, botw_uid *out, int capacity) {
++static Result botw_account_list_users_impl(int *count, botw_uid *out, int capacity) {
+     if (!atomic_load(&g_account_initialized) || !count || capacity < 0 || (capacity > 0 && !out)) return RES_FAIL;
+     if (capacity > 0) {
+         size_t bytes = (size_t)capacity * sizeof *out;
+@@ -61,9 +71,25 @@
+     *count = 1; // The SDK reports total users even when capacity is zero.
+     return RES_OK;
+ }
++HLE_FORCE("_ZN2nn7account12ListAllUsersEPiPNS0_3UidEi", "BotW: enumerate the local profile", Result, botw_account_list_users, int *count, botw_uid *out, int capacity) {
++    Result result = botw_account_list_users_impl(count, out, capacity);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_ACCOUNT_LIST_ALL_USERS,
++                              result == RES_OK ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
++}
+ 
+ /* BASE_V0_ACCOUNT_OPEN_BEGIN */
+-HLE_FORCE("_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE", "base-v0 preselected user uses the complete native account handle", Result, botw_base_v0_account_open_preselected, botw_user_handle *out) {
++static Result botw_base_v0_account_open_preselected_impl(botw_user_handle *out) {
+     return botw_account_try_open(out) ? RES_OK : RES_FAIL;
+ }
++HLE_FORCE("_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE", "base-v0 preselected user uses the complete native account handle", Result, botw_base_v0_account_open_preselected, botw_user_handle *out) {
++    Result result = botw_base_v0_account_open_preselected_impl(out);
++    int saved_errno = errno;
++    botw_whole_host_api_result(BOTW_HOST_API_ACCOUNT_OPEN_PRESELECTED_USER,
++                              result == RES_OK ? BOTW_HOST_API_OK : BOTW_HOST_API_ERROR);
++    errno = saved_errno;
++    return result;
++}
+ /* BASE_V0_ACCOUNT_OPEN_END */
