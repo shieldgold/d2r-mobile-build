@@ -126,3 +126,5 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 `TextureInitialize`只在宿主保存入口次数、已验证Builder快照次数和已发布成功次数；最近四条保存原API传入的raw指针值、既有快照target/flags/format/samples、started/returned_false/published状态以及成功put已分配的serial。成功调用不新增日志，异常中断不标为FALSE；计数饱和，序列耗尽停止记录，不复用仍可能存活的token。
 
 只有原`get(..., BWTexture)`确实失败时，`texture_lifecycle_context`才输出这些宿主元数据和get已经取得的serial/可读性，每行最多四条、每图形生命周期最多四行。它不再读取对象头、Builder、payload或栈，不新增validator/VM查询，不改变原BOOL、错误文本、fatal、pending flags或回调。成功图形初始化与成功shutdown清空；失败或重入的checked shutdown保留。`match=not_retained`只表示最近四槽没有该raw，不能称从未调用；相同raw曾成功而现serial为0也不自动区分Finalize、主动清零或其它对象传递错误。原游戏根因仍须取实际正常调用证据，不能由后续WriteTexels失败猜定D24或combined格式。
+
+正常 `TextureBuilderGetStorageSize` 返回 0 时，`texture_storage_size_zero` 在每个图形生命周期的前四次输出已有 validated Builder 快照的 target、flags、format、宽高深、levels、samples、stride，以及 GL name 非零、packaged data 非空两个布尔值。它不读取指针所指数据，不重复验证、计算布局或查询 VM；非零结果不输出。原返回值、异常、错误与回调保持，成功图形初始化或 shutdown 重置上限，失败生命周期操作保留。该标量只证明相应 API 返回 0，不能单独证明 pool 为 NULL、跳过 Init 或本次 WriteTexels 的原因，也不新增 3D 支持或改变页策略。

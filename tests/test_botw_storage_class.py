@@ -156,6 +156,24 @@ int main(int argc,char **argv){@autoreleasepool{
 #else
   CHECK(!badWrite(&raw));
 #endif
+ }else if(!strcmp(mode,"size-zero")||!strcmp(mode,"size-zero-gl")||!strcmp(mode,"size-zero-buffer")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->format=NVN_FORMAT_R8;b->width=7;b->height=9;b->depth=11;b->levels=3;b->stride=177;b->packagedData=(const void*)(uintptr_t)0xdeadbeef;
+  if(!strcmp(mode,"size-zero-gl")){b->target=NVN_TEXTURE_TARGET_2D;b->flags=8;b->format=NVN_FORMAT_R32UI;b->glName=9;b->device=NULL;b->width=-7;}
+  if(!strcmp(mode,"size-zero-buffer")){b->target=NVN_TEXTURE_TARGET_BUFFER;b->width=0;}
+  strcpy(lastError,"owned-size-sentinel");CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);CHECK(accessCalls==1&&notifications==0&&!pendingError&&!pendingFatal);CHECK(!strcmp(lastError,"owned-size-sentinel"));
+ }else if(!strcmp(mode,"size-positive")){
+  strcpy(lastError,"owned-size-sentinel");CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);CHECK(accessCalls==1&&notifications==0&&!pendingError&&!pendingFatal);CHECK(!strcmp(lastError,"owned-size-sentinel"));
+ }else if(!strcmp(mode,"size-invalid-builder")){
+  deniedAddress=&builder;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureBuilderGetStorageSize(&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==1&&accessCalls==1);CHECK(strstr(lastError,"entry=nvnTextureBuilderGetStorageSize: Unsupported or invalid NVN operation: texture metadata memory is not fully accessible"));deniedAddress=NULL;
+ }else if(!strcmp(mode,"size-cap")||!strcmp(mode,"size-reset")){
+  ((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_3D;
+  for(unsigned i=0;i<6;i++){unsigned before=accessCalls;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);CHECK(accessCalls==before+1&&notifications==0);}
+  if(!strcmp(mode,"size-reset")){
+   CHECK(!botw_graphics_init(NULL,captureError,NULL));CHECK(notifications==1);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);
+   BWPool *quarantined=[BWPool new];quarantined.kind=BW_POOL_ORDINARY;quarantined.retiring=YES;dispatch_group_t group=dispatch_group_create();dispatch_group_enter(group);objc_setAssociatedObject(quarantined,&poolBorrowedLifetimeKey,group,OBJC_ASSOCIATION_RETAIN_NONATOMIC);poolUnpublishedPools=[NSMutableArray arrayWithObject:quarantined];char error[256];
+   CHECK(!botw_graphics_shutdown_checked(error,sizeof error));CHECK(strstr(error,"borrowed Metal backing still retained")&&notifications==1);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);
+   dispatch_group_leave(group);CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!beginHost());builder=ownedBuilder();((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_3D;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0&&notifications==1);
+  }
  }else CHECK(0);
  CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!gpu&&!commandQueue);printf("TEXTURE_LIFECYCLE_CPU_OK mode=%s callbacks=%u no_real_gpu=true\n",mode,notifications);return 0;
 }}
@@ -240,6 +258,45 @@ int main(int argc,char **argv){@autoreleasepool{
         self.assertIn('bridge_init_entry_calls=18446744073709551615 validated_init_attempts=18446744073709551615 published_successes=18446744073709551615', lines[0])
         self.assertIn('history_saturated=true', lines[0])
         self.assertIn('recent_count=1', lines[0])
+
+    def size_mode(self, mode):
+        _, result = self.mode(mode)
+        return [s for s in result.stderr.splitlines()
+                if s.startswith('[botw graphics] texture_storage_size_zero ')], result
+
+    def test_zero_storage_result_logs_only_already_validated_builder_scalars(self):
+        lines, _ = self.size_mode('size-zero')
+        self.assertEqual(len(lines), 1)
+        for field in ['ordinal=1', 'target=2', 'flags=0x0', 'format=0x1',
+                      'width=7', 'height=9', 'depth=11', 'levels=3',
+                      'samples=0', 'stride=177', 'gl_name_nonzero=false',
+                      'packaged_data_nonnull=true']:
+            self.assertIn(field, lines[0])
+
+    def test_zero_gl_and_buffer_results_keep_existing_early_return_and_access_count(self):
+        for mode in ['size-zero-gl', 'size-zero-buffer']:
+            with self.subTest(mode=mode):
+                lines, _ = self.size_mode(mode)
+                self.assertEqual(len(lines), 1)
+                if mode == 'size-zero-gl':
+                    self.assertIn('gl_name_nonzero=true', lines[0])
+
+    def test_positive_result_and_invalid_builder_do_not_log_zero_result(self):
+        lines, result = self.size_mode('size-positive')
+        self.assertEqual(lines, [])
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(self.size_mode('size-invalid-builder')[0], [])
+
+    def test_zero_result_diagnostic_is_limited_to_first_four_per_lifecycle(self):
+        lines, _ = self.size_mode('size-cap')
+        self.assertEqual(len(lines), 4)
+        for ordinal, line in enumerate(lines, 1):
+            self.assertIn(f'ordinal={ordinal} ', line)
+
+    def test_failed_lifecycle_operations_preserve_zero_result_limit_and_success_resets(self):
+        lines, _ = self.size_mode('size-reset')
+        self.assertEqual(len(lines), 5)
+        self.assertIn('ordinal=1 ', lines[-1])
 
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal host objects')

@@ -101,7 +101,16 @@ static size_t textureBytes(const TextureBuilder *b){
         return bw_texture_storage_round_size(l.size,bw_pool_policy().mappingPageBytes,&rounded)?rounded:0;}
     return l.size;
 }
-NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return b.width>0&&bytes?(size_t)b.width*bytes:0;}return textureBytes(&b);}
+static size_t textureStorageSizeResult(const TextureBuilder *b,size_t result){
+    if(!result&&textureInitContext.zeroSizeDumps<BW_TEXTURE_LIFECYCLE_CAPACITY){
+        unsigned ordinal=++textureInitContext.zeroSizeDumps;
+        /* Snapshot-only normal API context. Do not report, read a provider or
+         * inspect pointed-to packaged data to explain an unchanged zero. */
+        fprintf(stderr,"[botw graphics] texture_storage_size_zero ordinal=%u target=%u flags=0x%x format=0x%x width=%d height=%d depth=%d levels=%d samples=%d stride=%u gl_name_nonzero=%s packaged_data_nonnull=%s\n",ordinal,(unsigned)b->target,(unsigned)b->flags,(unsigned)b->format,b->width,b->height,b->depth,b->levels,b->samples,b->stride,b->glName?"true":"false",b->packagedData?"true":"false");
+    }
+    return result;
+}
+NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);size_t result;if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);result=b.width>0&&bytes?(size_t)b.width*bytes:0;}else result=textureBytes(&b);return textureStorageSizeResult(&b,result);}
 /* Original base-v0 0x34-byte format records: +0x30 is nonzero and +0xe/+0xf
  * depth/stencil bytes are zero for exactly these 113 declared color formats.
  * This is independent of Metal's narrower format/creation capability. */

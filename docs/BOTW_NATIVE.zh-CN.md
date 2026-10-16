@@ -161,6 +161,14 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 该诊断相关 43 项测试先全部通过（9.661 秒）；随后独立行为 RED 发现发布标记应紧随既有 put/identity，而不能放在可能异常的引用登记之后。修正后最终 **8 项 CPU 测试通过**（5.175 秒），覆盖12个自有 native 模式，包括同/异 raw、零 serial、未验证 Builder、已验证后异常、原回调/错误保持、日志及环容量、成功/失败关闭和 UINT64 饱和。它们使用 fake Metal 工厂，不创建真实 GPU 设备或命令；该批用于定位，尚未证明或修复原游戏对象失效根因。
 
+提交 `275952b` 的普通 Mac 原游戏实测仍在 WriteTexels 的零 serial 对象停止；宿主记录显示本生命周期 `bridge_init_entry_calls=2 validated_init_attempts=2 published_successes=2`，历史未饱和且两条全部保留，均为 `target=1 flags=1 format=0x25 samples=0` 的 published 对象。出错 raw 与两条记录均不同，`match=not_retained`，没有 returned_false 记录。该事实用于继续查原接口路由与对象传递，不能直接断言原 SDK 全局从未初始化此对象，也不能认定为 D24。binary SHA256 为 `a4fbe47dfc975d8506bafe65bdaab46ef718d125e94632b28170012415fe6479`，受限解析报告位于 `outputs/botw-host39-mac-275952b/texture-lifecycle-evidence.json`；只使用已有日志和宿主记录，无新增 VM 查询或游戏栈内容读取，仍无游戏画面验收。
+
+当前 `275952b` 的固定全套共 **890 项，889 通过、1 个原硬件条件跳过**，190.833 秒，632 个源码文件前后摘要不变；source manifest SHA256 为 `5c2a40b7c8b6ce73a6ff155ed592455a8cb8ad73f09ee85d1b5ab406785681f7`。[iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38838373697) 和 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38838373727) 均成功，精确 head 已核验。通用宿主保持94个 native 来源文件，上限100未改。
+
+该版已保数据更新到当前 iPhone 12 / iOS 18.1，并普通启动 PID1068；安装后 executable 与本次安装地址匹配。累计启动标记26→27、旧日志前缀逐字节保持，本次恰好一次新启动。新日志与 Mac 同样只有两条成功初始化记录，随后向不同 raw 的零 serial 对象 WriteTexels 时停止，host_return=1，没有游戏呈现、操作、音频、存档或重开验收。两条日志视图分别保留精确 fresh 文件及从 bootstrap 标记开始的摘要，后者仅省略开头一个换行；额外受限解析报告位于 `outputs/botw-ios-275952b-iphone12/texture-lifecycle-evidence.json` 与 `policy-evidence.json`。签名 IPA 19,141,010 字节，SHA256 为 `79113d33813e28f66448850c003edc2cb4f6d6e12754ea82cf3933cde3ef5964`。RomFS 14,420,017,152 字节及 mtime、32字节 UID、着色器清单和目录/文件权限分别核验保留，未重传 RomFS。
+
+窄静态审查确认 main 存在 pool 为空时跳过纹理初始化、随后条件进入 WriteTexels 的路径，但尚未证明本次实际走过它；局部 GetStorageSize 返回0仅存入布局字段，未直接清空该 pool。原 base-v0 的 MEMORY_POOL_PAGE_SIZE 查询来自 provider 初始化的 device 字段，不能以其他版本的常量或 depth 的64KiB对齐规则证明其恒为65536；当前无修改页策略的依据。下一观测仅限正常 GetStorageSize 已验证输入与返回0的标量，保持返回和支持域。该增量先在275源码上得到5项真实行为失败，再通过14项相关 CPU 测试；独立复核同样14项通过并确认四个来源文件摘要不变。每图形生命周期最多四条，非零结果静默，未验证输入、返回、回调、错误、锁和成功/失败生命周期重置语义保持；没有新增 guest 内容或 VM 读取。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

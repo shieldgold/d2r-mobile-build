@@ -385,7 +385,7 @@ static int report(const char *format, ...) {
 typedef enum {BW_TEXTURE_INIT_STARTED,BW_TEXTURE_INIT_RETURNED_FALSE,BW_TEXTURE_INIT_PUBLISHED} BWTextureInitResult;
 typedef struct {const void *raw;uint64_t sequence,serial;uint32_t target,flags,format;int32_t samples;BWTextureInitResult result;} BWTextureInitRecord;
 typedef struct {unsigned slot;uint64_t sequence;} BWTextureInitToken;
-static struct {uint64_t entryCalls,validatedAttempts,publishedSuccesses,sequence;unsigned next,count,dumps;BOOL saturated;BWTextureInitRecord records[BW_TEXTURE_LIFECYCLE_CAPACITY];} textureInitContext;
+static struct {uint64_t entryCalls,validatedAttempts,publishedSuccesses,sequence;unsigned next,count,dumps,zeroSizeDumps;BOOL saturated;BWTextureInitRecord records[BW_TEXTURE_LIFECYCLE_CAPACITY];} textureInitContext;
 static void textureInitContextReset(void){memset(&textureInitContext,0,sizeof textureInitContext);}
 static void textureInitIncrement(uint64_t *value){if(*value<UINT64_MAX)(*value)++;}
 static void textureInitEntry(void){textureInitIncrement(&textureInitContext.entryCalls);}
