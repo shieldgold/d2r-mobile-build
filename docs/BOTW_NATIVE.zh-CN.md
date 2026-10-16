@@ -29,7 +29,9 @@
 
 当前目标是用户更换后的 **iPhone 12 / iOS 18.1**。当前安装 `3aaca29` 显式诊断版，argv仅 `--observe-graphics-lock`，PID1215；固定本机1055项中1054通过、1项条件跳过，精确head双CI成功，官方98项源码工件核验、组装签名后保数据更新。四个有界宿主锁样本已取齐，generation变化且包含idle，不支持同一轮持续持锁跨采样的解释；217.463秒完整采样无host_return/新error/真实帧，约600秒只查metadata仍无frame，后者不冒充重读boot内容。随后3a的observation-4已完整host_return=1，实际首错是 `nvnMemoryPoolInitialize: Memory pool CPU snapshot allocation failed`，在Metal工厂之前；与此前b7的Metal allocation generic首错不同，不能据此认为旧问题已修。正常日志的footprint287821504、resident350535680、available1912090944仅为当次advisory，不保证连续分配成功也不证明OOM。UID、14,420,017,152字节RomFS大小mtime、shader与权限均保留。**尚不能游玩**。
 
-后续主线已纠正为最新完整上游host、NVN和shader工具链，平台差异通过薄适配接入，见[完整后端计划](superpowers/plans/2026-10-16-complete-upstream-backend.md)。当前手机图形核心仍有本地子集实现，37个shader只覆盖内置UI/字体；kernel/IPC/HID也不能统称整模块移植。旧上游5f已落后98提交；本次完整源码锁定21f，其启动记录达到开场文字，但没有菜单或可玩验收。新上游面向1.9/SDK20.5.22/NVN55.15，不能套用到当前base-v0/NVN52.32。完整工具与隔离后端的编译通过不代表已经替换手机生产实现。
+后续主线已纠正为固定上游21f的完整host、NVN和shader工具链，平台差异通过薄适配接入，见[完整后端计划](superpowers/plans/2026-10-16-complete-upstream-backend.md)。当前手机图形核心仍有本地子集实现，37个shader只覆盖内置UI/字体；kernel/IPC/HID也不能统称整模块移植。旧上游5f已落后98提交。[21f README](https://github.com/TommyLau/botw-mobile/blob/21f026e0c7fd9fee575a1bfa8d925553bb4db88e/README.md)实际记载：Mac实验已播完开场、进入复苏神庙并到达玩家操作提示，运行五分钟；19,612个shader阶段中19,606个已有私有Metal产物，同时仍有渲染错误、静音，作者明确尚无可玩构建。此前概括为仅到开场文字不准确。这些是上游文档记录，不是本机iPhone实测。新上游面向1.9/SDK20.5.22/NVN55.15，不能直接套用到当前base-v0/NVN52.32。完整工具与隔离后端的编译通过不代表已经替换手机生产实现。
+
+当前已有的1.0.0 ExeFS和RomFS已解包，现有宿主运行、离线处理及完整模块开发不以`prod.keys`为前置。密钥问题仅针对尚未提取的加密1.9更新NSP；不能将其扩大为整个项目的运行要求。上游启动器也直接消费已解包/改写模块和RomFS。用户没有该密钥或1.9导出目录时，继续用现有已验证资源推进完整宿主、iOS前端、资源接口及base-v0 ABI适配；加密更新暂保原样，版本差异仍必须明确验证。
 
 此前 `c2b4db8` 取得原始逻辑堆和根堆，进入十三个工作线程，受控停在 `nvnMemoryPoolInitialize` 的 physical NoCopy backing 准入：120 MiB 请求向外取整为125,845,504字节，首个RW VM leaf只剩60,850,176字节，具体分支为 `vm_span`。该次完整日志有host_return=1，同一PID在启动约125.1秒后的系统进程查询中仍存活；这仅是该次观察区间，不是当前版本停止点、整次运行峰值或VM分裂来源证明。
 
