@@ -1,0 +1,39 @@
+--- a/dm/host/botw_hid.c
++++ b/dm/host/botw_hid.c
+@@ -412,6 +412,36 @@
+     return npad_states(out, capacity, id, STYLE_JOYRIGHT, "GetNpadStates<JoyRight>");
+ }
+ 
++// base-v0 singular APIs return void and leave out untouched on an empty read.
++// Use the complete original plural producer on an owned normal C stack state;
++// it retains the sole configuration/input mutex, selector and sample counter.
++static void botw_hid_single_state(NpadState *out, const uint32_t *id,
++        int (*plural)(NpadState *, int, const uint32_t *)) {
++    if (!out) die("BotW HID: GetNpadState with a null output");
++    NpadState state;
++    int count = plural(&state, 1, id);
++    if (!count) return;
++    if (count != 1) die("BotW HID: GetNpadState producer returned an invalid sample count");
++    if (!dm_guest_write_prepare_checked(out, sizeof *out))
++        die("BotW HID: single Npad output preparation failed");
++    memcpy(out, &state, sizeof *out);
++}
++HLE_FORCE("_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj", "base-v0 single Npad state uses the complete native pad producer", void, botw_hid_get_state_fullkey, NpadState *out, const uint32_t *id) {
++    botw_hid_single_state(out, id, botw_hid_get_states_fullkey);
++}
++HLE_FORCE("_ZN2nn3hid12GetNpadStateEPNS0_17NpadHandheldStateERKj", "base-v0 single Npad state uses the complete native pad producer", void, botw_hid_get_state_handheld, NpadState *out, const uint32_t *id) {
++    botw_hid_single_state(out, id, botw_hid_get_states_handheld);
++}
++HLE_FORCE("_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj", "base-v0 single Npad state uses the complete native pad producer", void, botw_hid_get_state_joydual, NpadState *out, const uint32_t *id) {
++    botw_hid_single_state(out, id, botw_hid_get_states_joydual);
++}
++HLE_FORCE("_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj", "base-v0 single Npad state uses the complete native pad producer", void, botw_hid_get_state_joyleft, NpadState *out, const uint32_t *id) {
++    botw_hid_single_state(out, id, botw_hid_get_states_joyleft);
++}
++HLE_FORCE("_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj", "base-v0 single Npad state uses the complete native pad producer", void, botw_hid_get_state_joyright, NpadState *out, const uint32_t *id) {
++    botw_hid_single_state(out, id, botw_hid_get_states_joyright);
++}
++
+ // ---------- Six-axis sensors (no host backend) ----------
+ HLE_FORCE("_ZN2nn3hid23GetSixAxisSensorHandlesEPNS0_19SixAxisSensorHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE", "BotW: host motion sensors unsupported; 0 handles", int, botw_hid_get_sixaxis_handles, uint32_t *out, int capacity, const uint32_t *id, uint32_t style) {
+     (void)out;

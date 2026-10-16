@@ -20,9 +20,12 @@ def macho_fixture(entries=None, pointer_format=6):
     """One owned __DATA page with local pointer chains and self-owned strings."""
     if entries is None:
         entries = [{'name': 'owned_symbol', 'why': 'owned reason', 'titles': 4}]
-    text_size, page, imagebase = 0x10000, 0x1000, 0x100000000
+    # Keep the entire registry and every link in one real chained-fixup page.
+    # The 132-entry profile occupies 4224 bytes and needs the supported 16K page.
+    text_size, imagebase = 0x10000, 0x100000000
+    page = 0x1000 if len(entries) * 32 <= 0x1000 else 0x4000
     if len(entries) * 32 > page:
-        raise ValueError('owned fixture registry exceeds one page')
+        raise ValueError('owned fixture registry exceeds one 16K page')
     file = bytearray(text_size + 2 * page)
     strings = 0x800
     encoded = []
@@ -113,10 +116,11 @@ class RegistryAudit(unittest.TestCase):
     def test_local_chained_pointer_formats_6_and_2_decode_same_registry(self):
         expected = [{'name': 'owned_symbol', 'why': 'owned reason', 'titles': 4}]
         for fmt in (6, 2):
-            with self.subTest(pointer_format=fmt):
-                result = self.reader.read_registry(self.file(macho_fixture(pointer_format=fmt)))
-                self.assertEqual(result['entries'], expected)
-                self.assertEqual(result['chained_pointer_formats'], [fmt])
+            for entries in (expected, self.expected_entries):
+                with self.subTest(pointer_format=fmt, entries=len(entries)):
+                    result = self.reader.read_registry(self.file(macho_fixture(entries, fmt)))
+                    self.assertEqual(result['entries'], entries)
+                    self.assertEqual(result['chained_pointer_formats'], [fmt])
 
     def test_fixed_expected_triples_match_the_existing_force_manifest(self):
         source = (ROOT / 'experiments/botw_upstream_host/adapter/base_v0_force.c').read_text()
@@ -124,7 +128,7 @@ class RegistryAudit(unittest.TestCase):
         pattern = r'^\s*\{(' + quoted + r'), (' + quoted + r'), (\d+)u, \d+u, \d+u\},$'
         actual = [{'name': json.loads(name), 'why': json.loads(why), 'titles': int(titles)}
                   for name, why, titles in re.findall(pattern, source, re.M)]
-        self.assertEqual(len(actual), 127)
+        self.assertEqual(len(actual), 132)
         self.assertEqual(self.reader.canonical_entries(actual),
                          self.reader.canonical_entries(self.expected_entries))
         self.assertEqual(self.reader.metadata_sha256(actual), self.expected_sha256)
@@ -135,7 +139,7 @@ class RegistryAudit(unittest.TestCase):
         result = self.cli(binary, output, self.expected_sha256)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         evidence = json.loads(output.read_text())
-        self.assertEqual(evidence['count'], 127)
+        self.assertEqual(evidence['count'], 132)
         self.assertEqual(evidence['canonical_metadata_sha256'], self.expected_sha256)
         self.assertEqual(evidence['binary_sha256'], hashlib.sha256(binary.read_bytes()).hexdigest())
         self.assertTrue(evidence['expected_registry_verified'])
@@ -233,12 +237,13 @@ class RegistryAudit(unittest.TestCase):
         self.assertFalse(output.exists())
 
     def test_actual_mac_link_only_file_has_the_fixed_registry(self):
-        binary = ROOT / ('outputs/botw-whole-host-integration/mac-closure-first/'
-                         'whole-host-LINK-ONLY-DO-NOT-RUN')
+        binary = Path(os.environ.get('BOTW_WHOLE_REGISTRY_BINARY', ROOT /
+            ('outputs/botw-whole-host-integration/mac-closure-first/'
+             'whole-host-LINK-ONLY-DO-NOT-RUN')))
         if not binary.is_file():
             self.skipTest('private linked Mac artifact is unavailable; owned metadata tests still run')
         result = self.reader.audit_registry(binary, self.expected_sha256)
-        self.assertEqual(result['count'], 127)
+        self.assertEqual(result['count'], 132)
         self.assertEqual(result['canonical_metadata_sha256'], self.expected_sha256)
 
 

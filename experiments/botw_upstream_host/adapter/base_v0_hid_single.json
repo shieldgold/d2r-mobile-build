@@ -1,0 +1,321 @@
+{
+  "schema": "botw-base-v0-hid-single-contract-v1",
+  "profile": "botw-switch-base-v0",
+  "module_sha256": {
+    "main": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+    "sdk": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31"
+  },
+  "state_bytes": 40,
+  "fields": {
+    "sampling": 0,
+    "buttons": 8,
+    "lx": 16,
+    "ly": 20,
+    "rx": 24,
+    "ry": 28,
+    "attributes": 32,
+    "reserved": 36
+  },
+  "public_abi": {
+    "parameters": [
+      "state_out",
+      "const uint32_t *id"
+    ],
+    "return": "void-compatible; no sample count returned",
+    "capacity": 1,
+    "empty": "success with zero count preserves all 40 output bytes",
+    "nonempty": "copy exactly 40 bytes of one actual sample",
+    "missing_slot": "detail returns 0x58cca; public wrapper aborts",
+    "invalid_id": "SDK AbortImpl; never a zero-count sample"
+  },
+  "states": [
+    {
+      "state": "FullKey",
+      "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj",
+      "singular": {
+        "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj",
+        "offset": "0x235b54",
+        "size": 124,
+        "sha256": "94303658bd4cac0283f2702be625f5c823e667c0b6ef367d15bf18774e27c9bb"
+      },
+      "plural": {
+        "symbol": "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj",
+        "offset": "0x235bd0",
+        "size": 132,
+        "sha256": "90b777fa2ff9f9271520bae7b572e81cd85b3fe71ea97e67d2bf2e5184e0cc0b"
+      },
+      "detail": {
+        "symbol": "_ZN2nn3hid6detail13GetNpadStatesEPiPNS0_16NpadFullKeyStateEiRKj",
+        "offset": "0x225984",
+        "size": 652,
+        "sha256": "f76f38771271b4aa2f46f118fe900383038936544314cfaa3620aad669f146b5"
+      },
+      "ring": {
+        "base": "0x28",
+        "capacity": "0x30",
+        "tail": "0x38",
+        "count": "0x40",
+        "entry_generation": "0x48",
+        "entry_state": "0x50",
+        "entry_stride": 48,
+        "copied_state_bytes": 40
+      },
+      "main_call": {
+        "offset": "0xa30a20",
+        "size": 12,
+        "sha256": "a82f77e3ec0e62cb5c16ee5d82cbc971956910d4de9d1874961791f4a3151a6b"
+      },
+      "main_mode": 0
+    },
+    {
+      "state": "Handheld",
+      "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_17NpadHandheldStateERKj",
+      "singular": {
+        "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_17NpadHandheldStateERKj",
+        "offset": "0x235c54",
+        "size": 124,
+        "sha256": "017edcfaf9200806459bfc75f4b5ef8cb7a4e223e7d06e8da728f4a6894d2738"
+      },
+      "plural": {
+        "symbol": "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj",
+        "offset": "0x235cd0",
+        "size": 132,
+        "sha256": "8ae1c29294697cc63271596552488dcc300fa39e8c54ccf547f3eb2cd1c8e14a"
+      },
+      "detail": {
+        "symbol": "_ZN2nn3hid6detail13GetNpadStatesEPiPNS0_17NpadHandheldStateEiRKj",
+        "offset": "0x225c10",
+        "size": 652,
+        "sha256": "fba03b71c5e33a6862a15714499b8e2710637754b7d641f059dd31446bbd1df5"
+      },
+      "ring": {
+        "base": "0x378",
+        "capacity": "0x380",
+        "tail": "0x388",
+        "count": "0x390",
+        "entry_generation": "0x398",
+        "entry_state": "0x3a0",
+        "entry_stride": 48,
+        "copied_state_bytes": 40
+      },
+      "main_call": {
+        "offset": "0xa309f8",
+        "size": 12,
+        "sha256": "f92c93f7d0a9fc104b6789d62d572635752e78dd48ffa5df575de6927fcec264"
+      },
+      "main_mode": 1
+    },
+    {
+      "state": "JoyDual",
+      "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj",
+      "singular": {
+        "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj",
+        "offset": "0x236324",
+        "size": 124,
+        "sha256": "454b0194cde690df32c6eb4894e45fc50e6e31aa86bba10864eab974b099fde7"
+      },
+      "plural": {
+        "symbol": "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj",
+        "offset": "0x2363a0",
+        "size": 132,
+        "sha256": "162b0eff1f3d635251877a6616d528933dccdaf7978604fae612e63f3c0dca27"
+      },
+      "detail": {
+        "symbol": "_ZN2nn3hid6detail13GetNpadStatesEPiPNS0_16NpadJoyDualStateEiRKj",
+        "offset": "0x225e9c",
+        "size": 652,
+        "sha256": "22159cfc6026920d3ee3bc48a40c971c503895fab6044ca51dae75008fcfbbc6"
+      },
+      "ring": {
+        "base": "0x6c8",
+        "capacity": "0x6d0",
+        "tail": "0x6d8",
+        "count": "0x6e0",
+        "entry_generation": "0x6e8",
+        "entry_state": "0x6f0",
+        "entry_stride": 48,
+        "copied_state_bytes": 40
+      },
+      "main_call": {
+        "offset": "0xa30a0c",
+        "size": 12,
+        "sha256": "58a827e87c694834c145e95f3d0be4da3f89cf6095d634e52950e6e019c37d47"
+      },
+      "main_mode": 2
+    },
+    {
+      "state": "JoyLeft",
+      "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj",
+      "singular": {
+        "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj",
+        "offset": "0x236424",
+        "size": 124,
+        "sha256": "b073dadf80ae2895583283dcff14c862a445fa25c643b2ae04718896ced731f6"
+      },
+      "plural": {
+        "symbol": "_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj",
+        "offset": "0x2364a0",
+        "size": 132,
+        "sha256": "17b5e32a1fb2f913c1656399f9dce8865271ee66427622e7074214e83a2ff1bd"
+      },
+      "detail": {
+        "symbol": "_ZN2nn3hid6detail13GetNpadStatesEPiPNS0_16NpadJoyLeftStateEiRKj",
+        "offset": "0x226128",
+        "size": 652,
+        "sha256": "1d2de98d7a16ba26667814eabfb282435dda3dbda73ffc463c824e14d1fd52d6"
+      },
+      "ring": {
+        "base": "0xa18",
+        "capacity": "0xa20",
+        "tail": "0xa28",
+        "count": "0xa30",
+        "entry_generation": "0xa38",
+        "entry_state": "0xa40",
+        "entry_stride": 48,
+        "copied_state_bytes": 40
+      },
+      "main_call": {
+        "offset": "0xa30a34",
+        "size": 12,
+        "sha256": "72161c45ecde4fe44e317aaf81b4ce4223fb6c94840eb27eaee610ec4cbc8b54"
+      },
+      "main_mode": 3
+    },
+    {
+      "state": "JoyRight",
+      "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj",
+      "singular": {
+        "symbol": "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj",
+        "offset": "0x236524",
+        "size": 124,
+        "sha256": "43a3c2fdd7e5ba94e01aed592407742e02996767c39f3114ad8dcfd32e941439"
+      },
+      "plural": {
+        "symbol": "_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj",
+        "offset": "0x2365a0",
+        "size": 132,
+        "sha256": "64593e5d1985aebbd4630acbc7f07e7229d9c32bbedeb732f2452ce36341deb9"
+      },
+      "detail": {
+        "symbol": "_ZN2nn3hid6detail13GetNpadStatesEPiPNS0_17NpadJoyRightStateEiRKj",
+        "offset": "0x2263b4",
+        "size": 652,
+        "sha256": "0dad8d67341612406fe80c4d67c075c34530db7489144c9f21ff883c54c3392f"
+      },
+      "ring": {
+        "base": "0xd68",
+        "capacity": "0xd70",
+        "tail": "0xd78",
+        "count": "0xd80",
+        "entry_generation": "0xd88",
+        "entry_state": "0xd90",
+        "entry_stride": 48,
+        "copied_state_bytes": 40
+      },
+      "main_call": {
+        "offset": "0xa30a48",
+        "size": 12,
+        "sha256": "70d0c04827fdd11ab96758bc27d14214e3df30e8cbaa75955430a73ea7d7a930"
+      },
+      "main_mode": 4
+    }
+  ],
+  "id_mapper": {
+    "legal_id_to_slot": {
+      "0": 0,
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 4,
+      "5": 5,
+      "6": 6,
+      "7": 7,
+      "32": 8,
+      "16": 9
+    },
+    "invalid": "all other uint32 values call SDK AbortImpl before slot load",
+    "abort_symbol": "_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i",
+    "abort_plt": "0x345ba4",
+    "pointer_table": "sdk global 0x75fe10 + 0x60 + slot*8",
+    "invalid_is_not_empty": true,
+    "null_slot_is_not_empty": true
+  },
+  "initialize": {
+    "public": {
+      "symbol": "_ZN2nn3hid14InitializeNpadEv",
+      "offset": "0x234ec8",
+      "size": 100,
+      "sha256": "39665f8896e74ffbd2df876da476f77c397bdc30cfe3661ea47c0f24e19f89d0"
+    },
+    "detail": {
+      "symbol": "_ZN2nn3hid6detail14InitializeNpadEv",
+      "offset": "0x224ef8",
+      "size": 84,
+      "sha256": "2ad433c7be635a8ab2542c553479cdc9e05ae4efcbae7717fc62593498a74bad"
+    },
+    "activate": {
+      "symbol": "_ZN2nn3hid6detail20SharedMemoryAccessor8ActivateEv",
+      "offset": "0x229558",
+      "size": 964,
+      "sha256": "878c315a7e8b4c67188480dc30235997352a2a3118abd1848b42e84dc2c08a9c"
+    },
+    "success_callback": {
+      "offset": "0x22888c",
+      "size": 328,
+      "sha256": "a7d3a63cd8f03d28d6a3837049c3a81d16e57cd3aa2a03e608d3742e1cdbb684"
+    },
+    "callback_vtable_relative_relocation": {
+      "offset": "0x6b0a68",
+      "value": "0x22888c",
+      "relocation_type": 1027
+    },
+    "successful_callback_publishes_all_ten_slots": true,
+    "shared_base_offset": "0x9a00",
+    "slot_stride": "0x5000",
+    "published_offsets": [
+      "0x9a00",
+      "0xea00",
+      "0x13a00",
+      "0x18a00",
+      "0x1da00",
+      "0x22a00",
+      "0x27a00",
+      "0x2ca00",
+      "0x31a00",
+      "0x36a00"
+    ],
+    "publication": "release stores; no supported-id/style condition in successful slot publication",
+    "unsupported_style_or_id_not_declared_does_not_mean_null_slot": true
+  },
+  "consumer_evidence": {
+    "main_state_consumer": {
+      "offset": "0x11e2860",
+      "size": 656,
+      "sha256": "9a90e764616a6d96979b6f81005b7e1b4058c232c7fa89621035b23ba0d39e88"
+    },
+    "main_axis_conversion": {
+      "offset": "0x11e2ce0",
+      "size": 32,
+      "sha256": "658012e18587acc2caeb7b7be4439edc67f0ced1e14d5deaac5ce7831ba79a85"
+    },
+    "main_mode_jump_table": {
+      "offset": "0x1c6d31c",
+      "size": 20,
+      "sha256": "0ae9a117618a1a5e00502b93bf7b880618f519580ad1d310f13de525ce8de4f2"
+    },
+    "main_mode_targets": {
+      "0": "0x11e28a8",
+      "1": "0x11e29c8",
+      "2": "0x11e28f4",
+      "3": "0x11e2940",
+      "4": "0x11e2974"
+    }
+  },
+  "limits": [
+    "Static initialized NSO bytes only; no Guest execution or memory observation.",
+    "Fields +0x00 and +0x08 are used by SDK getter; main consumes the four signed 32-bit axes and attributes at the listed offsets.",
+    "The last four bytes are copied as an opaque tail; no reserved-field semantics are inferred.",
+    "All ten legal slots are published after original InitializeNpad success, independently of supported IDs/styles.",
+    "Upstream forced InitializeNpad has one initialized flag, set only to one; focus or virtual presentation changes do not clear it."
+  ]
+}

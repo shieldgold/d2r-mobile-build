@@ -29,8 +29,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.c": {
-      "sha256": "591a6081fc263632dcc904c4072c7b8dea9f08eb7c1e2850418c6952e252f860",
-      "bytes": 24667,
+      "sha256": "9cb9e0acbb055f048b8f4ef840b8b1426f129d5904bafdd56cd60f450b3ba50b",
+      "bytes": 25374,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.h": {
@@ -66,6 +66,11 @@
     "adapter/base_v0_heap.json": {
       "sha256": "3a559c53a2bf00f744b8b3ded57d95a98cc663534e455f3881eb5c7bf196ec6f",
       "bytes": 2522,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_hid_single.json": {
+      "sha256": "228ed34421624dadc9fdd0f86463594426796401ef7dbf6fc048efa6632173ce",
+      "bytes": 10542,
       "role": "thin-adapter-or-verification"
     },
     "adapter/public_vm_read.h": {
@@ -453,6 +458,11 @@
       "bytes": 11412,
       "role": "thin-adapter-or-verification"
     },
+    "patches/base-v0-hid-single-state.patch": {
+      "sha256": "1f93a7b13ae1297170cf4148ceda0ba62255a8f5e17217ff1c3c328d648b384f",
+      "bytes": 2692,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/base-v0-host-arguments.patch": {
       "sha256": "713870fcd40604c42edb0746a46ff7cb4ce153dddbeefdbd9e5deda4b2e54811",
       "bytes": 1434,
@@ -619,7 +629,7 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/base_v0_force_probe.c": {
-      "sha256": "b5c0d9c96bc9b6978fd54f1c2de659f1a2ed4e5afb4fb3157cf9601427772406",
+      "sha256": "28826f743224afed67b44c692101973d7372f6a1eb19770132862bcc2f24dc9f",
       "bytes": 9754,
       "role": "thin-adapter-or-verification"
     },
@@ -711,6 +721,11 @@
     "tests/whole_heap_voice_probe.cpp": {
       "sha256": "e33d1a4c72eb269e61c2d7be1ab00b043ce1411460ceaf3117e214c2126c7719",
       "bytes": 8725,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_hid_single_probe.c": {
+      "sha256": "e6471540fb86fa0e1f81d40260a7c7f500b32da75229a9e7c30eed711052b846",
+      "bytes": 7701,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_host_arguments_probe.c": {
@@ -1567,7 +1582,8 @@
     "patches/base-v0-image-bank.patch",
     "patches/conditional-shader-runtime.patch",
     "patches/bounded-address-space.patch",
-    "patches/weak-import-resolution.patch"
+    "patches/weak-import-resolution.patch",
+    "patches/base-v0-hid-single-state.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1588,6 +1604,7 @@
     "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",
     "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",
     "dm/host/botw_fs.c": "c8c986526bc02ddd396be8d96ca8d93933525dea8babf9d59a8e0e6ec9395881",
+    "dm/host/botw_hid.c": "5cafc0c71e9abe4e000610a06a962383a515d3c80c1706a2f0032cff58b8f413",
     "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
     "dm/host/botw_pcm.c": "7b77d126af15ab5015770f823d47cf67ab08e4fdb52b9f167ae8179365e6a17e",
     "dm/host/botw_pcm.h": "de8e71d559f744a2959d0afb4e768633663aa88590e571ddb417d7db40dc9cd1",
@@ -1677,8 +1694,8 @@
   "runtime_configuration_translation_units": [
     "frontend/whole_runtime_configuration.m"
   ],
-  "swforce_record_count": 127,
-  "swforce_metadata_sha256": "df5207fef17b2bcae2a98d9f76c009bb2ea27040c383fd30aad8ff6618444932",
+  "swforce_record_count": 132,
+  "swforce_metadata_sha256": "89cf5f49f832c7e648c942f00b584e09c2327267e97c01e7d57d7d58f6a85d25",
   "normal_operand_validation_references": {
     "adapter/whole_pool_builder.c": [
       "_vm_region_recurse_64"

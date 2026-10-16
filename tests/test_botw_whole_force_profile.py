@@ -61,6 +61,11 @@ EXPECTED_REFERENCES = {
     "_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE": 1,
     "_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE": 1,
     "_ZN2nn3aoc10InitializeEv": 1,
+    "_ZN2nn3hid12GetNpadStateEPNS0_16NpadFullKeyStateERKj": 1,
+    "_ZN2nn3hid12GetNpadStateEPNS0_17NpadHandheldStateERKj": 1,
+    "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj": 1,
+    "_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj": 1,
+    "_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj": 1,
     "_ZN2nn3hid14InitializeNpadEv": 1,
     "_ZN2nn3hid15GetNpadStyleSetERKj": 1,
     "_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14VibrationValueE": 1,
@@ -153,7 +158,7 @@ class WholeForceProfileTests(unittest.TestCase):
         end = text.index('// Read the rewriter table header', begin)
         (cls.work / 'loader_force.inc').write_text(text[begin:end])
         rows = source_registry(stage)
-        if len(rows) != 127:
+        if len(rows) != 132:
             raise AssertionError('actual source registry changed: ' + str(len(rows)))
         owned = []
         for name, why, title in rows:
@@ -239,7 +244,7 @@ class WholeForceProfileTests(unittest.TestCase):
         manifest = {r.split()[0]: r.split()[1:] for r in rows}
         candidate_names = {name for name, _, title in source_registry(self.staged)
                            if title == 4 or name in BORROWED}
-        self.assertEqual(len(candidate_names), 125)
+        self.assertEqual(len(candidate_names), 130)
         actual = {}
         for module_index, name in enumerate(ORDER):
             data = (directory / name).read_bytes()
@@ -276,7 +281,7 @@ class WholeForceProfileTests(unittest.TestCase):
                 self.assertEqual(count, 1)
                 actual[symbol_name] = actual.get(symbol_name, 0) | (1 << module_index)
         self.assertEqual(actual, EXPECTED_REFERENCES)
-        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 133)
+        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 138)
 
     @unittest.skipIf(BASELINE, 'baseline has no stream verifier')
     def test_real_fixed_images_hash_as_raw_and_three_padded_signed_sections(self):
