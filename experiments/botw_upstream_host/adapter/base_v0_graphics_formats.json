@@ -1,0 +1,588 @@
+{
+  "schema": "botw-base-v0-nvn-format-contracts-v1",
+  "profile": "botw-switch-base-v0",
+  "scope": "Fixed disk NSO and original translator only. No draw or GPU executed, no guest runtime memory read. Static conditional constraints; not shader facts, review, admission, coverage or gameplay evidence.",
+  "source": {
+    "path": "outputs/botw-native-base/ExeFS/subsdk0",
+    "bytes": 883020,
+    "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000",
+    "initialized_image_sha256": "065cfc8fc879b60d0ee4b08f169a64424b62ed57366f97d2ce053dd8b0c8448c"
+  },
+  "proc_lookup_source": {
+    "path": "outputs/botw-whole-shader-binding-audit/nvn52-static-proc-tables.json",
+    "bytes": 64621,
+    "sha256": "5def92bdf94bdaba63dee41d92eecf7e60e81c3b2ff96d39bcc550dfea51549f"
+  },
+  "proc_entries": [
+    {
+      "name": "nvnTextureBuilderSetFormat",
+      "index": 358,
+      "pointer_entry": "0x1c9378",
+      "target": "0xbe0a8"
+    },
+    {
+      "name": "nvnTextureGetFormat",
+      "index": 380,
+      "pointer_entry": "0x1c9428",
+      "target": "0xbff7c"
+    },
+    {
+      "name": "nvnTextureViewSetFormat",
+      "index": 417,
+      "pointer_entry": "0x1c9550",
+      "target": "0xbea40"
+    },
+    {
+      "name": "nvnTextureViewGetFormat",
+      "index": 410,
+      "pointer_entry": "0x1c9518",
+      "target": "0xbeab8"
+    },
+    {
+      "name": "nvnCommandBufferSetRenderTargets",
+      "index": 150,
+      "pointer_entry": "0x1c8cf8",
+      "target": "0xd9c98"
+    },
+    {
+      "name": "nvnTexturePoolRegisterTexture",
+      "index": 404,
+      "pointer_entry": "0x1c94e8",
+      "target": "0xc05d8"
+    },
+    {
+      "name": "nvnVertexAttribStateSetFormat",
+      "index": 426,
+      "pointer_entry": "0x1c9598",
+      "target": "0xbd0c4"
+    },
+    {
+      "name": "nvnVertexAttribStateGetFormat",
+      "index": 423,
+      "pointer_entry": "0x1c9580",
+      "target": "0xbd0f8"
+    }
+  ],
+  "format_table": {
+    "pointer_global": "0x1c35e0",
+    "pointer_relocation_entry": "0x109280",
+    "relocation": "R_AARCH64_RELATIVE=1027",
+    "initialized_addend": "0x1c6790",
+    "entry_stride": 52,
+    "rt_format_offset": 28,
+    "maxwell_bl_first_word_offset": 36,
+    "bounded_prefix_start": "0x1c6790",
+    "bounded_prefix_end_exclusive": "0x1c870c",
+    "bounded_prefix_sha256": "2643f861e1abc99124dc651d530c29ef52904dd5b472a1bd936a02733002683a"
+  },
+  "fragment_output_classes": {
+    "37": {
+      "nvn_format": 37,
+      "nvn_format_hex": "0x25",
+      "name_crosscheck": "RGBA8",
+      "table_entry": "0x1c6f14",
+      "entry_bytes": 52,
+      "entry_sha256": "99088e38f7be6abdb9c9842f38d6d60665a50f6ee5ae2df69c7ea36748418431",
+      "hardware_rt_format": "0xd5",
+      "maxwell_bl_first_word": "0x58d24908",
+      "component_data_types_rgba": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "numeric_storage": "UNORM",
+      "fragment_output_type": "float"
+    },
+    "154": {
+      "nvn_format": 154,
+      "nvn_format_hex": "0x9a",
+      "name_crosscheck": "BGRA8",
+      "table_entry": "0x1c86d8",
+      "entry_bytes": 52,
+      "entry_sha256": "824bc4c4be533956e546c278cd20c3ee96fac76c52d85cfd547a23bfef579a9f",
+      "hardware_rt_format": "0xcf",
+      "maxwell_bl_first_word": "0x54e24908",
+      "component_data_types_rgba": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "numeric_storage": "UNORM",
+      "fragment_output_type": "float"
+    },
+    "41": {
+      "nvn_format": 41,
+      "nvn_format_hex": "0x29",
+      "name_crosscheck": "RGBA16F",
+      "table_entry": "0x1c6fe4",
+      "entry_bytes": 52,
+      "entry_sha256": "774da0d4de73df2bda057536923acfe0e4332d15714f358366a2df8a6c21f1a0",
+      "hardware_rt_format": "0xca",
+      "maxwell_bl_first_word": "0x58d7ff83",
+      "component_data_types_rgba": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "numeric_storage": "FLOAT",
+      "fragment_output_type": "float"
+    },
+    "46": {
+      "nvn_format": 46,
+      "nvn_format_hex": "0x2e",
+      "name_crosscheck": "RGBA32F",
+      "table_entry": "0x1c70e8",
+      "entry_bytes": 52,
+      "entry_sha256": "299152e448050707d8529bb50d72f1c4cfdafbf84ed57812f8ae910e40569586",
+      "hardware_rt_format": "0xc0",
+      "maxwell_bl_first_word": "0x58d7ff81",
+      "component_data_types_rgba": [
+        7,
+        7,
+        7,
+        7
+      ],
+      "numeric_storage": "FLOAT",
+      "fragment_output_type": "float"
+    }
+  },
+  "integer_negative_controls_not_admitted": {
+    "39": {
+      "nvn_format": 39,
+      "nvn_format_hex": "0x27",
+      "name_crosscheck": "RGBA8UI",
+      "table_entry": "0x1c6f7c",
+      "entry_bytes": 52,
+      "entry_sha256": "77b9c52a9968dbcb8569da9d8ce5700350541bb15fd94c18a03817999c6978d4",
+      "hardware_rt_format": "0xd9",
+      "maxwell_bl_first_word": "0x58d49208",
+      "component_data_types_rgba": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "numeric_storage": "UINT",
+      "fragment_output_type": "uint"
+    },
+    "40": {
+      "nvn_format": 40,
+      "nvn_format_hex": "0x28",
+      "name_crosscheck": "RGBA8I",
+      "table_entry": "0x1c6fb0",
+      "entry_bytes": 52,
+      "entry_sha256": "f6e4d291b978eebead75f0bf6131fc726537b3e2f866c16bfe5f6d7cdac2957a",
+      "hardware_rt_format": "0xd8",
+      "maxwell_bl_first_word": "0x58d36d88",
+      "component_data_types_rgba": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "numeric_storage": "SINT",
+      "fragment_output_type": "sint"
+    },
+    "44": {
+      "nvn_format": 44,
+      "nvn_format_hex": "0x2c",
+      "name_crosscheck": "RGBA16UI",
+      "table_entry": "0x1c7080",
+      "entry_bytes": 52,
+      "entry_sha256": "67129945925e159a4861e4be67c1a531d336ee794de58281c698e9632be15c84",
+      "hardware_rt_format": "0xc9",
+      "maxwell_bl_first_word": "0x58d49203",
+      "component_data_types_rgba": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "numeric_storage": "UINT",
+      "fragment_output_type": "uint"
+    },
+    "45": {
+      "nvn_format": 45,
+      "nvn_format_hex": "0x2d",
+      "name_crosscheck": "RGBA16I",
+      "table_entry": "0x1c70b4",
+      "entry_bytes": 52,
+      "entry_sha256": "1672c43de36b979263d5e2b2cb36cabd4714141d22c6496cd3c2049d0d8c475b",
+      "hardware_rt_format": "0xc8",
+      "maxwell_bl_first_word": "0x58d36d83",
+      "component_data_types_rgba": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "numeric_storage": "SINT",
+      "fragment_output_type": "sint"
+    },
+    "47": {
+      "nvn_format": 47,
+      "nvn_format_hex": "0x2f",
+      "name_crosscheck": "RGBA32UI",
+      "table_entry": "0x1c711c",
+      "entry_bytes": 52,
+      "entry_sha256": "2c056c068ec44a9f0a11709bd3c2b02c42ac85634e811fdda0cf838366382d22",
+      "hardware_rt_format": "0xc2",
+      "maxwell_bl_first_word": "0x58d49201",
+      "component_data_types_rgba": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "numeric_storage": "UINT",
+      "fragment_output_type": "uint"
+    },
+    "48": {
+      "nvn_format": 48,
+      "nvn_format_hex": "0x30",
+      "name_crosscheck": "RGBA32I",
+      "table_entry": "0x1c7150",
+      "entry_bytes": 52,
+      "entry_sha256": "387a7a6ccecf0f6b7d5a602802f25c03c88184cfef9a01d4be8d1bff098ad8ab",
+      "hardware_rt_format": "0xc1",
+      "maxwell_bl_first_word": "0x58d36d81",
+      "component_data_types_rgba": [
+        3,
+        3,
+        3,
+        3
+      ],
+      "numeric_storage": "SINT",
+      "fragment_output_type": "sint"
+    }
+  },
+  "effective_view_contract": {
+    "view_flags_offset": 0,
+    "format_valid_mask": 4,
+    "view_format_offset": 8,
+    "texture_format_offset": 56,
+    "resolved_format_offset": 80,
+    "rule": "view != NULL and (view.flags & 4) != 0 ? view.format : texture.format",
+    "must_guard": "Same normal draw and coherent RT/view snapshot. Missing RT0, unrecognized format, unsupported view realization or integer format reject. Metal pixelFormat alone is not NVN output type authority. Four-format float proof does not admit any other format."
+  },
+  "vertex_attribute_contract": {
+    "packed_word_offset": 0,
+    "format_bits": [
+      21,
+      30
+    ],
+    "relative_offset_bits": [
+      7,
+      20
+    ],
+    "enabled_bit": 6,
+    "get_stream_mask": 31,
+    "limitation": "No scalar-type rule is inferred for vertex attributes. Initial VS admission must require fresh analyze has no attributes; the packed NVN52 field is not a default float proof."
+  },
+  "evidence": [
+    {
+      "name": "TextureBuilderSetFormat",
+      "start": "0xbe0a8",
+      "end_exclusive": "0xbe0b0",
+      "bytes": 8,
+      "sha256": "cf12beb067ccf5c6df7e40da315453fc1f32701c58dd6675efbcc48d42b6ae96"
+    },
+    {
+      "name": "TextureGetFormat",
+      "start": "0xbff7c",
+      "end_exclusive": "0xbff84",
+      "bytes": 8,
+      "sha256": "70b6226cdde2aa2e19c7cef1812dc4f3cd14b63d0b93bca2e70ec7210fcf097f"
+    },
+    {
+      "name": "TextureViewSetFormat",
+      "start": "0xbea40",
+      "end_exclusive": "0xbea54",
+      "bytes": 20,
+      "sha256": "6f7b89ea515e23c761ee658179b05e566cbb0aeb2bf8a481df5e458392ad15a3"
+    },
+    {
+      "name": "TextureViewGetFormat",
+      "start": "0xbeab8",
+      "end_exclusive": "0xbeacc",
+      "bytes": 20,
+      "sha256": "a532f5ced8d17d9390233da3fe6862636651e77570bdff630b9a82a191626af9"
+    },
+    {
+      "name": "RT effective view selection",
+      "start": "0xbefb0",
+      "end_exclusive": "0xbefd0",
+      "bytes": 32,
+      "sha256": "ca966b5375d3fa0b2e13eccfb9c9bd34582cd2801f469668ecace620c4a701b3"
+    },
+    {
+      "name": "SetRenderTargets actual helper call",
+      "start": "0xd9d48",
+      "end_exclusive": "0xd9d80",
+      "bytes": 56,
+      "sha256": "c5855b25e1feccbe56beb71d39e340a00a485476b1569833cfc3017342975cc0"
+    },
+    {
+      "name": "RT format table read",
+      "start": "0xd9df4",
+      "end_exclusive": "0xd9e10",
+      "bytes": 28,
+      "sha256": "029c614d4094f8493d9dc85758a85c6f6acfda045f024d190ccbf6bfa1e9321d"
+    },
+    {
+      "name": "TexturePoolRegisterTexture actual TIC generator call",
+      "start": "0xc05d8",
+      "end_exclusive": "0xc0614",
+      "bytes": 60,
+      "sha256": "819275c4bb1cdd8d3f5c5effa386bc297db54abf4b6af76d5449e0f8c999423b"
+    },
+    {
+      "name": "TIC generator selection and table first-word write",
+      "start": "0xdd5a8",
+      "end_exclusive": "0xdd65c",
+      "bytes": 180,
+      "sha256": "078ace385cacc8e9fa84854c39473d64122c3bb1cc67f129fa8d40eaa25eb541"
+    },
+    {
+      "name": "VertexAttribStateSetFormat",
+      "start": "0xbd0c4",
+      "end_exclusive": "0xbd0e4",
+      "bytes": 32,
+      "sha256": "4c703985206092cb76972e63eb1b971c1c909bde1b2dea38f0b5c434fdeeeb2f"
+    },
+    {
+      "name": "VertexAttribStateGetFormat and GetStreamIndex",
+      "start": "0xbd0f8",
+      "end_exclusive": "0xbd120",
+      "bytes": 40,
+      "sha256": "e3c5d987f54c44feac68de05805e5a41f53746adb0b332d6898b5f4c4450c0c8"
+    }
+  ],
+  "official_sources": [
+    {
+      "repository": "https://github.com/NVIDIA/open-gpu-doc",
+      "commit": "9fdf5c4062007929d9f4e6cbad9c9771fe61b880",
+      "path": "classes/3d/clb197.h",
+      "url": "https://raw.githubusercontent.com/NVIDIA/open-gpu-doc/9fdf5c4062007929d9f4e6cbad9c9771fe61b880/classes/3d/clb197.h",
+      "bytes": 404915,
+      "sha256": "175c50f29798b39c6858cafe31497e9e9798c70ca068a64856719003b5d088d7"
+    },
+    {
+      "repository": "https://github.com/NVIDIA/open-gpu-doc",
+      "commit": "9fdf5c4062007929d9f4e6cbad9c9771fe61b880",
+      "path": "classes/3d/clb197tex.h",
+      "url": "https://raw.githubusercontent.com/NVIDIA/open-gpu-doc/9fdf5c4062007929d9f4e6cbad9c9771fe61b880/classes/3d/clb197tex.h",
+      "bytes": 153880,
+      "sha256": "d5aad7d7f339e09411b40a5e8b996613ae2c6d802187070bfa66a596513151bf"
+    }
+  ],
+  "official_fields": {
+    "maxwell_bl_type_bits_rgba": [
+      [
+        7,
+        9
+      ],
+      [
+        10,
+        12
+      ],
+      [
+        13,
+        15
+      ],
+      [
+        16,
+        18
+      ]
+    ],
+    "maxwell_bl_type_values": {
+      "UNORM": 2,
+      "SINT": 3,
+      "UINT": 4,
+      "FLOAT": 7
+    },
+    "header_lines": "clb197tex.h:343-374; clb197.h:671-697",
+    "rt_symbols": {
+      "0xd5": "A8B8G8R8",
+      "0xcf": "A8R8G8B8",
+      "0xca": "RF16_GF16_BF16_AF16",
+      "0xc0": "RF32_GF32_BF32_AF32"
+    }
+  },
+  "numeric_interpretation_reference": {
+    "url": "https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-fragmentoutput",
+    "relation": "Supporting primary numeric-interface definition: normalized fixed point consumes float, integer consumes matching signedness. Base actual format identity is established by fixed NSO, not Vulkan enum numbering."
+  },
+  "original_translator_sources": [
+    {
+      "path": "native/botw_resources/shader_toolchain/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Translation/ShaderDefinitions.cs",
+      "bytes": 13093,
+      "sha256": "554c0565b1ef25089a93bf91fb8a176a3d08d7239e8a37a541ce897954a46c7b"
+    },
+    {
+      "path": "native/botw_resources/shader_toolchain/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/AttributeType.cs",
+      "bytes": 1512,
+      "sha256": "3d4cbabfa22b5ef7e645967ce292948c9061c4ec03334f3e4abfc0621407db60"
+    },
+    {
+      "path": "native/botw_resources/shader_toolchain/dm/gfx/tools/dmsh_xlate/Program.cs",
+      "bytes": 12585,
+      "sha256": "b67fd662441d14b0e4fb42e4211931a4be0388055b5a38a6ccff91bf3d66f0a7"
+    }
+  ],
+  "translator_relation": "Program.QueryGraphicsState explicit fout -> FragmentOutputTypes[location] -> GetFragmentOutputColorType -> AttributeType.Aggregate Float=FP32, Sint=S32, Uint=U32. Default Float array is not authority; publisher must explicitly constrain admitted actual RT format.",
+  "implicit_texture_bank": {
+    "schema": "botw-base-v0-implicit-texture-bank-v1",
+    "profile": "botw-switch-base-v0",
+    "scope": "Static fixed base graphics initialization and original translator sentinel contract; not per-texture type/format facts or compute/bindless-wide permission.",
+    "source": {
+      "path": "outputs/botw-native-base/ExeFS/subsdk0",
+      "bytes": 883020,
+      "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000",
+      "initialized_image_sha256": "065cfc8fc879b60d0ee4b08f169a64424b62ed57366f97d2ce053dd8b0c8448c"
+    },
+    "proc_entries": [
+      {
+        "name": "nvnQueueInitialize",
+        "index": 279,
+        "pointer_entry": "0x1c9100",
+        "target": "0xba1b4"
+      }
+    ],
+    "normal_initialization_chain": [
+      "QueueInitialize+0xba5e0 calls 0xd5664",
+      "0xd5664..0xd5f68 initializes normal graphics state",
+      "0xd59e0..0xd59e8 emits inline packet 0x80020982"
+    ],
+    "packet": {
+      "word": "0x80020982",
+      "sec_op": 4,
+      "sec_op_name": "IMMD_DATA_METHOD",
+      "method_word": "0x982",
+      "method_byte": "0x2608",
+      "immediate": 2,
+      "slot_select": 2
+    },
+    "official_sources": [
+      {
+        "repository": "https://github.com/NVIDIA/open-gpu-doc",
+        "commit": "9fdf5c4062007929d9f4e6cbad9c9771fe61b880",
+        "path": "classes/3d/clb197.h",
+        "url": "https://raw.githubusercontent.com/NVIDIA/open-gpu-doc/9fdf5c4062007929d9f4e6cbad9c9771fe61b880/classes/3d/clb197.h",
+        "bytes": 404915,
+        "sha256": "175c50f29798b39c6858cafe31497e9e9798c70ca068a64856719003b5d088d7"
+      },
+      {
+        "repository": "https://github.com/NVIDIA/open-gpu-doc",
+        "commit": "9fdf5c4062007929d9f4e6cbad9c9771fe61b880",
+        "path": "classes/host/clb06f.h",
+        "url": "https://raw.githubusercontent.com/NVIDIA/open-gpu-doc/9fdf5c4062007929d9f4e6cbad9c9771fe61b880/classes/host/clb06f.h",
+        "bytes": 16934,
+        "sha256": "c19a3ba78c6337f9139567365a657c7473d36d335b339f10bb83d2538e282fc7"
+      }
+    ],
+    "official_fields": {
+      "clb197.h:4105": "SET_BINDLESS_TEXTURE=0x2608; CONSTANT_BUFFER_SLOT_SELECT=4:0",
+      "clb06f.h:168-185": "METHOD_ADDRESS=11:0, IMMD_DATA=28:16, SEC_OP=31:29; IMMD_DATA_METHOD=4"
+    },
+    "evidence": [
+      {
+        "name": "QueueInitialize normal graphics initializer call",
+        "start": "0xba5b4",
+        "end_exclusive": "0xba610",
+        "bytes": 92,
+        "sha256": "aa691b054b71a60640e7c0fbacc4734c7f5ef20cc7e78f72cfc73436b311f8c9"
+      },
+      {
+        "name": "Initializer entry",
+        "start": "0xd5664",
+        "end_exclusive": "0xd56b8",
+        "bytes": 84,
+        "sha256": "c30d6cf8958e5d44602a0a235fa3c414af465a675ca6a754a1708e0640ae4e03"
+      },
+      {
+        "name": "Fixed c2 inline packet store",
+        "start": "0xd59d0",
+        "end_exclusive": "0xd5a0c",
+        "bytes": 60,
+        "sha256": "eacf4e813dc248428a2677b22ef3c3fbc8a652eac41e06bf2244293e6b6e8c97"
+      }
+    ],
+    "whole_initializer_bounds": {
+      "start": "0xd5664",
+      "end_exclusive": "0xd5f68",
+      "sha256": "8460c2dce6771a61fbeb00f51668723d76f62bf1b91378f8b4ccccf23eee8c38"
+    },
+    "translator_sources": [
+      {
+        "path": "native/botw_resources/shader_toolchain/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/TextureHandle.cs",
+        "bytes": 5028,
+        "sha256": "e72ac096d6dddcb57db0831fbf2e6d1269708f6e08446cc5f0ac5b9815c931d3"
+      },
+      {
+        "path": "native/botw_resources/shader_toolchain/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/IntermediateRepresentation/TextureOperation.cs",
+        "bytes": 2018,
+        "sha256": "265ff271a4843ce36b484f471fd19005fa68b3b7caf60459e1ba5d36ff92119c"
+      },
+      {
+        "path": "native/botw_resources/shader_toolchain/dm/third_party/ryujinx/src/Ryujinx.Graphics.Shader/Translation/ResourceManager.cs",
+        "bytes": 22654,
+        "sha256": "35f9da40216adcad512d49b00ed329e03d10c421a5ab10459808daa2902f2620"
+      },
+      {
+        "path": "native/botw_resources/shader_toolchain/dm/gfx/tools/dmsh_xlate/Program.cs",
+        "bytes": 12585,
+        "sha256": "b67fd662441d14b0e4fb42e4211931a4be0388055b5a38a6ccff91bf3d66f0a7"
+      }
+    ],
+    "translator_rule": "TextureOperation.DefaultCbufSlot=-1. TextureHandle.UnpackSlots(slots<0, defaultTextureBufferIndex) resolves texture and sampler to that default. ResourceManager preserves CbufSlot and uses tcb naming for negative sentinel. Fixed base normal graphics default is 2. This does not authorize arbitrary negative values.",
+    "narrow_admission_contract": {
+      "accepted_implicit_cbuf_slot": -1,
+      "resolved_constant_bank": 2,
+      "accepted_handle_type": 0,
+      "handle_type_name": "CombinedSampler",
+      "required_offset1_words": 0,
+      "required_array_length": 1,
+      "required_separate": false,
+      "texture_handle_offset_words_bits": [
+        0,
+        13
+      ],
+      "texture_handle_offset1_words_bits": [
+        14,
+        27
+      ],
+      "texture_handle_type_bits": [
+        28,
+        31
+      ],
+      "handle_offset_bytes": {
+        "minimum_inclusive": 32,
+        "maximum_exclusive": 288,
+        "stride": 8
+      },
+      "nvn_texture_slot_formula": "((handle & 0x3fff)*4 - 0x20)/8",
+      "limitations": [
+        "Fresh original translate/analyze must still have no unknown/conflict/query fallback and preserve required resource identity.",
+        "Actual normal draw descriptor must prove requested sampler target. c2 proves table bank and slot, never a 2D default.",
+        "Separate sampler, direct, array, malformed packed slots and explicit non-c2 banks are outside this narrow contract.",
+        "Fixed graphics BindTexture table offset proof is separate binding-contracts.json; compute path is not admitted."
+      ]
+    },
+    "binding_table_proof": {
+      "path": "outputs/botw-whole-shader-binding-audit/binding-contracts.json",
+      "bytes": 50884,
+      "sha256": "0f378f5f649d024f8221f6b04f8a127ac62366f96c82f6c47710cdb427250b96"
+    }
+  },
+  "evidence_receipts": {
+    "format_document_sha256": "420af10e4b613f35eec248074b7b08920decfe3aa62c883b0591e68e61f7bc39",
+    "implicit_bank_document_sha256": "ff39c172d0e5fab88fb2d285ba7b1578e4682b09c929e4977ef4fa654da263ca",
+    "reduction": "Only fixed source identities, bounded excerpt hashes, register/format values and proof relationships are retained; disassembly and raw table rows are omitted."
+  }
+}

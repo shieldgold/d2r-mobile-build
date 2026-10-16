@@ -43,6 +43,16 @@
       "bytes": 4969,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/base_v0_graphics_format_identity.h": {
+      "sha256": "e1845d1a8fdfbd5c44f9c53e55c25e18c0ae77bf6224b1cfe705b805eeaf77eb",
+      "bytes": 308,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_graphics_formats.json": {
+      "sha256": "3f46576221f48db69abb5b553529fea2dd5f9a2ac1d14a50d5e7c57a499a2865",
+      "bytes": 20374,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/base_v0_heap.c": {
       "sha256": "2828fc27e6dcf83dc4d01cca07b2e91a2255dec506d62119584711d979afa96a",
       "bytes": 6700,
@@ -61,6 +71,11 @@
     "adapter/public_vm_read.h": {
       "sha256": "6403c785cb8e83888e2c8c3334ba6f2ce7cf78961a3f29b5af5502ec89ed3db6",
       "bytes": 1480,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/shader_conditional_build.py": {
+      "sha256": "a91e56c76b22571bba5985acf168694ba84445d256a6e56b0660237171647fe6",
+      "bytes": 33099,
       "role": "thin-adapter-or-verification"
     },
     "adapter/shader_source_build.py": {
@@ -288,14 +303,39 @@
       "bytes": 13074,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_shader_bundle_publication.h": {
+      "sha256": "8a5297a64810a049d02982e5ef6d51fc15d1132c6d2e6ac7dad0e188ceb01e5b",
+      "bytes": 522,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_shader_bundle_publication.m": {
+      "sha256": "15f4a84cf0daad8facfc46c637d69df13d546125b3b7fafce293090afeb98fa9",
+      "bytes": 14237,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_shader_conditional.h": {
+      "sha256": "295f21d6690db49a6df532e3d4eb22d2cfa7dfdc43f4273f6b22cea85c10e15d",
+      "bytes": 2084,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_shader_conditional.m": {
+      "sha256": "35a2064d521fabe3c910b3d9eb08982ee182d913d2166aeca673188474d200ae",
+      "bytes": 19197,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/whole_shader_publication.h": {
       "sha256": "172b9e41632973c6c05826af95c8c2f481b1faafa599e085ae368b0357827959",
       "bytes": 682,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_shader_publication.m": {
-      "sha256": "bd93df3d1522f41e25cb9f0907c8aa3d65d062dbd16cd0524e3d7c560b712f3b",
-      "bytes": 11284,
+      "sha256": "954cb6b447af0ba9b9068d7328e0347bc6da179fd54aca379b2abdd4a70b750b",
+      "bytes": 8662,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_shader_publication_files.h": {
+      "sha256": "2cec4f2386331ba224544d52e9d30c18aab33841f6a50dcdf0169da8fe88eab1",
+      "bytes": 3125,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_thread_memory.h": {
@@ -359,13 +399,13 @@
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_runtime_configuration.m": {
-      "sha256": "f2712697da24950e924651c8476b690d09baddf58db5db2112452e4ac626b849",
-      "bytes": 15338,
+      "sha256": "d14bb7e32b062a032a093711175bb6533fa1b143d0b6fdd9c8d39f8ec54c846f",
+      "bytes": 15666,
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_runtime_configuration_private.h": {
-      "sha256": "6969fd051faa075744b507dc04e8b6c5e13d0d48e5563eefba11fa3a23d337f7",
-      "bytes": 952,
+      "sha256": "a80bcc41ec44e2edb351f6a8f156159337950e5aee8cabb98eb4d1956667bd04",
+      "bytes": 808,
       "role": "thin-adapter-or-verification"
     },
     "patches/applet-lifecycle.patch": {
@@ -426,6 +466,11 @@
     "patches/checked-dirty-write.patch": {
       "sha256": "dab2a0616f11bc035ee0ba3c6faacdacb1d31ac5a15307c8cc207b42cc2b99b3",
       "bytes": 11979,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/conditional-shader-runtime.patch": {
+      "sha256": "d1dfbab2dcf8352ec7e853b1225951b6eea8b9980888134a45bae5f0ce4c1364",
+      "bytes": 19251,
       "role": "thin-adapter-or-verification"
     },
     "patches/current-thread-ownership.patch": {
@@ -533,9 +578,14 @@
       "bytes": 18272,
       "role": "thin-adapter-or-verification"
     },
+    "scripts/package_conditional.py": {
+      "sha256": "b31cadabff5fdea65b95ac432d671fa4b64744ee6a7bf8be6349509ff24d49a7",
+      "bytes": 22027,
+      "role": "thin-adapter-or-verification"
+    },
     "scripts/package_ios.py": {
-      "sha256": "8500f27f0cd6192662e74e55fb9f1f5174fec9e148a8c30b6bbd0e7c3ba565eb",
-      "bytes": 25157,
+      "sha256": "40d7f1fd4f883233fc21b7b3a77b80b0dd6046ef67a3db0a05fb0cbe5e0e6527",
+      "bytes": 26299,
       "role": "thin-adapter-or-verification"
     },
     "scripts/read_swforce_registry.py": {
@@ -701,6 +751,21 @@
     "tests/whole_runtime_resources_probe.c": {
       "sha256": "caf47bab5176eb920b6166d4ab461762d756a32e848ac338982243139e3c1dca",
       "bytes": 1162,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_shader_bundle_publication_probe.m": {
+      "sha256": "e50f46a6b4464e1c0a0c70082d435ae3656f51a203ec3198a2beed8a6d9e66ce",
+      "bytes": 897,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_shader_conditional_probe.m": {
+      "sha256": "1822f80ef5bf4ade7146cdb5443687bafe53f71c509bda7e0d9c1ac420f43246",
+      "bytes": 3700,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_shader_conditional_runtime_probe.m": {
+      "sha256": "f1ade4a36c4e1be3fe47269b591638b5d58e6610664f8928a8323c9eb50a8eef",
+      "bytes": 5314,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_shader_source_probe.m": {
@@ -1469,21 +1534,22 @@
     "patches/transfer-memory.patch",
     "patches/normal-heap-lease.patch",
     "patches/portable-shader-source.patch",
-    "patches/base-v0-image-bank.patch"
+    "patches/base-v0-image-bank.patch",
+    "patches/conditional-shader-runtime.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
     "dm/gfx/nvn/botw_shader_manifest.h": "a95145b9f7fbeb9a72f082ecf38cab776af078d7ecf91c99e6824afd24386501",
-    "dm/gfx/nvn/botw_shader_manifest.m": "336c284a0220048bc3b5d6a3759b72544882ade54bd7f52d92f55521f87293c5",
+    "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
-    "dm/gfx/nvn/hle_nvn.c": "e3e8bc9c0f5a1daa417794c90dce581474280c22f7721ecd0ddef3146c0367d7",
+    "dm/gfx/nvn/hle_nvn.c": "d6952649722e79c37d4d7d633cddc9b544d3d64c9839c8cd0ed68a4fd26abe1e",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
     "dm/gfx/nvn/nvn_mtl.h": "18a45e5f00a93f16959697407c0e810029e591071947463a759804f8bd58790d",
-    "dm/gfx/nvn/nvn_mtl.m": "635bbcf2dafbcd11b3e507c9106163b6e64054af9b8bd3b57156350d514a7521",
+    "dm/gfx/nvn/nvn_mtl.m": "199c5d960218f62fda7de1664bdf282f488c278530f55a7acd56a950b40ba6a0",
     "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
     "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
     "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
@@ -1571,7 +1637,9 @@
     "adapter/whole_heap_lease.c",
     "adapter/whole_heap_provider.c",
     "adapter/whole_runtime_resources.m",
-    "adapter/whole_shader_publication.m"
+    "adapter/whole_shader_publication.m",
+    "adapter/whole_shader_conditional.m",
+    "adapter/whole_shader_bundle_publication.m"
   ],
   "runtime_configuration_translation_units": [
     "frontend/whole_runtime_configuration.m"

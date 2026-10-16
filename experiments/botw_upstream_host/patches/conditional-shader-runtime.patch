@@ -1,0 +1,279 @@
+--- a/dm/gfx/nvn/botw_shader_manifest.m
++++ b/dm/gfx/nvn/botw_shader_manifest.m
+@@ -1,4 +1,5 @@
+ #import "botw_shader_manifest.h"
++#import "whole_shader_conditional.h"
+ 
+ #import <CommonCrypto/CommonDigest.h>
+ #include <errno.h>
+@@ -204,6 +205,8 @@
+     if (!manifest_data) return nil;
+     NSDictionary *manifest = json_dictionary(manifest_data, @"manifest-build.json", error);
+     if (!manifest) return nil;
++    if ([manifest[@"schema"] isEqual:@"botw-shader-conditional-source-manifest-v1"])
++        return [WholeShaderConditionalManifest conditionalManifestAtAbsolutePath:path error:error];
+     NSString *chain = manifest[@"chain"];
+     BOOL source = [manifest[@"schema"] isEqual:kSourceManifestSchema];
+     if (!source && ![manifest[@"schema"] isEqual:kManifestSchema]) {
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -53,6 +53,7 @@
+ #include "botw_shader.h"
+ #include "botw_shader_observation.h"
+ #import "botw_shader_runtime.h"
++#import "whole_shader_conditional.h"
+ #include "../tex/nvn_fmt_mtl.h"
+ #include "../tex/nvn_deswizzle.h"
+ #include "../tex/nvn_deswizzle_gpu.h"
+@@ -1693,7 +1694,7 @@
+ static RENC g_enc;
+ 
+ // Target info of the current render pass: determined once from the attachments at rp_begin and shared by all draws in the pass (pipeline key, depth-stencil, viewport / scissor all depend only on it)
+-static struct { uint32_t cfmt[8], dfmt, sfmt, samples; int hd, hs; NSUInteger tw, th; uint64_t serial, reg_gen, ser_gen, range_dirty; int range_external, range_depth_nonro; __unsafe_unretained id<MTLTexture> range_color, range_depth; } g_pass;
++static struct { uint32_t conditional_color0_format, conditional_color0_known; uint32_t cfmt[8], dfmt, sfmt, samples; int hd, hs; NSUInteger tw, th; uint64_t serial, reg_gen, ser_gen, range_dirty; int range_external, range_depth_nonro; __unsafe_unretained id<MTLTexture> range_color, range_depth; } g_pass;
+ static id<MTLRenderPipelineState> g_enc_pso; static id<MTLDepthStencilState> g_enc_dss;
+ 
+ // Fixed-function state already set on this encoder (not resent if unchanged; same lifetime as g_enc_pso: invalidated when a new render encoder is opened). valid bits: 0 viewport 1 scissor 2 cull 3 winding 4 fill 5 depth bias 6 blend color 7 stencil reference 8 depth clip mode
+@@ -2475,6 +2476,13 @@
+         uint64_t ser = g_pass.serial + 1; memset(&g_pass, 0, sizeof g_pass); g_pass.serial = ser;
+         for (int i = 0; i < R.rt.n && i < 8; i++) { id<MTLTexture> t = R.rt.color[i] ? pd.colorAttachments[i].texture : nil;
+             if (t) { g_pass.cfmt[i] = (uint32_t)t.pixelFormat; g_pass.samples = (uint32_t)t.sampleCount; } }
++        if (R.rt.n > 0 && R.rt.color[0] && pd.colorAttachments[0].texture && !g_blkv_alias[0]) {
++            uint32_t logical = R.rt.has_cview[0] && R.rt.cview[0].set_format ? R.rt.cview[0].format : R.rt.color[0]->d.format;
++            uint32_t required_pf = 0; uint8_t swizzle[4];
++            if (nvn_fmt_to_mtl((int)logical,&required_pf,swizzle) && required_pf && required_pf == g_pass.cfmt[0]) {
++                g_pass.conditional_color0_known = 1; g_pass.conditional_color0_format = logical;
++            }
++        }
+         id<MTLTexture> dt = R.rt.depth ? pd.depthAttachment.texture : nil, stt = R.rt.depth ? pd.stencilAttachment.texture : nil;   //Depth / stencil attachments are fetched separately (possibly only one of them is attached)
+         g_pass.hd = dt && dt.pixelFormat != MTLPixelFormatStencil8; g_pass.hs = stt != nil;
+         g_pass.dfmt = g_pass.hd ? (uint32_t)dt.pixelFormat : 0; g_pass.sfmt = stt ? (uint32_t)stt.pixelFormat : 0;
+@@ -2619,7 +2627,7 @@
+     botw_shader_identity ident; } @end   //ident: full program identity of a manifest-mode shader, checked on every cache hit
+ @implementation NvShader @end
+ #include "nvn_pso_skey.h"
+-@interface NvProg : NSObject { @public NvShader *sh[6]; __unsafe_unretained NvShader *fl_sh[6]; uint8_t fl_ok, fl_img, fl_img_w; uint32_t fl_cmask; } @end   //fl_*: reflection summary used per draw (udc_note_draw), reused after checking against sh[]
++@interface NvProg : NSObject { @public NSMutableDictionary<NSString *, NvProg *> *conditional; NvShader *sh[6]; __unsafe_unretained NvShader *fl_sh[6]; uint8_t fl_ok, fl_img, fl_img_w; uint32_t fl_cmask; } @end   //fl_*: reflection summary used per draw (udc_note_draw), reused after checking against sh[]
+ @implementation NvProg @end
+ 
+ // Warm-up entry: built in the background, waiting to be taken by the submit thread. vs / fs are strong references (in pso they are only raw pointers, and the background dictionary is released when the task ends)
+@@ -2900,7 +2908,12 @@
+     }
+     return v;
+ }
++static int shader_mode_conditional(void) {
++    return [botw_shader_runtime_manifest() isKindOfClass:WholeShaderConditionalManifest.class];
++}
+ static __unsafe_unretained NvProg *prog_get(const prog_t *cp) {   //Called only on the submit thread
++    /* Prewalk S is not necessarily the future draw S. Deferred is never Missing. */
++    if (shader_mode_conditional()) return nil;
+     if (shader_observation_mode()) {
+         // Bounded observation classifies before any cache, artifact or library access. Prewalkers call
+         // prog_get before the draw executes; a targeted graphics match must resolve nil conservatively
+@@ -3246,6 +3259,89 @@
+     float point_size;   //Fixed NVN point size; shader-selected point rasterization remains unsupported.
+     float line_width;   //nvnCommandBufferSetLineWidth: NVN default 1; Metal has no line-width state, draws consuming a non-unit width are rejected at draw entry
+ } S;
++/* WHOLE_CONDITIONAL_HELPERS_BEGIN
++ * The prewalk path never resolves a conditional artifact. Only actual draw
++ * enters here; source compilation runs outside both metadata locks. */
++static botw_conditional_draw_state conditional_snapshot_locked(const prog_t *p) {
++    botw_conditional_draw_state s = {0};
++    const dev_t_ *d = p ? (const dev_t_ *)p->dev : NULL;
++    if (d && d->magic == MAGIC('D','E','V',0)) {
++        s.device_known = 1;
++        s.window_origin_mode = __atomic_load_n(&d->origin, __ATOMIC_RELAXED);
++        s.depth_mode = __atomic_load_n(&d->depth_mode, __ATOMIC_RELAXED);
++    }
++    s.descriptor_epoch = atomic_load_explicit(&g_reg_gen, memory_order_relaxed);
++    s.color0_known = R.has_rt && R.rt.n >= 0 && R.rt.n <= 8;
++    s.color0_present = s.color0_known && R.rt.n > 0 && R.rt.color[0];
++    if (s.color0_present) s.color0_format = R.rt.has_cview[0] && R.rt.cview[0].set_format ? R.rt.cview[0].format : R.rt.color[0]->d.format;
++    return s;
++}
++static NvProg *conditional_program_for_draw(const prog_t *p, botw_conditional_draw_state *snapshot) {
++    WholeShaderConditionalManifest *m = (WholeShaderConditionalManifest *)botw_shader_runtime_manifest();
++    if (!p || !p->serial || !p->nstage || p->nstage > 2) botw_shader_unsupported("conditional graphics program has invalid immutable stages/serial", NULL);
++    botw_conditional_modes_lock(); pthread_mutex_lock(&g_rmu);
++    *snapshot = conditional_snapshot_locked(p);
++    pthread_mutex_unlock(&g_rmu); botw_conditional_modes_unlock();
++    WholeShaderConditionalArtifact *selected[2] = {nil,nil};
++    botw_shader_info infos[2];
++    for (unsigned i=0;i<p->nstage;i++) {
++        botw_shader_info info;
++        if (!botw_shader_get_info(&p->sd[i], &info) || info.stage > 1 || selected[info.stage])
++            botw_shader_unsupported("conditional scope requires unique immutable VS/FS snapshots", NULL);
++        NSError *error = nil;
++        selected[info.stage] = [m artifactForInfo:&info state:snapshot error:&error];
++        if (!selected[info.stage]) botw_shader_unsupported(error.localizedDescription.UTF8String, info.key);
++        infos[info.stage] = info;
++    }
++    if (!selected[0]) botw_shader_unsupported("conditional graphics program has no vertex stage", NULL);
++    NSString *tuple = [NSString stringWithFormat:@"%@|%@", selected[0].cacheIdentity, selected[1] ? selected[1].cacheIdentity : @"no-fragment"];
++    NvProg *owner = serial_get(p->serial);
++    if (!owner) { owner = [NvProg new]; owner->conditional = [NSMutableDictionary dictionary]; serial_put(p->serial, owner); }
++    if (!owner->conditional) botw_shader_unsupported("conditional serial owner belongs to a different shader route", NULL);
++    NvProg *have = owner->conditional[tuple];
++    if (have) return have; /* Selection above rechecks every required field. */
++    NvProg *resolved = [NvProg new];
++    for (unsigned st=0;st<2;st++) if (selected[st]) {
++        WholeShaderConditionalArtifact *a=selected[st];
++        if (!g_shcache) g_shcache=[NSMutableDictionary dictionary];
++        NvShader *sh=g_shcache[a.cacheIdentity];
++        if (sh && (!botw_shader_identity_matches(&sh->ident,&infos[st]) || sh->artifact != a))
++            botw_shader_unsupported("conditional shader cache identity collision", infos[st].key);
++        if (!sh) {
++            /* Only a diagnostic label is shortened; cache identities never are. */
++            sh=shader_load_artifact([a.key stringByAppendingString:@"_b"],a,&infos[st]);
++            if (!sh) botw_shader_unsupported("conditional source failed actual function creation",infos[st].key);
++            g_shcache[a.cacheIdentity]=sh;atomic_fetch_add(&g_shcache_n,1);
++        }
++        resolved->sh[st]=sh;
++    }
++    owner->conditional[tuple]=resolved;return resolved;
++}
++typedef struct { int held; } conditional_draw_guard;
++static void conditional_draw_unlock(conditional_draw_guard *g) {
++    if (g->held) { g->held=0;pthread_mutex_unlock(&g_rmu);botw_conditional_modes_unlock(); }
++}
++static int conditional_draw_commit(conditional_draw_guard *g,const prog_t *p,NvProg *resolved,const botw_conditional_draw_state *expected) {
++    botw_conditional_modes_lock();pthread_mutex_lock(&g_rmu);g->held=1;
++    botw_conditional_draw_state now=conditional_snapshot_locked(p);
++    if (!botw_conditional_state_equal(expected,&now)) { conditional_draw_unlock(g);return 0; }
++    /* Actual attachment publication follows view creation in rp_begin_ex. */
++    if (resolved->sh[1] && (!g_pass.conditional_color0_known || g_pass.conditional_color0_format != now.color0_format)) {
++        conditional_draw_unlock(g);return 0;
++    }
++    WholeShaderConditionalManifest *m=(WholeShaderConditionalManifest *)botw_shader_runtime_manifest();
++    for (unsigned i=0;i<p->nstage;i++) {
++        botw_shader_info info;
++        if (!botw_shader_get_info(&p->sd[i],&info) || info.stage>1 || !resolved->sh[info.stage] ||
++            !botw_shader_identity_matches(&resolved->sh[info.stage]->ident,&info)) { conditional_draw_unlock(g);return 0; }
++        NSError *error=nil;
++        WholeShaderConditionalArtifact *a=[m artifactForInfo:&info state:&now error:&error];
++        if (!a || a!=resolved->sh[info.stage]->artifact) { conditional_draw_unlock(g);return 0; }
++    }
++    return 1; /* Both locks remain held through both stage encodes and draw. */
++}
++/* WHOLE_CONDITIONAL_HELPERS_END */
++
+ static void udc_note_draw(NvProg *pr) {
+ 
+     // Same target, all-zero set generation unchanged: it was already removed last time, so no need to scan the set again (the set has up to 4096 entries, scanned once per color attachment per draw)
+@@ -3869,11 +3965,11 @@
+     if (nvn_stage == 0 || nvn_stage == 1)
+         for (int r = 0; r < 8; r++) { uint64_t ih = S.img[nvn_stage][r]; memcpy(d + 0x120 + 8 * r, &ih, 8); }
+ }
+-static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex) {
++static int encode_args_impl(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex, int registry_locked) {
+     if (!sh->ae) return 1;
+     uint64_t slots[NVN_REFL_MAXB] = {0};
+     args_sync_dirty();
+-    if (!passdump() && !g_args_dirty[nvn_stage] && sh->ab_buf && sh->ab_pass == g_pass.serial && nvn_stage != 5) {
++    if (!registry_locked && !passdump() && !g_args_dirty[nvn_stage] && sh->ab_buf && sh->ab_pass == g_pass.serial && nvn_stage != 5) {
+         bind_args(en, nvn_stage, metal_vertex, sh->ab_buf, sh->ab_gpu, sh->ab_off, sh->rf.abi);
+         g_stat_args_reuse++;
+         return 1;
+@@ -3895,7 +3991,7 @@
+     static uint64_t bl_pass[6]; static int bl_all = -1; if (bl_all < 0) bl_all = getenv("DM_NVN_PASSDUMP_ALL") != NULL;   //Record on every new encode (otherwise only the first time per pass per stage)
+     int bl = passdump() && (bl_all || bl_pass[nvn_stage] != g_stat_pass);
+     if (bl) { bl_pass[nvn_stage] = g_stat_pass; PD("K %llu st%d key=%s nb=%d", g_stat_pass, nvn_stage, sh->key[0] ? sh->key : sh->builtin ? sh->builtin : "?", sh->rf.nb); }
+-    pthread_mutex_lock(&g_rmu);   //The texture / sampler registration tables may be being grown or rewritten by the game thread
++    if (!registry_locked) pthread_mutex_lock(&g_rmu);   // Conditional draw holds one lock for both stages
+     for (int i = 0; i < sh->rf.nb; i++) {
+         const nvn_rbind *b = &sh->rf.b[i];
+         int reg = b->reg, aid = b->aid;
+@@ -4004,7 +4100,7 @@
+     }
+     #undef USE
+     #undef USE_SAMP
+-    pthread_mutex_unlock(&g_rmu);
++    if (!registry_locked) pthread_mutex_unlock(&g_rmu);
+     NSUInteger arg_len = sh->arg_len ? sh->arg_len : sh->ae.encodedLength;
+     id<MTLBuffer> ab; size_t off = arena_alloc(arg_len, &ab);
+     memcpy((uint8_t *)ab.contents + off, slots, arg_len);
+@@ -4012,6 +4108,9 @@
+     sh->ab_buf = ab; sh->ab_gpu = g_cur_arena->gpu + off; sh->ab_off = off; sh->ab_pass = g_pass.serial; g_args_dirty[nvn_stage] = 0;
+     g_stat_args_enc++;
+     return 1;
++}
++static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int stage, int vertex) {
++    return encode_args_impl(en,sh,stage,vertex,0);
+ }
+ static id<MTLBuffer> g_quad_ib; static uint64_t g_quad_gpu;
+ static RENC rp_begin(void);
+@@ -5528,7 +5627,10 @@
+         MDIE("UNIMPL NVN point rasterization at fixed size %a: translated shaders write size 1", (double)S.point_size);
+     shader_observe_draw(dw, di);
+     if (!S.prog) { RED_ONCE(18, "no program bound before draw"); return; }
+-    __unsafe_unretained NvProg *pr = prog_get(S.prog);
++    botw_conditional_draw_state conditional_snapshot = {0};
++    int conditional_mode = shader_mode_conditional();
++    NvProg *conditional_program = conditional_mode ? conditional_program_for_draw(S.prog,&conditional_snapshot) : nil;
++    __unsafe_unretained NvProg *pr = conditional_mode ? conditional_program : prog_get(S.prog);
+     if (botw_missing_shader_skip() && (!pr || !pr->sh[0])) {   // skip mode left the program empty (observation mode keeps nil)
+         uint64_t n = atomic_fetch_add(&g_missing_draws, 1) + 1;
+         if (n == 1 || n % 1000 == 0) MLOG("[ERROR] %llu draws skipped so far: program without a vertex shader artifact (%llu programs)",
+@@ -5717,11 +5819,14 @@
+     static id<MTLBuffer> zero; if (!zero) { zero = [g_dev newBufferWithLength:64 options:MTLResourceStorageModeShared]; res_add(zero); }
+     static uint64_t zero_gpu; if (!zero_gpu) zero_gpu = zero.gpuAddress;
+     enc_r_vbuf(en, 30, zero_gpu);
+-    if (pr->sh[0]) encode_args(en, pr->sh[0], 0, 1);
+-    if (pr->sh[1]) encode_args(en, pr->sh[1], 1, 0);
++    conditional_draw_guard conditional_guard __attribute__((cleanup(conditional_draw_unlock))) = {0};
++    if (conditional_mode && !conditional_draw_commit(&conditional_guard,S.prog,pr,&conditional_snapshot))
++        botw_shader_unsupported("conditional metadata changed during function/PSO compilation", NULL);
++    if (pr->sh[0]) encode_args_impl(en, pr->sh[0], 0, 1, conditional_mode);
++    if (pr->sh[1]) encode_args_impl(en, pr->sh[1], 1, 0, conditional_mode);
+ 
+     // Parameter binding captures the actual resources under the registry lock; if the version changed between the eligibility check and the binding, split and retry before any GPU draw.
+-    if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { rp_end(); draw(dw, di); return; }
++    if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { conditional_draw_unlock(&conditional_guard); rp_end(); draw(dw, di); return; }
+     int prim = dw ? dw->prim : di->prim;
+     MTLPrimitiveType mp;
+     switch (prim) {
+@@ -5891,6 +5996,7 @@
+     args_dirty_all();
+ }
+ static void dispatch(const p_dispatch *dp) {
++    if (shader_mode_conditional()) botw_shader_unsupported("conditional first scope does not admit compute dispatch", NULL);
+     zskip_clear();
+     if (shader_observation_mode()) {
+         shader_observation_class c = shader_observation_classify(S.prog);
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -32,6 +32,7 @@
+ #include "botw_shader.h"
+ #include "nvn_clock.h"
+ #include "nvn_handle.h"
++#include "whole_shader_conditional.h"
+ #include "nvn_cmd_audit.h"
+ #include "nvn_dtex.h"
+ #include <mach/mach_time.h>
+@@ -131,12 +132,14 @@
+ NVN(nvnDeviceBuilderSetDefaults, void, NVNdeviceBuilder *b) { memset(b, 0, sizeof(dev_builder_t)); }
+ NVN(nvnDeviceBuilderSetFlags, void, NVNdeviceBuilder *b, int f) { ((dev_builder_t *)b)->flags = f; }
+ NVN(nvnDeviceInitialize, NVNboolean, NVNdevice *d, const NVNdeviceBuilder *b) {
++    botw_conditional_modes_lock();
+     dev_t_ *o = (dev_t_ *)d; memset(o, 0, sizeof *o);
+     o->magic = MAGIC('D', 'E', 'V', 0); o->flags = ((const dev_builder_t *)b)->flags;
++    botw_conditional_modes_unlock();
+     OLOG("DeviceInitialize %p flags=%#x", (void *)d, o->flags);
+     return 1;
+ }
+-NVN(nvnDeviceFinalize, void, NVNdevice *d) { ((dev_t_ *)d)->magic = 0; }
++NVN(nvnDeviceFinalize, void, NVNdevice *d) { botw_conditional_modes_lock(); ((dev_t_ *)d)->magic = 0; botw_conditional_modes_unlock(); }
+ NVN(nvnDeviceGetProcAddress, PFNNVNGENERICFUNCPTRPROC, const NVNdevice *d, const char *name) {
+     (void)d; return (PFNNVNGENERICFUNCPTRPROC)nvn_lookup(name);
+ }
+@@ -229,8 +232,8 @@
+ NVN(nvnDeviceInstallDebugCallback, void, NVNdevice *d, const PFNNVNDEBUGCALLBACKPROC cb, void *data, uint32_t enable) {
+     dev_t_ *o = (dev_t_ *)d; o->dbg_cb = B(enable) ? (void *)cb : NULL; o->dbg_data = data;
+ }
+-NVN(nvnDeviceSetWindowOriginMode, void, NVNdevice *d, NVNwindowOriginMode m) { __atomic_store_n(&((dev_t_ *)d)->origin, (uint32_t)m, __ATOMIC_RELAXED); LOG("[nvn] window origin %s", m ? "upper-left (same as D3D / Metal)" : "lower-left (GL)"); }
+-NVN(nvnDeviceSetDepthMode, void, NVNdevice *d, NVNdepthMode m) { __atomic_store_n(&((dev_t_ *)d)->depth_mode, (uint32_t)m, __ATOMIC_RELAXED); LOG("[nvn] depth mode %s", m ? "near=0 (same as D3D / Metal)" : "near=-w (GL)"); }
++NVN(nvnDeviceSetWindowOriginMode, void, NVNdevice *d, NVNwindowOriginMode m) { botw_conditional_modes_lock(); __atomic_store_n(&((dev_t_ *)d)->origin, (uint32_t)m, __ATOMIC_RELAXED); botw_conditional_modes_unlock(); LOG("[nvn] window origin %s", m ? "upper-left (same as D3D / Metal)" : "lower-left (GL)"); }
++NVN(nvnDeviceSetDepthMode, void, NVNdevice *d, NVNdepthMode m) { botw_conditional_modes_lock(); __atomic_store_n(&((dev_t_ *)d)->depth_mode, (uint32_t)m, __ATOMIC_RELAXED); botw_conditional_modes_unlock(); LOG("[nvn] depth mode %s", m ? "near=0 (same as D3D / Metal)" : "near=-w (GL)"); }
+ NVN(nvnDeviceFinalizeCommandHandle, void, NVNdevice *d, NVNcommandHandle h) { (void)d; (void)h; }
+ 
+ 

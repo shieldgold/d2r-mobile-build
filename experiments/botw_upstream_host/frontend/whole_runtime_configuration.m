@@ -132,7 +132,7 @@ static int prepare(void *opaque,char *error,size_t capacity) {
     if(strcmp(paths.metadata,context->metadata)) {code=problem(error,capacity,EINVAL,"metadata argument changed");goto failed;}
     if((code=whole_runtime_romfs_verify(context->documents,context->romfs,sizeof context->romfs,error,capacity)))goto failed;
 #if defined(BOTW_WHOLE_SHADER_PUBLICATION) && BOTW_WHOLE_SHADER_PUBLICATION
-    if((code=whole_runtime_shader_publication(context->bundle,context->manifest,sizeof context->manifest,error,capacity)))goto failed;
+    if((code=whole_runtime_shader_bundle_publication(context->bundle,context->manifest,sizeof context->manifest,error,capacity)))goto failed;
     if(context->manifest[0]!='/') {code=problem(error,capacity,EINVAL,"shader publication did not supply an absolute verified path");goto failed;}
 #else
     code=problem(error,capacity,ENOTSUP,"no verified shader publication is configured; host/Guest entry is blocked");
@@ -238,8 +238,12 @@ const whole_frontend_runtime *whole_runtime_configuration(void) {
         @autoreleasepool {
             runtime_context *context=&g_configuration;
             NSArray<NSURL*> *documents=[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
+            /* Canonicalize only the OS-provided trusted bundle root, before
+             * forming any artifact path. System /var aliases must not become
+             * artifact symlink exemptions; bundle children remain no-follow. */
+            NSString *trusted_bundle=NSBundle.mainBundle.bundlePath.stringByResolvingSymlinksInPath;
             if(documents.count!=1||copy_path(context->documents,sizeof context->documents,documents[0].path)||
-                copy_path(context->bundle,sizeof context->bundle,NSBundle.mainBundle.bundlePath)||
+                copy_path(context->bundle,sizeof context->bundle,trusted_bundle)||
                 copy_path(context->temporary,sizeof context->temporary,NSTemporaryDirectory())||
                 copy_path(context->executable,sizeof context->executable,NSBundle.mainBundle.executablePath))return;
             int n=snprintf(context->metadata,sizeof context->metadata,"%s/botw",context->bundle);

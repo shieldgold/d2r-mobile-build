@@ -18,6 +18,7 @@ import shutil
 import struct
 import sys
 import tempfile
+from types import SimpleNamespace
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT))
@@ -239,8 +240,17 @@ def verify_guest(guest,report,rewrite,profile,repository,temporary):
                                 'framework_sha256':generated['framework']['sha256'],'modules':names}
 
 
-def shader_files(source):
+def shader_files(source,*,conditional_supported=False):
     source=checked_path(source);ios._tree(source)
+    if os.path.lexists(source/'conditional-publication.json'):
+        if os.path.lexists(source/'source-publication.json'):
+            raise ValueError('ambiguous established and conditional source publications')
+        if not conditional_supported:
+            raise ValueError('actual configured host did not compile the conditional runtime and bundle gate')
+        adapter=load(COMPONENT/'scripts/package_conditional.py','whole_package_conditional_contract')
+        ports=SimpleNamespace(checked_path=checked_path,ios=ios,digest=digest,
+            source_builder=source_builder,read=read,COMPONENT=COMPONENT,load=load)
+        return adapter.shader_files(source,ports)
     # Execute only hash-verified private copies of the pinned builder. The
     # provided tree can change after validation; no unchecked reopen may feed
     # Python execution or the final bundle bytes.
@@ -319,7 +329,9 @@ def prepare(binary,receipt,commands,guest,preflight_report,rewrite,source_public
     if not re.fullmatch(r'[0-9]+(?:\.[0-9]+){0,2}',build_version):raise ValueError('explicit numeric debug build version required')
     raw=read(binary,BINARY);layout=executable_layout(raw)
     lock,build=verify_build(raw,receipt,commands,ROOT)
-    shaders,shader_index=shader_files(source_publication)
+    conditional_supported={'adapter/whole_shader_conditional.m','adapter/whole_shader_bundle_publication.m'}<=set(lock['adapter_translation_units']) and \
+        'patches/conditional-shader-runtime.patch' in lock.get('patches',[])
+    shaders,shader_index=shader_files(source_publication,conditional_supported=conditional_supported)
     info=plistlib.loads(read(info_plist))
     if (info.get('CFBundleIdentifier')!=ios.BUNDLE_ID or info.get('CFBundleExecutable')!='BOTWNative' or
             info.get('CFBundlePackageType')!='APPL' or info.get('MinimumOSVersion')!='18.0' or
@@ -347,6 +359,7 @@ def prepare(binary,receipt,commands,guest,preflight_report,rewrite,source_public
         audit={'schema':'botw-whole-ios-package-v1','bundle_id':ios.BUNDLE_ID,'build_version':build_version,
                'unsigned':True,'installed':False,'executed':False,'phone_ready':False,'game_playable':False,
                'runtime_configured':True,'runtime_shader_compilation_required':True,'executable':layout,
+               'conditional_shader_predicates_required':shader_index['schema']=='botw-whole-conditional-shader-package-v1',
                'build':build,'guest':guest_identity,'shader':shader_index,'files':files,
                'scope':'exact admitted shader batch only; unsigned owned preparation is not device or gameplay acceptance'}
         write_json(app/'package-manifest.json',audit)
