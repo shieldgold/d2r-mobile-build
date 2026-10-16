@@ -1,0 +1,34 @@
+--- a/dm/host/botw_graphics.c
++++ b/dm/host/botw_graphics.c
+@@ -24,6 +24,9 @@
+     LOG("BotW graphics driver: native NVN/Metal, guest transfer memory=%zu", size);
+ }
+ HLE_FORCE("nvnBootstrapLoader", "BotW: resolve native NVN entry points", void *, botw_nvn_bootstrap, const char *name) {
++    static atomic_flag logged = ATOMIC_FLAG_INIT;
++    if (!atomic_flag_test_and_set_explicit(&logged, memory_order_relaxed))
++        LOG("BotW graphics bootstrap: native lookup entered");
+     return nvn_lookup(name);
+ }
+ 
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -108,6 +108,9 @@
+         nvn_slot[i].fn = im[k].fn; hit++;
+     }
+     g_nsem = hit;
++    static atomic_flag logged = ATOMIC_FLAG_INIT;
++    if (!atomic_flag_test_and_set_explicit(&logged, memory_order_relaxed))
++        LOG("BotW graphics bootstrap: native dispatch ready");
+ }
+ 
+ void *nvn_lookup(const char *name) {
+@@ -138,6 +141,9 @@
+     dev_t_ *o = (dev_t_ *)d; memset(o, 0, sizeof *o);
+     o->magic = MAGIC('D', 'E', 'V', 0); o->flags = ((const dev_builder_t *)b)->flags;
+     botw_conditional_modes_unlock();
++    static atomic_flag logged = ATOMIC_FLAG_INIT;
++    if (!atomic_flag_test_and_set_explicit(&logged, memory_order_relaxed))
++        LOG("BotW graphics bootstrap: native device initialized");
+     OLOG("DeviceInitialize %p flags=%#x", (void *)d, o->flags);
+     return 1;
+ }

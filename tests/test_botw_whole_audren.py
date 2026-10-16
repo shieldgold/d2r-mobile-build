@@ -36,7 +36,7 @@ class WholeAudrenTests(unittest.TestCase):
             cls.addClassCleanup(transfer_fixtures.WholeTransfer.doClassCleanups)
             kernel_work=transfer_fixtures.WholeTransfer.binary.parent
             extra_sources=[EXP/'adapter/whole_audren.c',EXP/'tests/whole_audren_kernel_probe.c',
-                           EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c']
+                           EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c',EXP/'adapter/whole_policy.c']
             extra_sources += [ROOT/path for path in ('native/botw_host/services.c','native/botw_resources/romfs.c',
                 'native/botw_resources/savefs.c','native/botw_resources/local_user.c','native/botw_input/input.c')]
             extra_cmake='target_include_directories(owned_whole_audren PRIVATE '+ ' '.join('"'+str(x)+'"' for x in

@@ -61,7 +61,7 @@ class WholeTransfer(unittest.TestCase):
                '-include', EXP / 'tests/whole_transfer_vm_hooks.h',
                EXP / 'tests/whole_transfer_probe.c']
         if BASELINE: cmd += ['-DWHOLE_TRANSFER_BASELINE']
-        else: cmd += [EXP / 'adapter/whole_transfer_vm.c', EXP / 'adapter/base_v0_heap.c']
+        else: cmd += [EXP / 'adapter/whole_transfer_vm.c', EXP / 'adapter/base_v0_heap.c', EXP / 'adapter/whole_policy.c']
         cmd += ['-o', cls.binary]
         result = subprocess.run([str(p) for p in cmd], capture_output=True, text=True)
         if result.returncode: raise AssertionError(result.stdout + result.stderr)

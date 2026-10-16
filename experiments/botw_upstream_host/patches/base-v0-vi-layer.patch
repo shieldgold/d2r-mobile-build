@@ -1,0 +1,88 @@
+--- a/dm/host/botw_graphics.c
++++ b/dm/host/botw_graphics.c
+@@ -3,6 +3,7 @@
+ #define HLE_FORCE_TITLES DM_TM_BOTW
+ #include "hle.h"
+ #include <stdatomic.h>
++#include "whole_vi_layer.h"
+ 
+ void *nvn_lookup(const char *name);
+ void hle_bind_system_event(void *event, int autoclear);
+@@ -30,7 +31,21 @@
+     return nvn_lookup(name);
+ }
+ 
+-static struct { unsigned magic; } g_display = {0x4453504c}, g_layer = {0x4c415952}, g_window = {0x57494e44};
++static struct { unsigned magic; } g_display = {0x4453504c}, g_window = {0x57494e44};
++static struct { unsigned magic; _Atomic uint32_t scaling_mode; } g_layer = {
++    0x4c415952, BOTW_VI_SCALE_PRESERVE_ASPECT
++}; // Preserve existing presentation until an explicit normal VI selection.
++uint32_t botw_vi_layer_scaling_mode(void) {
++    return atomic_load_explicit(&g_layer.scaling_mode, memory_order_relaxed);
++}
++HLE_FORCE("_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE",
++          "base-v0 VI layer scaling is consumed by native presentation", Result,
++          botw_vi_layer_scaling, void *layer, int mode) {
++    if (layer != &g_layer || (mode != BOTW_VI_SCALE_FIT_TO_LAYER && mode != BOTW_VI_SCALE_PRESERVE_ASPECT))
++        return RES_FAIL;
++    atomic_store_explicit(&g_layer.scaling_mode, (uint32_t)mode, memory_order_relaxed);
++    return RES_OK;
++}
+ static _Atomic(void *) g_vsync_event;
+ static void vsync_tick(void) {
+     void *event = atomic_load(&g_vsync_event);
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -18,6 +18,7 @@
+ #include <sys/mman.h>
+ #include <fcntl.h>
+ #include "nvn_mtl.h"
++#include "whole_vi_layer.h"
+ #include "nvn_cmd_audit.h"
+ #include "nvn_dtex.h"
+ 
+@@ -7164,6 +7165,17 @@
+     return v;
+ }
+ 
++// The single native VI layer owns the selected scaling policy. Both Metal
++// encoders use one snapshot; shader state and source crop remain unchanged.
++static MTLViewport vi_layer_viewport(double cw, double ch, double dw, double dh) {
++    uint32_t mode = botw_vi_layer_scaling_mode();
++    if (mode == BOTW_VI_SCALE_FIT_TO_LAYER) return (MTLViewport){0, 0, dw, dh, 0, 1};
++    double s = fmin(dw / cw, dh / ch);
++    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
++    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    return vp;
++}
++
+ // Present samples only the valid source rectangle declared by NVN; kept separate from the raw swapchain readback screenshot. Edges are clamped to the texel centers of the valid area, so bilinear does not read the black texels outside.
+ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src0, id<MTLTexture> dst, const int crop[4]) {
+     id<MTLTexture> src = present_src(src0);
+@@ -7183,11 +7195,9 @@
+     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+ 
+ 
+-    // Keep the game picture's aspect ratio and center it, leaving black bars in the rest (no stretching when the screen ratio differs from the game's, e.g. iPhone about 19.5:9 versus the game's 16:9);
+-    // when the ratio difference is < 1% (the remainder from the game width being a multiple of 8 in the full-screen setup, e.g. 1952x900 versus 2868x1320 differs by 0.17%) fill directly, leaving no few-pixel border
+-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    // Consume the normal VI layer mode for this presentation.
++    double dw = dst.width, dh = dst.height;
++    MTLViewport vp = vi_layer_viewport(cw, ch, dw, dh);
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     static double last_vp[4];   //Log one line when the viewport changes (used by the real-device screen-level acceptance screen_check.py to check the aspect ratio)
+     if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
+@@ -7216,9 +7226,8 @@
+         cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3];
+     }
+     present_pipeline(dst.pixelFormat);
+-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    double dw = dst.width, dh = dst.height;
++    MTLViewport vp = vi_layer_viewport(cw, ch, dw, dh);
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     RPD *rp = [RPD new];
+     rp.colorAttachments[0].texture = dst;

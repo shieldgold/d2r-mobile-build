@@ -38,7 +38,7 @@ class WholeHeapVoice(unittest.TestCase):
             source=Path(cls.temp.name)
         cls.build=source/'build'
         sources=[EXP/'tests/whole_heap_voice_probe.cpp',EXP/'tests/whole_heap_voice_kernel.c',
-                 EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c',
+                 EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c',EXP/'adapter/whole_policy.c',
                  EXP/'adapter/whole_heap_lease.c',EXP/'adapter/whole_heap_provider.c']
         includes=[EXP/'adapter',EXP/'tests',work,work/'dm/host',work/'dm/gfx/nvn']
         cmake='''cmake_minimum_required(VERSION 3.24)

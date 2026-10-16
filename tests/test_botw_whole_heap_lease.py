@@ -43,7 +43,7 @@ class WholeHeapLease(unittest.TestCase):
              '-fsanitize=address,undefined','-fno-sanitize-recover=all',
              '-I',work/'dm/host','-I',work/'dm/gfx/nvn','-I',EXP/'adapter','-I',EXP/'tests','-I',work,
              '-include',EXP/'tests/whole_transfer_vm_hooks.h',EXP/'tests/whole_heap_lease_probe.c',
-             EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c',EXP/'adapter/whole_heap_lease.c',
+             EXP/'adapter/whole_transfer_vm.c',EXP/'adapter/base_v0_heap.c',EXP/'adapter/whole_policy.c',EXP/'adapter/whole_heap_lease.c',
              EXP/'adapter/whole_heap_provider.c','-o',cls.binary]
         result=subprocess.run([str(v) for v in cmd],capture_output=True,text=True)
         if result.returncode:raise AssertionError(result.stdout+result.stderr)

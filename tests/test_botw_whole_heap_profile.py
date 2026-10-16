@@ -38,7 +38,7 @@ class WholeHeapProfile(unittest.TestCase):
                    '-I', str(cls.source / 'dm/host'), '-I', str(EXP / 'adapter'),
                    '-I', str(cls.work), str(EXP / 'tests/base_v0_heap_probe.c'), '-o', str(cls.binary)]
         if not BASELINE:
-            command += ['-DBOTW_BASE_V0_HEAP_ADAPTED=1', str(EXP / 'adapter/base_v0_heap.c')]
+            command += ['-DBOTW_BASE_V0_HEAP_ADAPTED=1', str(EXP / 'adapter/base_v0_heap.c'), str(EXP / 'adapter/whole_policy.c')]
         build = subprocess.run(command, capture_output=True, text=True)
         if build.returncode:
             raise AssertionError(build.stdout + build.stderr)

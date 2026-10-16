@@ -8,6 +8,31 @@
 #include <execinfo.h>
 
 #define BOTW_WHOLE_HOST_POLICY 1
+/* Only normal, identified host APIs with a Horizon Result belong here.
+ * Callers pass no guest frame, address, raw Result or diagnostic context. */
+typedef enum {
+    BOTW_HOST_API_SET_HEAP_SIZE,
+    BOTW_HOST_API_SET_MEMORY_PERMISSION,
+    BOTW_HOST_API_SET_MEMORY_ATTRIBUTE,
+    BOTW_HOST_API_MAP_MEMORY,
+    BOTW_HOST_API_UNMAP_MEMORY,
+    BOTW_HOST_API_QUERY_MEMORY,
+    BOTW_HOST_API_CREATE_THREAD,
+    BOTW_HOST_API_START_THREAD,
+    BOTW_HOST_API_CREATE_TRANSFER_MEMORY,
+    BOTW_HOST_API_CLOSE_HANDLE,
+    BOTW_HOST_API_WAIT_SYNCHRONIZATION,
+    BOTW_HOST_API_GET_INFO,
+    BOTW_HOST_API_CONNECT_TO_NAMED_PORT,
+    BOTW_HOST_API_SEND_SYNC_REQUEST,
+    BOTW_HOST_API_COUNT
+} botw_whole_host_api;
+typedef enum {
+    BOTW_HOST_API_OK,
+    BOTW_HOST_API_ERROR
+} botw_whole_host_api_outcome;
+void botw_whole_host_api_result(botw_whole_host_api api, botw_whole_host_api_outcome outcome);
+void botw_whole_host_heap_capacities(size_t heap, size_t root);
 char *botw_whole_host_getenv(const char *name);
 int botw_backend_compat_diagnostic_enabled(void);
 int botw_whole_host_backtrace(void **buffer, int size);

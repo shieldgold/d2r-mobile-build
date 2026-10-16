@@ -1,0 +1,45 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -1,6 +1,7 @@
+ // Horizon kernel system calls (triggered by the SDK runtime once the SDK is loaded). Only what the P1 boot chain needs is implemented: memory layout + heap + query + debug output + timing.
+ // Register convention: inputs w1.. / outputs w0=Result, x1=value (GetInfo / SetHeapSize), consistent with the public Horizon ABI.
+ #include "dm.h"
++#include "whole_policy.h"
+ #include "whole_ipc.h"
+ #include "hle.h"
+ #include "dm_title.h"
+@@ -166,3 +167,3 @@
+ 
+-uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
++static uint64_t svc_dispatch_impl(int num, uint64_t *regs, uint64_t orig_addr) {
+     { void hlecount_svc(int); hlecount_svc(num); }   // DM_HLECOUNT: svc counts by number
+@@ -331,3 +332,29 @@
+         return svc_unknown_strict(num, regs, orig_addr);
+     }
+ }
++
++/* The original dispatcher owns all arguments and results. Classify only its
++ * completed normal Result; no frame/address/raw Result reaches the logger. */
++uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
++    uint64_t returned = svc_dispatch_impl(num, regs, orig_addr);
++    botw_whole_host_api api;
++    switch (num) {
++    case 0x01: api = BOTW_HOST_API_SET_HEAP_SIZE; break;
++    case 0x02: api = BOTW_HOST_API_SET_MEMORY_PERMISSION; break;
++    case 0x03: api = BOTW_HOST_API_SET_MEMORY_ATTRIBUTE; break;
++    case 0x04: api = BOTW_HOST_API_MAP_MEMORY; break;
++    case 0x05: api = BOTW_HOST_API_UNMAP_MEMORY; break;
++    case 0x06: api = BOTW_HOST_API_QUERY_MEMORY; break;
++    case 0x08: api = BOTW_HOST_API_CREATE_THREAD; break;
++    case 0x09: api = BOTW_HOST_API_START_THREAD; break;
++    case 0x15: api = BOTW_HOST_API_CREATE_TRANSFER_MEMORY; break;
++    case 0x16: api = BOTW_HOST_API_CLOSE_HANDLE; break;
++    case 0x18: api = BOTW_HOST_API_WAIT_SYNCHRONIZATION; break;
++    case 0x29: api = BOTW_HOST_API_GET_INFO; break;
++    case 0x1F: api = BOTW_HOST_API_CONNECT_TO_NAMED_PORT; break;
++    case 0x21: api = BOTW_HOST_API_SEND_SYNC_REQUEST; break;
++    default: return returned;
++    }
++    botw_whole_host_api_result(api, (uint32_t)regs[0] ? BOTW_HOST_API_ERROR : BOTW_HOST_API_OK);
++    return returned;
++}

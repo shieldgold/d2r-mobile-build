@@ -1,0 +1,81 @@
+{
+  "schema": "botw-base-v0-nvn-version-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "scope": "Two DeviceGetInteger version reports only. No full NVN 52.32 implementation/capability or gameplay claim.",
+  "modules": {
+    "main": {
+      "source_sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "spans": {
+        "version_queries_and_comparisons": {
+          "offset": "0x9fc624",
+          "bytes": 72,
+          "sha256": "1a8a8805c7aa441d688dfd637baeb1277679ffedcf7210d1cebe80c3ac33919d"
+        }
+      }
+    },
+    "subsdk0": {
+      "source_sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "spans": {
+        "DeviceGetInteger": {
+          "offset": "0xb1e30",
+          "bytes": 48,
+          "sha256": "89fd72d6a72b161954fd6d6c474457b047349597009d9815300b13cd2e7000cf"
+        },
+        "IntegerQuery_prefix": {
+          "offset": "0xb3448",
+          "bytes": 72,
+          "sha256": "0fd04d93c45da4ec8999572c7350179f48e7d59f56aaf69a2817c9da58905f0a"
+        },
+        "IntegerQuery_minor": {
+          "offset": "0xb34c8",
+          "bytes": 8,
+          "sha256": "3cf10775e0b90fff74e0262fd424c85ce3de73fd3ebfa2a633800a39209e4696"
+        },
+        "IntegerQuery_return": {
+          "offset": "0xb357c",
+          "bytes": 16,
+          "sha256": "b95a9d7e01419863cf64bf512dfd953f6fc59116b2444ecbd55178b2465382f9"
+        },
+        "IntegerQuery_keys0_1_table": {
+          "offset": "0x162790",
+          "bytes": 8,
+          "sha256": "29f7a66f308251d4d22d40e7646a09af08e02d14e0a6fdf2772fe73ff485a82b"
+        }
+      }
+    }
+  },
+  "query_body_sha256": "c785dab379bba0ec01944ebd68b652d46ab431be8938a66fced2bfca7e8958c1",
+  "original_table_sha256": "d375aa5d9bb3ad5f2087063f1642bce594dbea5a4a370dc45a07b9719c84b3f7",
+  "contracts": {
+    "signature": "void nvnDeviceGetInteger(const NVNdevice *, NVNdeviceInfo, int *)",
+    "output": "Exactly one 32-bit int is written through the third argument; the query returns void.",
+    "main": {
+      "query_calls": {
+        "0": "0x9fc63c",
+        "1": "0x9fc650"
+      },
+      "major_compare": "0x9fc658",
+      "major_required": 52,
+      "major_reject_branch": "0x9fc65c !=",
+      "minor_compare": "0x9fc664",
+      "minor_minimum": 32,
+      "minor_reject_branch": "0x9fc668 signed <",
+      "reject_target": "0x9fcd84"
+    },
+    "original_primary_driver": {
+      "module": "subsdk0",
+      "proc_table_index": 190,
+      "DeviceGetInteger": "0xb1e30",
+      "IntegerQuery": "0xb3448",
+      "jump_table": "0x162790",
+      "key0_target": "0xb357c",
+      "key0_value_from": "0xb3480",
+      "major": 52,
+      "key1_target": "0xb34c8",
+      "minor": 32
+    },
+    "normal_query_preserved": "Device argument stays unused; all original fields >=2 and out-of-table log+zero behavior remain byte-identical in the original function.",
+    "runtime_causality": "The fixed version mismatch is statically proven. No actual fault address, NULL object or SIGSEGV causal chain is inferred."
+  }
+}

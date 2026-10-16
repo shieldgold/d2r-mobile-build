@@ -21,7 +21,7 @@ def macho_fixture(entries=None, pointer_format=6):
     if entries is None:
         entries = [{'name': 'owned_symbol', 'why': 'owned reason', 'titles': 4}]
     # Keep the entire registry and every link in one real chained-fixup page.
-    # The 132-entry profile occupies 4224 bytes and needs the supported 16K page.
+    # The 133-entry profile occupies 4256 bytes and needs the supported 16K page.
     text_size, imagebase = 0x10000, 0x100000000
     page = 0x1000 if len(entries) * 32 <= 0x1000 else 0x4000
     if len(entries) * 32 > page:
@@ -128,7 +128,7 @@ class RegistryAudit(unittest.TestCase):
         pattern = r'^\s*\{(' + quoted + r'), (' + quoted + r'), (\d+)u, \d+u, \d+u\},$'
         actual = [{'name': json.loads(name), 'why': json.loads(why), 'titles': int(titles)}
                   for name, why, titles in re.findall(pattern, source, re.M)]
-        self.assertEqual(len(actual), 132)
+        self.assertEqual(len(actual), 133)
         self.assertEqual(self.reader.canonical_entries(actual),
                          self.reader.canonical_entries(self.expected_entries))
         self.assertEqual(self.reader.metadata_sha256(actual), self.expected_sha256)
@@ -139,7 +139,7 @@ class RegistryAudit(unittest.TestCase):
         result = self.cli(binary, output, self.expected_sha256)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         evidence = json.loads(output.read_text())
-        self.assertEqual(evidence['count'], 132)
+        self.assertEqual(evidence['count'], 133)
         self.assertEqual(evidence['canonical_metadata_sha256'], self.expected_sha256)
         self.assertEqual(evidence['binary_sha256'], hashlib.sha256(binary.read_bytes()).hexdigest())
         self.assertTrue(evidence['expected_registry_verified'])
@@ -243,7 +243,7 @@ class RegistryAudit(unittest.TestCase):
         if not binary.is_file():
             self.skipTest('private linked Mac artifact is unavailable; owned metadata tests still run')
         result = self.reader.audit_registry(binary, self.expected_sha256)
-        self.assertEqual(result['count'], 132)
+        self.assertEqual(result['count'], 133)
         self.assertEqual(result['canonical_metadata_sha256'], self.expected_sha256)
 
 

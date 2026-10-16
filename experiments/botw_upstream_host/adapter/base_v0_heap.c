@@ -2,6 +2,7 @@
  * Pure planning function retained verbatim from native/botw_host/runtime.c;
  * source binding and exact disk thunk profile are in base_v0_heap.json. */
 #include "base_v0_heap.h"
+#include "whole_policy.h"
 #include <stdint.h>
 #include <stdio.h>
 #if defined(__APPLE__)
@@ -59,7 +60,7 @@ int botw_base_v0_heap_thread_init(pthread_key_t heap_key, pthread_key_t root_key
     pthread_mutex_lock(&plan_lock);
     size_t heap = heap_capacity, root = root_capacity;
     botw_base_v0_heap_inputs inputs = initial_inputs;
-    int result = 0;
+    int result = 0, first_commit = 0;
     if (selected && (heap_key != selected_heap_key || root_key != selected_root_key || query != input_query))
         result = fail(error, capacity, "base-v0 heap: immutable provider or TSD key pair changed");
     if (!result && !selected) {
@@ -81,9 +82,12 @@ int botw_base_v0_heap_thread_init(pthread_key_t heap_key, pthread_key_t root_key
     if (!result && !selected) {
         initial_inputs = inputs; heap_capacity = heap; root_capacity = root;
         selected_heap_key = heap_key; selected_root_key = root_key; input_query = query; selected = 1;
+        first_commit = 1;
     }
     if (error && capacity) error[capacity - 1] = 0;
-    pthread_mutex_unlock(&plan_lock); return result ? -1 : 0;
+    pthread_mutex_unlock(&plan_lock);
+    if (first_commit) botw_whole_host_heap_capacities(heap, root);
+    return result ? -1 : 0;
 }
 int botw_base_v0_heap_initial_pending(void) {
     pthread_mutex_lock(&plan_lock); int pending = !initial_accepted;

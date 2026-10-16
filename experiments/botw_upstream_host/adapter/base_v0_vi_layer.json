@@ -1,0 +1,267 @@
+{
+  "schema": "botw-base-v0-vi-layer-contract-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "scope": "One native-owned VI layer scaling selection and the two original normal Metal present paths; not a VI IPC reimplementation or gameplay proof.",
+  "all_seven_module_sha256": {
+    "rtld": "2bf1918e54e3d6378f150e45a264c151558198703a778408db5ac26263a3a362",
+    "main": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+    "subsdk0": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+    "subsdk1": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+    "subsdk2": "e56eec1a58d1fa53779469e6eea36a795c0deac90bbf25b54b97c44ed195bd65",
+    "subsdk3": "2f344d84badf826937317e033b47f32bb2e1e8b7856553ce7356616268b5e238",
+    "sdk": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31"
+  },
+  "modules": {
+    "main": {
+      "source_sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "spans": {
+        "InitializeGraphics_to_VI_scaling_and_vsync": {
+          "offset": "0x9fc4b4",
+          "bytes": 160,
+          "sha256": "fa0e401edf7ae90ecee009f5f310cb47ff2dfac6440a162f35bd35688ad78784"
+        },
+        "public_scaling_call": {
+          "offset": "0x9fc538",
+          "bytes": 12,
+          "sha256": "bc50dc5cc164b5da91e7561e9969ab3d529d5dc0eab7c3d35581bd32bb5aad7d"
+        }
+      }
+    },
+    "subsdk1": {
+      "source_sha256": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+      "spans": {
+        "SetLayerScalingMode": {
+          "offset": "0xe20c",
+          "bytes": 100,
+          "sha256": "8a1c174d46d5145597e5e598b33f79864f4c1735957ed7026b77f4cc9efa237e"
+        },
+        "GetService": {
+          "offset": "0x2820",
+          "bytes": 36,
+          "sha256": "efa619509b63f5d17be05da5cd72099cf1d0835fbc98bb9bff0eabfac1064751"
+        },
+        "CMIF_SetLayerScalingMode": {
+          "offset": "0x5c78",
+          "bytes": 420,
+          "sha256": "e2e3a9dd0f6172f83f8fd20e0968c2d7775b0f99928314c15a949e6e40e8533f"
+        },
+        "unconverted_mode_input": {
+          "offset": "0x5c8c",
+          "bytes": 12,
+          "sha256": "779ab567514d5608ee3df517abf134fb7503a0d0bfef9cae6c535437a239b729"
+        },
+        "unconverted_mode_payload_store": {
+          "offset": "0x5d30",
+          "bytes": 12,
+          "sha256": "2f53d8153a1b7501d14a4ae6ff0ff429158c4ca438c6a4fc15b20abd889f8d29"
+        }
+      }
+    }
+  },
+  "imported_vi_apis": {
+    "_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE": {
+      "demangled": "nn::vi::GetDisplayVsyncEvent(nn::os::SystemEventType*, nn::vi::Display*)",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0xd118",
+          "bytes": 160,
+          "bounded_sha256": "a52c109ed5e8da580d55228c06e6567c11feb40520e87df87a109eba4d20d881"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x22637a0",
+          "addend": 0
+        }
+      ]
+    },
+    "_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE": {
+      "demangled": "nn::vi::SetLayerScalingMode(nn::vi::Layer*, nn::vi::ScalingMode)",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0xe20c",
+          "bytes": 100,
+          "bounded_sha256": "8a1c174d46d5145597e5e598b33f79864f4c1735957ed7026b77f4cc9efa237e"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x2263798",
+          "addend": 0
+        }
+      ]
+    },
+    "_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE": {
+      "demangled": "nn::vi::OpenDefaultDisplay(nn::vi::Display**)",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0xce70",
+          "bytes": 32,
+          "bounded_sha256": "e625e845392e09ee2f251b9c1559afed8ad23af2a497315729324139175e4054"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x2263788",
+          "addend": 0
+        }
+      ]
+    },
+    "_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE": {
+      "demangled": "nn::vi::GetNativeWindow(void**, nn::vi::Layer*)",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0xe270",
+          "bytes": 44,
+          "bounded_sha256": "cdf18c220af0444b39c39d5abbe188f4326aaa0bbfec5c2b3958807dd6692216"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x22637b0",
+          "addend": 0
+        }
+      ]
+    },
+    "_ZN2nn2vi11CreateLayerEPPNS0_5LayerEPNS0_7DisplayE": {
+      "demangled": "nn::vi::CreateLayer(nn::vi::Layer**, nn::vi::Display*)",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0xdda0",
+          "bytes": 648,
+          "bounded_sha256": "8e42b22a376b2510b13639e0e5755e1f05ab267854726648ebabf4a305f048ac"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x2263790",
+          "addend": 0
+        },
+        {
+          "module": "subsdk1",
+          "type": 1026,
+          "offset": "0x29260",
+          "addend": 0
+        }
+      ]
+    },
+    "_ZN2nn2vi10InitializeEv": {
+      "demangled": "nn::vi::Initialize()",
+      "importing_modules": [
+        "main"
+      ],
+      "definitions": [
+        {
+          "module": "subsdk1",
+          "offset": "0x288c",
+          "bytes": 2480,
+          "bounded_sha256": "16ca051af38f38d68ead0b263eb4bd78572445df0747e15dbfaa5a450b4b5e70"
+        }
+      ],
+      "relocations": [
+        {
+          "module": "main",
+          "type": 1026,
+          "offset": "0x2263780",
+          "addend": 0
+        },
+        {
+          "module": "subsdk1",
+          "type": 1026,
+          "offset": "0x294e0",
+          "addend": 0
+        }
+      ]
+    }
+  },
+  "original_missing_force": "_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE",
+  "force_reason": "base-v0 VI layer scaling is consumed by native presentation",
+  "force_reference_mask": 1,
+  "primary_scaling_reference": {
+    "project": "switchbrew/libnx",
+    "commit": "2fc36019d74785dc53e1ed36606e668ad519e249",
+    "files": {
+      "nx/include/switch/services/vi.h": {
+        "url": "https://raw.githubusercontent.com/switchbrew/libnx/2fc36019d74785dc53e1ed36606e668ad519e249/nx/include/switch/services/vi.h",
+        "sha256": "c70490311556b36bae00aa46e2f531faf227e8ae494385adaf4608ac2211d09f",
+        "bytes": 4911
+      },
+      "nx/source/services/vi.c": {
+        "url": "https://raw.githubusercontent.com/switchbrew/libnx/2fc36019d74785dc53e1ed36606e668ad519e249/nx/source/services/vi.c",
+        "sha256": "bc1461f5a041d6b5d7246939142a8b422fe2ca9d6e29ed6a8f6e55b85f7eca86",
+        "bytes": 17849
+      }
+    }
+  },
+  "public_abi": {
+    "parameters": [
+      "nn::vi::Layer *",
+      "32-bit nn::vi::ScalingMode"
+    ],
+    "return": "nn::Result in w0; zero means completed successfully.",
+    "original_layer_id_offset": "0x20",
+    "original_service_getter": "subsdk1+0x2820 loads the VI service from its own context, retains non-NULL service, and writes it through indirect result x8.",
+    "original_public_mode": "subsdk1+0xe220 copies w1 to w19; +0xe23c copies it unchanged to CMIF w2.",
+    "original_wire_mode": "CMIF+0x5c8c copies w2 to w20; +0x5d38 writes the same u32 into payload+0x10; the layer ID occupies payload+0x18. No enum conversion occurs.",
+    "original_result": "CMIF reply Result is loaded at+0x5d9c; public wrapper returns its low32 unchanged.",
+    "ownership_gap": "The old host CreateLayer supplies a four-byte native identity token, while unforced original SetLayerScalingMode consumes original VI service and Layer+0x20. The replacement compares native token identity without dereferencing caller pointers."
+  },
+  "native_consumption": {
+    "owner": "the existing botw_graphics.c g_layer only",
+    "initial_host_policy": "Preserve the pre-existing aspect-fit behavior until a successful explicit scaling selection. This is not a claim about the original SDK default.",
+    "supported_modes": {
+      "2": {
+        "name": "FitToLayer",
+        "viewport": "Full destination canvas; source crop and sampling remain the original NVN logic."
+      },
+      "4": {
+        "name": "PreserveAspectRatio",
+        "viewport": "Original centered fmin scaling, floor origins, rounded extents and original one-percent near-equal ratio fill tolerance."
+      }
+    },
+    "unsupported_modes": "0,1,3 and all other 32-bit values return original RES_FAIL without changing state.",
+    "invalid_owner": "NULL, forged, foreign or lookalike tokens return RES_FAIL before any pointer dereference or state change.",
+    "publication": "One atomic mode field on the original native layer; one atomic snapshot per viewport, no secondary layer registry.",
+    "consumers": [
+      "present_encode",
+      "present_encode_m4"
+    ]
+  },
+  "limitations": [
+    "The static ownership/protocol gap is confirmed; no actual fault PC or SIGSEGV causal location is inferred.",
+    "No guest runtime memory, registers, stack or diagnostic capture was read.",
+    "Owned viewport tests do not establish physical-device rendering or gameplay."
+  ],
+  "guest_or_gpu_executed": false
+}

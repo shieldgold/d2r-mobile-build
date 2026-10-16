@@ -1,0 +1,13 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -180,7 +180,9 @@
+ 
+ // Device properties: values measured on Tegra X1 (nnheaders nvn_DeviceConstantsNX.h, obtained by calling nvnDeviceGetInteger item by item on SMO)
+ static const int g_devinfo[] = {
+-    [0x00] = 55, [0x01] = 15,   // BotW 1.9.0 SDK: sdk+0x4c7444/0x4c7460; main+0xe93b50 requires major 55 and minor >= 15.
++    // Fixed base-v0: subsdk0+0xb3448 reports 52/32; main+0x9fc658 requires 52 and minor >= 32.
++    // This report adaptation does not claim complete NVN 52.32 capability coverage.
++    [0x00] = 52, [0x01] = 32,
+     [0x02] = 14, [0x03] = 65536, [0x04] = 256, [0x05] = 8, [0x06] = 16, [0x07] = 4, [0x08] = 16, [0x09] = 32,
+     [0x0A] = 16, [0x0B] = 4, [0x0C] = 4, [0x0D] = 4, [0x0E] = 16, [0x0F] = 32, [0x10] = 32, [0x11] = 256, [0x12] = 256,
+     [0x13] = 4, [0x14] = 8, [0x15] = 512, [0x16] = 256, [0x17] = 2, [0x18] = 256, [0x19] = 4096, [0x1A] = 131072,

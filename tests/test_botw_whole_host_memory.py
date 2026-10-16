@@ -27,7 +27,7 @@ class WholeHostMemory(unittest.TestCase):
              '-fsanitize=address,undefined','-fno-sanitize-recover=all',
              '-I',str(work/'dm/host'),'-I',str(EXP/'adapter'),'-I',str(EXP/'tests'),'-I',str(work),
              '-include',str(EXP/'tests/whole_transfer_vm_hooks.h'),str(EXP/'tests/whole_host_memory_probe.c'),
-             str(EXP/'adapter/whole_transfer_vm.c'),str(EXP/'adapter/base_v0_heap.c')]
+             str(EXP/'adapter/whole_transfer_vm.c'),str(EXP/'adapter/base_v0_heap.c'),str(EXP/'adapter/whole_policy.c')]
         if BASELINE:cmd+=['-DWHOLE_HOST_MEMORY_BASELINE=1']
         else:cmd += [str(EXP/'adapter/whole_host_memory.c'),str(EXP/'adapter/whole_guest_memory.c')]
         result=subprocess.run(cmd+['-o',str(cls.binary)],capture_output=True,text=True)

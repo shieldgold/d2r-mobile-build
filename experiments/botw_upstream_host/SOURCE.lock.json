@@ -29,8 +29,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.c": {
-      "sha256": "9cb9e0acbb055f048b8f4ef840b8b1426f129d5904bafdd56cd60f450b3ba50b",
-      "bytes": 25374,
+      "sha256": "f3c0682b84d25f1c3b8347411a90f2495d1b9c5d56ef8c06bc000a28a4a7fd9e",
+      "bytes": 25520,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.h": {
@@ -54,8 +54,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.c": {
-      "sha256": "2828fc27e6dcf83dc4d01cca07b2e91a2255dec506d62119584711d979afa96a",
-      "bytes": 6700,
+      "sha256": "8e41db1134df1156964cd35e28632fd52e5bdf05d905553474922705fcbb2113",
+      "bytes": 6841,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.h": {
@@ -71,6 +71,16 @@
     "adapter/base_v0_hid_single.json": {
       "sha256": "228ed34421624dadc9fdd0f86463594426796401ef7dbf6fc048efa6632173ce",
       "bytes": 10542,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_nvn_version.json": {
+      "sha256": "8eaf118f44c706153f27cf4825e6f166043b3a1cb590f60a90a9b66e7485922c",
+      "bytes": 3095,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_vi_layer.json": {
+      "sha256": "0847d45aa2096f6347da033bbfa153c2e41b6b743c59961313f3678f9bb8f7fc",
+      "bytes": 9729,
       "role": "thin-adapter-or-verification"
     },
     "adapter/public_vm_read.h": {
@@ -234,13 +244,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "0366fa75db3dac7d7422a6f7976a3023462f1bc4147664a47649a0905f407a28",
-      "bytes": 3542,
+      "sha256": "f8b05d5bec5c29d1e3055eed7ba6758f1042ffae785aee09971759287f2b502a",
+      "bytes": 6512,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "ed32997adde85bf69844d9234da3efd2d798e22b35bdb8015bdc0007f35beb9f",
-      "bytes": 1270,
+      "sha256": "e95081a361a646864c1aed1b9ed4f032813bc219223d6d81d21ee9b72fc732c9",
+      "bytes": 2226,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -388,6 +398,11 @@
       "bytes": 3061,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/whole_vi_layer.h": {
+      "sha256": "67ba3707872319ab55e38afbb1e38873e355a9214b4cfd6095bb57cd44926cea",
+      "bytes": 411,
+      "role": "thin-adapter-or-verification"
+    },
     "frontend/whole_front_state.c": {
       "sha256": "46c0af78fed0e370071f32f2b9ca85fb2c062de9e0458e7251a02d8a0dd9b357",
       "bytes": 4377,
@@ -478,9 +493,19 @@
       "bytes": 644,
       "role": "thin-adapter-or-verification"
     },
+    "patches/base-v0-nvn-version.patch": {
+      "sha256": "e78c433b4aada5168a15ce3378c479811ddffe2d0ecc12ff062b9d4f56a29a7b",
+      "bytes": 943,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/base-v0-pool-builder.patch": {
       "sha256": "6e8124a8facb5f0d4f363d790d59960deb9223df26e79400a5746d1da48487ff",
       "bytes": 3830,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-vi-layer.patch": {
+      "sha256": "ddf6522db5980bb0fa4eec72bc13fc91d490f5cc634de7611be8532cd219f985",
+      "bytes": 4742,
       "role": "thin-adapter-or-verification"
     },
     "patches/bounded-address-space.patch": {
@@ -508,6 +533,11 @@
       "bytes": 3832,
       "role": "thin-adapter-or-verification"
     },
+    "patches/graphics-bootstrap-status.patch": {
+      "sha256": "a15a568d13beca601f796a02775e55998bce5fae626628be30712c3bcbb72ac7",
+      "bytes": 1369,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/host-policy.patch": {
       "sha256": "d345e2b247ef43cc01ec48b0d50a6647c2327817468ec68d065ad82c2af014f7",
       "bytes": 45829,
@@ -531,6 +561,11 @@
     "patches/kernel-services.patch": {
       "sha256": "a8d3b35d201062152e9c16124b7c0497b01fdcf4a03565f38d90f95e6be3969b",
       "bytes": 8325,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/normal-api-status.patch": {
+      "sha256": "772c7cd225b8f0df2675ecda26acad3b8c09eff6b4fa80b9de5dfb369bbaca28",
+      "bytes": 2200,
       "role": "thin-adapter-or-verification"
     },
     "patches/normal-heap-lease.patch": {
@@ -629,7 +664,7 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/base_v0_force_probe.c": {
-      "sha256": "28826f743224afed67b44c692101973d7372f6a1eb19770132862bcc2f24dc9f",
+      "sha256": "561584c717f7c921a96fc39eeaaf150783cfa82aca4456aa9393538737a7fbd2",
       "bytes": 9754,
       "role": "thin-adapter-or-verification"
     },
@@ -698,6 +733,11 @@
       "bytes": 8577,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_graphics_bootstrap_probe.c": {
+      "sha256": "3813e8d6069b5448f2a87125c0aeddc720ed5075f7485f9af716c30e232b60f3",
+      "bytes": 6664,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_guest_memory_probe.c": {
       "sha256": "1a8dbf9711b01dbe79adedbbef1cc3c5602a2d0b4e0c3f358419593513689537",
       "bytes": 4220,
@@ -751,6 +791,16 @@
     "tests/whole_kernel_services_probe.c": {
       "sha256": "41f286421373554584cd3bfd946cda50f0aecb41124326496a515280aa4db5ed",
       "bytes": 11831,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_normal_api_status_probe.c": {
+      "sha256": "d2064aa8c3ff0cde430bdaffd438ad7d45c4fe849996cf9a8d925ac97ece7d08",
+      "bytes": 7775,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_nvn_version_probe.c": {
+      "sha256": "1cd2a7edfbb3d5350d3249970dfa223f0c25c645a5dd8ebd42b38df24f39b7e4",
+      "bytes": 2387,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pcm_stress_frontier_probe.c": {
@@ -821,6 +871,11 @@
     "tests/whole_transfer_vm_hooks.h": {
       "sha256": "20fe622a04eb11f872d7526a1785befe78973a99e1b55edffdfc2980526857fb",
       "bytes": 625,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_vi_layer_probe.m": {
+      "sha256": "17b830750a7337926c5eefc2d9674a364f3658c07df76fe708aee8c93b8ad8e7",
+      "bytes": 4434,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_weak_import_probe.c": {
@@ -1583,7 +1638,11 @@
     "patches/conditional-shader-runtime.patch",
     "patches/bounded-address-space.patch",
     "patches/weak-import-resolution.patch",
-    "patches/base-v0-hid-single-state.patch"
+    "patches/base-v0-hid-single-state.patch",
+    "patches/normal-api-status.patch",
+    "patches/base-v0-nvn-version.patch",
+    "patches/graphics-bootstrap-status.patch",
+    "patches/base-v0-vi-layer.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
@@ -1591,19 +1650,20 @@
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
-    "dm/gfx/nvn/hle_nvn.c": "d6952649722e79c37d4d7d633cddc9b544d3d64c9839c8cd0ed68a4fd26abe1e",
+    "dm/gfx/nvn/hle_nvn.c": "e9e824c7431ba5747de28e859fcaac0275b2751f399faf465505e7c5b48feba7",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
     "dm/gfx/nvn/nvn_mtl.h": "18a45e5f00a93f16959697407c0e810029e591071947463a759804f8bd58790d",
-    "dm/gfx/nvn/nvn_mtl.m": "199c5d960218f62fda7de1664bdf282f488c278530f55a7acd56a950b40ba6a0",
+    "dm/gfx/nvn/nvn_mtl.m": "2bcd5d0c200ec4370ac03d28a9eee612b716b3ba2b4c2752e48f2159b2ca46c3",
     "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
     "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
     "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
     "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",
     "dm/host/botw_audio_renderer.c": "3b5375a4cdf0d465a0e6fc97e0cb90c1dd6c4d3065d6243703f70f0e8314daf8",
     "dm/host/botw_fs.c": "c8c986526bc02ddd396be8d96ca8d93933525dea8babf9d59a8e0e6ec9395881",
+    "dm/host/botw_graphics.c": "b1f61695cd93d0bb61a4cc2594c23f56b3c094a83d7c088e701766b9ffb07a2d",
     "dm/host/botw_hid.c": "5cafc0c71e9abe4e000610a06a962383a515d3c80c1706a2f0032cff58b8f413",
     "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
     "dm/host/botw_pcm.c": "7b77d126af15ab5015770f823d47cf67ab08e4fdb52b9f167ae8179365e6a17e",
@@ -1614,7 +1674,7 @@
     "dm/host/hle.c": "721c43f02f361e0ace50a9b7ed7561109f27cf8e9494e34e4371b55d03bdf552",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
-    "dm/host/hle_svc.c": "4590cc81b1f5ebf7d6fe15f76a10913ab9a4697b8899d3cb218d3b55f7c29a87",
+    "dm/host/hle_svc.c": "fe293ff4bae63ebde2af0845caa927a87f11273617c2eacdc9c32f8b05c83b1a",
     "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
     "dm/host/loader.c": "42e7e7eb2a0d67b860b02a74e11af0ca395951e9219da7bdbc2dedb4a1104ab5",
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",
@@ -1694,8 +1754,8 @@
   "runtime_configuration_translation_units": [
     "frontend/whole_runtime_configuration.m"
   ],
-  "swforce_record_count": 132,
-  "swforce_metadata_sha256": "89cf5f49f832c7e648c942f00b584e09c2327267e97c01e7d57d7d58f6a85d25",
+  "swforce_record_count": 133,
+  "swforce_metadata_sha256": "b43dee230c7b8a7540abef375e839d37e772c3484118e27a40330c5587354122",
   "normal_operand_validation_references": {
     "adapter/whole_pool_builder.c": [
       "_vm_region_recurse_64"

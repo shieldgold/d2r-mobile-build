@@ -152,6 +152,7 @@ static const force_rule rules[] = {
     {"_ZN2nn2vi10InitializeEv", "BotW: native host display", 4u, 1u, 5u},
     {"_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE", "BotW: default host display", 4u, 1u, 1u},
     {"_ZN2nn2vi11CreateLayerEPPNS0_5LayerEPNS0_7DisplayE", "BotW: native Metal layer", 4u, 1u, 5u},
+    {"_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE", "base-v0 VI layer scaling is consumed by native presentation", 4u, 1u, 1u},
     {"_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE", "BotW: NVN window token", 4u, 1u, 1u},
     {"_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE", "BotW: host display refresh event", 4u, 1u, 1u},
     {"_ZN2nn3hid14InitializeNpadEv", "BotW: Npad backed by the host keyboard / mouse / GameController", 4u, 1u, 1u},
