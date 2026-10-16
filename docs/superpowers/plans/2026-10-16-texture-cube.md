@@ -25,8 +25,9 @@
 
 ## Task 3：集成与游戏验收
 
-- [ ] root精确stage、commit并push，普通Mac以固定提交/200私有输入运行，保留真实新停止点或第一帧；不等待长超时猜因果，不把受控agentstop当guest完成。
-- [ ] 连贯候选固定完整测试及精确head CI，核官方工件后本机签名并保数据更新iPhone12；当前已装cae/PID1160、UID/RomFS/shader保全，非终态日志继续分样保存。
+- [x] root精确核7冻结SHA及index，连同3自有文档共10路径提交并push `7ee9a1acbbf97d9eff4993385fd32a682d9a62ed`。
+- [ ] 普通Mac以固定提交/200私有输入运行，保留真实新停止点或第一帧；不等待长超时猜因果，不把受控agentstop当guest完成。当前binary e0c77e87…运行中无host_return，桌面接口锁定状态与ioreg不一致，仍待成功屏幕核验。
+- [x] 7ee固定完整1004项/1003pass+1既有skip完整exit0（254.899秒），644项来源前后稳；iOS38873214176/Linux38873214174精确head成功，官方工件核后本机签名并保数据更新iPhone12/PID1175，UID/RomFS/shader保全。首40秒与后续295秒观察均13线程、无host_return/新fatal/frame，boot前缀保留且只一次新增bootstrap，非终态日志分样保留。
 - [ ] 真实游戏画面、操作、音频、存档和重开都验收后才可称可玩。时间基准/锁调查作为独立只读证据线，未经证实不修改counter或引入显示时钟fallback。
 
 最终7路径freeze SHA256 `6059d61d5901577ae3b574f8d4ccfef0d996cac372235b8154f180c794b1fa8a`，family `69d5de4232a3d7dff008eedbe8ef170e38ff51f3dac7f3c66751931f8b51194d`，native98/100。owner相关CPU36/36通过7.256秒；独立CPU8/8、12mode通过5.711秒，ASan/UBSan及ARC exceptions启用。新两GPU方法/七模式先固定旧生产真实RED，再在相同最终生产通过2.972秒，实测六face×三mip及rawDepth1 selected Cube；最终独立public Cube四模式、原generic target9负域与2DArray共3方法/15模式通过3.598秒，实际MetalValidation启用，无GPU sanitizer。全7文件与98项依赖SHA前后稳定，双独审CLOSED/GPU_RELEASED；完整原游戏和A14结果另记，不能从自有夹具通过推定可玩。CPU多mip对象明确要求单mip View，NULL region只支持完整六面，未宣称所有原View语义已等价。
