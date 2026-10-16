@@ -161,6 +161,12 @@ int main(int argc,char **argv){@autoreleasepool{
   if(!strcmp(mode,"size-zero-gl")){b->target=NVN_TEXTURE_TARGET_2D;b->flags=8;b->format=NVN_FORMAT_R32UI;b->glName=9;b->device=NULL;b->width=-7;}
   if(!strcmp(mode,"size-zero-buffer")){b->target=NVN_TEXTURE_TARGET_BUFFER;b->width=0;}
   strcpy(lastError,"owned-size-sentinel");CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);CHECK(accessCalls==1&&notifications==0&&!pendingError&&!pendingFatal);CHECK(!strcmp(lastError,"owned-size-sentinel"));
+ }else if(!strcmp(mode,"size-1d")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_1D;b->width=4;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);b->levels=3;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==1536);CHECK(notifications==0);
+  b->glName=1;b->device=NULL;b->width=-4;unsigned before=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==before+1);b->glName=0;b->device=&rawDevice;b->width=4;b->packagedData=(const void*)(uintptr_t)UINTPTR_MAX;before=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==before+1);b->packagedData=NULL;b->packaged=0x101;before=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==before+1&&notifications==0);for(unsigned h=0;h<6;h++){b->packaged=1|(h<<4);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==1536);}
+ }else if(!strcmp(mode,"1d-init-boundaries")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_1D;b->width=4;BWPool *pool=get(&rawPool,[BWPool class]);NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
+  for(unsigned i=0;i<2;i++){pool.kind=i?BW_POOL_ORDINARY:BW_POOL_VIRTUAL;b->levels=i?3:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned reads=accessCalls,calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&accessCalls==reads+3&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i?"1D Metal textures require one level":"1D textures require ordinary pool storage"));}
  }else if(!strcmp(mode,"size-positive")){
   strcpy(lastError,"owned-size-sentinel");CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);CHECK(accessCalls==1&&notifications==0&&!pendingError&&!pendingFatal);CHECK(!strcmp(lastError,"owned-size-sentinel"));
  }else if(!strcmp(mode,"size-invalid-builder")){
@@ -272,6 +278,14 @@ int main(int argc,char **argv){@autoreleasepool{
                       'samples=0', 'stride=177', 'gl_name_nonzero=false',
                       'packaged_data_nonnull=true']:
             self.assertIn(field, lines[0])
+
+    def test_non_array_1d_size_alignment_and_mips_reuse_original_gob_layout(self):
+        lines, result = self.size_mode('size-1d')
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(all('target=0 ' in line for line in lines))
+
+    def test_1d_virtual_and_mip_creation_reject_before_object_or_registry_publication(self):
+        self.mode('1d-init-boundaries')
 
     def test_zero_gl_and_buffer_results_keep_existing_early_return_and_access_count(self):
         for mode in ['size-zero-gl', 'size-zero-buffer']:

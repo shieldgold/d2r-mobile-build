@@ -119,3 +119,13 @@ object ABI, public iOS VM calls, checked copies/failure paths, per-command
 buffer publication, classic Metal, pool generations and strict unsupported
 semantics. Upstream no-op/fallback results and game-specific rendering policies
 are not imported. See TEXTURES.md for supported scope and validation limits.
+
+The non-array 1D thin adapter reuses the complete pinned nvn_tex layout,
+deswizzle, nvn_texwrite and nvn_texflush modules unchanged. Its public fixture
+adapts dm/gfx/tests/t_texwrite.m's 1D 4x1 RGBA8 WriteTexels/Metal readback case
+at the same 5f673ae commit above; native MTLTextureType1D selection follows
+dm/gfx/nvn/nvn_mtl.m tex_desc. Local validation restricts creation to one mip,
+ordinary pools, supported identity color formats and flags=0; it does not copy
+the upstream descriptor's unvalidated multi-mip 1D behavior or its broader
+target/format fallback. Apple primary type/view/mipmap constraints and the
+independently checked base-v0 layout are documented in TEXTURES.md.

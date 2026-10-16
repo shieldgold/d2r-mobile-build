@@ -1,5 +1,6 @@
 """Synthetic base SDK texture ABI, lifetime and real Metal regressions."""
 from pathlib import Path
+import os
 import platform
 import subprocess
 import tempfile
@@ -10,6 +11,73 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class TextureFamilyTests(unittest.TestCase):
+    def test_non_array_1d_uses_real_private_texture_and_preserves_explicit_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / 'texture-1d'
+            graphics = ROOT / 'native/botw_graphics'
+            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+                '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'),
+                str(graphics / 'tools/probe_texture_family.c'), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(executable)],
+                capture_output=True, text=True, timeout=120)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            for mode in ['1d-init', '1d', '1d-wide', '1d-packaged', '1d-cached', '1d-boundaries', '1d-views',
+                         '1d-virtual', '1d-stale']:
+                with self.subTest(mode=mode):
+                    run = subprocess.run([str(executable), mode], capture_output=True,
+                                         text=True, timeout=60,
+                                         env={**os.environ, 'MTL_DEBUG_LAYER': '1'})
+                    if run.returncode == 77:
+                        self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                    self.assertIn('TEXTURE_1D_', run.stdout)
+                    self.assertNotIn('failed assertion', run.stderr)
+
+    def test_non_array_1d_descriptor_sampling_type_guard_and_private_alias_authority(self):
+        import test_botw_graphics as baseline
+        from unittest.mock import patch
+        feature = r'''
+    API(nvnTextureBuilderSetTarget);API(nvnTextureBuilderSetSize1D);API(nvnTextureWriteTexels);API(nvnTextureFinalize);
+    API(nvnTexturePoolInitialize);API(nvnTexturePoolRegisterTexture);API(nvnSamplerPoolInitialize);API(nvnSamplerPoolRegisterSampler);
+    API(nvnSamplerBuilderSetDefaults);API(nvnSamplerBuilderSetDevice);API(nvnSamplerBuilderSetMinMagFilter);API(nvnSamplerInitialize);
+    API(nvnTextureViewSetDefaults);API(nvnTextureViewSetTarget);API(nvnTextureViewSetSwizzle);
+    API(nvnDeviceGetTextureHandle);API(nvnCommandBufferSetTexturePool);API(nvnCommandBufferSetSamplerPool);API(nvnCommandBufferBindTexture);
+    unsigned char *oneMemory=NULL;CHECK(!posix_memalign((void**)&oneMemory,page,page*4));memset(oneMemory,0,page*4);NVNmemoryPool onePool;nvnMemoryPoolBuilderSetStorage(&mb,oneMemory,page*4);CHECK(nvnMemoryPoolInitialize(&onePool,&mb));
+    int wide=argc>1&&!strcmp(argv[1],"1d-sample-wide");unsigned oneWidth=wide?33:4;NVNtexture one;nvnTextureBuilderSetDefaults(&tb);nvnTextureBuilderSetDevice(&tb,&device);nvnTextureBuilderSetTarget(&tb,NVN_TEXTURE_TARGET_1D);nvnTextureBuilderSetSize1D(&tb,oneWidth);nvnTextureBuilderSetFormat(&tb,NVN_FORMAT_RGBA8);nvnTextureBuilderSetStorage(&tb,&onePool,0);CHECK(nvnTextureInitialize(&one,&tb));
+    unsigned char onePixels[132];for(unsigned x=0;x<oneWidth;x++)for(unsigned c=0;c<4;c++)onePixels[x*4+c]=c==3?255:(unsigned char)(1+(x*7+c*31+13)%230);NVNcopyRegion full={0,0,0,(int)oneWidth,1,1};nvnTextureWriteTexels(&one,NULL,&full,onePixels);
+    if(argc>1&&(!strcmp(argv[1],"1d-live-authority")||!strcmp(argv[1],"1d-retired-authority"))){
+      NVNtexture alias;nvnTextureBuilderSetTarget(&tb,NVN_TEXTURE_TARGET_2D);nvnTextureBuilderSetSize2D(&tb,4,1);CHECK(nvnTextureInitialize(&alias,&tb));const NVNtexture *aliasTarget[]={&alias};
+      nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,aliasTarget,NULL,NULL,NULL);nvnCommandBufferSetScissor(&cb,0,0,4,1);float aliasColor[]={.2f,.4f,.6f,1};nvnCommandBufferClearColor(&cb,0,aliasColor,15);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);
+      if(!strcmp(argv[1],"1d-retired-authority"))nvnTextureFinalize(&alias);CHECK(botw_graphics_read_texture(&one,onePixels,sizeof onePixels));return 2;
+    }
+    NVNtexturePool tp;NVNsamplerPool sp;CHECK(nvnTexturePoolInitialize(&tp,&pool,0,16));CHECK(nvnSamplerPoolInitialize(&sp,&pool,1024,16));NVNtextureView view;nvnTextureViewSetDefaults(&view);nvnTextureViewSetTarget(&view,NVN_TEXTURE_TARGET_1D);
+    int swizzle=argc>1&&!strcmp(argv[1],"1d-sample-view");if(swizzle)nvnTextureViewSetSwizzle(&view,NVN_TEXTURE_SWIZZLE_B,NVN_TEXTURE_SWIZZLE_G,NVN_TEXTURE_SWIZZLE_R,NVN_TEXTURE_SWIZZLE_A);nvnTexturePoolRegisterTexture(&tp,3,&one,&view);nvnTextureViewSetDefaults(&view);
+    NVNsamplerBuilder sb;NVNsampler sampler;nvnSamplerBuilderSetDefaults(&sb);nvnSamplerBuilderSetDevice(&sb,&device);nvnSamplerBuilderSetMinMagFilter(&sb,NVN_MIN_FILTER_NEAREST,NVN_MAG_FILTER_NEAREST);CHECK(nvnSamplerInitialize(&sampler,&sb));nvnSamplerPoolRegisterSampler(&sp,4,&sampler);uint64_t textureHandle=nvnDeviceGetTextureHandle(&device,3,4);
+    controls[0][8]=32;controls[1][8]=33;codes[0][8]=32;codes[1][8]=33;memcpy(memory+128,codes[0],128);memcpy(memory+256,codes[1],128);
+    int wrong=argc>1&&!strcmp(argv[1],"1d-wrong-shader-type");char oneMSL[1200];snprintf(oneMSL,sizeof oneMSL,"#include <metal_stdlib>\nusing namespace metal;vertex float4 ov(uint v [[vertex_id]]){float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[v],0,1);}fragment float4 of(float4 p [[position]],%s<float> t [[texture(3)]],sampler s [[sampler(0)]]){return t.sample(s,%s);}",wrong?"texture2d":"texture1d",wrong?"float2(p.x/4.0f,.5f)":wide?"(float((uint(p.x)*32u)/3u)+.5f)/33.0f":"p.x/4.0f");
+    botw_graphics_shader_binding bindings[]={{BOTW_GRAPHICS_TEXTURE,0,3},{BOTW_GRAPHICS_SAMPLER,0,0}};CHECK(botw_graphics_register_shader(controls[0],64,codes[0],128,NVN_SHADER_STAGE_VERTEX,oneMSL,"ov"));CHECK(botw_graphics_register_shader_with_bindings(controls[1],64,codes[1],128,NVN_SHADER_STAGE_FRAGMENT,oneMSL,"of",bindings,2));CHECK(nvnProgramSetShaders(&program,2,sd));
+    nvnCommandBufferBeginRecording(&cb);nvnCommandBufferSetRenderTargets(&cb,1,targets,NULL,NULL,NULL);nvnCommandBufferBindProgram(&cb,&program,NVN_SHADER_STAGE_ALL_GRAPHICS_BITS);nvnCommandBufferSetTexturePool(&cb,&tp);nvnCommandBufferSetSamplerPool(&cb,&sp);nvnCommandBufferBindTexture(&cb,NVN_SHADER_STAGE_FRAGMENT,0,textureHandle);nvnCommandBufferDrawArrays(&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,0,3);handle=nvnCommandBufferEndRecording(&cb);nvnQueueSubmitCommands(&queue,1,&handle);nvnQueueFinish(&queue);CHECK(botw_graphics_read_texture(&texture,pixels,sizeof pixels));
+    for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++)for(unsigned c=0;c<4;c++){unsigned component=swizzle&&c<3?2-c:c,sample=wide?x*32/3:x;CHECK(abs((int)pixels[(y*4+x)*4+c]-(int)onePixels[sample*4+component])<=1);}
+    nvnTextureFinalize(&one);nvnMemoryPoolFinalize(&onePool);free(oneMemory);puts("GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK");
+'''
+        source = baseline.METAL_SMOKE.replace('    nvnMemoryPoolFinalize(&pool);',
+            feature + '    nvnMemoryPoolFinalize(&pool);')
+        original_run = subprocess.run
+        def checked_run(*args, **kwargs):
+            result = original_run(*args, **kwargs)
+            self.assertNotIn('failed assertion', result.stderr)
+            return result
+        with patch.dict(os.environ, {'MTL_DEBUG_LAYER': '1'}), \
+                patch.object(baseline.subprocess, 'run', side_effect=checked_run):
+            baseline.MetalBridgeTests.compile_render_probe(self, source, [
+                ('1d-sample', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-sample-wide', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-sample-view', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-wrong-shader-type', 'shader texture type differs', False),
+                ('1d-live-authority', 'texture storage authority', False),
+                ('1d-retired-authority', 'texture storage authority', False)])
+
     def test_native_builder_view_and_pool_lifetime(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / 'texture-family'

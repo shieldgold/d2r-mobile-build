@@ -169,6 +169,12 @@ Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainCo
 
 窄静态审查确认 main 存在 pool 为空时跳过纹理初始化、随后条件进入 WriteTexels 的路径，但尚未证明本次实际走过它；局部 GetStorageSize 返回0仅存入布局字段，未直接清空该 pool。原 base-v0 的 MEMORY_POOL_PAGE_SIZE 查询来自 provider 初始化的 device 字段，不能以其他版本的常量或 depth 的64KiB对齐规则证明其恒为65536；当前无修改页策略的依据。下一观测仅限正常 GetStorageSize 已验证输入与返回0的标量，保持返回和支持域。该增量先在275源码上得到5项真实行为失败，再通过14项相关 CPU 测试；独立复核同样14项通过并确认四个来源文件摘要不变。每图形生命周期最多四条，非零结果静默，未验证输入、返回、回调、错误、锁和成功/失败生命周期重置语义保持；没有新增 guest 内容或 VM 读取。
 
+提交 `6da5352` 的普通 Mac 原游戏新增一条真实零大小查询：`target=0 flags=0 format=0x25 width=4 height=1 depth=1 levels=1 samples=0 stride=0`，GL name 与 packaged data 均为空。它对应当前未准入的一维纹理，不能沿用其他版本的3D参数解释。随后仍为两次成功初始化及另一零 serial 对象 WriteTexels 停止；该查询与停止点的具体因果仍待适配后复测。binary SHA256 为 `036c7802bc262dd953106d7520d06d2b9623232d64fe74a2ffae4b1d76488a18`，参数报告位于 `outputs/botw-host39-mac-6da5352/zero-storage-query-evidence.json`。该纯诊断版尚未重装手机，手机已验证版本仍为275；目前没有可玩验收。
+
+`6da5352` 的 [iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38840038047) 和 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38840038174) 均成功，精确 head 已核验；未将这些通用检查作为原游戏画面或可玩验收。
+
+一维纹理适配沿用已引入的完整上游 layout、texwrite、deswizzle 与 flush 模块，base-v0 独立静态核验本例 Size/Align 均为512。GPU 首域限 ordinary pool、未压缩普通颜色、flags=0、raw samples=0、h=d=1 与单级 mip，实际创建 MTLTextureType1D；不借2D视图代换。一维元数据仍可计算合法 mip 链，但 [Apple MSL 规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.1 限制 native 1D 不支持 mip，因此多级 GPU Init 在 Metal 物化/put 前拒绝。virtual pool、depth、压缩、linear、跨维视图、格式重解释、RT 与 Window 不因本批而开放；既有回收、authority、错误回调和对象 get 规则保持。当前诊断未记录 packaged layout 字段，不能声称实际字段为0；保留的合法 H0..5、W=D=0 范围有原静态尺寸/Write等价证明，packagedData 非空保持拒绝且不读取所指内容。 该组相关三模块 **65 项全部通过，20.426 秒，零跳过**；真实 Metal 校验开启，包含9个公共读写/边界模式与6个采样/反射/authority模式，宽33的1536字节 allocation 使用独立 GOB 地址与 padding canary 核验。CPU查询先复现0→期望512的行为失败；格式重解释的真实 Metal 拒绝由新增受控 guard 前拒，不借 driver assertion 接受不支持的格式。 独立 CPU 检查16项通过（6.499秒、零跳过、ASan/UBSan），独立 GPU 检查2项方法内15个 native 模式通过（2.656秒、零跳过、全部实际 Metal API Validation Enabled）；六个来源文件摘要稳定，graphics.m 与6da逐字节相同。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

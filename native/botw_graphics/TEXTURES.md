@@ -13,7 +13,15 @@
 
 View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode 保留完整 32 位。未设置的 getter 仍写出存储值并返回 false。Compare 忽略未设置字段和 padding。采样和命令记录持有按值快照，随后改变 guest View 不能改变已登记的描述符或已录命令。
 
-实际 GPU 路径限定为已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。数组显式单层视图可作为 2D render target；采样视图支持 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。未验证的 3D/cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
+实际 GPU 路径包含下述受限 1D，以及已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。数组显式单层视图可作为 2D render target；采样视图支持 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。未验证的 3D/cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
+
+## 普通池的非数组 1D
+
+`target=0` 的新域限定 flags=0、原始 samples=0、height=depth=1、width 1..16384，普通 color 的 1×1 block 格式。Size/Alignment 继续使用完整 `nvn_tex` GOB 布局：原 base-v0 静态分支与完整固定上游对 4×RGBA8 均为 512/512；合法多 mip 查询仍逐级计算，例如三级为 1536。GPU 还要求现有精确恒等 Metal 格式、普通 pool 与一个 mip；virtual/physical 直接池、多 mip、depth/stencil、block compression、linear、COMPRESSIBLE 等不会因开放 target0 获准创建。GL name 非零的 Size 先返回 0，packaged data 非空不解引用并拒绝。Packaged layout 仅保留 W=D=0/H=0..5 的既有受限域：原版保存 H，但其单行 Size 与 CPU Write 都将有效 H 缩为 0，与完整 vendor 的 dim1 寻址一致；其它位拒绝。本轮原游戏日志没有记录该布局字段，不能推断实际值为 0。
+
+真实资源为 `MTLTextureType1D`。Apple [MSL 规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.1（2026-06-04 版，第 243–244 页，SHA256 `41538b30d2f1140a5b2a0c84ce0a9f7b67bf0c707e224cfea0bfe5a44aa26cf5`）限制 native 1D 不使用 mipmap，因此不把上游直接赋多级 descriptor 的代码当作 GPU 支持证明。采样视图只保持 1D、原格式和 level0，允许已有 swizzle；跨 1D/2D 的 CPU View 和采样 View、GPU 格式重解释、render attachment 与 Window/Present 都在不兼容 Metal 操作前拒绝。CPU View 的同 block 字节格式合同仍由完整 write planner 检查，不新增转换。上传与读回保留原合法非零 blit row/image pitch、origin y=z=0 和 size height=depth=1；不把 replaceRegion 的 pitch 习惯套到 blit API。
+
+公共 1D 回归在 `MTL_DEBUG_LAYER=1` 下验证四个不同非零 texel、宽 33 跨 16/64-byte GOB 的独立地址 oracle 与整个 allocation padding canary、实际 Metal 读回、`texture1d<float>` 描述符采样、所选 swizzle、反射维度拒绝、live/retired 私有权威、copied CPU_CACHED、Flush/Invalidate、stale generation、跨维/格式/RT/Window 拒绝。CPU ASan/UBSan 另核查询、GL 早返及多 mip/virtual 在对象与 registry 发布前拒绝。它们不证明原游戏的 Write-zero 原因、首帧或手机可玩。
 
 ## 存储生命周期与一致性
 
