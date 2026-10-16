@@ -180,7 +180,7 @@ int main(int argc,char **argv){@autoreleasepool{
    CHECK(!compareExpected(&empty,&second,1));CHECK(objects.count==count&&serial==nextSerial);CHECK(!badWrite(&empty));unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureFinalize(&empty);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"object lifetime/type expected=BWTexture")&&objects.count==count&&serial==nextSerial);
   }else CHECK(0);
  }else if(!strcmp(mode,"size-zero")||!strcmp(mode,"size-zero-gl")||!strcmp(mode,"size-zero-buffer")){
-  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->format=NVN_FORMAT_R8;b->width=7;b->height=9;b->depth=11;b->levels=3;b->stride=177;b->packagedData=(const void*)(uintptr_t)0xdeadbeef;
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->format=NVN_FORMAT_R8;b->width=7;b->height=9;b->depth=11;b->levels=3;b->stride=177;b->packaged=0x7a51;b->packagedData=(const void*)(uintptr_t)0xdeadbeef;
   if(!strcmp(mode,"size-zero-gl")){b->target=NVN_TEXTURE_TARGET_2D;b->flags=8;b->format=NVN_FORMAT_R32UI;b->glName=9;b->device=NULL;b->width=-7;}
   if(!strcmp(mode,"size-zero-buffer")){b->target=NVN_TEXTURE_TARGET_BUFFER;b->width=0;}
   strcpy(lastError,"owned-size-sentinel");CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);CHECK(accessCalls==1&&notifications==0&&!pendingError&&!pendingFatal);CHECK(!strcmp(lastError,"owned-size-sentinel"));
@@ -192,6 +192,20 @@ int main(int argc,char **argv){@autoreleasepool{
   if(!strcmp(mode,"alignment-1d-array")){CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);}
   else{CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);b->height=3;b->levels=3;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==4608);b->height=2048;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==3145728);b->levels=4;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->levels=3;b->height=2049;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->height=1;b->glName=1;b->device=NULL;b->width=-4;unsigned before=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==before+1);}
   CHECK(!notifications);
+ }else if(!strcmp(mode,"size-3d")||!strcmp(mode,"alignment-3d")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;
+  if(!strcmp(mode,"alignment-3d")){CHECK(w_nvnTextureBuilderGetStorageAlignment(&builder)==512);}
+  else{CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==512);for(unsigned z=1;z<=17;z+=4){b->depth=z;b->levels=3;nvn_texdesc d=textureDescriptor(b);nvn_texlayout layout;nvn_tex_layout(&d,&layout);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==layout.size&&layout.layers==1);}b->levels=7;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->levels=1;b->depth=1;b->width=2049;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->width=4;b->packaged=1;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->packaged=0;b->packagedData=(const void*)(uintptr_t)UINTPTR_MAX;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder));b->packagedData=NULL;b->glName=1;b->device=NULL;b->width=-4;unsigned reads=accessCalls;CHECK(!w_nvnTextureBuilderGetStorageSize(&builder)&&accessCalls==reads+1);}
+  CHECK(!notifications);
+ }else if(!strcmp(mode,"3d-init-boundaries")){
+  TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;BWPool *pool=get(&rawPool,[BWPool class]);NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
+  for(unsigned i=0;i<3;i++){pool.kind=i?BW_POOL_ORDINARY:BW_POOL_VIRTUAL;b->depth=i==2?2:1;b->levels=i==1?2:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i==2?"3D Metal textures require one depth slice":i==1?"3D Metal textures require one level":"3D textures require ordinary pool storage"));}
+ }else if(!strcmp(mode,"3d-view-counts")){
+  CHECK(w_nvnTextureInitialize(&raw,&builder));BWTexture *t=textureObject(&raw);TextureBuilder b=t.metadata;b.target=NVN_TEXTURE_TARGET_3D;b.width=b.height=4;t.metadata=b;t.descriptor=textureDescriptor(&b);nvn_texlayout layout;nvn_texdesc descriptor=t.descriptor;nvn_tex_layout(&descriptor,&layout);t.layout=layout;t.width=t.height=4;
+  for(unsigned layers=0;layers<2;layers++)for(unsigned empty=0;empty<2;empty++)for(unsigned read=0;read<2;read++){NVNtextureView view={0};w_nvnTextureViewSetDefaults(&view);if(layers)w_nvnTextureViewSetLayers(&view,0,-1);else w_nvnTextureViewSetLevels(&view,0,-1);TextureView snapshot=textureView(&view);CHECK(layers?snapshot.numLayers==UINT16_MAX:snapshot.numLevels==UINT8_MAX);NVNcopyRegion region={0,0,0,empty?0:4,4,1};unsigned before=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){if(read)w_nvnTextureReadTexels(&raw,&view,&region,(void*)(uintptr_t)1);else w_nvnTextureWriteTexels(&raw,&view,&region,(const void*)(uintptr_t)1);CHECK(0);}recoverNow=NO;CHECK(notifications==before+1&&strstr(lastError,"3D CPU view requires level0 and layer0")&&!pendingError&&!pendingFatal&&!graphicsDepth);}
+ }else if(!strcmp(mode,"3d-input-boundaries")){
+  TextureBuilder *b=(TextureBuilder*)&builder;BWPool *pool=get(&rawPool,[BWPool class]);pool.kind=BW_POOL_ORDINARY;NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
+  for(unsigned i=0;i<10;i++){builder=ownedBuilder();b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_3D;b->width=b->height=4;if(i==0)b->flags=8;if(i==1)b->flags=4;if(i==2)b->samples=1;if(i==3)b->format=NVN_FORMAT_DEPTH16;if(i==4)b->format=NVN_FORMAT_RGBA_ASTC_4x4;if(i==5)b->glName=1;if(i==6)b->packagedData=(const void*)(uintptr_t)UINTPTR_MAX;if(i==7)b->packaged=1;if(i==8)b->height=2049;if(i==9)b->depth=-1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);}
  }else if(!strcmp(mode,"1d-array-init-boundaries")){
   TextureBuilder *b=(TextureBuilder*)&builder;b->target=NVN_TEXTURE_TARGET_1D_ARRAY;b->width=4;BWPool *pool=get(&rawPool,[BWPool class]);NSUInteger count=objects.count;uint64_t nextSerial=serial;NVNtexture candidate;unsigned char before[sizeof candidate];
   for(unsigned i=0;i<3;i++){pool.kind=i?BW_POOL_ORDINARY:BW_POOL_VIRTUAL;b->height=i==2?2:1;b->levels=i==1?2:1;memset(&candidate,0x5a,sizeof candidate);memcpy(before,&candidate,sizeof candidate);unsigned calls=notifications;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureInitialize(&candidate,&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==calls+1&&!memcmp(&candidate,before,sizeof candidate)&&objects.count==count&&serial==nextSerial);CHECK(strstr(lastError,i==2?"1D array Metal textures require one layer":i==1?"1D Metal textures require one level":"1D textures require ordinary pool storage"));}
@@ -203,13 +217,13 @@ int main(int argc,char **argv){@autoreleasepool{
  }else if(!strcmp(mode,"size-invalid-builder")){
   deniedAddress=&builder;recoverNow=YES;if(!sigsetjmp(recovery,1)){w_nvnTextureBuilderGetStorageSize(&builder);CHECK(0);}recoverNow=NO;CHECK(notifications==1&&accessCalls==1);CHECK(strstr(lastError,"entry=nvnTextureBuilderGetStorageSize: Unsupported or invalid NVN operation: texture metadata memory is not fully accessible"));deniedAddress=NULL;
  }else if(!strcmp(mode,"size-cap")||!strcmp(mode,"size-reset")){
-  ((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_3D;
+  ((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_CUBEMAP;
   for(unsigned i=0;i<6;i++){unsigned before=accessCalls;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);CHECK(accessCalls==before+1&&notifications==0);}
   if(!strcmp(mode,"size-reset")){
    CHECK(!botw_graphics_init(NULL,captureError,NULL));CHECK(notifications==1);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);
    BWPool *quarantined=[BWPool new];quarantined.kind=BW_POOL_ORDINARY;quarantined.retiring=YES;dispatch_group_t group=dispatch_group_create();dispatch_group_enter(group);objc_setAssociatedObject(quarantined,&poolBorrowedLifetimeKey,group,OBJC_ASSOCIATION_RETAIN_NONATOMIC);poolUnpublishedPools=[NSMutableArray arrayWithObject:quarantined];char error[256];
    CHECK(!botw_graphics_shutdown_checked(error,sizeof error));CHECK(strstr(error,"borrowed Metal backing still retained")&&notifications==1);CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0);
-   dispatch_group_leave(group);CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!beginHost());builder=ownedBuilder();((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_3D;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0&&notifications==1);
+   dispatch_group_leave(group);CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!beginHost());builder=ownedBuilder();((TextureBuilder*)&builder)->target=NVN_TEXTURE_TARGET_CUBEMAP;CHECK(w_nvnTextureBuilderGetStorageSize(&builder)==0&&notifications==1);
   }
  }else CHECK(0);
  CHECK(botw_graphics_shutdown_checked(NULL,0));CHECK(!gpu&&!commandQueue);printf("TEXTURE_LIFECYCLE_CPU_OK mode=%s callbacks=%u no_real_gpu=true\n",mode,notifications);return 0;
@@ -307,7 +321,8 @@ int main(int argc,char **argv){@autoreleasepool{
         for field in ['ordinal=1', 'target=2', 'flags=0x0', 'format=0x1',
                       'width=7', 'height=9', 'depth=11', 'levels=3',
                       'samples=0', 'stride=177', 'gl_name_nonzero=false',
-                      'packaged_data_nonnull=true']:
+                      'packaged_data_nonnull=true', 'packaged_layout_set=true',
+                      'packaged_layout_bits=0x7a5']:
             self.assertIn(field, lines[0])
 
     def test_non_array_1d_size_alignment_and_mips_reuse_original_gob_layout(self):
@@ -323,6 +338,21 @@ int main(int argc,char **argv){@autoreleasepool{
 
     def test_1d_array_alignment_reuses_original_single_gob_alignment(self):
         self.mode('alignment-1d-array')
+
+    def test_3d_size_reuses_complete_volume_layout_and_explicit_metadata_boundaries(self):
+        self.mode('size-3d')
+
+    def test_3d_alignment_reuses_original_gob_alignment(self):
+        self.mode('alignment-3d')
+
+    def test_3d_negative_view_counts_truncate_to_unsigned_and_reject_before_payload(self):
+        self.mode('3d-view-counts')
+
+    def test_3d_new_flags_formats_and_imports_reject_before_publication(self):
+        self.mode('3d-input-boundaries')
+
+    def test_3d_virtual_multislice_and_mips_reject_before_publication(self):
+        self.mode('3d-init-boundaries')
 
     def test_1d_array_virtual_multilayer_and_mips_reject_before_publication(self):
         self.mode('1d-array-init-boundaries')

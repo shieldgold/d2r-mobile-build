@@ -245,6 +245,14 @@ base-v0 的原 Write/Read 与 vendor1.9 的多层坐标语义尚未证明相同�
 
 该替换 freeze 的独立CPU16项通过（4.607秒，ASan/UBSan、fake Metal、无GPU），独立GPU2方法6个真实模式通过（2.266秒、零跳过、无GPU sanitizer）。双方审查 CLOSED，三来源 SHA 前后精确一致，GPU已释放供普通原游戏验证；没有增加生产文件或修改通用对象门禁。
 
+替换提交 `dc9cfa6` 已推送，普通 Mac 实际输出成功迁移index1至4，旧目的槽冲突消失；trace上限4，不能据此断言总迁移次数恰为4。新正常零大小查询为 `target=2 flags=0 format=0x25 width=4 height=4 depth=1 levels=1 samples=0 stride=0`、GL name及packaged data均空；target2是真正3D。随后首个fatal为DeviceGetTextureHandle，现场参数已明确 `texture=-1(0xffffffff) sampler=257(0x101)`，本桥既有索引guard保持，未把两个事件的具体因果写成已证明。binary SHA256 为 `a46956c60e72ab29c22368e9a416d94fcd0554c4b28a3118a5c8dd0a51e6bddd`，完整退出 host_return=1，仍无游戏画面或可玩验收；证据位于 `outputs/botw-host39-mac-dc9cfa6/transfer-and-storage-evidence.json`。后续按原3D布局、上传和真实Metal维度合同继续薄适配。
+
+`dc9cfa6` 固定全套 **971项，970通过、1个原硬件条件跳过**，221.106秒；639个来源文件前后逐项SHA稳定，manifest SHA256 为 `42b0f93e318db334e6d608598f34e2e809395ac31ba841674d91e8869e3c9fbf`。[iOS 通用宿主构建与合成测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38849566097) 与 [Linux 检查](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38849565933) 均成功，精确head已核验。该版已保数据更新iPhone12/iOS18.1并普通启动PID1104，executable匹配本次安装；启动标记33→34，累计日志42,876,686字节完整流式核验，旧前缀保留。手机同样迁移trace1..4，随后出现3D零大小查询及texture=-1/sampler257；不推总迁移次数或具体因果。IPA 19,155,092字节，SHA256 为 `433b4a0e899c70952f1c525a66ba5dd6e436a4af33e8e970c8fadb54aeca099d`。RomFS大小/mtime、UID、shader清单及权限均保留，未重传资源；仍host_return=1，无可玩验收。证据位于 `outputs/botw-ios-dc9cfa6-iphone12/device-run-report.json` 和 `policy-and-transfer-evidence.json`。
+
+3D适配复用完整vendor的体积布局、texwrite、deswizzle和flush模块；原SDK与自有81组CPU布局核验确认普通4×4×1单mip的Size/Align均512，mip的宽高深共同缩小、不是数组乘层。metadata三轴≤2048、合法mips；原packaged H能改变3D布局而vendor未消费该覆盖，因此首域packaged W/H/D均0。GPU只ordinary精确未压缩颜色、flags0/raw samples0、depth1/level1，真正创建 `MTLTextureType3D`、float3采样及同维精确view；virtual、多depth/mip、RT/Window、跨维/格式重解释保持前拒。零extent先验证对象、View、坐标与stride，不搬payload。GetStorageSize的既有cap4零结果诊断仅追加正常快照已有的layout-set及12位layout标量，不新增guest读取、provider调用或VM扫描；现有handle逻辑未改。
+
+Size/Align/Init三项先真实失败，新增trace字段也有独立行为RED。相关storage+family组首次72项中71通过，唯一旧generic-target负例因3D已进入新正域而失败；将该负例迁至仍不支持的Cube后，1方法4子例定点通过（1.026秒），未宣称重跑72全绿。另增正常SetLevels/Layers(-1)经原无符号字段截断后，空/非空Read/Write八次受控拒，1项CPU通过（4.297秒）；没有伪称生产负count漏洞或行为RED。独立CPU先5项通过（4.416秒），最终增量1项8次public拒通过（4.240秒）；独立GPU2方法11个实际Metal validation模式通过（2.477秒、零跳过、无GPU sanitizer），覆盖跨GOB非零图案、padding、empty、swizzle、真3D反射和live/retired authority。最终7文件与GPU时生产/依赖精确相同，双独审CLOSED；freeze文件SHA256为 `0603406898785dfc2d17233d39b145c6e3e27169b7a4b43fc2a26990a3c3eea5`，native97/100保持。固定原游戏及后续整套结果另记。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

@@ -13,7 +13,7 @@
 
 View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode 保留完整 32 位。未设置的 getter 仍写出存储值并返回 false。Compare 忽略未设置字段和 padding。采样和命令记录持有按值快照，随后改变 guest View 不能改变已登记的描述符或已录命令。
 
-实际 GPU 路径包含下述受限 1D/1D-array，以及已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。2D数组显式单层视图可作为 2D render target；采样视图支持各自准入域内的 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。未验证的 3D/cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
+实际 GPU 路径包含下述受限 1D/1D-array/3D，以及已验证的 2D/2D-array、单采样、有限 mip 链及可精确映射的 Metal 格式。2D数组显式单层视图可作为 2D render target；采样视图支持各自准入域内的 mip/layer 子区间、0 表示余下范围、Metal 格式视图和 ZERO/ONE/RGBA swizzle。渲染目标使用选定视图的实际尺寸和 pixel format，包括 sRGB。超出下述首域的 3D、cube/MSAA、数组 depth、组合 depth/stencil、BC 解码、GL 导入、packaged data 指针等保持受控拒绝，没有 fallback 纹理。
 
 ## 普通池的非数组 1D
 
@@ -22,6 +22,14 @@ View levels 为无符号 8 位、layers 为无符号 16 位，depth/stencil mode
 真实资源为 `MTLTextureType1D`。Apple [MSL 规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.1（2026-06-04 版，第 243–244 页，SHA256 `41538b30d2f1140a5b2a0c84ce0a9f7b67bf0c707e224cfea0bfe5a44aa26cf5`）限制 native 1D 不使用 mipmap，因此不把上游直接赋多级 descriptor 的代码当作 GPU 支持证明。采样视图只保持 1D、原格式和 level0，允许已有 swizzle；跨 1D/2D 的 CPU View 和采样 View、GPU 格式重解释、render attachment 与 Window/Present 都在不兼容 Metal 操作前拒绝。CPU View 的同 block 字节格式合同仍由完整 write planner 检查，不新增转换。上传与读回保留原合法非零 blit row/image pitch、origin y=z=0 和 size height=depth=1；不把 replaceRegion 的 pitch 习惯套到 blit API。
 
 公共 1D 回归在 `MTL_DEBUG_LAYER=1` 下验证四个不同非零 texel、宽 33 跨 16/64-byte GOB 的独立地址 oracle 与整个 allocation padding canary、实际 Metal 读回、`texture1d<float>` 描述符采样、所选 swizzle、反射维度拒绝、live/retired 私有权威、copied CPU_CACHED、Flush/Invalidate、stale generation、跨维/格式/RT/Window 拒绝。CPU ASan/UBSan 另核查询、GL 早返及多 mip/virtual 在对象与 registry 发布前拒绝。它们不证明原游戏的 Write-zero 原因、首帧或手机可玩。
+
+## 普通池的单切片 3D
+
+base-v0 target2 是非数组体积：Size/Alignment 复用完整 `nvn_tex`，mip 同时缩小 width/height/depth，`layout.layers=1`，不能再将 depth 乘作数组层。自动布局的 tileH 为0、tileD按体积深度选择；4×4×1 RGBA8 的 size/alignment 均512。新查询域限普通未块压缩 color、flags0/raw samples0、三轴1..2048及合法 mip 数，尺寸上限与 Apple [Metal Feature Set Tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf) 的3D三轴限制一致。原3D packaged W/H/D可改变布局，但现固定完整 vendor 不消费3D packaged H，本批显式拒绝任何 packaged layout、packagedData 和 GL 导入；GL name非0的Size仍早返0，不读取指针内容。Metadata 多深度/mip 可算，不等于 GPU 创建域。
+
+首个 GPU 域仅 ordinary pool、depth=levels=1、flags0/raw samples0、可精确恒等映射的未块压缩普通颜色。资源是 [MTLTextureType3D](https://developer.apple.com/documentation/metal/mtltexturetype/type3d)，depth=1、arrayLength=1，不以2D代替。多切片、多mip、virtual、depth/stencil、COMPRESSIBLE和linear等输入在Metal创建或对象/registry发布前拒绝。完整GOB、deswizzle、Write/Read、flush算法不重写；单切片使用合法非零 blit row/image pitch、slice0、origin.z=0、size.depth=1，CPU region 仅 z=0、depth在0..1及合法非负xy范围。原 get/provider、View、region及完整planner校验后，任一extent0显式EMPTY，不搬运payload，也不让未登记对象绕过寿命检查；这不是声称原空调用完全没有映射副作用。
+
+新GPU采样View只保持3D、同格式、level0/layer0及已有swizzle；跨维双向、格式重解释、render attachment（包括view伪装2D）和Window/Present均前拒。CPU Read/Write另有同维门和level0/layer0限制，同block字节格式由完整planner校验。MSL [规范](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf) §6.13.5 用 `texture3d<T>` 与float3采样坐标；规范支持3D mip不代表本批已开放多mipGPU。公共回归显式开启 `MTL_DEBUG_LAYER=1`，验证4×4和33×9非零网格、跨64-byte/8-row GOB的独立地址oracle、整个allocation padding、真实Metal读写、descriptor采样、swizzle、反射错维与私有live/retired别名权威。CPU ASan/UBSan独立核查询及拒绝零发布。合成M3通过不替代A14或原游戏首帧验收。
 
 ## 普通池的单层 1D 数组
 
@@ -79,7 +87,7 @@ BuilderGetStorageClass 与 TextureGetStorageClass 共用纯元数据规则：tar
 
 此值由原调用链证明：`BuilderGetStorageClass` 的非压缩分支向 `b6900` 传压缩请求 0；普通颜色参数经 `NvRmGpuDeviceChooseKind` 到 HAL `31294`，选择 vtable `+0x68`。原版 RTTI 标明 GK100 与 GM200 两套 HAL 均将该槽指向 `316c0`，其完整函数只返回 `0xfe`；Builder 最后编码 `0x100 | rawKind`。该路径仍要求有效的 device provider；本桥先核 raw 地址精确对应 registry 中的 live BWDevice，再检查 header 可读且 serial 身份一致。null、未初始化、已 finalize、外来地址、不可读内存或复制了存活 serial 的伪对象均明确拒绝。pool 和 SetStorage 不属于此前置条件，getter 不调用 Metal。
 
-该普通颜色结果不随 samples、尺寸、其余 target 或不相关 flags 改变；samples 和 fast-clear 虽先构造参数，最终常量槽不消费它们。BUFFER 和 linear 仍先走 pitch 规则；`DEPTH16_PREFER_FAST_CLEAR` 的类别选择作用属于 depth 路径。metadata 查询因此不会限制 GPU 创建范围：不支持的 MSAA、3D、BC 解码和 sparse 等仍由原 Initialize/映射入口独立拒绝。这里的未压缩指未请求 GPU 硬件压缩，和 BC/ASTC 数据块压缩格式不同。
+该普通颜色结果不随 samples、尺寸、其余 target 或不相关 flags 改变；samples 和 fast-clear 虽先构造参数，最终常量槽不消费它们。BUFFER 和 linear 仍先走 pitch 规则；`DEPTH16_PREFER_FAST_CLEAR` 的类别选择作用属于 depth 路径。metadata 查询因此不会限制 GPU 创建范围：不支持的 MSAA、超出首域的3D、BC 解码和 sparse 等仍由原 Initialize/映射入口独立拒绝。这里的未压缩指未请求 GPU 硬件压缩，和 BC/ASTC 数据块压缩格式不同。
 
 Texture 查询从已初始化对象的不可变 Builder 快照取值，并沿用对象、pool generation 和 device 生命周期检查。随后改写 Builder 不会改变 Texture 的类别；已初始化普通 block-linear 对象的 `0x1fe` 与原 Texture getter 的已保存 raw kind `0xfe | 0x100` 一致。未证明有效 kind 的硬件压缩请求、下述已证子域之外的 depth/stencil、原无效或未知格式的原生类别继续明确拒绝；停止信息仅记录 target、flags、format、samples 等有限元数据。
 
@@ -149,7 +157,7 @@ iOS没有Depth24Unorm_Stencil8；Metal D32F或D32FS8替代资源不等于原4byt
 
 只有原`get(..., BWTexture)`确实失败时，`texture_lifecycle_context`才输出这些宿主元数据和get已经取得的serial/可读性，每行最多四条、每图形生命周期最多四行。它不再读取对象头、Builder、payload或栈，不新增validator/VM查询，不改变原BOOL、错误文本、fatal、pending flags或回调。成功图形初始化与成功shutdown清空；失败或重入的checked shutdown保留。`match=not_retained`只表示最近四槽没有该raw，不能称从未调用；相同raw曾成功而现serial为0也不自动区分Finalize、主动清零或其它对象传递错误。原游戏根因仍须取实际正常调用证据，不能由后续WriteTexels失败猜定D24或combined格式。
 
-正常 `TextureBuilderGetStorageSize` 返回 0 时，`texture_storage_size_zero` 在每个图形生命周期的前四次输出已有 validated Builder 快照的 target、flags、format、宽高深、levels、samples、stride，以及 GL name 非零、packaged data 非空两个布尔值。它不读取指针所指数据，不重复验证、计算布局或查询 VM；非零结果不输出。原返回值、异常、错误与回调保持，成功图形初始化或 shutdown 重置上限，失败生命周期操作保留。该标量只证明相应 API 返回 0，不能单独证明 pool 为 NULL、跳过 Init 或本次 WriteTexels 的原因，也不新增 3D 支持或改变页策略。
+正常 `TextureBuilderGetStorageSize` 返回 0 时，`texture_storage_size_zero` 在每个图形生命周期的前四次输出已有 validated Builder 快照的 target、flags、format、宽高深、levels、samples、stride，以及 GL name 非零、packaged data 非空、packaged layout 已设三个布尔值与已保存的12-bit布局编码。它不读取指针所指数据，不重复验证、计算布局或查询 VM；非零结果不输出。原返回值、异常、错误与回调保持，成功图形初始化或 shutdown 重置上限，失败生命周期操作保留。该标量只证明相应 API 返回 0，不能单独证明 pool 为 NULL、跳过 Init 或本次 WriteTexels 的原因，该诊断本身不改变支持域或页策略。
 
 ## 已审 main 纹理值转移与原始存储所有权
 

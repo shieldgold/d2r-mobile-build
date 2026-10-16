@@ -197,3 +197,18 @@ Apple MSL specification section6.13.2 and official texture/descriptor type and
 arrayLength documentation supply platform/type/no-mip constraints, not an
 assertion of untested A14 game rendering. No original executable bytes appear
 in these tests or this source adaptation.
+
+The first 3D adapter reuses those same complete pinned nvn_tex, nvn_deswizzle,
+nvn_texwrite and nvn_texflush modules; their source algorithms are unchanged.
+The two fixed Metal families select native Type3D, arrayLength1 and descriptor
+depth, with 3D blits using slice0 and spatial z origin/extent. The bridge only
+materializes the proven one-slice/one-level ordinary-color intersection; it
+retains its existing exception-safe blit, checked-copy and authority handling
+rather than importing upstream nil-resource/readback fallbacks. Original
+base-v0 static layout evidence separately establishes volume mip geometry.
+Packaged 3D H is not consumed by the pinned vendor layout, so packaged layout
+is explicitly excluded. Complete existing public writer/readback and sampler
+fixtures are adapted to 3D grids without importing a new layout or codec.
+Apple MSL section6.13.5, official Type3D/depth/view/blit APIs and feature tables
+supply native type, depth1, dimensions and view constraints; they do not prove
+A14 game rendering or extend the GPU domain to multiple slices or mips.

@@ -11,6 +11,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires Metal')
 class TextureFamilyTests(unittest.TestCase):
+    def test_single_slice_3d_public_write_read_gob_padding_and_explicit_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / 'texture-3d'
+            graphics = ROOT / 'native/botw_graphics'
+            built = subprocess.run(['xcrun', 'clang', '-std=c11', '-fobjc-arc',
+                '-fobjc-arc-exceptions', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I', str(graphics), str(graphics / 'graphics.m'),
+                str(graphics / 'tools/probe_texture_family.c'), '-framework', 'Foundation',
+                '-framework', 'Metal', '-framework', 'QuartzCore', '-o', str(executable)],
+                capture_output=True, text=True, timeout=120)
+            self.assertEqual(built.returncode, 0, built.stdout+built.stderr)
+            for mode in ['3d', '3d-wide', '3d-boundaries', '3d-cached', '3d-empty']:
+                with self.subTest(mode=mode):
+                    run = subprocess.run([str(executable), mode], capture_output=True, text=True,
+                        timeout=60, env={**os.environ, 'MTL_DEBUG_LAYER': '1'})
+                    if run.returncode == 77:
+                        self.skipTest('Metal unavailable')
+                    self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+                    self.assertIn('TEXTURE_3D_SINGLE_SLICE_', run.stdout)
+                    self.assertIn('Metal API Validation Enabled', run.stderr)
+                    self.assertNotIn('failed assertion', run.stderr)
+
     def test_single_layer_1d_array_public_writes_readback_and_explicit_boundaries(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / 'texture-1d-array'
@@ -56,7 +78,7 @@ class TextureFamilyTests(unittest.TestCase):
                     self.assertIn('TEXTURE_1D_', run.stdout)
                     self.assertNotIn('failed assertion', run.stderr)
 
-    def _one_dimensional_descriptor_probe(self, array=False):
+    def _one_dimensional_descriptor_probe(self, array=False, volume=False):
         import test_botw_graphics as baseline
         from unittest.mock import patch
         feature = r'''
@@ -90,20 +112,35 @@ class TextureFamilyTests(unittest.TestCase):
             source = source.replace('wrong?"texture2d":"texture1d"', 'wrong?"texture2d":"texture1d_array"')
             source = source.replace('"(float((uint(p.x)*32u)/3u)+.5f)/33.0f":"p.x/4.0f"',
                                     '"(float((uint(p.x)*32u)/3u)+.5f)/33.0f,0u":"p.x/4.0f,0u"')
+        if volume:
+            source = source.replace('NVN_TEXTURE_TARGET_1D', 'NVN_TEXTURE_TARGET_3D')
+            source = source.replace('API(nvnTextureBuilderSetSize1D);', 'API(nvnTextureBuilderSetSize3D);')
+            source = source.replace('unsigned oneWidth=wide?33:4;', 'unsigned oneWidth=wide?33:4,oneHeight=wide?9:4;')
+            source = source.replace('nvnTextureBuilderSetSize1D(&tb,oneWidth);', 'nvnTextureBuilderSetSize3D(&tb,oneWidth,oneHeight,1);')
+            source = source.replace('unsigned char onePixels[132];for(unsigned x=0;x<oneWidth;x++)for(unsigned c=0;c<4;c++)onePixels[x*4+c]=c==3?255:(unsigned char)(1+(x*7+c*31+13)%230);NVNcopyRegion full={0,0,0,(int)oneWidth,1,1};', 'unsigned char onePixels[1188];for(unsigned y=0;y<oneHeight;y++)for(unsigned x=0;x<oneWidth;x++)for(unsigned c=0;c<4;c++)onePixels[(y*oneWidth+x)*4+c]=c==3?255:(unsigned char)(1+(x*7+y*19+c*31+13)%230);NVNcopyRegion full={0,0,0,(int)oneWidth,(int)oneHeight,1};')
+            source = source.replace('wrong?"texture2d":"texture1d"', 'wrong?"texture2d":"texture3d"')
+            source = source.replace('"(float((uint(p.x)*32u)/3u)+.5f)/33.0f":"p.x/4.0f"', '"float3((float((uint(p.x)*32u)/3u)+.5f)/33.0f,(float((uint(p.y)*8u)/3u)+.5f)/9.0f,.5f)":"float3(p.x/4.0f,p.y/4.0f,.5f)"')
+            source = source.replace('sample=wide?x*32/3:x;', 'sample=(wide?y*8/3:y)*oneWidth+(wide?x*32/3:x);')
+            source = source.replace('GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', 'GPU_NATIVE_TEXTURE3D_NONZERO_GRID_AND_SELECTED_VIEW_OK')
         original_run = subprocess.run
         def checked_run(*args, **kwargs):
             result = original_run(*args, **kwargs)
             self.assertNotIn('failed assertion', result.stderr)
+            if volume and result.args and str(result.args[0]).endswith('/state') and result.returncode != 77:
+                self.assertIn('Metal API Validation Enabled', result.stderr)
             return result
         with patch.dict(os.environ, {'MTL_DEBUG_LAYER': '1'}), \
                 patch.object(baseline.subprocess, 'run', side_effect=checked_run):
             baseline.MetalBridgeTests.compile_render_probe(self, source, [
-                ('1d-sample', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
-                ('1d-sample-wide', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
-                ('1d-sample-view', 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-sample', 'GPU_NATIVE_TEXTURE3D_NONZERO_GRID_AND_SELECTED_VIEW_OK' if volume else 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-sample-wide', 'GPU_NATIVE_TEXTURE3D_NONZERO_GRID_AND_SELECTED_VIEW_OK' if volume else 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
+                ('1d-sample-view', 'GPU_NATIVE_TEXTURE3D_NONZERO_GRID_AND_SELECTED_VIEW_OK' if volume else 'GPU_NATIVE_TEXTURE1D_NONZERO_COLUMNS_AND_SELECTED_VIEW_OK', True),
                 ('1d-wrong-shader-type', 'shader texture type differs', False),
                 ('1d-live-authority', 'texture storage authority', False),
                 ('1d-retired-authority', 'texture storage authority', False)])
+
+    def test_single_slice_3d_native_shader_type_selected_view_and_private_alias_authority(self):
+        self._one_dimensional_descriptor_probe(volume=True)
 
     def test_non_array_1d_descriptor_sampling_type_guard_and_private_alias_authority(self):
         self._one_dimensional_descriptor_probe()

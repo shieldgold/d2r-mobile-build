@@ -129,4 +129,5 @@ PYTHONPATH=scripts:tests .tools/botw-venv/bin/python -m unittest -v \
 - [x] 只交接 primary span，旧 objects/value、descriptor/recorded 引用、MTL资源、texown/flush与private authority保持；旧 alias 的原 Finalize 不能删除新 key 的目的 span。没有原 Finalize 的旧资源可能积累至 shutdown，不能拿64个 pending token上限冒称资源上限。
 - [x] 新功能先在旧实现编译成功后3项真实失败，最终18项通过（6.791秒，CPU16、GPU2方法6实际模式），覆盖成功替换、旧新公开 descriptor 像素、private authority、旧 alias Finalize、部分/错误类拒绝、epoch变更、clone异常与abort。真实GPU、CPU/fake Metal和原游戏分别记录。
 - [x] 三文件freeze3独立审查 CLOSED：CPU16项4.607秒、GPU2方法6模式2.266秒，全部通过，SHA前后稳定，native97保持。
-- [ ] 精确提交推送；普通原游戏确定下一实际边界，固定全套与CI通过后保数据更新已连接手机。仍需真实画面、操作、声音、存档重开验收。
+- [x] 精确5路径提交并推送 `dc9cfa6`；普通原游戏成功迁移trace index1..4（上限4），旧目的槽冲突消失。新零大小查询为target2/3D、4×4×1/单mip，随后handle参数texture=-1/sampler257被原guard拒绝；没有游戏画面，继续3D合同主线。
+- [x] 固定全套971项（970通过、1硬件条件跳过）及iOS/Linux CI成功，已保数据更新dc9cfa6到iPhone12并普通启动PID1104/fresh33→34；日志及资源完整保留。游戏画面、操作、声音、存档重开验收仍未完成，继续3D主线。
