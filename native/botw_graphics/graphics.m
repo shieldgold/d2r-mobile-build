@@ -33,7 +33,10 @@
 #include "vendor/botw-texture/modules.inc"
 #include "vendor/botw-vpool/modules.inc"
 
+#include "texture_storage_policy.h"
 @interface BWDevice : NSObject
+@property(readonly) BWTextureKindPolicy textureKindPolicy;
+- (instancetype)initWithTextureKindPolicy:(BWTextureKindPolicy)policy;
 @property int flags;
 @property NVNwindowOriginMode windowOrigin;
 @property(strong) id<MTLCounterSet> timestampSet;
@@ -42,6 +45,9 @@
 @property BWLinearPolicy linearPolicy;
 @end
 @implementation BWDevice
+- (instancetype)initWithTextureKindPolicy:(BWTextureKindPolicy)policy {
+    self=[super init];if(self)_textureKindPolicy=policy;return self;
+}
 @end
 @interface BWPool : NSObject
 @property void *memory;
@@ -88,6 +94,7 @@
 @property uint64_t storageSize;
 @property TextureBuilder metadata;
 @property(strong) BWDevice *device;
+@property BWTextureKindPolicy kindPolicy;
 @property NVNmemoryPool *rawPool;
 @property uint64_t poolGeneration,identity;
 @property(strong) BWTexture *base;
@@ -617,7 +624,7 @@ static void linearConfigureDevice(BWDevice *device){
     fprintf(stderr,"[botw graphics] linear_storage_policy=%s source=Metal.minimumLinearTextureAlignmentForPixelFormat scope=exact_identity_ordinary_color formats=%zu host_format_max=%zu texture_stride_alignment=%zu render_stride_alignment=%zu apple_render_target=%s pool_scope=coherent_only\n",
             policy.valid?"available":"unavailable",policy.formatCount,policy.formatMax,policy.textureAlignment,policy.renderAlignment,policy.renderSupported?"supported":"unsupported");
 }
-NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[BWDevice new];device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;counterConfigureDevice(device);linearConfigureDevice(device);put(d,device);return 1;}
+NVN(nvnDeviceInitialize,NVNboolean,NVNdevice *d,const NVNdeviceBuilder *b){if(!gpu)return report("Metal not initialized");BWDevice *device=[[BWDevice alloc] initWithTextureKindPolicy:BW_TEXTURE_KIND_METAL_PLAIN_COLOR];fprintf(stderr,"[botw graphics] texture_kind_policy=MetalPlainColor source=bridge_backend_NV_hardware_kind_representation_unavailable request_flags=preserved scope=valid_ordinary_color\n");device.flags=((const DeviceBuilder*)b)->flags;device.windowOrigin=NVN_WINDOW_ORIGIN_MODE_UPPER_LEFT;counterConfigureDevice(device);linearConfigureDevice(device);put(d,device);return 1;}
 NVN(nvnDeviceFinalize,void,NVNdevice *d){get(d,[BWDevice class]);removeObject(d);}
 NVN(nvnDeviceSetWindowOriginMode,void,NVNdevice *raw,NVNwindowOriginMode mode){
     BWDevice *device=get(raw,[BWDevice class]);

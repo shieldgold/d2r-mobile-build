@@ -32,6 +32,15 @@ int main(void) {
         CHECK(bw_texture_color_compression_layout(format,13,0)==(int)known);
         CHECK(!bw_texture_color_compression_layout(format,8,1));CHECK(!bw_texture_color_compression_layout(format,0xa,0));
     }
+    unsigned colorCount=0;for(unsigned format=0;format<0x200;format++){
+        int valid=(format>=1&&format<=0x18)||(format>=0x22&&format<=0x30)||(format>=0x37&&format<=0x50)||(format>=0x6d&&format<=0x9c);
+        CHECK(bw_texture_ordinary_color_format(format)==valid);colorCount+=valid;
+        CHECK(bw_texture_plain_color_selected(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format)==valid);
+        CHECK(!bw_texture_plain_color_selected(BW_TEXTURE_KIND_UNKNOWN,format));CHECK(!bw_texture_plain_color_selected((BWTextureKindPolicy)99,format));
+        CHECK(bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,8,0)==valid);
+        CHECK(bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,13,0)==valid);
+        CHECK(!bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,8,1));CHECK(!bw_texture_plain_color_layout(BW_TEXTURE_KIND_METAL_PLAIN_COLOR,format,0xa,0));
+    }CHECK(colorCount==113);
     CHECK(!bw_texture_color_disables_compression(UINT32_MAX));
     unsigned kind=0xdead;CHECK(!bw_texture_depth_storage_kind(0x31,0,0,&kind)&&kind==0xdead);
     CHECK(!bw_texture_depth_storage_kind(0xffffffff,0,0,&kind));CHECK(!bw_texture_depth_storage_kind(0x32,0x50,0,&kind));CHECK(!bw_texture_depth_storage_kind(0x32,0,0,0));
@@ -86,6 +95,29 @@ class StorageClassTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn(expected, run.stdout)
         self.assertNotIn('failed assertion', run.stderr)
+
+    def test_backend_plain_color_policy_unifies_all_113_queries_without_changing_flags(self):
+        for mode in ('policy-class', 'policy-align', 'policy-size', 'policy-readonly'):
+            with self.subTest(mode=mode):
+                self.probe(mode, f'METAL_PLAIN_COLOR_POLICY_{mode}_OK')
+
+    def test_backend_plain_color_preserves_size_domain_gl_and_exact_live_provider(self):
+        for mode in ('policy-domain', 'policy-gl', 'policy-live-class', 'policy-live-align', 'policy-live-size'):
+            with self.subTest(mode=mode):
+                self.probe(mode, f'METAL_PLAIN_COLOR_POLICY_{mode}_OK')
+
+    def test_plain_color_initialize_checks_registry_before_any_untrusted_provider_header_read(self):
+        for state in ('foreign', 'inaccessible', 'copy'):
+            with self.subTest(state=state):
+                self.probe('policy-init-provider-' + state, 'METAL_PLAIN_COLOR_INIT_REGISTRY_BEFORE_HEADER_OK')
+
+    def test_plain_color_ordinary_snapshot_and_metal_format_boundary(self):
+        self.probe('policy-create', 'METAL_PLAIN_COLOR_ORDINARY_SNAPSHOT_AND_UNSUPPORTED_FORMAT_OK')
+
+    def test_plain_color_uses_exact_live_registry_provider(self):
+        for state in ('null', 'garbage', 'finalized', 'foreign', 'inaccessible', 'copy'):
+            with self.subTest(state=state):
+                self.probe('backend-invalid-device-' + state, 'STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK')
 
     def test_compressible_request_preserves_flags_for_all_65_original_ineligible_colors(self):
         for mode in ('compression-query', 'compression-query-readonly'):
@@ -169,7 +201,7 @@ class StorageClassTests(unittest.TestCase):
             with self.subTest(state=state):
                 self.probe('builder-invalid-device-' + state, 'STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK')
 
-    def test_compression_msaa_stencil_and_unknown_formats_require_native_kind(self):
+    def test_depth_compression_msaa_stencil_and_unknown_formats_require_native_kind(self):
         for mode in ('builder-block', 'builder-rejected-formats'):
             with self.subTest(mode=mode):
                 self.probe(mode, 'STORAGE_CLASS_NATIVE_KIND_REQUIRED_REJECTED_OK')

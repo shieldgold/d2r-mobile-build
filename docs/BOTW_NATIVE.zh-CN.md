@@ -117,6 +117,16 @@ USB 导入目录的权限与私有身份后端要求不一致时，保留传输�
 
 该版通过 [iOS 构建](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38829115589) 与 [准备测试](https://github.com/shieldgold/d2r-mobile-build/actions/runs/38829115510)，94 个通用 native 源文件含新增 policy header 均通过来源校验。在当前手机保留数据更新并普通启动为 PID **1037**，本次安装路径与启动收据一致，完整 boot.log 保留前缀且恰好新增一次 bootstrap。真机也记录上述 120 MiB pool 的两段成功发布，随后独立复现同一 R8 `flags=0x8` 查询停止点，`host_return=1`；24.0 秒的系统查询仍见该 PID。原堆参数、线程数和最大读取与前版一致，RomFS 大小及修改时间、UID 字节与权限、shader manifest 全部保留。动态报告位于 `outputs/botw-ios-b5d60eb-iphone12/device-run-report.json`；全部可玩验收保持 false。
 
+`61519b3` 保留请求中的 COMPRESSIBLE 标志，对原格式资格检查恒选有效 compression=0 的 65 种颜色格式，共同适配 `class=0x1fe`、alignment=512、有限 raw samples=0 的 GOB size 和现有 FE 虚拟纹理消费；新 size/GPU flags 域限定为 `COMPRESSIBLE|DISPLAY|IMAGE` 组合。GL size 提前返回 0，原 flags、provider、格式能力、别名、私有 GPU authority、提交前预检及真实 NoCopy 退役合同均保留。未证明的压缩请求在普通纹理创建发布前拒绝；其余 Class/Size/Alignment 的旧域范围以 `native/botw_graphics/TEXTURES.md` 为准。相关定点 **215 项，214 通过、1 项原有硬件条件跳过**，独立公开查询和实际 R8/ASTC GPU 正反场景 **31 项通过**。普通 Mac 本次仍记录 120 MiB pool 的两段成功发布，首个图形停止点改为 `target=1 flags=0x8 format=0xb samples=0`，即 R32UI 的压缩请求；`mac_host_return=1`，原堆参数、十三个线程和最大读取保持，没有游戏绘制呈现日志。报告位于 `outputs/botw-host39-mac-61519b3/ordinary-admission-evidence.json`，全部可玩验收保持 false。
+
+`61519b3` 固定源码完整回归共 **850 项，849 通过、1 项原有硬件条件跳过**，耗时 178.184 秒；632 个跟踪源码文件的固定快照保持不变，源码清单 SHA256 为 `f6189765dc04815808d8974458a8290d43eeff9a6bc5fea018765ad14e222e0d`。测试通过不代表原游戏已经可玩。
+
+`61519b3` 的 iOS/Linux 构建均成功；官方通用宿主经摘要与 94 个源码文件来源核验后，本地加入原有六模块 Guest 并签名，已保数据更新到当前 iPhone 12 / iOS 18.1。新启动 PID 1045，累计日志保留原前缀并恰新增一次 bootstrap；同样记录 120 MiB physical pool 的两段成功发布，随后在 R32UI `target=1 flags=0x8 format=0xb samples=0` 查询受控停止，`host_return=1`。约 20.0 秒后的进程快照仍含同 PID，不构成长期稳定或可玩证明。14,420,017,152 字节 RomFS 的大小与 mtime、32 字节 UID、shader manifest 和权限均保持，未重传资源；仍无游戏帧、输入、音频或存档验收。报告位于 `outputs/botw-ios-61519b3-iphone12/device-run-report.json`，签名 IPA SHA256 为 `fcef177d3fabd5c01ef146859285b9ac951f67cfdfdb874ab8edb0bc37126727`。
+
+Metal 后端随后采用明确、只在设备初始化时确定的 `MetalPlainColor` 配置：本桥尚不表示 NVIDIA 硬件压缩 kind，保留原请求 flags，并统一选择原 SDK 已存在的 effective compression0 普通 color 分支。113 个原有效 color 的 Class、Alignment、Size、Initialize 与 virtual kind 使用同一 live-device 策略；原 65 个 provider 无关格式的事实仍独立保留，另 48 个属于宿主配置选择。此配置不改原 provider 字段，不宣称还原原默认配置或支持 NV 预压缩数据。新 Size/GPU 范围仍限 raw samples0 与 flags8/9/C/D，原格式能力、depth COMP、DB Map 拒绝和映射/权威/退役边界继续保留；详见 `native/botw_graphics/TEXTURES.md`。
+
+该批最终定点 **72 项通过**，独立公开查询与实际整数纹理 GPU 正反场景 **36 项通过**。独立审查发现的新 COMP 初始化来源顺序问题，以 foreign/不可读/复制 provider 的 guarded-header 读取计数真 RED 复现；修复后三项均在读取对象头前拒绝。独立完整 graphics TU 的纯 CPU 九场景同时确认新域零读取，旧无 COMP/pitch 顺序保留。此前冻结版的相关 **223 项通过**另行保存，不替代最终修改后的固定源码全套回归。R32UI/RG32UI/RGBA32UI 使用正确整数纹理 shader，核验高位图案、FE 重映和别名，以及错误 kind/跨 segment 整批拒绝、GPU 权威和实际清退；这些结果仍不是原游戏首帧或可玩证明。
+
 Host39 是固定版本的显式原生适配：两个原 SDK 地址分配器使用真实宿主保留区，SDK 和 subsdk 中共 36 处 HIPC 内联地址编码按固定原始上下文改写，另接管五个已审计的 PLT helper。宿主在任何原程序执行前检查实际映射的分支和 thunk，未适配的镜像不能用 `--host39` 启动。36 位默认策略保留。原始 NSO 不改动。
 
 云端工作流 `botw-native-ios.yml` 只编译通用 C/汇编/UIKit 宿主，精确上传三文件组成的无游戏 IPA。游戏程序只在 Mac 本机加入后签名；不向 GitHub 上传游戏、生成的 Guest.framework、描述文件或私钥。

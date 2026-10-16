@@ -15,11 +15,31 @@ static inline int bw_texture_color_disables_compression(uint32_t format){
         (format>=0x39&&format<=0x3c)||(format>=0x41&&format<=0x50)||
         (format>=0x79&&format<=0x98);
 }
-/* New flags8 layout/GPU scope. Raw samples1/2 have original multisample layout;
- * the existing upstream layout's samples1 convention is not reused here. */
+/* Explicit bridge representation policy, not an original NV configuration
+ * word or a physical GPU feature query. Unknown is never a usable policy. */
+typedef enum { BW_TEXTURE_KIND_UNKNOWN=0, BW_TEXTURE_KIND_METAL_PLAIN_COLOR=1 } BWTextureKindPolicy;
+/* Original 113 valid ordinary-color records, independent of Metal support. */
+static inline int bw_texture_ordinary_color_format(uint32_t format){
+    return (format>=0x01&&format<=0x18)||(format>=0x22&&format<=0x30)||
+        (format>=0x37&&format<=0x50)||(format>=0x6d&&format<=0x9c);
+}
+/* Only the supported raw single-sample, DISPLAY/IMAGE request layout. */
+static inline int bw_texture_color_layout_inputs(uint32_t format,uint32_t flags,int32_t samples){
+    return bw_texture_ordinary_color_format(format)&&(flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&samples==0&&
+        !(flags&~(uint32_t)(NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_IMAGE));
+}
+/* Historical provider-independent subset, distinct from backend policy. */
 static inline int bw_texture_color_compression_layout(uint32_t format,uint32_t flags,int32_t samples){
-    return (flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_color_disables_compression(format)&&
-        samples==0&&!(flags&~(uint32_t)(NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_IMAGE));
+    return bw_texture_color_disables_compression(format)&&bw_texture_color_layout_inputs(format,flags,samples);
+}
+/* The backend cannot transport native NV hardware-compression kinds. Select
+ * the original driver's effective-compression=0 color branch while retaining
+ * the request. The provider-independent 65-format fact above stays separate. */
+static inline int bw_texture_plain_color_selected(BWTextureKindPolicy policy,uint32_t format){
+    return policy==BW_TEXTURE_KIND_METAL_PLAIN_COLOR&&bw_texture_ordinary_color_format(format);
+}
+static inline int bw_texture_plain_color_layout(BWTextureKindPolicy policy,uint32_t format,uint32_t flags,int32_t samples){
+    return bw_texture_plain_color_selected(policy,format)&&bw_texture_color_layout_inputs(format,flags,samples);
 }
 static inline int bw_texture_depth_storage_format(uint32_t format){
     return format>=NVN_FORMAT_DEPTH16&&format<=NVN_FORMAT_DEPTH32F_STENCIL8;

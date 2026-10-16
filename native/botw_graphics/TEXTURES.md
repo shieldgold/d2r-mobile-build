@@ -83,10 +83,21 @@ metadata class `0x101` 等不会开放 MapVirtual、vendor 或 GPU resolver 的 
 
 原 base-v0 的 `COMPRESSIBLE` 是请求资格，不能直接当作实际压缩布局。原 Builder Class、Alignment、Size 都先检查 provider 的压缩入口，再区分 depth/stencil 和普通 color；对原有效 color，blockWidth 大于 1 或 bytes/block 小于 4 时，无论 provider 内部字段取何值，都将有效 compression 参数设为 0。原 flags 保留不改。R8 是 bw1/bpb1 的合法 color，因此经两 HAL 共同的普通 color 槽得到 raw FE/class1FE，Alignment512，Size 不增加特殊 kind 页 rounding。这是原指令和记录可证的路径，未采用固定上游实验100 token或统一替代kind。
 
-完整原113色彩记录中有65项满足该条件：`01..09`、`0d..10`、`39..3c`、`41..50`、`79..98`。`texture_storage_policy.h` 保存这份固定资格，Class/Align 与 Size/GPU 共用；Class/Align 的原 FE/512 结果不消费 samples 或其它非 pitch flags，并仍要求精确 live provider。其余48项依赖 provider 或压缩 HAL 的 pixel/sample 参数及 fallback，不能统称已实际压缩，也不能统一返回FE。本批它们的 Class 继续拒绝，旧 Size/Alignment 行为未新增原 SDK 完整性承诺。D16 在 color 字节条件之前进入 depth 分支，不能因 bpb2 套用这份资格；depth COMPRESSIBLE 仍不支持。
+完整原113色彩记录中有65项满足该条件：`01..09`、`0d..10`、`39..3c`、`41..50`、`79..98`。`texture_storage_policy.h` 保存这份固定资格，Class/Align 与 Size/GPU 共用；Class/Align 的原 FE/512 结果不消费 samples 或其它非 pitch flags，并仍要求精确 live provider。其余48项在原默认策略下依赖 provider 或压缩 HAL 的 pixel/sample 参数及 fallback，不能统称已实际压缩，也不能作为 provider 无关的 FE 集合；后端对它们的显式选择见下一节。D16 在 color 字节条件之前进入 depth 分支，不能因 bpb2 套用这份资格；depth COMPRESSIBLE 仍不支持。
 
 新增 flags8 的 Size/GPU 子域限定原始 samples0，以及 flags8 与 DISPLAY1/IMAGE4 的组合；VIDEO_DECODE2、SPARSE20、MINIMAL_LAYOUT200、fast-clear 和未知位不借此开放布局或创建。无 COMPRESSIBLE 的旧域保持原行为。Size 保留原 GOB 算法、维度/mip/array/packaged-layout 边界；GL name 非0先返回0，再考虑 provider 或 geometry，packagedData 对 metadata 始终只是不解引用的 opaque 指针。Class/Align 各守原 provider 条件。Texture 仍保存64位大小快照，getter显式投影为signed low32；Builder/Texture/descriptor 的原 flags8 均可读回，不会被归一操作清除。
 
-virtual 纹理只对这个已证有效 compression0 的新布局子域请求现有 FE kind；vendor Map 类、resolver、canonical/alias/generation、authority、整批提交前检查及 NoCopy segment/ACK 合同不变。ordinary Initialize 原先可直接接受 flags8，现在对未证明的 color 余域、depth 压缩或未支持的 flags/samples，在对象写入和实际 Metal 创建前明确拒绝。R8、ASTC 等创建继续独立核原 Metal 格式、设备能力和 target；BC/转换解码、GL/packaged 导入、MSAA及其它未验证语义保留原拒绝。ASTC/BC 的数据块压缩与这里的 NVN 硬件压缩资格是不同合同。
+virtual 纹理只对这个已证有效 compression0 的新布局子域请求现有 FE kind；vendor Map 类、resolver、canonical/alias/generation、authority、整批提交前检查及 NoCopy segment/ACK 合同不变。ordinary Initialize 对未证明的格式、depth 压缩或未支持的 flags/samples，在对象写入和实际 Metal 创建前明确拒绝。R8、ASTC 等创建继续独立核原 Metal 格式、设备能力和 target；BC/转换解码、GL/packaged 导入、MSAA及其它未验证语义保留原拒绝。ASTC/BC 的数据块压缩与这里的 NVN 硬件压缩资格是不同合同。
 
 回归使用固定原记录的65正集和48余集、真实只读 Builder/canary、live/伪造/过期 provider、GL早0及受限Size/GPU域。真实 Metal fixture 保留 flags8，验证 virtual R8/已有ASTC的非零图案采样、重映后另一图案、别名、wrong-kind/跨segment整批零写、R8私有GPU权威拒绝重映并保留结果，以及物理pool Finalize真实资源清退和已录旧消费拒绝。这些兼容层证据不表示原游戏已可玩。
+
+
+## MetalPlainColor 后端配置
+
+`BWDevice` 初始化一次、只读保存 `MetalPlainColor`；未配置或未知值在需要此策略的 COMPRESSIBLE 路径明确拒绝。来源是本桥未实现 NVIDIA 硬件 kind 表示的后端配置，不是硬件 `GetInteger` 查询，也不是向原 provider 的私有字段写假值。它不宣称 Metal 已解码或生成 NV DB/E9/F5 压缩数据，也不以 Metal 自身的 lossless 优化作 NV kind 等价证明。设备初始化仅输出一次不含地址/内容的具名策略来源。
+
+固定原 SDK 的设备初始化将 `+1948/+194c/+1950` 设为 `0/0/1`，可经原 `NvOsGetConfigString` 配置通道覆盖；`+1a60` 由 `+1950` 的位计算，关闭时即使原请求 flags8 保留，三个存储查询仍共同选择 effective compression0。该配置来自 nvhost 控制接口，不是公开稳定能力 API；数字配置名的友好语义没有证明。原默认开启不等于本桥默认。本桥明确选择原可达的普通 color 分支，保存请求 flags，并让全部113个原有效 color 在具名后端策略下取 FE/512/既有 GOB size；原65个无关 provider 的固定资格事实继续独立保留，未扩其 predicate。[deko3d 的可选硬件压缩标志](https://github.com/devkitPro/deko3d/blob/350f2b00a3e76ecd4f00191f8c5d6544ffbcb9db/include/deko3d.h#L374)同样将其定义为允许启用的优化；其原 NV kind/大页重保护实现不能直接当作 Metal 映射模块。
+
+Class、Alignment、Size、Initialize 和 virtual kind 都通过精确 live BWDevice 的同一 selector；复制 serial、过期 provider、未知 policy 不能按格式常量获得新资格。Texture 保存所属 device、policy 与原 Builder flags 快照，selected view 继承，原生命周期检查继续有效。仅新 COMPRESSIBLE 的 Size/GPU 域为 raw samples0 与 flags8/9/C/D；MSAA、depth COMPRESSIBLE、其它 flags、GL/packaged GPU 导入和未实现 Metal 格式不扩大。GL Size 非0仍先0，不提前读 provider，packagedData metadata 保持 opaque。旧无 COMPRESSIBLE、pitch、depth 非压缩与 size ABI 合同保持。
+
+MapVirtual/resolver 仍只接受 class100/1FE。显式 DB 等硬压缩 kind 输入拒绝，不承诺预压缩 NV payload 导入；canonical identity、映射代际、别名、整批前置拒绝、private GPU authority 与各 segment 的 NoCopy ACK 不变。R32UI/RG32UI/RGBA32UI 真实 GPU 探针用 `texture2d<uint>` 读取大于2^24且含高位的32位图案，整像素校验独立算出的四字节结果，再验证 FE remap/alias、DB映射拒绝、wrong-kind/跨segment整批零写、private权威与Finalize清退。这些结果仅验证兼容层，不表示原游戏有首帧或可玩。

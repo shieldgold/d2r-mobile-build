@@ -9,6 +9,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 static sigjmp_buf recovery;
+static const void *unregisteredProvider;
+static unsigned unregisteredProviderReads;
+static int providerAccess(const void *address,size_t bytes,int writable){(void)bytes;(void)writable;if(address==unregisteredProvider){unregisteredProviderReads++;return 0;}return 1;}
+
 static void rejected(const char *message){fprintf(stderr,"REJECT:%s\n",message);siglongjmp(recovery,1);}
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"CHECK:%s (%s)\n",#x,botw_graphics_last_error());return 1;}}while(0)
 #define API(name) NVNT_##name name=(NVNT_##name)botw_nvn_bootstrap_loader(#name)
@@ -75,12 +79,44 @@ int main(int argc,char **argv){
   }
   munmap(builder,page);botw_graphics_shutdown();return 0;
  }
+
+ if(!strncmp(mode,"policy-init-provider-",21)){
+  API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnTextureInitialize);NVNdeviceBuilder db;NVNdevice device,copy;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));memcpy(&copy,&device,sizeof copy);NVNdevice *inaccessible=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(inaccessible!=MAP_FAILED);unregisteredProvider=strstr(mode,"copy")?(const void*)&copy:strstr(mode,"inaccessible")?(const void*)inaccessible:(const void*)(uintptr_t)0xdeadbeef000;
+  nvnTextureBuilderSetDevice(builder,(NVNdevice*)unregisteredProvider);nvnTextureBuilderSetSize2D(builder,5,3);nvnTextureBuilderSetFlags(builder,8);nvnTextureBuilderSetFormat(builder,NVN_FORMAT_R32UI);NVNtexture texture;memset(&texture,0xa5,sizeof texture);unsigned char before[sizeof texture];memcpy(before,&texture,sizeof texture);botw_graphics_set_memory_access_validator(providerAccess);
+  if(!sigsetjmp(recovery,1)){nvnTextureInitialize(&texture,builder);CHECK(0);}CHECK(strstr(botw_graphics_last_error(),"object lifetime/type"));fprintf(stderr,"UNREGISTERED_PROVIDER_HEADER_READS observed=%u expected=0\n",unregisteredProviderReads);CHECK(!unregisteredProviderReads&&!memcmp(before,&texture,sizeof texture));botw_graphics_set_memory_access_validator(NULL);botw_graphics_shutdown();munmap(inaccessible,page);munmap(builder,page);puts("METAL_PLAIN_COLOR_INIT_REGISTRY_BEFORE_HEADER_OK");return 0;
+ }
+ if(!strncmp(mode,"policy-",7)&&strcmp(mode,"policy-create")){
+  API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnDeviceFinalize);API(nvnTextureBuilderGetFlags);API(nvnTextureBuilderSetGLTextureName);API(nvnTextureBuilderSetPackagedTextureData);NVNdeviceBuilder db;NVNdevice device;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));nvnTextureBuilderSetDevice(builder,&device);nvnTextureBuilderSetSize2D(builder,5,3);nvnTextureBuilderSetFlags(builder,8);nvnTextureBuilderSetFormat(builder,NVN_FORMAT_R32UI);
+  if(!strcmp(mode,"policy-gl")){
+   nvnTextureBuilderSetGLTextureName(builder,42);nvnTextureBuilderSetDevice(builder,(NVNdevice*)(uintptr_t)0xdeadbeef000);nvnTextureBuilderSetSize2D(builder,INT32_MAX,INT32_MAX);CHECK(nvnTextureBuilderGetStorageSize(builder)==0);nvnTextureBuilderSetDevice(builder,&device);nvnTextureBuilderSetSize2D(builder,5,3);nvnTextureBuilderSetPackagedTextureData(builder,(void*)(uintptr_t)0xdeadbeef000);CHECK(nvnTextureBuilderGetStorageClass(builder)==0x1fe&&nvnTextureBuilderGetStorageAlignment(builder)==512);nvnTextureBuilderSetGLTextureName(builder,0);CHECK(nvnTextureBuilderGetStorageSize(builder)==512);
+  }else if(!strncmp(mode,"policy-live-",12)){
+   nvnDeviceFinalize(&device);nvnTextureBuilderSetDevice(builder,&device);if(!sigsetjmp(recovery,1)){if(strstr(mode,"align"))nvnTextureBuilderGetStorageAlignment(builder);else if(strstr(mode,"size"))nvnTextureBuilderGetStorageSize(builder);else nvnTextureBuilderGetStorageClass(builder);CHECK(0);}CHECK(strstr(botw_graphics_last_error(),"object lifetime/type"));
+  }else if(!strcmp(mode,"policy-domain")){
+   const unsigned flags[]={8,9,12,13,10,0x28,0x108,0x208,0x80000008};const int samples[]={0,1,2,-1,8};
+   for(unsigned i=0;i<sizeof flags/sizeof *flags;i++)for(unsigned j=0;j<sizeof samples/sizeof *samples;j++){nvnTextureBuilderSetFlags(builder,flags[i]);nvnTextureBuilderSetSamples(builder,samples[j]);CHECK(nvnTextureBuilderGetStorageClass(builder)==0x1fe&&nvnTextureBuilderGetStorageAlignment(builder)==512);CHECK(nvnTextureBuilderGetStorageSize(builder)==(size_t)((i<4&&!samples[j])?512:0));}
+  }else{
+   unsigned cases=0;const unsigned flags[]={8,9,12,13};
+   for(unsigned f=0;f<sizeof ordinaryColorFormats/sizeof *ordinaryColorFormats;f++)for(unsigned k=0;k<4;k++){
+    unsigned format=ordinaryColorFormats[f];nvnTextureBuilderSetFormat(builder,(NVNformat)format);nvnTextureBuilderSetFlags(builder,flags[k]);unsigned char before[sizeof *builder];memcpy(before,builder,sizeof before);if(strstr(mode,"readonly"))CHECK(!mprotect(builder,page,PROT_READ));
+    if(!strcmp(mode,"policy-class")||strstr(mode,"readonly"))CHECK(nvnTextureBuilderGetStorageClass(builder)==0x1fe);
+    if(!strcmp(mode,"policy-align")||strstr(mode,"readonly"))CHECK(nvnTextureBuilderGetStorageAlignment(builder)==512);
+    if(!strcmp(mode,"policy-size")||strstr(mode,"readonly"))CHECK(nvnTextureBuilderGetStorageSize(builder)==(size_t)(((format>=0x2e&&format<=0x30)||(format>=0x76&&format<=0x78))?1024:512));
+    CHECK((unsigned)nvnTextureBuilderGetFlags(builder)==flags[k]&&!memcmp(before,builder,sizeof before));if(strstr(mode,"readonly"))CHECK(!mprotect(builder,page,PROT_READ|PROT_WRITE));cases++;
+   }CHECK(cases==452);for(size_t i=sizeof *builder;i<page;i++)CHECK(((unsigned char*)builder)[i]==0xa5);
+  }
+  printf("METAL_PLAIN_COLOR_POLICY_%s_OK\n",mode);munmap(builder,page);botw_graphics_shutdown();return 0;
+ }
+ if(!strcmp(mode,"policy-create")){
+  API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolBuilderSetFlags);API(nvnMemoryPoolInitialize);API(nvnTextureInitialize);API(nvnTextureFinalize);API(nvnTextureGetFlags);NVNdeviceBuilder db;NVNdevice device;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));void *memory=mmap(NULL,65536,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(memory!=MAP_FAILED);NVNmemoryPoolBuilder mb;NVNmemoryPool pool;nvnMemoryPoolBuilderSetDefaults(&mb);nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetFlags(&mb,0x22);nvnMemoryPoolBuilderSetStorage(&mb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&mb));
+  const unsigned formats[]={NVN_FORMAT_R32UI,NVN_FORMAT_RG32UI,NVN_FORMAT_RGBA32UI};for(unsigned i=0;i<3;i++){
+   nvnTextureBuilderSetDefaults(builder);nvnTextureBuilderSetDevice(builder,&device);nvnTextureBuilderSetSize2D(builder,5,3);nvnTextureBuilderSetFlags(builder,8);nvnTextureBuilderSetFormat(builder,(NVNformat)formats[i]);nvnTextureBuilderSetStorage(builder,&pool,0);NVNtexture texture;CHECK(nvnTextureInitialize(&texture,builder));CHECK(nvnTextureGetStorageClass(&texture)==0x1fe&&nvnTextureGetFlags(&texture)==8&&nvnTextureGetStorageSize(&texture)==(i==2?1024:512));nvnTextureBuilderSetFlags(builder,0);nvnTextureBuilderSetFormat(builder,NVN_FORMAT_DEPTH16);CHECK(nvnTextureGetStorageClass(&texture)==0x1fe&&nvnTextureGetFlags(&texture)==8);nvnTextureFinalize(&texture);
+  }
+  nvnTextureBuilderSetFlags(builder,8);nvnTextureBuilderSetFormat(builder,NVN_FORMAT_RGB32F);CHECK(nvnTextureBuilderGetStorageClass(builder)==0x1fe);NVNtexture texture;memset(&texture,0xa5,sizeof texture);unsigned char before[sizeof texture];memcpy(before,&texture,sizeof texture);if(!sigsetjmp(recovery,1)){CHECK(!nvnTextureInitialize(&texture,builder));}CHECK(strstr(botw_graphics_last_error(),"Texture format")&&!memcmp(before,&texture,sizeof texture));botw_graphics_shutdown();CHECK(!munmap(memory,65536));munmap(builder,page);puts("METAL_PLAIN_COLOR_ORDINARY_SNAPSHOT_AND_UNSUPPORTED_FORMAT_OK");return 0;
+ }
  if(!strcmp(mode,"compression-unknown-create")){
   API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnMemoryPoolBuilderSetDefaults);API(nvnMemoryPoolBuilderSetDevice);API(nvnMemoryPoolBuilderSetStorage);API(nvnMemoryPoolBuilderSetFlags);API(nvnMemoryPoolInitialize);API(nvnTextureInitialize);NVNdeviceBuilder db;NVNdevice device;nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));void *memory=mmap(NULL,65536,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(memory!=MAP_FAILED);NVNmemoryPoolBuilder mb;NVNmemoryPool pool;nvnMemoryPoolBuilderSetDefaults(&mb);nvnMemoryPoolBuilderSetDevice(&mb,&device);nvnMemoryPoolBuilderSetFlags(&mb,0x22);nvnMemoryPoolBuilderSetStorage(&mb,memory,65536);CHECK(nvnMemoryPoolInitialize(&pool,&mb));nvnTextureBuilderSetDevice(builder,&device);nvnTextureBuilderSetSize2D(builder,5,3);nvnTextureBuilderSetFlags(builder,8);nvnTextureBuilderSetStorage(builder,&pool,0);
-  unsigned colorCases=0;for(unsigned i=0;i<sizeof ordinaryColorFormats/sizeof *ordinaryColorFormats;i++){
-   unsigned f=ordinaryColorFormats[i];int eligible=(f<=9)||(f>=0xd&&f<=0x10)||(f>=0x39&&f<=0x3c)||(f>=0x41&&f<=0x50)||(f>=0x79&&f<=0x98);if(eligible)continue;
-   nvnTextureBuilderSetFormat(builder,(NVNformat)f);if(!sigsetjmp(recovery,1)){nvnTextureBuilderGetStorageClass(builder);CHECK(0);}CHECK(strstr(botw_graphics_last_error(),"ChooseKind"));NVNtexture texture;memset(&texture,0xa5,sizeof texture);unsigned char before[sizeof texture];memcpy(before,&texture,sizeof texture);if(!sigsetjmp(recovery,1)){CHECK(!nvnTextureInitialize(&texture,builder));}CHECK(!memcmp(before,&texture,sizeof texture)&&strstr(botw_graphics_last_error(),"hardware compression"));colorCases++;
-  }CHECK(colorCases==48);
+  const unsigned unknown[]={0,NVN_FORMAT_RGB8,NVN_FORMAT_R8_UI2F,0x9d,0xffffffff};
+  for(unsigned i=0;i<sizeof unknown/sizeof *unknown;i++){nvnTextureBuilderSetFormat(builder,(NVNformat)unknown[i]);NVNtexture texture;memset(&texture,0xa5,sizeof texture);unsigned char before[sizeof texture];memcpy(before,&texture,sizeof texture);if(!sigsetjmp(recovery,1)){CHECK(!nvnTextureInitialize(&texture,builder));}CHECK(!memcmp(before,&texture,sizeof texture)&&strstr(botw_graphics_last_error(),"hardware compression"));}
   const unsigned formats[]={NVN_FORMAT_STENCIL8,NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH24,NVN_FORMAT_DEPTH32F,NVN_FORMAT_DEPTH24_STENCIL8,NVN_FORMAT_DEPTH32F_STENCIL8};
   for(unsigned i=0;i<6;i++){nvnTextureBuilderSetFormat(builder,(NVNformat)formats[i]);NVNtexture texture;memset(&texture,0xa5,sizeof texture);unsigned char before[sizeof texture];memcpy(before,&texture,sizeof texture);if(!sigsetjmp(recovery,1)){CHECK(!nvnTextureInitialize(&texture,builder));}CHECK(!memcmp(before,&texture,sizeof texture)&&strstr(botw_graphics_last_error(),"hardware compression"));}
   const unsigned flags[]={8,0xa,0x28,0x108,0x208,0x80000008};for(unsigned i=0;i<6;i++){
@@ -109,13 +145,13 @@ int main(int argc,char **argv){
   }
   for(size_t i=sizeof *builder;i<page;i++)CHECK(((unsigned char*)builder)[i]==0xa5);printf("STORAGE_CLASS_GENERIC_METADATA_IMMUTABLE_OK formats=113 cases=%u\n",cases);munmap(builder,page);botw_graphics_shutdown();return 0;
  }
- if(!strncmp(mode,"builder-invalid-device-",23)||!strncmp(mode,"depth-invalid-device-",21)||!strncmp(mode,"compression-invalid-device-",27)){
+ if(!strncmp(mode,"builder-invalid-device-",23)||!strncmp(mode,"depth-invalid-device-",21)||!strncmp(mode,"compression-invalid-device-",27)||!strncmp(mode,"backend-invalid-device-",23)){
   const char *state=mode+(!strncmp(mode,"depth-",6)?21:!strncmp(mode,"compression-",12)?27:23);
   API(nvnDeviceBuilderSetDefaults);API(nvnDeviceInitialize);API(nvnDeviceFinalize);NVNdeviceBuilder db;NVNdevice device,original;memset(&device,0,sizeof device);NVNdevice *inaccessible=NULL;
   if(!strcmp(state,"finalized")){nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&device,&db));nvnDeviceFinalize(&device);}
   if(!strcmp(state,"copy")){nvnDeviceBuilderSetDefaults(&db);CHECK(nvnDeviceInitialize(&original,&db));memcpy(&device,&original,sizeof device);}
   if(!strcmp(state,"inaccessible")){inaccessible=mmap(NULL,page,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);CHECK(inaccessible!=MAP_FAILED);}
-  nvnTextureBuilderSetTarget(builder,NVN_TEXTURE_TARGET_2D);nvnTextureBuilderSetFlags(builder,!strncmp(mode,"compression-",12)?8:0);nvnTextureBuilderSetFormat(builder,!strncmp(mode,"depth-",6)?NVN_FORMAT_DEPTH16:!strncmp(mode,"compression-",12)?NVN_FORMAT_R8:NVN_FORMAT_RGBA8);nvnTextureBuilderSetDevice(builder,!strcmp(state,"null")?NULL:!strcmp(state,"foreign")?(NVNdevice*)(uintptr_t)0xdeadbeef000:inaccessible?inaccessible:&device);
+  nvnTextureBuilderSetTarget(builder,NVN_TEXTURE_TARGET_2D);nvnTextureBuilderSetFlags(builder,(!strncmp(mode,"compression-",12)||!strncmp(mode,"backend-",8))?8:0);nvnTextureBuilderSetFormat(builder,!strncmp(mode,"depth-",6)?NVN_FORMAT_DEPTH16:!strncmp(mode,"compression-",12)?NVN_FORMAT_R8:!strncmp(mode,"backend-",8)?NVN_FORMAT_R32UI:NVN_FORMAT_RGBA8);nvnTextureBuilderSetDevice(builder,!strcmp(state,"null")?NULL:!strcmp(state,"foreign")?(NVNdevice*)(uintptr_t)0xdeadbeef000:inaccessible?inaccessible:&device);
   if(!sigsetjmp(recovery,1)){nvnTextureBuilderGetStorageClass(builder);CHECK(0);}CHECK(strstr(botw_graphics_last_error(),"object lifetime/type"));puts("STORAGE_CLASS_GENERIC_LIVE_DEVICE_REQUIRED_OK");if(inaccessible)munmap(inaccessible,page);munmap(builder,page);botw_graphics_shutdown();return 0;
  }
  if(!strcmp(mode,"depth-import-metadata")){
@@ -169,7 +205,7 @@ int main(int argc,char **argv){
   botw_graphics_shutdown();CHECK(!munmap(memory,bytes));munmap(builder,page);return 0;
  }
  if(!strcmp(mode,"builder-block")||!strcmp(mode,"builder-rejected-formats")){
-  const unsigned formats[]={NVN_FORMAT_RGBA8,NVN_FORMAT_R32F,NVN_FORMAT_RGBA16F,NVN_FORMAT_STENCIL8,NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH24,NVN_FORMAT_DEPTH32F,NVN_FORMAT_DEPTH24_STENCIL8,NVN_FORMAT_DEPTH32F_STENCIL8,0,NVN_FORMAT_RGB8,NVN_FORMAT_RGB16I,NVN_FORMAT_R8_UI2F,NVN_FORMAT_RGB10A2_I2F,0x9d,0xa0,0xffffffff,NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH32F_STENCIL8};unsigned cases=0;
+  const unsigned formats[]={NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH32F,NVN_FORMAT_DEPTH32F_STENCIL8,NVN_FORMAT_STENCIL8,NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH24,NVN_FORMAT_DEPTH32F,NVN_FORMAT_DEPTH24_STENCIL8,NVN_FORMAT_DEPTH32F_STENCIL8,0,NVN_FORMAT_RGB8,NVN_FORMAT_RGB16I,NVN_FORMAT_R8_UI2F,NVN_FORMAT_RGB10A2_I2F,0x9d,0xa0,0xffffffff,NVN_FORMAT_DEPTH16,NVN_FORMAT_DEPTH32F_STENCIL8};unsigned cases=0;
   nvnTextureBuilderSetTarget(builder,NVN_TEXTURE_TARGET_2D);
   for(unsigned f=0;f<(!strcmp(mode,"builder-block")?1:sizeof formats/sizeof *formats);f++){
    unsigned flag=f<3?NVN_TEXTURE_FLAGS_COMPRESSIBLE:f>=17?(NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_DEPTH16_PREFER_FAST_CLEAR):0;int samples=(f>=4&&f<=8)?1:0;nvnTextureBuilderSetSamples(builder,samples);nvnTextureBuilderSetFlags(builder,flag);nvnTextureBuilderSetFormat(builder,(NVNformat)formats[f]);

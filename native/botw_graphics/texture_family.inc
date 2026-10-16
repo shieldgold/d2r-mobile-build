@@ -25,7 +25,9 @@ static void textureOut(void *p,size_t n){if(!p||(memoryAccessValidator&&!memoryA
 #include "texture_storage_policy.h"
 static void textureEnsureMapping(BWTexture *t,const char *reason);
 static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView view,BOOL attachment);
-static void textureStorageDevice(const NVNdevice *raw);
+static BWDevice *textureStorageDevice(const NVNdevice *raw);
+static BOOL textureColorSelected(const TextureBuilder *b);
+static BOOL textureColorLayout(const TextureBuilder *b);
 /* Selected views can outlive their descriptor entry or object-table record in
  * recorded commands. Weak tracking finds all wrappers without extending them. */
 static NSHashTable<BWTexture *> *textureReferences;
@@ -34,6 +36,7 @@ static void textureLive(BWTexture *t){
     BWTexture *base=t.base?:t;
     if(!base.pool.live||base.pool.generation!=base.poolGeneration||objects[@(base.poolGeneration)]!=base.pool)fatal("stale texture pool");
     if(!base.pool.device||base.pool.device!=base.device||![objects.allValues containsObject:base.device])fatal("stale texture device");
+    if(base.kindPolicy!=base.device.textureKindPolicy)fatal("texture device representation policy changed");
 }
 NVN(nvnTextureBuilderSetDefaults,void,NVNtextureBuilder *raw){TextureBuilder *b=textureBuilderWrite(raw);memset((char*)b+8,0,0x44);memset((char*)b+0x50,0,0xa);memset((char*)b+0x5c,0,8);b->target=NVN_TEXTURE_TARGET_2D;b->levels=1;for(unsigned i=0;i<4;i++)b->swizzle[i]=i+2;}
 NVN(nvnTextureBuilderSetDevice,void,NVNtextureBuilder *b,NVNdevice *d){textureBuilderWrite(b)->device=d;}
@@ -77,10 +80,9 @@ static size_t textureBytes(const TextureBuilder *b){
     unsigned depthKind=0;BOOL depthStorage=bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind);
     if(!(b->flags&0x50)&&bw_texture_depth_storage_format(b->format)&&!depthStorage)return 0;
     if(depthStorage&&b->glName)return 0; /* Original Builder Size bf1d4..bf1e0. */
-    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_color_disables_compression(b->format)){
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&bw_texture_ordinary_color_format(b->format)){
         if(b->glName)return 0; /* Original Builder Size short-circuits GL before provider/layout. */
-        if(!bw_texture_color_compression_layout(b->format,b->flags,b->samples))return 0;
-        textureStorageDevice(b->device);
+        if(!textureColorLayout(b))return 0;
     }
     BOOL array=b->target==NVN_TEXTURE_TARGET_2D_ARRAY;
     if((b->target!=NVN_TEXTURE_TARGET_2D&&!array)||b->width<1||b->height<1||b->width>16384||b->height>16384||b->depth<1||b->depth>(array?2048:1)||b->levels<1||b->levels>15||b->samples<0||b->samples>1||texturePackagedHeight(b)>6||(b->packaged&0xff00)||(array&&(b->flags&(0x10|0x40))))return 0;
@@ -95,11 +97,8 @@ NVN(nvnTextureBuilderGetStorageSize,size_t,const NVNtextureBuilder *raw){Texture
 /* Original base-v0 0x34-byte format records: +0x30 is nonzero and +0xe/+0xf
  * depth/stencil bytes are zero for exactly these 113 declared color formats.
  * This is independent of Metal's narrower format/creation capability. */
-static BOOL textureOrdinaryStorageFormat(uint32_t format){
-    return (format>=NVN_FORMAT_R8&&format<=NVN_FORMAT_RG32I)||(format>=NVN_FORMAT_RGB32F&&format<=NVN_FORMAT_RGBA32I)||
-        (format>=NVN_FORMAT_RGBX8_SRGB&&format<=NVN_FORMAT_BPTC_UFLOAT)||(format>=NVN_FORMAT_RGBX8&&format<=NVN_FORMAT_BGRA8_SRGB);
-}
-static void textureStorageDevice(const NVNdevice *raw){
+static BOOL textureOrdinaryStorageFormat(uint32_t format){return bw_texture_ordinary_color_format(format);}
+static BWDevice *textureStorageDevice(const NVNdevice *raw){
     /* Establish exact live-object provenance before reading a guest header. */
     BWDevice *provider=nil;
     for(NSNumber *key in objectSpans){NSRange span=objectSpans[key].rangeValue;id object=objects[key];
@@ -107,6 +106,17 @@ static void textureStorageDevice(const NVNdevice *raw){
     if(!provider)fatal("object lifetime/type expected=BWDevice storage-class provider is not registered");
     textureMemory(raw,sizeof(uint64_t),NO);
     if(get(raw,[BWDevice class])!=provider)fatal("object lifetime/type expected=BWDevice storage-class provider identity mismatch");
+    return provider;
+}
+static BOOL textureColorSelected(const TextureBuilder *b){
+    BWDevice *device=textureStorageDevice(b->device);
+    if(device.textureKindPolicy!=BW_TEXTURE_KIND_METAL_PLAIN_COLOR)fatal("texture device representation policy is unavailable");
+    return bw_texture_plain_color_selected(device.textureKindPolicy,b->format);
+}
+static BOOL textureColorLayout(const TextureBuilder *b){
+    /* Reject unsupported layout inputs without adding provider reads. */
+    if(!bw_texture_color_layout_inputs(b->format,b->flags,b->samples))return NO;
+    return textureColorSelected(b);
 }
 /* Base-v0 returns 0x100 | rawKind. BUFFER and flags&0x50 take rawKind=0
  * before accessing the device. Otherwise GK100/GM200 share ChooseKind+0x68:
@@ -117,14 +127,14 @@ static NVNstorageClass textureMetadataStorageClass(const TextureBuilder *b){
     unsigned depthKind=0;if(bw_texture_depth_storage_kind(b->format,b->flags,b->samples,&depthKind)){
         textureStorageDevice(b->device);return 0x100|depthKind;
     }
-    if(textureOrdinaryStorageFormat(b->format)&&(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)||bw_texture_color_disables_compression(b->format))){
+    if(textureOrdinaryStorageFormat(b->format)&&(!(b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)||textureColorSelected(b))){
         textureStorageDevice(b->device);return 0x1fe;
     }
     char detail[256];snprintf(detail,sizeof detail,"texture storage class requires unimplemented native ChooseKind target=%u flags=0x%x format=0x%x samples=%d source=base-v0-storage-metadata",b->target,b->flags,b->format,b->samples);fatal(detail);
 }
 NVN(nvnTextureBuilderGetStorageClass,NVNstorageClass,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);return textureMetadataStorageClass(&b);}
 NVN(nvnTextureBuilderGetStorageAlignment,size_t,const NVNtextureBuilder *raw){TextureBuilder b=textureBuilder(raw);if(b.flags&(0x10|0x40)){BWDevice *device=get(b.device,[BWDevice class]);BWLinearPolicy policy=device.linearPolicy;return bw_linear_alignment(&policy,b.flags);}if(b.target==NVN_TEXTURE_TARGET_BUFFER){int bytes=nvn_fmt_bpb(b.format,NULL,NULL);return bytes==12?4:bytes;}
-    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&bw_texture_color_disables_compression(b.format)){textureStorageDevice(b.device);return 512;}
+    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&textureOrdinaryStorageFormat(b.format)&&textureColorSelected(&b))return 512;
     if(bw_texture_depth_storage_format(b.format)){(void)textureMetadataStorageClass(&b);return bw_pool_policy().mappingPageBytes;}
     if(!textureBytes(&b))return 0;nvn_texdesc d=textureDescriptor(&b);nvn_texlayout l;nvn_tex_layout(&d,&l);return l.align;}
 NVN(nvnTextureViewSetDefaults,void,NVNtextureView *raw){memset(textureViewWrite(raw),0,sizeof(TextureView));}
@@ -145,7 +155,7 @@ NVN(nvnTextureViewCompare,NVNboolean,const NVNtextureView *a,const NVNtextureVie
 static int textureMappingKind(TextureBuilder b,BWPool *pool){
     if(pool.kind==BW_POOL_PHYSICAL)fatal("physical pool cannot be a direct texture GPU resource");
     if(pool.kind!=BW_POOL_VIRTUAL)return -1;
-    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!bw_texture_color_compression_layout(b.format,b.flags,b.samples))fatal("virtual texture hardware compressed kind is not implemented");
+    if((b.flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!textureColorLayout(&b))fatal("virtual texture hardware compressed kind is not implemented");
     if(!(b.flags&0x50)&&!textureOrdinaryStorageFormat(b.format))fatal("virtual texture depth/non-color kind is not implemented");
     return (b.flags&0x50)?0:0xfe;
 }
@@ -213,8 +223,9 @@ static void textureRetirePoolReferences(BWPool *pool){
     }
 }
 NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *builder){
-    TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;BWDevice *device=get(b->device,[BWDevice class]);
-    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!bw_texture_color_compression_layout(b->format,b->flags,b->samples))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
+    TextureBuilder snapshot=textureBuilder(builder);const TextureBuilder *b=&snapshot;
+    if((b->flags&NVN_TEXTURE_FLAGS_COMPRESSIBLE)&&!(b->flags&0x50)&&!textureColorLayout(b))return report("Texture hardware compression/layout request is not implemented for this format/flags/samples");
+    BWDevice *device=get(b->device,[BWDevice class]);
     if(!b->pool||!textureBytes(b)||(b->flags&~(0x10|0x40|NVN_TEXTURE_FLAGS_DISPLAY|NVN_TEXTURE_FLAGS_COMPRESSIBLE|NVN_TEXTURE_FLAGS_IMAGE))||b->glName||b->packagedData)return report("Unsupported texture dimension/flags/samples/levels/layout/linear/GL/packaged data");
     uint32_t format=0;uint8_t swz[4];if(nvn_fmt_to_mtl(b->format,&format,swz)!=1||(b->format>=0x41&&b->format<=0x50))return report("Texture format requires an unimplemented conversion/BC decoder");
     if(b->format>=NVN_FORMAT_RGBA_ASTC_4x4&&b->format<=NVN_FORMAT_RGBA_ASTC_12x12_SRGB&&!supportsASTC())return report("ASTC textures require Metal Apple2 family support");
@@ -237,7 +248,7 @@ NVN(nvnTextureInitialize,NVNboolean,NVNtexture *raw,const NVNtextureBuilder *bui
     t.blockLinear=!(td.flags&0x10);t.depth=b->format>=NVN_FORMAT_DEPTH16&&b->format<=NVN_FORMAT_DEPTH32F_STENCIL8;
     if(t.depth&&b->format!=NVN_FORMAT_DEPTH16&&b->format!=NVN_FORMAT_DEPTH32F)return report("Combined depth/stencil storage not implemented");
     if(t.depth&&b->target==NVN_TEXTURE_TARGET_2D_ARRAY)return report("Array depth texture semantics are not yet validated");
-    t.pool=pool;t.device=device;t.poolGeneration=pool.generation;t.rawPool=b->pool;t.offset=b->offset;t.stride=linear?linearLayout.stride:b->stride;t.width=b->width;t.height=b->height;t.format=b->format;
+    t.pool=pool;t.device=device;t.kindPolicy=device.textureKindPolicy;t.poolGeneration=pool.generation;t.rawPool=b->pool;t.offset=b->offset;t.stride=linear?linearLayout.stride:b->stride;t.width=b->width;t.height=b->height;t.format=b->format;
     (void)textureMappingKind(*b,pool);
     /* Virtual initialization records metadata even before MapVirtual. Actual
      * GPU use resolves the current map and creates the matching real resource. */
@@ -350,7 +361,7 @@ static id<MTLTexture> textureMakeSelected(BWTexture *base,TextureView v,BOOL att
 static BWTexture *textureSelected(BWTexture *base,TextureView v,BOOL attachment){
     id<MTLTexture> resource=textureMakeSelected(base,v,attachment);
     unsigned level=(v.flags&1)?v.baseLevel:0;int format=(v.flags&4)?v.format:base.format;
-    BWTexture *t=[BWTexture new];t.base=base;t.texture=resource;t.mapping=base.mapping;t.selection=v;t.selectedAttachment=attachment;t.pool=base.pool;t.poolGeneration=base.poolGeneration;t.device=base.device;t.metadata=base.metadata;t.storageSize=base.storageSize;t.format=format;t.width=MAX(1,base.width>>level);t.height=MAX(1,base.height>>level);t.depth=base.depth;t.descriptor=base.descriptor;t.layout=base.layout;
+    BWTexture *t=[BWTexture new];t.base=base;t.texture=resource;t.mapping=base.mapping;t.selection=v;t.selectedAttachment=attachment;t.pool=base.pool;t.poolGeneration=base.poolGeneration;t.device=base.device;t.kindPolicy=base.kindPolicy;t.metadata=base.metadata;t.storageSize=base.storageSize;t.format=format;t.width=MAX(1,base.width>>level);t.height=MAX(1,base.height>>level);t.depth=base.depth;t.descriptor=base.descriptor;t.layout=base.layout;
     textureRememberReference(t);return t;
 }
 NVN(nvnTextureGetViewOffset,ptrdiff_t,const NVNtexture *raw,const NVNtextureView *view){BWTexture *t=textureObject(raw);TextureView v=textureView(view);unsigned level=(v.flags&1)?v.baseLevel:0,layer=(v.flags&2)?v.minLayer:0;if(level>=t.descriptor.levels||layer>=t.layout.layers)fatal("texture view offset bounds");nvn_texdesc d=t.descriptor;return nvn_tex_level_offset(&d,level)+layer*t.layout.layer_size;}

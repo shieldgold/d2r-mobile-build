@@ -44,6 +44,26 @@ class VirtualTextureTests(unittest.TestCase):
                         'failed assertion'):
             self.assertNotIn(failure, result.stderr)
 
+    def test_plain_color_backend_uses_uint_32_64_128_bit_texels_through_real_fe_remaps(self):
+        for mode in ('policy-r32ui', 'policy-rg32ui', 'policy-rgba32ui'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_color_backend_still_refuses_db_and_cross_segment_before_any_batch_submission(self):
+        for mode in ('policy-wrong-db', 'policy-cross'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_plain_color_backend_preserves_private_authority_and_finalize_backing(self):
+        for mode in ('policy-authority', 'policy-finalize'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
+    def test_unconfigured_live_device_policy_fails_closed_without_publication(self):
+        for mode in ('policy-unknown-class', 'policy-unknown-align', 'policy-unknown-size', 'policy-unknown-init'):
+            with self.subTest(mode=mode):
+                self.mode(mode)
+
     def test_compressible_r8_and_astc_preserve_flags_while_sampling_real_fe_aliases_and_remaps(self):
         for mode in ('compression-r8', 'compression-astc'):
             with self.subTest(mode=mode):
