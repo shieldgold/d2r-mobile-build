@@ -1,0 +1,16 @@
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -408,10 +408,11 @@
+                              tm / 1e6, tp / 1e6, tg / 1e6, tr / 1e6, (now_ns() - t0) / 1e6);
+ }
+ 
+-// Plays the role of rtld's InitModules (rtld+0x830): call each module's DT_INIT in forward order of the load list.
++// Fixed base-v0 rtld (+0x524..0x53c) inserts ascending modules at the list head;
++// InitModules (+0x748) follows next and calls DT_INIT (+0xb0c), in reverse load order.
+ // The timing is decided by nn::init::Start: after nninitStartup and _init_libc2, before nnMain (the 4th argument callback of Start).
+ void run_module_inits(void) {
+-    for (int i = 0; i < g_nmod; i++) {
++    for (int i = g_nmod - 1; i >= 0; i--) {
+         module_t *m = &g_mod[i];
+         if (!m->init) continue;
+         LOG("%s: DT_INIT +%#llx (init_array %llu entries)", m->name, m->init, m->init_arraysz / 8);

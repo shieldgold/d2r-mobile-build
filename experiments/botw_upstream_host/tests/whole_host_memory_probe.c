@@ -15,6 +15,9 @@ static void *owned_getspecific(pthread_key_t key){owned_tsd_reads++;return (pthr
 #endif
 static unsigned char *module_bytes;
 static const size_t module_size=0x20000;
+static unsigned char *tlr_vm_page(unsigned char *tlr,size_t page){
+    return (unsigned char*)((uintptr_t)tlr&~((uintptr_t)page-1));
+}
 static unsigned preparations;
 static int prepare_failure, kernel_denial;
 #ifndef WHOLE_HOST_MEMORY_BASELINE
@@ -148,9 +151,17 @@ int main(int argc,char **argv){
         CHECK(!pthread_setspecific(g_keytlr,original));
     }else if(!strcmp(argv[1],"tlr-vm")){
         void *original=pthread_getspecific(g_keytlr);size_t page=(size_t)getpagesize();
-        CHECK(!pthread_setspecific(g_keytlr,module_bytes+0x9000));CHECK(!mprotect(module_bytes+0x8000,page,PROT_NONE));
+        unsigned char *tlr=module_bytes+0x9000;
+        /* Deterministic geometry coverage for both supported host page sizes;
+         * the actual mprotect below still uses the real OS page size only. */
+        for(size_t geometry=4096;geometry<=16384;geometry*=4){
+            uintptr_t low=(uintptr_t)tlr_vm_page(tlr,geometry),address=(uintptr_t)tlr;
+            CHECK(address>=low&&address-low<=geometry-0x200);
+        }
+        unsigned char *protected_page=tlr_vm_page(tlr,page);
+        CHECK(!pthread_setspecific(g_keytlr,tlr));CHECK(!mprotect(protected_page,page,PROT_NONE));
         void *out=(void*)1;size_t length=19;CHECK(botw_whole_host_current_tlr(&normal_memory,&out,&length,E)==-1&&out==(void*)1&&length==19);
-        CHECK(!mprotect(module_bytes+0x8000,page,PROT_READ|PROT_WRITE));CHECK(!pthread_setspecific(g_keytlr,original));
+        CHECK(!mprotect(protected_page,page,PROT_READ|PROT_WRITE));CHECK(!pthread_setspecific(g_keytlr,original));
     }else if(!strcmp(argv[1],"tlr-prepare")){
         prepare_failure=1;void *out=(void*)1;size_t length=19;
         CHECK(botw_whole_host_current_tlr(&normal_memory,&out,&length,E)==-1&&out==(void*)1&&length==19&&preparations==1);

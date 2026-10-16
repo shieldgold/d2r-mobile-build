@@ -116,7 +116,7 @@ jobs:
       - name: Compile complete upstream backend for iPhoneOS without execution
         run: python3 experiments/botw_upstream_backend/scripts/build_compile_only.py --sdk iphoneos --output outputs/botw-upstream-iphoneos
       - name: Compile complete upstream host and UIKit frontend without execution
-        run: python3 experiments/botw_upstream_host/scripts/build_link_only.py --sdk iphoneos --output outputs/botw-whole-host-iphoneos
+        run: python3 experiments/botw_upstream_host/scripts/build_link_only.py --sdk iphoneos --runtime-configured --output outputs/botw-whole-host-iphoneos
       - name: Preserve complete host iPhoneOS compile receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -126,6 +126,7 @@ jobs:
             outputs/botw-whole-host-iphoneos/*.json
             outputs/botw-whole-host-iphoneos/*.stdout
             outputs/botw-whole-host-iphoneos/*.stderr
+            outputs/botw-whole-host-iphoneos/whole-host-LINK-ONLY-DO-NOT-RUN
           if-no-files-found: warn
           retention-days: 7
       - name: Preserve upstream iPhoneOS compile receipts

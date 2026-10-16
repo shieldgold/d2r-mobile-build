@@ -101,6 +101,17 @@ def verify_staged(staged: Path, before: dict, patched: dict) -> None:
                 raise ValueError("staged source lock mismatch: " + relative)
 
 
+def configured_runtime_units(lock: dict, sdk: str, enabled: bool) -> list[str]:
+    if not enabled:
+        return []
+    if sdk != "iphoneos":
+        raise ValueError("configured runtime is restricted to physical iPhoneOS builds")
+    expected = ["frontend/whole_runtime_configuration.m"]
+    if lock.get("runtime_configuration_translation_units") != expected:
+        raise ValueError("configured runtime requires the exact reviewed provider")
+    return expected
+
+
 def audit_external_references(symbols: set[str], relative: str, lock: dict) -> set[str]:
     approved = set(lock.get("normal_operand_validation_references", {}).get(relative, []))
     reviewed = {"adapter/whole_pool_builder.c", "adapter/whole_pool_backing_memory.m",
@@ -124,6 +135,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sdk", choices=("macosx", "iphoneos"), default="macosx")
+    parser.add_argument("--runtime-configured", action="store_true",
+                        help="link the explicit iPhone runtime; still no execution or install readiness")
     args = parser.parse_args()
     output = args.output.resolve()
     if output == component or component in output.parents:
@@ -132,7 +145,7 @@ def main() -> int:
     lock_path = component / "SOURCE.lock.json"
     commands: list[dict] = []
     receipt: dict = {"schema": "botw-whole-host-link-only-v1", "sdk": args.sdk,
-                     "host_or_guest_or_GPU_executed": False, "runtime_configured": False,
+                     "host_or_guest_or_GPU_executed": False, "runtime_configured": args.runtime_configured,
                      "installable_candidate": False, "compile_exit": None, "link_exit": None,
                      "source_stable": False}
     before: dict[str, str] = {}
@@ -157,6 +170,7 @@ def main() -> int:
 
     try:
         lock = json.loads(lock_path.read_text())
+        configuration_units = configured_runtime_units(lock, args.sdk, args.runtime_configured)
         before = verify_sources(component, lock)
         external = lock.get("external_files", {})
         for relative, entry in external.items():
@@ -194,11 +208,14 @@ def main() -> int:
                   "-Wno-unused-function", "-fblocks", "-DDM_NVN_M3=1",
                   "-Werror=unguarded-availability", "-Werror=unguarded-availability-new",
                   "-I", str(staged / "dm/host"), "-I", str(staged / "dm/gfx/nvn/include"),
+                  "-I", str(staged / "dm/gfx/nvn"),
                   "-I", str(adapter), "-I", str(frontend),
                   "-I", str(repository / "native/botw_resources"),
                   "-I", str(repository / "native/botw_host")]
         if args.sdk == "iphoneos":
             common += ["-DDM_SHELL=1"]
+        if args.runtime_configured:
+            common += ["-DBOTW_WHOLE_RUNTIME_CONFIGURED=1", "-DBOTW_WHOLE_SHADER_PUBLICATION=1"]
         if audio_plan:
             clangxx = run("find-clangxx", ["xcrun", "--find", "clang++"]).stdout.strip()
             for include in audio_plan["includes"]:
@@ -209,6 +226,7 @@ def main() -> int:
         object_dir.mkdir()
         sources = [(str(staged / p), p) for p in upstream]
         sources += [(str(component / p), p) for p in lock["adapter_translation_units"]]
+        sources += [(str(component / p), p) for p in configuration_units]
         sources += [(str(repository / p), p) for p in lock["external_translation_units"]]
         if audio_plan:
             sources += audio_plan["sources"]

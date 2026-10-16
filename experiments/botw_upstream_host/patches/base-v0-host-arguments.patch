@@ -1,0 +1,23 @@
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -24,6 +24,11 @@
+     // The three callbacks passed in by rtld: A only sets an rtld flag (skipped), B = each module's DT_INIT (before nnMain), C = destructors (not done)
+     ((fn0)req("_init_libc0"))();
+     LOG(">>> nnosInitialize"); ((fn2)req("nnosInitialize"))(hmain, 0);
++    // Fixed base-v0 nnosInitialize sets these same two globals when a normal
++    // process argument area exists. x1 stays zero here; publish the original
++    // host argv now so later SDK initialization and constructors can read it.
++    ((fnp)req("_ZN2nn2os11SetHostArgcEi"))((void *)(uint64_t)g_argc);
++    ((fnp)req("_ZN2nn2os11SetHostArgvEPPc"))(g_argv);
+     ((fn0)req("_init_libc1"))();
+     LOG(">>> nninitInitializeSdkModule"); ((fn0)req("nninitInitializeSdkModule"))();
+     LOG(">>> nninitStartup"); ((fn0)req("nninitStartup"))();
+@@ -31,8 +36,6 @@
+     dm_prof_mark("② SDK init (nnosInitialize -> nninitStartup)");
+     run_module_inits();   // rtld callback B: each module's DT_INIT (global constructors)
+     dm_prof_mark("③ per-module init_array");
+-    ((fnp)req("_ZN2nn2os11SetHostArgcEi"))((void *)(uint64_t)g_argc);
+-    ((fnp)req("_ZN2nn2os11SetHostArgvEPPc"))(g_argv);
+     if (T->before_nnmain) T->before_nnmain();   // Diablo II: fixed seed / save throttle / guest thread self-test / touch layout prefixes
+     LOG(">>> nnMain"); ((fn0)req("nnMain"))();
+     LOG("nnMain returned");

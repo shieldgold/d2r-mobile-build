@@ -1,0 +1,224 @@
+--- a/dm/gfx/nvn/botw_shader_manifest.h
++++ b/dm/gfx/nvn/botw_shader_manifest.h
+@@ -25,16 +25,24 @@
+ @property(nonatomic, readonly, copy) NSString *captureSHA256;
+ @property(nonatomic, readonly) BotwShaderStage stage;
+ @property(nonatomic, readonly, copy) NSDictionary *reflection;
++/* Compiled v1 libraries keep their original contract. Portable source v1
++ * holds owned UTF-8 bytes separately and is compiled only on first function use. */
+ @property(nonatomic, readonly, copy) NSData *metallib;
++@property(nonatomic, readonly, copy, nullable) NSData *metalSource;
+ @end
+ 
+ @interface BotwShaderManifest : NSObject
+ @property(nonatomic, readonly, copy) NSString *chain;
+ @property(nonatomic, readonly, copy) NSString *outputDirectory;
+ @property(nonatomic, readonly) NSUInteger count;
++/* Startup audit uses the same artifact reader/gates without retaining an
++ * entire game library in RAM. It creates no Metal device or function. */
++- (BOOL)validateArtifactsWithoutRetaining:(NSError * _Nullable * _Nullable)error;
+ 
+-/* Validates the manifest and every result's identity, gates and artifact
+- * paths and digests. The published files themselves are read on first use. */
++/* Compiled v1 keeps exact absolute paths and MTLB-only libraries. Explicit
++ * portable source v1 uses sibling names and source_ready/runnable=false;
++ * device compilation must succeed before use. Both keep immutable identities,
++ * facts/reflection gates and owned artifact digests. */
+ + (nullable instancetype)manifestAtAbsolutePath:(NSString *)path
+                                            error:(NSError * _Nullable * _Nullable)error;
+ 
+--- a/dm/gfx/nvn/botw_shader_manifest.m
++++ b/dm/gfx/nvn/botw_shader_manifest.m
+@@ -15,6 +15,7 @@
+ NSErrorDomain const BotwShaderManifestErrorDomain = @"dev.botw-mobile.shader-manifest";
+ 
+ static NSString *const kManifestSchema = @"botw-shader-build-manifest-v1";
++static NSString *const kSourceManifestSchema = @"botw-shader-source-manifest-v1";
+ static NSString *const kReflectionSchema = @"botw-shader-reflection-v1";
+ /* A full-library manifest holds about 20,000 results of roughly 1.5 KiB. */
+ enum { ManifestLimit = 256 * 1024 * 1024, ReflectionLimit = 16 * 1024 * 1024 };
+@@ -26,6 +27,7 @@
+ @property(nonatomic, readwrite) BotwShaderStage stage;
+ @property(nonatomic, readwrite, copy) NSDictionary *reflection;
+ @property(nonatomic, readwrite, copy) NSData *metallib;
++@property(nonatomic, readwrite, copy, nullable) NSData *metalSource;
+ @end
+ @implementation BotwShaderArtifact @end
+ 
+@@ -35,6 +37,7 @@
+ @interface BotwShaderEntry : NSObject
+ @property(nonatomic, copy) NSString *key, *captureSHA256, *reflectionPath, *reflectionSHA256, *metallibPath, *metallibSHA256;
+ @property(nonatomic) BotwShaderStage stage;
++@property(nonatomic) BOOL source;
+ @property(nonatomic, strong) BotwShaderArtifact *artifact;
+ @property(nonatomic, strong) NSError *failure;
+ @end
+@@ -148,10 +151,13 @@
+ }
+ 
+ static BOOL validate_reflection(NSDictionary *reflection, NSString *key, NSString *captureSHA,
+-                                BotwShaderStage stage, NSString *chain, NSError **error) {
++                                BotwShaderStage stage, NSString *chain, BOOL source, NSError **error) {
+     NSString *runtime_key = [key stringByAppendingString:@"_b"];
+     if (![reflection[@"schema"] isEqual:kReflectionSchema] || ![reflection[@"route"] isEqual:@"B"] ||
+-        !is_boolean(reflection[@"runnable"]) || ![reflection[@"runnable"] boolValue] ||
++        !is_boolean(reflection[@"runnable"]) || [reflection[@"runnable"] boolValue] == source ||
++        (source && (!is_boolean(reflection[@"runtime_compile_required"]) ||
++                    ![reflection[@"runtime_compile_required"] boolValue] ||
++                    !lowercase_hex(reflection[@"facts_sha256"], 64))) ||
+         ![reflection[@"chain"] isEqual:chain] || ![reflection[@"key"] isEqual:runtime_key] ||
+         ![reflection[@"dm_ctl"] isEqual:key] || ![reflection[@"sha256"] isEqual:captureSHA] ||
+         ![reflection[@"stage"] isEqual:reflection_stage(stage)] ||
+@@ -199,17 +205,21 @@
+     NSDictionary *manifest = json_dictionary(manifest_data, @"manifest-build.json", error);
+     if (!manifest) return nil;
+     NSString *chain = manifest[@"chain"];
+-    if (![manifest[@"schema"] isEqual:kManifestSchema]) {
++    BOOL source = [manifest[@"schema"] isEqual:kSourceManifestSchema];
++    if (!source && ![manifest[@"schema"] isEqual:kManifestSchema]) {
+         fail(error, BotwShaderManifestErrorInvalidManifest, @"manifest schema is invalid"); return nil;
+     }
+-    if (![manifest[@"mode"] isEqual:@"build"] || !is_boolean(manifest[@"runnable"]) || ![manifest[@"runnable"] boolValue]) {
++    if (![manifest[@"mode"] isEqual:(source ? @"source" : @"build")] ||
++        !is_boolean(manifest[@"runnable"]) || [manifest[@"runnable"] boolValue] == source ||
++        (source && (!is_boolean(manifest[@"runtime_compile_required"]) ||
++                    ![manifest[@"runtime_compile_required"] boolValue]))) {
+         fail(error, BotwShaderManifestErrorInvalidManifest, @"manifest is not a runnable build"); return nil;
+     }
+     if (!lowercase_hex(chain, 12)) {
+         fail(error, BotwShaderManifestErrorInvalidManifest, @"manifest chain is invalid"); return nil;
+     }
+-    if (![manifest[@"output"] isEqual:output] ||
+-        ![output.lastPathComponent isEqual:[@"botw-b-" stringByAppendingString:chain]]) {
++    if (![manifest[@"output"] isEqual:(source ? @"." : output)] ||
++        ![output.lastPathComponent isEqual:[(source ? @"botw-s-" : @"botw-b-") stringByAppendingString:chain]]) {
+         fail(error, BotwShaderManifestErrorInvalidManifest,
+              @"manifest output directory %@ does not match package %@", manifest[@"output"], output); return nil;
+     }
+@@ -228,8 +238,10 @@
+         BotwShaderStage stage;
+         NSString *capture_key = is_dictionary(capture) ? capture[@"key"] : nil;
+         NSString *capture_sha = is_dictionary(capture) ? capture[@"sha256"] : nil;
+-        if (!lowercase_hex(key, 16) || entries[key] || ![result[@"status"] isEqual:@"ready"] ||
+-            !is_boolean(result[@"runnable"]) || ![result[@"runnable"] boolValue] ||
++        if (!lowercase_hex(key, 16) || entries[key] || ![result[@"status"] isEqual:(source ? @"source_ready" : @"ready")] ||
++            !is_boolean(result[@"runnable"]) || [result[@"runnable"] boolValue] == source ||
++            (source && (!is_boolean(result[@"runtime_compile_required"]) ||
++                        ![result[@"runtime_compile_required"] boolValue])) ||
+             !empty_array(result[@"errors"]) || !empty_array(result[@"unknowns"]) || !empty_array(result[@"conflicts"]) ||
+             !is_dictionary(capture) || ![capture_key isEqual:key] || !lowercase_hex(capture_sha, 64) ||
+             ![[capture_sha substringToIndex:16] isEqual:key] || !stage_value(capture, &stage) || !is_dictionary(files)) {
+@@ -242,14 +254,23 @@
+         NSString *msl_path = [output stringByAppendingPathComponent:[base stringByAppendingString:@".metal"]];
+         NSDictionary *msl = files[@"msl"];
+         NSString *reflection_hash, *metallib_hash;
+-        if (files.count != 3 || !is_dictionary(msl) || msl.count != 1 || ![msl[@"path"] isEqual:msl_path] ||
+-            !exact_file(files, @"json", reflection_path, &reflection_hash) ||
+-            !exact_file(files, @"metallib", metallib_path, &metallib_hash)) {
++        BOOL valid_files;
++        if (source) {
++            /* Portable packages name exact sibling files, never caller paths.
++             * Absolute host paths and traversal are not accepted/rebased. */
++            valid_files = files.count == 2 &&
++                exact_file(files, @"json", [base stringByAppendingString:@".json"], &reflection_hash) &&
++                exact_file(files, @"metal_source", [base stringByAppendingString:@".metal"], &metallib_hash);
++            metallib_path = msl_path;
++        } else valid_files = files.count == 3 && is_dictionary(msl) && msl.count == 1 && [msl[@"path"] isEqual:msl_path] &&
++            exact_file(files, @"json", reflection_path, &reflection_hash) &&
++            exact_file(files, @"metallib", metallib_path, &metallib_hash);
++        if (!valid_files) {
+             fail(error, BotwShaderManifestErrorInvalidManifest, @"manifest artifact names or hashes are invalid for %@", key);
+             return nil;
+         }
+         BotwShaderEntry *entry = [BotwShaderEntry new];
+-        entry.key = key; entry.captureSHA256 = capture_sha; entry.stage = stage;
++        entry.key = key; entry.captureSHA256 = capture_sha; entry.stage = stage; entry.source = source;
+         entry.reflectionPath = reflection_path; entry.reflectionSHA256 = reflection_hash;
+         entry.metallibPath = metallib_path; entry.metallibSHA256 = metallib_hash;
+         entries[key] = entry;
+@@ -257,24 +278,45 @@
+     BotwShaderManifest *loaded = [BotwShaderManifest new];
+     loaded.chain = chain; loaded.outputDirectory = output; loaded.entries = entries;
+     return loaded;
++}
++
++- (BOOL)validateArtifactsWithoutRetaining:(NSError **)error {
++    if (error) *error = nil;
++    for (BotwShaderEntry *entry in self.entries.allValues) {
++        NSError *failure = nil;
++        BOOL valid;
++        @autoreleasepool {
++            valid = [self loadEntry:entry error:&failure] != nil;
++        }
++        if (!valid) { if (error) *error = failure; return NO; }
++    }
++    return YES;
+ }
+ 
+ /* Reads one entry's published files. The bytes are kept, so later changes to
+  * the files never affect an artifact that has been validated. */
+ - (BotwShaderArtifact *)loadEntry:(BotwShaderEntry *)entry error:(NSError **)error {
+     NSData *reflection_data = read_regular(entry.reflectionPath, ReflectionLimit, error);
+-    NSData *metallib_data = reflection_data ? read_regular(entry.metallibPath, MetallibLimit, error) : nil;
++    NSData *metallib_data = reflection_data ? read_regular(entry.metallibPath, entry.source ? ReflectionLimit : MetallibLimit, error) : nil;
+     if (!reflection_data || !metallib_data) return nil;
+     if (![sha256(reflection_data) isEqual:entry.reflectionSHA256] || ![sha256(metallib_data) isEqual:entry.metallibSHA256]) {
+         fail(error, BotwShaderManifestErrorInvalidArtifact, @"published artifact digest mismatch for %@", entry.key);
+         return nil;
+     }
+     NSDictionary *reflection = json_dictionary(reflection_data, entry.reflectionPath.lastPathComponent, error);
+-    if (!reflection || !validate_reflection(reflection, entry.key, entry.captureSHA256, entry.stage, self.chain, error))
++    if (!reflection || !validate_reflection(reflection, entry.key, entry.captureSHA256, entry.stage, self.chain, entry.source, error))
+         return nil;
+     BotwShaderArtifact *artifact = [BotwShaderArtifact new];
+     artifact.key = entry.key; artifact.captureSHA256 = entry.captureSHA256; artifact.stage = entry.stage;
+-    artifact.reflection = reflection; artifact.metallib = metallib_data;
++    artifact.reflection = reflection;
++    if (entry.source) {
++        NSString *text = [[NSString alloc] initWithData:metallib_data encoding:NSUTF8StringEncoding];
++        if (!text || !text.length || memchr(metallib_data.bytes, 0, metallib_data.length)) {
++            fail(error, BotwShaderManifestErrorInvalidArtifact, @"source for %@ is not bounded NUL-free UTF-8", entry.key);
++            return nil;
++        }
++        artifact.metalSource = metallib_data; artifact.metallib = [NSData data];
++    } else artifact.metallib = metallib_data;
+     return artifact;
+ }
+ 
+--- a/dm/gfx/nvn/botw_shader_runtime.m
++++ b/dm/gfx/nvn/botw_shader_runtime.m
+@@ -115,8 +115,22 @@
+         fail(error, BotwShaderRuntimeErrorEntry, @"reflection for %@ has no entry point", artifact.key);
+         return nil;
+     }
++    if (!device) {
++        fail(error, BotwShaderRuntimeErrorLibrary, @"shader %@ has no actual Metal device", artifact.key);
++        return nil;
++    }
++    id<MTLLibrary> library = nil;
++    NSError *library_error = nil;
++    if (artifact.metalSource) {
++        // A separate explicit schema carries owned, digest-verified source.
++        // A compiler failure is terminal for this shader; no legacy fallback.
++        NSString *source = [[NSString alloc] initWithData:artifact.metalSource encoding:NSUTF8StringEncoding];
++        MTLCompileOptions *options = [MTLCompileOptions new];
++        options.fastMathEnabled = NO;
++        library = source ? [device newLibraryWithSource:source options:options error:&library_error] : nil;
++    } else {
+     NSData *bytes = artifact.metallib;
+-    // Only compiled libraries are accepted; there is no source compilation fallback.
++    // The compiled v1 contract remains MTLB-only, with no source fallback.
+     if (bytes.length < 4 || memcmp(bytes.bytes, "MTLB", 4)) {
+         fail(error, BotwShaderRuntimeErrorLibrary, @"artifact %@ is not a compiled Metal library", artifact.key);
+         return nil;
+@@ -124,8 +138,8 @@
+     // The destructor block retains the owned NSData until Metal releases the dispatch data.
+     dispatch_data_t data = dispatch_data_create(bytes.bytes, bytes.length, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+                                                 ^{ (void)bytes; });
+-    NSError *library_error = nil;
+-    id<MTLLibrary> library = [device newLibraryWithData:data error:&library_error];
++    library = [device newLibraryWithData:data error:&library_error];
++    }
+     if (!library) {
+         fail(error, BotwShaderRuntimeErrorLibrary, @"artifact %@ library creation failed: %@", artifact.key,
+              library_error.localizedDescription ?: @"unknown error");

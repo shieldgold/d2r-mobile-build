@@ -13,6 +13,18 @@ spec.loader.exec_module(build)
 
 
 class WholeHostBuildTests(unittest.TestCase):
+    def test_configured_runtime_requires_exact_provider_and_physical_ios_target(self):
+        lock = {"runtime_configuration_translation_units": ["frontend/whole_runtime_configuration.m"]}
+        self.assertEqual(build.configured_runtime_units(lock, "iphoneos", False), [])
+        self.assertEqual(build.configured_runtime_units(lock, "iphoneos", True),
+                         ["frontend/whole_runtime_configuration.m"])
+        with self.assertRaisesRegex(ValueError, "iPhoneOS"):
+            build.configured_runtime_units(lock, "macosx", True)
+        for invalid in ({}, {"runtime_configuration_translation_units": []},
+                        {"runtime_configuration_translation_units": ["unknown.c"]}):
+            with self.assertRaisesRegex(ValueError, "exact"):
+                build.configured_runtime_units(invalid, "iphoneos", True)
+
     def test_normal_operand_vm_validation_is_confined_to_the_reviewed_copier(self):
         lock = {"forbidden_external_references": ["_vm_region_recurse_64", "_task_threads"],
                 "normal_operand_validation_references": {
