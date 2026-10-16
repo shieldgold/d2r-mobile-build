@@ -65,6 +65,7 @@ static const force_rule rules[] = {
     {"_ZN2nn3mem17StandardAllocator8AllocateEmm", "allocates exactly as the original; only reports when returning null (original callers often skip the null check)", 2u, 0u, 0u},
     {"_ZN2nn7account10InitializeEv", "BotW: initialize one host-local user", 4u, 1u, 1u},
     {"_ZN2nn7account22TryOpenPreselectedUserEPNS0_10UserHandleE", "BotW: preselect the local user", 4u, 1u, 0u},
+    {"_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE", "base-v0 preselected user uses the complete native account handle", 4u, 1u, 1u},
     {"_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE", "BotW: resolve a local user handle", 4u, 1u, 33u},
     {"_ZN2nn7account12PopOpenUsersEPiPNS0_10UserHandleEi", "BotW: transfer the local startup user", 4u, 1u, 0u},
     {"_ZN2nn7account12ListAllUsersEPiPNS0_3UidEi", "BotW: enumerate the local profile", 4u, 1u, 33u},

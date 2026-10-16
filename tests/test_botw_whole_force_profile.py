@@ -113,6 +113,7 @@ EXPECTED_REFERENCES = {
     "_ZN2nn5prepo10PlayReport4SaveEv": 1,
     "_ZN2nn6applet23GetAppletResourceUserIdEv": 38,
     "_ZN2nn7account10InitializeEv": 1,
+    "_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE": 1,
     "_ZN2nn7account12ListAllUsersEPiPNS0_3UidEi": 33,
     "_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE": 33,
     "_ZN2nv18InitializeGraphicsEPvm": 1,
@@ -134,6 +135,8 @@ def stage_source(destination):
         patches.append('patches/base-v0-stack-allocator.patch')
     if 'patches/base-v0-debug-pad.patch' not in patches:
         patches.append('patches/base-v0-debug-pad.patch')
+    if 'patches/base-v0-account-open.patch' not in patches:
+        patches.append('patches/base-v0-account-open.patch')
     for name in patches:
         if BASELINE and name == 'patches/base-v0-force.patch':
             continue
@@ -168,7 +171,7 @@ class WholeForceProfileTests(unittest.TestCase):
         end = text.index('// Read the rewriter table header', begin)
         (cls.work / 'loader_force.inc').write_text(text[begin:end])
         rows = source_registry(stage)
-        if len(rows) != 136:
+        if len(rows) != 137:
             raise AssertionError('actual source registry changed: ' + str(len(rows)))
         owned = []
         for name, why, title in rows:
@@ -254,7 +257,7 @@ class WholeForceProfileTests(unittest.TestCase):
         manifest = {r.split()[0]: r.split()[1:] for r in rows}
         candidate_names = {name for name, _, title in source_registry(self.staged)
                            if title == 4 or name in BORROWED}
-        self.assertEqual(len(candidate_names), 134)
+        self.assertEqual(len(candidate_names), 135)
         actual = {}
         for module_index, name in enumerate(ORDER):
             data = (directory / name).read_bytes()
@@ -291,7 +294,7 @@ class WholeForceProfileTests(unittest.TestCase):
                 self.assertEqual(count, 1)
                 actual[symbol_name] = actual.get(symbol_name, 0) | (1 << module_index)
         self.assertEqual(actual, EXPECTED_REFERENCES)
-        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 142)
+        self.assertEqual(sum(mask.bit_count() for mask in actual.values()), 143)
 
     @unittest.skipIf(BASELINE, 'baseline has no stream verifier')
     def test_real_fixed_images_hash_as_raw_and_three_padded_signed_sections(self):

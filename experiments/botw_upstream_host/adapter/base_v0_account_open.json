@@ -1,0 +1,153 @@
+{
+  "schema": "botw-base-v0-account-open-contract-v1",
+  "profile": "botw-switch-base-v0",
+  "upstream_commit": "21f026e0c7fd9fee575a1bfa8d925553bb4db88e",
+  "scope": "Only fixed base-v0 Result-typed OpenPreselectedUser import; reuse the complete existing upstream local-user handle producer. No general account IPC implementation, new handle namespace, provider or guest rewrite.",
+  "source_symbols": [
+    {
+      "module": "rtld",
+      "sha256": "2bf1918e54e3d6378f150e45a264c151558198703a778408db5ac26263a3a362",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "main",
+      "sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "symbols": [
+        {
+          "index": 160,
+          "name": "_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE",
+          "info": 18,
+          "section": 0,
+          "value": "0x0",
+          "bytes": 0
+        }
+      ],
+      "relocations": [
+        {
+          "table": "JMPREL",
+          "slot": "0x2263c48",
+          "type": 1026,
+          "addend": 0
+        }
+      ]
+    },
+    {
+      "module": "subsdk0",
+      "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk1",
+      "sha256": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk2",
+      "sha256": "e56eec1a58d1fa53779469e6eea36a795c0deac90bbf25b54b97c44ed195bd65",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "subsdk3",
+      "sha256": "2f344d84badf826937317e033b47f32bb2e1e8b7856553ce7356616268b5e238",
+      "symbols": [],
+      "relocations": []
+    },
+    {
+      "module": "sdk",
+      "sha256": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31",
+      "symbols": [
+        {
+          "index": 9243,
+          "name": "_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE",
+          "info": 18,
+          "section": 1,
+          "value": "0xa9664",
+          "bytes": 184,
+          "span_sha256": "8155493c842d8f0295417606d7536aae05817e246a479ea026cb38baf415438e"
+        }
+      ],
+      "relocations": []
+    }
+  ],
+  "fixed_sdk_leaves": [
+    {
+      "index": 8466,
+      "name": "_ZN2nn7account10InitializeEv",
+      "binding": 1,
+      "section": 1,
+      "offset": "0xa8b24",
+      "bytes": 312,
+      "body_sha256": "8ac9560ef00b070a3b079e6364ace107f0775ef156a3e088d5c2b76f6fc88935"
+    },
+    {
+      "index": 9243,
+      "name": "_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE",
+      "binding": 1,
+      "section": 1,
+      "offset": "0xa9664",
+      "bytes": 184,
+      "body_sha256": "8155493c842d8f0295417606d7536aae05817e246a479ea026cb38baf415438e"
+    },
+    {
+      "index": 1601,
+      "name": "_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE",
+      "binding": 1,
+      "section": 1,
+      "offset": "0xa972c",
+      "bytes": 16,
+      "body_sha256": "84275e75c6b0b549bee1a45b2ded68b3d63f98cbced93171c344323da76a1d51"
+    }
+  ],
+  "wire_contract": {
+    "abi": "nn::Result OpenPreselectedUser(UserHandle *); low32 Result, one pointer argument. Not the newer TryOpenPreselectedUser bool ABI.",
+    "handle": {
+      "bytes": 24,
+      "uid_bytes": 16,
+      "opaque_manager_word_offset": 16
+    },
+    "sdk_dependency": "Original Open directly consumes private SDK preselected UID/backend object initialized by original SDK Initialize; it does not call TryOpenPreselectedUser. The existing host force initializer/GetUserId instead own one immutable local UID and host token."
+  },
+  "implementation": {
+    "entry": "botw_base_v0_account_open_preselected",
+    "call": "return botw_account_try_open(out) ? RES_OK : RES_FAIL;",
+    "one_owner": "Use original write_handle, bound persistent local UID, LOCAL_USER_TOKEN and g_account_user_open. Original ListAllUsers, GetUserId and PopOpenUsers share the same original account state.",
+    "writes": "No extra check, temporary handle, memcpy, identity read or atomic state. Existing try_open rejects NULL/uninitialized before writing; write_handle uses the existing checked void preparation before its original 24B copy. Failed preparation dies before the copy and open-state store.",
+    "success": "The configured one-preselected-local-user path returns existing RES_OK=0 only after original producer succeeds.",
+    "failure": "Existing host RES_FAIL=0x2a2 when original bool returns0. This is the existing host policy and is not asserted equal to any particular original SDK failure Result."
+  },
+  "references": {
+    "rule": {
+      "name": "_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE",
+      "why": "base-v0 preselected user uses the complete native account handle",
+      "titles": 4,
+      "candidate": 1,
+      "reference_mask": 1
+    },
+    "loader_order": [
+      "main",
+      "subsdk0",
+      "subsdk1",
+      "subsdk2",
+      "subsdk3",
+      "sdk"
+    ],
+    "actual_force_lookup_count": 1,
+    "all_other_original_rules_unchanged": 136
+  },
+  "expected_registry": {
+    "entries": 137,
+    "candidates": 135,
+    "active": 102,
+    "force_lookup_references": 143,
+    "canonical_metadata_sha256": "4551621b20c39e52dc487d0e18406b49e43cbf271a74db96f92d224093d8d6d1"
+  },
+  "limits": [
+    "Static/owned CPU evidence does not establish which Init caller executed, identify a device fatal site, or prove gameplay.",
+    "This adaptation does not create an SDK service object or expose host handles to original SDK account consumers.",
+    "Original upstream account body, UID/save binding, generic account IPC, and all other APIs remain unchanged."
+  ]
+}

@@ -1,0 +1,12 @@
+--- a/dm/host/botw_account.c
++++ b/dm/host/botw_account.c
+@@ -61,3 +61,9 @@
+     *count = 1; // The SDK reports total users even when capacity is zero.
+     return RES_OK;
+ }
++
++/* BASE_V0_ACCOUNT_OPEN_BEGIN */
++HLE_FORCE("_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE", "base-v0 preselected user uses the complete native account handle", Result, botw_base_v0_account_open_preselected, botw_user_handle *out) {
++    return botw_account_try_open(out) ? RES_OK : RES_FAIL;
++}
++/* BASE_V0_ACCOUNT_OPEN_END */

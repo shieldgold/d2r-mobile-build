@@ -196,6 +196,6 @@ int main(int argc, char **argv) {
     assert(base_v0_force_references_end() == 0);
 #endif
     force_check();
-    assert(calls == 142 && callback_count == 142 && g_force_active == 101);
+    assert(calls == 143 && callback_count == 143 && g_force_active == 102);
     return 0;
 }
