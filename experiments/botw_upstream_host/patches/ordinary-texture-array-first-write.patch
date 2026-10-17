@@ -1,0 +1,14 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -866,6 +866,11 @@
+         if (ready < 0) { free(copy); texwrite_stop(fn, "UNIMPL", why, o); }
+         if (ready > 0) { texwrite_import(fn, o, &p, copy, texflush_layer_count(o)); free(copy); return; }
+     }
++    if (!o->has_layout && coherence == NVN_TEXFLUSH_UNTRACKED && texflush_full_layer(o, &p) &&
++        (sync_layer || sync_count != texflush_layer_count(o))) {
++        int ready = mtl_tex_import_check(o, &why);
++        if (ready > 0) { texwrite_import(fn, o, &p, copy, texflush_layer_count(o)); free(copy); return; }
++    }
+     if (!o->has_layout) {
+         NVNcopyRegion mr = {(int)p.x0, (int)p.y0, (int)p.z0, (int)p.width, (int)p.height, (int)p.depth};
+         int rc = mtl_write_texels(o, p.level, p.layer, &mr, copy, p.src_row, p.src_img);

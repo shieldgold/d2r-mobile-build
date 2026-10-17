@@ -703,6 +703,11 @@
       "bytes": 849,
       "role": "thin-adapter-or-verification"
     },
+    "patches/ordinary-texture-array-first-write.patch": {
+      "sha256": "449c8067461c708d7bed10c9c1a1dfeca37f000bed2126541bacf5e990843711",
+      "bytes": 817,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/ordinary-texture-flush-error-propagation.patch": {
       "sha256": "9c8c4cdc3e5870f046e073a018c955b1fb3b010798c3007d90be854ae5e78f1d",
       "bytes": 600,
@@ -1071,6 +1076,11 @@
     "tests/whole_sync_wait_probe.c": {
       "sha256": "06c458f3883ae9e44e2e5e1bcf8799c5efd83dae5700fe39b7db4e0963155e11",
       "bytes": 6269,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_texture_array_first_write_probe.m": {
+      "sha256": "9c7029a19f90e3d6b2cab3f1bcee00a4b5ccbe1db97fe109388007b96a2d2ead",
+      "bytes": 8055,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_texture_flush_error_propagation_probe.m": {
@@ -1903,7 +1913,8 @@
     "patches/base-v0-vpool-consumers.patch",
     "patches/virtual-pool-cpu-boundaries.patch",
     "patches/ordinary-texture-flush-import.patch",
-    "patches/ordinary-texture-flush-error-propagation.patch"
+    "patches/ordinary-texture-flush-error-propagation.patch",
+    "patches/ordinary-texture-array-first-write.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1914,7 +1925,7 @@
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
     "dm/gfx/nvn/botw_storage_class.c": "f300d8474acf8be8ed17e829d74d8add3d47331a0bb03792ec2292555ffc9c22",
-    "dm/gfx/nvn/hle_nvn.c": "55dbeda8d69f09368916a4935d1af0ce451bf7a4448d7aeba324b1d5f6026cc4",
+    "dm/gfx/nvn/hle_nvn.c": "e42d93530714d25cabdab7f19351ea80a6c2ac09564f24d5933270331b4f12a3",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
