@@ -33,13 +33,18 @@
       "bytes": 5696,
       "role": "thin-adapter-or-verification"
     },
+    "adapter/base_v0_allocation_guard.json": {
+      "sha256": "bbb6d40118e5fad1f6ac2074429f00ddebcad2ad2c3bb7c9bee0b1f2963cea8a",
+      "bytes": 3115,
+      "role": "thin-adapter-or-verification"
+    },
     "adapter/base_v0_debug_pad.json": {
       "sha256": "7ca5f10d44bc59bdee7f1a6c566e03bdee3b90567f14fde9ae0b514f193cd064",
       "bytes": 5902,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_force.c": {
-      "sha256": "6bf356213e329dc4f300643e2e144d1f40c2cf7a1071d948b71c6ddb2e12f32d",
+      "sha256": "800da70a1d89c7460437884b9beb2d5d76dc5a4fb128cf1bdd9a47f62862c0c9",
       "bytes": 26059,
       "role": "thin-adapter-or-verification"
     },
@@ -74,8 +79,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.json": {
-      "sha256": "3a559c53a2bf00f744b8b3ded57d95a98cc663534e455f3881eb5c7bf196ec6f",
-      "bytes": 2522,
+      "sha256": "851578186f96d68249066dd16f0939dd190acfc0f445223ac6bcb226131fe129",
+      "bytes": 2619,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_hid_single.json": {
@@ -269,13 +274,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "e9af183203726d4886adbd04bcb8f93f2c0d2ac98609c1621e173c7a68473124",
-      "bytes": 7755,
+      "sha256": "a2e056c8c3e54e74f9030bddcb102dd5ad0f175cfa7ece7c15fdfa30f5f07e8e",
+      "bytes": 8137,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "0d89f415b9a8c61139f02cad34627f5a8ffe8b86000dc3c044c0176dd5f00378",
-      "bytes": 2803,
+      "sha256": "68c74045727d97526dfa229ea5565c6febfc072b496493de6426fdd7a15c9756",
+      "bytes": 2939,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -339,8 +344,8 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_runtime_resource_manifest.h": {
-      "sha256": "9b342436ae9503c0b07ebbae1c968f420f53735eee35d2d2841da63455623010",
-      "bytes": 1992,
+      "sha256": "b1309f38e840a3d3a1e73e2ec481df0e01974ad27cc23cd4f67fdc6a3ebeeeb0",
+      "bytes": 2021,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_runtime_resources.h": {
@@ -486,6 +491,11 @@
     "patches/base-v0-account-open.patch": {
       "sha256": "020420fd18b7f3f840368d7e0400256b9d4cfe24bd08bd1b08135da85db743a0",
       "bytes": 515,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-allocation-failure.patch": {
+      "sha256": "2b04570594edb82f047af2aee2585968c276ff7fb744a22fd4f32a6748e92319",
+      "bytes": 1896,
       "role": "thin-adapter-or-verification"
     },
     "patches/base-v0-constructor-order.patch": {
@@ -729,8 +739,8 @@
       "role": "thin-adapter-or-verification"
     },
     "scripts/package_ios.py": {
-      "sha256": "40d7f1fd4f883233fc21b7b3a77b80b0dd6046ef67a3db0a05fb0cbe5e0e6527",
-      "bytes": 26299,
+      "sha256": "869b6f501028b0f11996b31f7b75b164f6c035e74e29636aeac7305b47d3cced",
+      "bytes": 26312,
       "role": "thin-adapter-or-verification"
     },
     "scripts/read_swforce_registry.py": {
@@ -781,6 +791,11 @@
     "tests/whole_address_space_probe.c": {
       "sha256": "3de8598ef3d3ac914a6de3439d27b917fcf069da8935769bff3d8be0cc1adaca",
       "bytes": 6498,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_allocation_failure_probe.c": {
+      "sha256": "010d6da79fecf551a18ea5f9b1eb512d6608af029c6179b5514e4fa4abd8fd43",
+      "bytes": 4382,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_applet_probe.c": {
@@ -1778,7 +1793,8 @@
     "patches/base-v0-debug-pad.patch",
     "patches/base-v0-account-open.patch",
     "patches/normal-account-result-status.patch",
-    "patches/normal-signal-kind.patch"
+    "patches/normal-signal-kind.patch",
+    "patches/base-v0-allocation-failure.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1810,6 +1826,7 @@
     "dm/host/dm.h": "27cbad1e7034cf33726e0328259acf70e2d7b234c50b2e5bdb06c50772c49756",
     "dm/host/dm_title.c": "3967eb6b141445f192bd7bc28d4ced1fcbde021a43ea3bb9282f87c1715a87c9",
     "dm/host/hle.c": "721c43f02f361e0ace50a9b7ed7561109f27cf8e9494e34e4371b55d03bdf552",
+    "dm/host/hle.h": "7e89dd92723c4ed95a222f3386b83fc91c7bf8e33119e4b7ac550854f9a4ff45",
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_os.c": "a1aff3b2fade3c1e27be46666098dc59457c6070c2619e2b029b4c03a458097f",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
@@ -1819,7 +1836,7 @@
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",
     "dm/host/tests/t_botw_pcm.c": "eedde76aead52c05888f3541a7529e30d6febdb16e2683bb56bff254ef7f09c6",
     "dm/host/thread.c": "554d07f4f1028fa771a00080c741bfaf5646ed3a8aa46304846f82922dc1828a",
-    "dm/host/title_botw.c": "6cba0eecdd217ebfa2b44a5e603f027db834ef4c852aacc04dac2374057f7e30"
+    "dm/host/title_botw.c": "2feb2dbc45bc3534f81392999f2177d8ea41ec5632f1b8670f3dd37f6dc133bf"
   },
   "targets": {
     "macosx": "arm64-apple-macos15.0",

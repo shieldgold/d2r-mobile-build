@@ -226,7 +226,7 @@ def verify_guest(guest,report,rewrite,profile,repository,temporary):
     for name,(size,sha) in pins.items():
         path=profile if name=='base-profile.json' else Path(guest)/('' if name=='guest-framework-report.json' else 'dm')/name
         raw=read(path)
-        if len(raw)!=size or digest(raw)!=sha:raise ValueError('fixed v4/base metadata identity differs: '+name)
+        if len(raw)!=size or digest(raw)!=sha:raise ValueError('fixed guard/base metadata identity differs: '+name)
         if name=='base-profile.json':profile_raw=raw
     metadata=document(Path(guest)/'guest-framework-report.json');names=[r['name'] for r in metadata['modules']]
     if len(names)!=6 or set(names)!=set(NAMES):raise ValueError('requires exactly the fixed six-module Guest')
@@ -373,8 +373,8 @@ def main(argv=None):
     for name in ('binary','receipt','guest','source-publication','info-plist','output'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--commands',type=Path)
-    parser.add_argument('--preflight-report',type=Path,default=ROOT/'outputs/botw-native-host39-bounded-pthread-stack-v4/report.json')
-    parser.add_argument('--rewrite',type=Path,default=ROOT/'outputs/botw-native-host39-bounded-pthread-stack-v4/rewrite')
+    parser.add_argument('--preflight-report',type=Path,default=ROOT/'outputs/botw-native-host39-v4-normal-allocation-guard-v1/report.json')
+    parser.add_argument('--rewrite',type=Path,default=ROOT/'outputs/botw-native-host39-v4-normal-allocation-guard-v1/rewrite')
     parser.add_argument('--build-version',required=True)
     args=vars(parser.parse_args(argv));args['commands']=args['commands'] or args['receipt'].parent/'commands.json'
     try:result=prepare(**args)

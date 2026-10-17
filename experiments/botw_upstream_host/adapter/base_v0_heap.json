@@ -1,5 +1,5 @@
 {
-  "guest_final_image_sha256": "cba191507c56577c3b81d61f7c32c3873a3bcfd980537a43b806bf6ab38458f7",
+  "guest_final_image_sha256": "2c5eabacc5250be1ad31021a511c34d1b5d3d05b977ea457447f3cbe84940cca",
   "heap_manifest": {
     "input_image_bytes": 37723204,
     "input_image_sha256": "dba3105888571a9e11bd07bec9ef921341b12e4c03c944b39379cc0a0a05f87c",
@@ -59,5 +59,6 @@
   "values": {
     "KRES0": "initial SDK heap capacity in bytes",
     "KRES1": "root arena capacity in bytes; heap minus 32 MiB"
-  }
+  },
+  "allocation_guard_profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1"
 }

@@ -108,10 +108,10 @@ class RuntimeResources(unittest.TestCase):
         result = subprocess.run([str(self.lifecycle), "fatal-dispatch"], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 70, result.stdout + result.stderr)
 
-    def test_private_fixed_v4_package_static_only_when_available(self):
-        original = ROOT / "outputs/botw-guest-framework-host39-bounded-pthread-stack-v4-six-final-ios18"
+    def test_private_guard_package_static_only_when_available(self):
+        original = ROOT / "outputs/botw-guest-framework-host39-v4-normal-allocation-guard-v1-six-final-ios18"
         if not (original / "Guest.framework/Guest").is_file():
-            self.skipTest("private fixed v4 disk artifact is not distributed in the repository")
+            self.skipTest("private allocation-guard disk artifact is not distributed in the repository")
         bundle = self.directory / "Owned.app"
         shutil.copytree(original / "dm", bundle / "botw", dirs_exist_ok=True)
         shutil.copy2(ROOT / "profiles/botw-switch-base-v0.json", bundle / "botw/base-profile.json")
@@ -123,6 +123,18 @@ class RuntimeResources(unittest.TestCase):
         with (bundle / "botw/main.gates.tsv").open("ab") as target:
             target.write(b"\n")
         self.assertEqual(self.run_probe("package", bundle, "unused").returncode, 1)
+
+    def test_private_legacy_v4_is_rejected_by_the_new_runtime_identity(self):
+        original = ROOT / "outputs/botw-guest-framework-host39-bounded-pthread-stack-v4-six-final-ios18"
+        if not (original / "Guest.framework/Guest").is_file():
+            self.skipTest("private legacy v4 disk artifact is not distributed in the repository")
+        bundle = self.directory / "Legacy.app"
+        shutil.copytree(original / "dm", bundle / "botw", dirs_exist_ok=True)
+        shutil.copy2(ROOT / "profiles/botw-switch-base-v0.json", bundle / "botw/base-profile.json")
+        shutil.copy2(original / "guest-framework-report.json", bundle / "botw/guest-framework-report.json")
+        shutil.copytree(original / "Guest.framework", bundle / "Frameworks/Guest.framework", dirs_exist_ok=True)
+        result = self.run_probe("package", bundle, "unused")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
     def test_runtime_provider_requires_explicit_build_macro(self):
         result = subprocess.run(["clang", "-fobjc-arc", "-fblocks", "-std=c11", "-fsyntax-only",

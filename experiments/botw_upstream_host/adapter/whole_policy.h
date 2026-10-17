@@ -48,6 +48,8 @@ int botw_whole_host_backtrace(void **buffer, int size);
 void botw_whole_host_backtrace_symbols_fd(void *const *buffer, int size, int fd);
 _Noreturn void botw_backend_host_diagnostic_denied(const char *operation);
 _Noreturn void botw_whole_host_failure(void);
+/* Normal allocation failure, with no guest operand or execution context. */
+_Noreturn void botw_whole_host_account_heap_failure(void);
 _Noreturn void botw_whole_host_signal_failure(int signal_number);
 /* OS signal classification only; neither argument contains guest state. */
 _Noreturn void botw_whole_host_signal_failure_kind(int signal_number, int signal_code);

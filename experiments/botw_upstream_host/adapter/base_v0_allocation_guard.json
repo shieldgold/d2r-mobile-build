@@ -1,0 +1,68 @@
+{
+  "schema": "botw-base-v0-normal-allocation-guard-contract-v1",
+  "profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1",
+  "manifest": {
+    "schema": "normal-allocation-guard-v1",
+    "profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1",
+    "input_profile": "botw-switch-base-v0-pthread-stack-v4",
+    "policy": {
+      "schema": 1,
+      "profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1",
+      "input_profile": "botw-switch-base-v0-pthread-stack-v4",
+      "allocation_site": 14390184,
+      "normal_hostcall": 128,
+      "original_allocator": true,
+      "game_playable": false
+    },
+    "module": "main",
+    "game_playable": false,
+    "input_image_bytes": 37723336,
+    "input_image_sha256": "cba191507c56577c3b81d61f7c32c3873a3bcfd980537a43b806bf6ab38458f7",
+    "output_image_bytes": 37723388,
+    "output_image_sha256": "2c5eabacc5250be1ad31021a511c34d1b5d3d05b977ea457447f3cbe84940cca",
+    "fixups_sha256": "d16b439edde318861a04ac1e9641a273110fbcd890275d5863f0acc21f8d20f3",
+    "input_gates_sha256": "55fed8f4e6f224a6e1fc80daca03d76434c6c8c5ed96dc98e3bbedd1be94e857",
+    "output_gates_sha256": "b57066cfcfa977fa7dc259e5335783ba2df639faf7fe6e949d7f654310fc52ea",
+    "input_sites_sha256": "d071392b2c769a34cda1a529214c3b954fe6953c814d12084966327542da3461",
+    "output_sites_sha256": "4ae2bb25d4585abfe7cd9c1f1fe62313c6d41f47024fafc6fd878690983e6db2",
+    "site": 14390184,
+    "original": "f60300aa",
+    "replacement": "48025914",
+    "thunk_offset": 37723336,
+    "thunk_bytes": "600000b4f60300aab7fda617fd7bbfa97ed03bd55dfcfff0bd0f40f9de031d8bde0340f9fd0340f9c0033fd6fd7bc1a8adfda617",
+    "gate_entry": 37723348,
+    "gate_return": 37723380,
+    "normal_hostcall": 128,
+    "appended_gate_row": "0x23f9cf4\tsvc\t128\t0xdb93a8\n",
+    "appended_site_row": "0xdb93a8\tnormal-allocation-guard-v1\n",
+    "input_gate_count": 93,
+    "output_gate_count": 94,
+    "input_site_count": 9965,
+    "output_site_count": 9966,
+    "normal_gate_source": {
+      "pinned_rewriter_sha256": "c9a0c7574547ab945e4648bd6664e86fa4a77de12253a55e7b464232b2cdf274",
+      "reference_gate_offset": 37641580,
+      "reference_gate_sha256": "d6b09ef6fd96cf3795b17cc735fb91fd480c55bc312e75fbf710892583e239bf"
+    }
+  },
+  "source_preflight_report_sha256": "e150eb3acadcfd1bf0c8f4a9ca398463ee3d240cae560850223ec8648a3ef4ec",
+  "guest_framework_report_sha256": "1ef1e776387b6152403c57d53499c58da1249c7daa0d5a01868345c87daed8bc",
+  "main_identity": {
+    "image_bytes": 37723388,
+    "image_sha256": "2c5eabacc5250be1ad31021a511c34d1b5d3d05b977ea457447f3cbe84940cca",
+    "padded_bytes": 37732352,
+    "padded_sha256": "f50bdce8c1131e8ff05f3041ba5d0ddfa35a4a3043e3ea6a1b513002f608acd8",
+    "unchanged_from_v4": false
+  },
+  "normal_failure": {
+    "title": "botw",
+    "hostcall": 128,
+    "message": "account heap allocation failed",
+    "exit": 70,
+    "argument_read": false
+  },
+  "limitations": [
+    "This corrects one confirmed unchecked allocation failure path.",
+    "The failure cause on the device and gameplay remain unverified."
+  ]
+}

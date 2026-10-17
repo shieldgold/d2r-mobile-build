@@ -93,8 +93,8 @@ class WholeHeapProfile(unittest.TestCase):
 
     @unittest.skipIf(BASELINE, 'baseline has no static profile admission')
     def test_actual_disk_guest_unwinds_v4_then_both_exact_heap_thunks(self):
-        from scripts.botw_native import heap_policy, thread_stack
-        directory = ROOT / 'outputs/botw-native-host39-bounded-pthread-stack-v4'
+        from scripts.botw_native import heap_policy, thread_stack, allocation_guard
+        directory = ROOT / 'outputs/botw-native-host39-v4-normal-allocation-guard-v1'
         if not (directory / 'report.json').exists():
             self.skipTest('private fixed Guest artifact unavailable')
         report = json.loads((directory / 'report.json').read_text())
@@ -104,7 +104,12 @@ class WholeHeapProfile(unittest.TestCase):
         self.assertEqual(evidence['guest_final_image_sha256'], row['image_sha256'])
         image = (directory / 'rewrite/main.patched.bin').read_bytes()
         self.assertEqual(hashlib.sha256(image).hexdigest(), row['image_sha256'])
-        no_stack = thread_stack.verify(image, row['thread_stack_adaptation'])
+        files = directory / 'rewrite'
+        v4 = allocation_guard.verify(image, (files / 'main.fixups.tsv').read_bytes(),
+            (files / 'main.gates.tsv').read_bytes(), (files / 'main.sites.tsv').read_bytes(),
+            row['normal_allocation_guard'])
+        self.assertEqual(hashlib.sha256(v4).hexdigest(), allocation_guard.INPUT_SHA256)
+        no_stack = thread_stack.verify(v4, row['thread_stack_adaptation'])
         no_heap = heap_policy.verify(no_stack, row['heap_adaptation'])
         self.assertEqual(hashlib.sha256(no_heap).hexdigest(), row['host39_image_sha256'])
         self.assertEqual(row['heap_adaptation']['slots'], {'heap': 'KRES0', 'root': 'KRES1'})

@@ -152,6 +152,45 @@ def _thread_stack_policy(report, originals, rewrites, address_bits):
     return expected.copy()
 
 
+def _allocation_guard_policy(report, originals, rewrites, address_bits, heap_policy, stack_policy):
+    policy = report.get('guest_allocation_guard_policy')
+    adapted = {name for name, item in rewrites.items() if
+               'normal_allocation_guard' in item or 'normal_allocation_guard_input_image_sha256' in item}
+    if policy is None:
+        if adapted:
+            raise ValueError('Normal allocation guard requires its explicit policy')
+        return None
+    from .allocation_guard import POLICY, INPUT_SHA256
+    from .heap_policy import POLICY as HEAP_POLICY
+    from .thread_stack import SZS_POLICY
+    if (type(policy) is not dict or policy != POLICY or
+            any(type(policy.get(key)) is not type(value) for key, value in POLICY.items()) or
+            address_bits != 39 or heap_policy != HEAP_POLICY or stack_policy != SZS_POLICY or
+            adapted != {'main'} or type(rewrites['main'].get('normal_allocation_guard')) is not dict or
+            rewrites['main'].get('normal_allocation_guard_input_image_sha256') != INPUT_SHA256):
+        raise ValueError('Unsupported or incomplete explicit normal allocation guard policy')
+    profile_path = Path(__file__).resolve().parents[2] / 'profiles/botw-switch-base-v0.json'
+    verify_profile(list(originals.values()), json.loads(profile_path.read_text()))
+    return POLICY.copy()
+
+
+def _has_normal_allocation_guard(files, image):
+    from .allocation_guard import INPUT_BYTES, SITE, THUNK_BYTES, SCHEMA
+    if any(row.split('\t')[1:] == [SCHEMA] for row in _text(files['sites'], 'sites').splitlines()):
+        return True
+    for row in _text(files['gates'], 'gates').splitlines():
+        fields = row.split('\t')
+        if len(fields) == 4 and fields[1] == 'svc' and int(fields[2], 10) == 128 and int(fields[3], 0) == SITE:
+            return True
+    if len(image) == INPUT_BYTES + THUNK_BYTES:
+        word = struct.unpack_from('<I', image, SITE)[0]
+        displacement = word & 0x3ffffff
+        if displacement & 0x2000000:
+            displacement -= 0x4000000
+        return word & 0xfc000000 == 0x14000000 and SITE + displacement * 4 == INPUT_BYTES
+    return False
+
+
 def _text(data, label):
     try:
         return data.decode('utf-8')
@@ -341,6 +380,8 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
     address_bits = _address_policy(report, originals, rewrites)
     heap_policy = _heap_policy(report, originals, rewrites, address_bits)
     thread_stack_policy = _thread_stack_policy(report, originals, rewrites, address_bits)
+    allocation_guard_policy = _allocation_guard_policy(
+        report, originals, rewrites, address_bits, heap_policy, thread_stack_policy)
     names = list(MODULE_NAMES if module_names is None else module_names)
     if not names or len(set(names)) != len(names) or any(name not in MODULE_NAMES for name in names):
         raise ValueError('Select unique known BOTW module names')
@@ -358,6 +399,13 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         layout = _layout(files['fixups'], originals[name], len(image))
         _audit_tables(files, image, layout, rewrites[name])
         address_image = image
+        if name == 'main':
+            if allocation_guard_policy:
+                from .allocation_guard import verify as verify_guard
+                address_image = verify_guard(image, files['fixups'], files['gates'], files['sites'],
+                                             rewrites[name]['normal_allocation_guard'])
+            elif _has_normal_allocation_guard(files, image):
+                raise ValueError('Loaded normal allocation guard requires its explicit policy')
         if name == 'main' and not thread_stack_policy:
             from .thread_stack import SITE, REPLACEMENT, CAPACITY_SITE, VOLANTE_SITE, VOLANTE_REPLACEMENT, SZS_SITE, SZS_REPLACEMENT
             if (image[SITE:SITE + 4] == REPLACEMENT or image[VOLANTE_SITE:VOLANTE_SITE + 4] == VOLANTE_REPLACEMENT or
@@ -424,6 +472,8 @@ def build_framework(report_path, rewrite_dir, output_dir, *, module_names=None,
         result['guest_heap_policy'] = heap_policy
     if thread_stack_policy:
         result['guest_thread_stack_policy'] = thread_stack_policy
+    if allocation_guard_policy:
+        result['guest_allocation_guard_policy'] = allocation_guard_policy
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f'.{output_dir.name}.tmp-', dir=output_dir.parent))
     try:

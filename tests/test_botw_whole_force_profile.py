@@ -298,7 +298,7 @@ class WholeForceProfileTests(unittest.TestCase):
 
     @unittest.skipIf(BASELINE, 'baseline has no stream verifier')
     def test_real_fixed_images_hash_as_raw_and_three_padded_signed_sections(self):
-        directory = ROOT / 'outputs/botw-native-host39-bounded-pthread-stack-v4/rewrite'
+        directory = ROOT / 'outputs/botw-native-host39-v4-normal-allocation-guard-v1/rewrite'
         if not all((directory / (name + '.patched.bin')).is_file() for name in ORDER):
             self.skipTest('private rewritten disk images are not present; no guest executed')
         self.probe('disk-raw', 0, directory)
@@ -306,7 +306,7 @@ class WholeForceProfileTests(unittest.TestCase):
         self.probe('disk-mutated', 0, directory)
         self.probe('disk-bad-padding', 0, directory)
         manifest = {r.split()[0]: r.split()[1:] for r in self.probe('manifest').stdout.splitlines()}
-        guest = ROOT / ('outputs/botw-guest-framework-host39-bounded-pthread-stack-v4-six-final-ios18/'
+        guest = ROOT / ('outputs/botw-guest-framework-host39-v4-normal-allocation-guard-v1-six-final-ios18/'
                         'Guest.framework/Guest')
         if guest.is_file():
             # Static Mach-O sections only; no dyld, VM inspection or execution.

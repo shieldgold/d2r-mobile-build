@@ -126,6 +126,13 @@ _Noreturn void botw_whole_host_failure(void) {
     (void)write(STDERR_FILENO, message, sizeof message - 1);
     _exit(70);
 }
+_Noreturn void botw_whole_host_account_heap_failure(void) {
+    /* A normal product failure from the one statically verified NULL-return
+     * branch. No argument, execution frame or diagnostic callback is read. */
+    static const char message[] = "[botw whole-host] account heap allocation failed\n";
+    (void)write(STDERR_FILENO, message, sizeof message - 1);
+    _exit(70);
+}
 _Noreturn void botw_whole_host_signal_failure(int signal_number) {
     static const char message[] = "[botw whole-host] unhandled host signal\n";
     (void)write(STDERR_FILENO, message, sizeof message - 1);

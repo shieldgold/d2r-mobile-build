@@ -1,0 +1,39 @@
+--- a/dm/host/hle.h
++++ b/dm/host/hle.h
+@@ -57,6 +57,11 @@
+ void dm_audio_suspend(int on);
+ uint64_t dm_audio_render_calls(void);   // Cumulative sound card callback count (the silent sink is not counted)
+ 
++// Title-local normal failure for the explicit base-v0 allocation guard.
++// hle_svc dispatches through the selected title before unknown-SVC handling;
++// the same number's Diablo II meaning remains confined to that title.
++enum { SVC_HOST_BOTW_ALLOCATION_FAILURE = 0x80 };
++
+ // ---------- Host call number registry (a cut replaces a game-internal function entry with `svc #number; ret`, and the rewriter turns it into a host gate) ----------
+ // Horizon's SVC numbers only go up to 0x7F; 0x80 onward is reserved for host calls. New ones must be registered here and numbers must not repeat; dispatch is in hle_svc.c → svc_host_call.
+ //   No.    Purpose                                      File            Cut (main offset)
+--- a/dm/host/title_botw.c
++++ b/dm/host/title_botw.c
+@@ -4,6 +4,14 @@
+ #include "hle.h"
+ #include "dm_title.h"
+ #include "base_v0_heap.h"
++#include "whole_policy.h"
++
++static uint64_t botw_normal_host_call(int num, uint64_t *regs) {
++    (void)regs;
++    if (num == SVC_HOST_BOTW_ALLOCATION_FAILURE)
++        botw_whole_host_account_heap_failure();
++    return 0;
++}
+ 
+ // Native time startup installs a libc callback backed by Horizon time services.
+ // Keep the SDK counter callback; botw_time.c hosts the imported nn::time APIs.
+@@ -30,6 +38,7 @@
+     .id = DM_TITLE_BOTW, .name = "botw", .argv0 = "BotW", .program_id = 0x01007EF00011E000ull, .modules = botw_modules,
+     .force_also = botw_force_also,
+     .on_select = botw_base_v0_heap_enable, .before_nnmain = base_v0_before_nnmain,
++    .svc_host_call = botw_normal_host_call,
+     // Remaining hooks stay empty; no foreign-title thread parameters are installed.
+ };
+ DM_TITLE_REGISTER(botw_title);
