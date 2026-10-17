@@ -1,0 +1,70 @@
+--- a/dm/host/dm.h
++++ b/dm/host/dm.h
+@@ -30,7 +30,7 @@
+ enum { R_AARCH64_ABS64 = 257, R_AARCH64_GLOB_DAT = 1025, R_AARCH64_JUMP_SLOT = 1026, R_AARCH64_RELATIVE = 1027 };
+ #define ELF64_ST_BIND(i) ((i) >> 4)            // symbol binding: 0 = STB_LOCAL
+ #define ELF64_ST_VISIBILITY(o) ((o) & 3)       // visibility: 0 = STV_DEFAULT
+-enum { STB_LOCAL = 0, STV_DEFAULT = 0 };
++enum { STB_LOCAL = 0, STB_WEAK = 2, STV_DEFAULT = 0 };
+ 
+ // Run-time state of one NSO module
+ typedef struct {
+--- a/dm/host/hle.c
++++ b/dm/host/hle.c
+@@ -31,7 +31,7 @@
+ // Per module, one cache of symbol number → resolved address
+ static uint64_t g_cache[MAX_MOD][8192];
+ 
+-uint64_t resolve_import(module_t *m, const char *name) {
++uint64_t resolve_import(module_t *m, const char *name, int weak_undefined) {
+     static const hle_ent *sec; static unsigned long secsz;
+     if (!sec) sec = (const hle_ent *)getsectiondata(&_mh_execute_header, "__DATA", "swhle", &secsz);
+     for (unsigned i = 0; i < secsz / sizeof(hle_ent); i++)
+@@ -43,6 +43,9 @@
+ #endif
+             void *hlecount_wrap(const char *, const char *, void *); return (uint64_t)hlecount_wrap("HLE", name, sec[i].fn);   // With DM_HLECOUNT it is a counting stub (including the libc passthrough table)
+         }
++    // An unresolved weak reference remains NULL after real HLE lookup.
++    // Check before reusing a same-name strong reference's diagnostic stub.
++    if (weak_undefined) return 0;
+     // Reuse the stub if one was already allocated for the same name
+     void *hlecount_wrap(const char *, const char *, void *);
+     for (unsigned k = 0; k < g_nstub; k++)
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -20,7 +20,7 @@
+ pthread_key_t g_keyres[2], g_keyaspect, g_keyaspectui;   // g_keyaspect: aspect ratio upper-limit parameter slot (KASPECT)          // resolution parameter slots (rewriter PARAMS, KRES0 handheld / KRES1 docked); 0 and not allocated if the build output lacks them
+ enum { KEY_K18, KEY_KTLS, KEY_KTLR, KEY_KGATE, KEY_KRES0, KEY_KRES1, KEY_KASPECT, KEY_KASPECTUI, KEY_N };
+ 
+-uint64_t resolve_import(module_t *m, const char *name);
++uint64_t resolve_import(module_t *m, const char *name, int weak_undefined);
+ void gate_register(uint64_t ret_addr, const char *kind, int arg, uint64_t orig);
+ 
+ static pthread_key_t key_value(unsigned i) {
+@@ -116,9 +116,9 @@
+ }
+ 
+ // Cross-module symbol resolution: first look for a definition in the loaded modules, and only if not found hand over to HLE / stubs
+-static uint64_t resolve_sym(module_t *m, const char *name) {
++static uint64_t resolve_sym(module_t *m, const char *name, int weak_undefined) {
+     for (int i = 0; i < g_nmod; i++) { void *p = module_sym(&g_mod[i], name); if (p) return (uint64_t)p; }
+-    return resolve_import(m, name);
++    return resolve_import(m, name, weak_undefined);
+ }
+ 
+ // Forced take-over table (hle.h HLE_FORCE, the __DATA,swforce section): a hit overrides the definition inside the module
+@@ -268,11 +268,12 @@
+             // so blocks from main's new were freed by sdk's libc++ string code into the SDK heap, and CentralHeap::Free reported NotNMallocPtr
+             if (!v && s->st_shndx) {
+                 uint64_t self = (uint64_t)m->base + s->st_value;
+-                v = ELF64_ST_BIND(s->st_info) == STB_LOCAL || ELF64_ST_VISIBILITY(s->st_other) != STV_DEFAULT ? self : resolve_sym(m, m->strtab + s->st_name);
++                v = ELF64_ST_BIND(s->st_info) == STB_LOCAL || ELF64_ST_VISIBILITY(s->st_other) != STV_DEFAULT ? self : resolve_sym(m, m->strtab + s->st_name, 0);
+                 if (!v) v = self;
+                 if (v != self && nint++ < 8) LOG("%s: %s 绑到先装模块的定义（%s） | bound to an earlier module's definition", m->name, m->strtab + s->st_name, module_of((void *)v) ? module_of((void *)v)->name : "?");
+             }
+-            if (!v) v = resolve_sym(m, m->strtab + s->st_name);
++            if (!v) v = resolve_sym(m, m->strtab + s->st_name,
++                s->st_shndx == 0 && ELF64_ST_BIND(s->st_info) == STB_WEAK);
+             if (type == R_AARCH64_JUMP_SLOT) { *where = v; cnt[2]++; }
+             else { *where = v + r->r_addend; cnt[1]++; }       // ABS64 / GLOB_DAT
+         }

@@ -148,6 +148,10 @@
       "bytes": 27063,
       "sha256": "ace1680dae3b6a8e3cb78e3962182867a8762bee00783c3be4f80b9012c3c8af"
     },
+    "patches/base-v0-weak-import-resolution.patch": {
+      "bytes": 4192,
+      "sha256": "489469d6315ca33ebdf5b4919a53527a7888d0d0548bd600e64a08354da7530b"
+    },
     "patches/horizon-address-signal.patch": {
       "bytes": 1179,
       "sha256": "0e5e260198f7a2d5e4c823082eafe97c3ec5b30a3ef0a2a6950d851704fd9094"
@@ -197,8 +201,8 @@
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_base_v0_runtime.py": {
-      "bytes": 44606,
-      "sha256": "7b175453eb96ba937f4b7f92e24d1275fedfbd2f822ea0b66ed8cc0abc5503bc"
+      "bytes": 44723,
+      "sha256": "068ff3826f33a64047c7a12b1cd330d0785d9a0aa06170d168b7a78907f2d7b3"
     },
     "tools/build_fragment_shader_contracts.py": {
       "bytes": 9511,

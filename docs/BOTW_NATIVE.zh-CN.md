@@ -4,15 +4,17 @@
 
 ## 2026-10-17 当前接入
 
-当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `811572d64fdc49d0803f9ea78d4531cde8143e01` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39020136804) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
+当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `7548795edf0052f9a867880234c9f2534d872f5f` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39039791557) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
 
-本地候选 `1017.38` 已完成六模块装载表、实际宿主接口表和签名校验。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
+`1017.39` 已完成六模块装载表、实际宿主接口表和签名校验，并覆盖安装到 iPhone 15 Pro。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
 
 iPhone 15 Pro 已实读 iOS 27.2 Beta，并覆盖安装 `1.0.0 / 1017.38`。资源迁移现已完成：手机 `Documents/romfs` 的 39,678 个文件路径和大小与本地来源逐项一致，合计 14,417,240,079 字节；`Pack/Bootup.pack` 与 `Pack/Bootup_Graphics.pack` 另外做了完整回读 SHA256 校验。并未对手机全部资源宣称全量哈希验证。
 
 传输曾因实际 AFC 可用空间仅 167,809,024 字节而停止。旧 `botw-romfs.bin` 已先完整备份到 Mac，核对 14,420,017,152 字节及 SHA256 `00f26f19441fce157ca3f2e1d6590db783da6b1b9a6b55571e9871e50e8d00cc` 后，才移除手机上的旧镜像以回收空间。备份保存在本地忽略目录；原保存路径保留。用户确认中途曾拔线，随后已重连并解锁。最终清单还发现 34 个先前中断 CoreDevice 传输产生的 root 所有、零字节残留文件；仅删除并从原资源重建这些确定的截断副本，现有资源均为 mobile 所有。完成后 AFC 可用空间约 10.1 GB。
 
-正常启动 `1017.38` 的实际控制台首错为 `[nxnative normal] diagnostic entry disabled`，程序在进入 UIKit 和游戏前退出。定位到上游 `hle_movie.c` 的 Metroid Dread ring 观测门构造函数：它无条件调用正常配置明确拒绝的 `gate_obs_set`。BOTW 本次改写没有观测门，因此修复仅在正常配置跳过该构造函数的两次登记，完整电影解码模块和观测 API 的拒绝策略保留；非正常配置继续登记。新增真实 C 构造函数测试先复现同样的退出码 77，再验证修复后进入 main；另覆盖显式非正常配置、默认上游配置及函数外源码不变。修复后 320 项 nxnative 回归测试全部通过，固定源码清单核验通过；等待新的 iPhoneOS 构建及实机安装，尚无新版本真机游戏画面、触控、声音或保存重开验收。
+正常启动 `1017.38` 的实际控制台首错为 `[nxnative normal] diagnostic entry disabled`，程序在进入 UIKit 和游戏前退出。定位到上游 `hle_movie.c` 的 Metroid Dread ring 观测门构造函数：它无条件调用正常配置明确拒绝的 `gate_obs_set`。BOTW 本次改写没有观测门，因此修复仅在正常配置跳过该构造函数的两次登记，完整电影解码模块和观测 API 的拒绝策略保留；非正常配置继续登记。新增真实 C 构造函数测试先复现同样的退出码 77，再验证修复后进入 main；另覆盖显式非正常配置、默认上游配置及函数外源码不变。修复后 320 项 nxnative 回归测试全部通过，固定源码清单核验和新的 iPhoneOS CI 均通过。签名后静态装载验证通过，实际 614 行宿主接口表在签名前后保持一致。`1017.39` 实机正常启动已越过原退出点并记录原逻辑堆规划 3,261,071,360 字节，随后停止于 `unimplemented import`。覆盖安装后 39,678 个资源文件路径及大小保持一致；系统容器管理器添加了数据保护扩展属性，不能据此宣称所有元数据逐字节不变。
+
+通过实机 LLDB 在 `unimpl_c` 入口捕获 stub 12，具体符号为 `nnosGetDefaultUserExceptionStackForApplication`。实读 sdk 符号表第 11 项 `st_info=0x20`（STB_WEAK / STT_NOTYPE）、`st_shndx=0`；实际调用前存在空指针检查。当前装载器把未解析弱引用填入非空诊断 stub，导致原 SDK 错走可选回调。修复保留完整模块与 HLE 查找顺序，仅将缺失的未定义弱引用保持为 NULL，并在复用同名强引用 stub 之前检查；已定义符号的当前跨模块抢占、指定强制接口、强引用失败和 RELA 加数语义保留。9 项带 ASan/UBSan 的真实装载器 CPU 测试先复现 4 项失败，修复后全部通过；新补丁的 329 项 nxnative 全量回归及固定源码清单核验均通过，等待 iPhoneOS 构建和实机更新，尚未证明越过此停止点。
 
 新宿主使用 `Documents/romfs` 中的完整资源目录，旧宿主的 `Documents/botw-romfs.bin` 不能直接代替它。保存位置为 `Documents/save`，旧 `Documents/botw-saves` 保留。覆盖安装时保留文稿，游戏内容与生成的着色器仅存放在本地忽略目录。
 

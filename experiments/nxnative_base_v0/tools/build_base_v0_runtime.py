@@ -53,6 +53,8 @@ EXTRA_PATCHES = (
     ('patches/base-v0-audren-runtime.patch', ('dm/host/hle_audren.c', 'dm/host/main.c',
         'dm/ios/Sources/front_ios.m')),
     ('patches/base-v0-normal-movie-constructor.patch', ('dm/host/hle_movie.c',)),
+    ('patches/base-v0-weak-import-resolution.patch', ('dm/host/dm.h', 'dm/host/hle.c',
+        'dm/host/loader.c')),
 )
 REQUIRED = ('tools/build_base_v0_runtime.py', PROFILE, 'profile/base_v0.json',
     'tools/generate_base_v0_contract.py', 'tools/build_link_only.py',
