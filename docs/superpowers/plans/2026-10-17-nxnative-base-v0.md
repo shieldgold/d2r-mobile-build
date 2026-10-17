@@ -139,3 +139,4 @@ python3 experiments/nxnative_base_v0/tools/build_link_only.py \
 - 用户再次连接后，独立 IORegistry／usbmux 核验纠正 USB 报告盲区：`system_profiler SPUSBDataType` 空清单不等于没有物理手机。实际有线设备为 Cookie 的 iPhone（iPhone 12），普通 lockdown／CoreDevice 当前实读 iOS 26.5（23F77）、wired tunnel connected；旧 iOS 18.1 结论不可继续沿用。此设备满足 Apple 公布的 iPhone12／iOS26 Metal4 平台范围，仍不是游戏实际输出证明。
 - 当前手机 CoreDevice 实读开发者模式 disabled，应用查询实际返回 error10005；已请求用户在手机开启并按系统提示重启确认。标准本地目录与项目签名产物共 86 份配置、16 个唯一 UUID 全部正常解码，均未包含这台新手机，冻结 validate_profile 正确拒绝；原 1017.38 签名候选及其 iPhone15Pro 准入记录保留，不能当成新手机的签名许可。
 - Apple Developer 官方签名入口已打开，设备注册／开发配置材料已在本地准备；等待用户自行完成账户登录及手机设置，再经正规设备登记和 profile 重签。未修改现有 profile、未导出私钥、未安装或启动候选，原文稿与存档未改。
+- 随后再次实读，当前 iPhone12 的开发者模式已 enabled、DDI services true、wired tunnel connected。仅查询 `local.botw.native` 得到未安装，普通磁盘元数据可用空间 101009825792 字节；手机设置这项前置条件已完成。Apple 官方页面仍为登录页，剩余签名配置尚未签发，未尝试以不匹配 profile 安装。
