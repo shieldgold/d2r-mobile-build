@@ -1,0 +1,330 @@
+--- a/shader_provider/adapter/whole_shader_conditional.h
++++ b/shader_provider/adapter/whole_shader_conditional.h
+@@ -10,6 +10,9 @@
+     uint64_t descriptor_epoch;
+     /* Normal replay operands, captured and rechecked in the original mode/
+      * registry transaction. No vertex bytes or index scanning. */
++    /* Exact normal target/view operands. Realized PSO formats are checked
++     * separately under the original final draw transaction. */
++    uint32_t colors_known, color_present_mask, color_format[8], color_type_mask[8];
+     uint32_t vertex_known, vertex_count, stream_count;
+     uint32_t vertex_type_mask[16], vertex_format[16], vertex_offset[16], vertex_stream[16];
+     uint32_t stream_stride[16], stream_divisor[16];
+--- a/shader_provider/adapter/whole_shader_conditional.m
++++ b/shader_provider/adapter/whole_shader_conditional.m
+@@ -16,6 +16,9 @@
+     return a && b && a->device_known==b->device_known && a->window_origin_mode==b->window_origin_mode &&
+         a->depth_mode==b->depth_mode && a->color0_known==b->color0_known && a->color0_present==b->color0_present &&
+         a->color0_format==b->color0_format && a->descriptor_epoch==b->descriptor_epoch &&
++        a->colors_known==b->colors_known && a->color_present_mask==b->color_present_mask &&
++        !memcmp(a->color_format,b->color_format,sizeof a->color_format) &&
++        !memcmp(a->color_type_mask,b->color_type_mask,sizeof a->color_type_mask) &&
+         a->vertex_known==b->vertex_known && a->vertex_count==b->vertex_count && a->stream_count==b->stream_count &&
+         !memcmp(a->vertex_type_mask,b->vertex_type_mask,sizeof a->vertex_type_mask) &&
+         !memcmp(a->vertex_format,b->vertex_format,sizeof a->vertex_format) &&
+@@ -171,18 +174,42 @@
+     return YES;
+ }
+ 
++static BOOL fragment_requirements(id rows) {
++    if(!arr(rows)||[rows count]>8)return NO;NSInteger last=-1;
++    for(id row in rows){if(!dict(row)||[row count]!=2||!integer(row[@"location"],7)||
++        ![@[@"float",@"int",@"uint"] containsObject:row[@"component_type"]]||[row[@"location"] integerValue]<=last)return NO;
++        last=[row[@"location"] integerValue];}return YES;
++}
++static BOOL fragment_reflection(id rows,id requirements,id colors) {
++    if(!fragment_requirements(requirements)||!arr(rows)||[rows count]!=[requirements count]||!arr(colors)||[colors count]!=[rows count])return NO;
++    for(NSUInteger i=0;i<[rows count];i++){id row=rows[i],want=requirements[i];NSString *base=want[@"component_type"];
++        if(!dict(row)||[row count]!=2||![row[@"location"] isEqual:want[@"location"]]||
++            ![colors[i] isEqual:want[@"location"]]||!str(row[@"msl_type"]))return NO;
++        NSString *ty=row[@"msl_type"];if(![ty isEqual:base]&&![@[[base stringByAppendingString:@"2"],
++            [base stringByAppendingString:@"3"],[base stringByAppendingString:@"4"]] containsObject:ty])return NO;
++    }return YES;
++}
++static BOOL fragment_predicate(NSArray *rows,const botw_conditional_draw_state *s) {
++    if(!s||s->colors_known!=1||s->color_present_mask>255||!fragment_requirements(rows))return NO;
++    for(NSDictionary *row in rows){unsigned i=[row[@"location"] unsignedIntValue];
++        unsigned type=[row[@"component_type"] isEqual:@"float"]?1:[row[@"component_type"] isEqual:@"int"]?2:4;
++        if((s->color_present_mask>>i&1)&&s->color_type_mask[i]!=type)return NO;
++    }return YES;
++}
++
+ static BOOL contract_valid(NSDictionary *c,NSDictionary *result,NSString *chain,NSString *adapter,NSError **e) {
+     NSDictionary *q=c[@"requirements"],*device=dict(q)?q[@"device"]:nil,*proof=c[@"proofs"],*translation=c[@"translation"];
+     BOOL vs=[result[@"capture"][@"stage_name"] isEqual:@"vertex"];
+-    BOOL typed=[c[@"scope"] isEqual:@"typed-vs-nonqueried-v1"];
++    BOOL typed=[c[@"scope"] isEqual:@"typed-vs-nonqueried-v1"],fragment=[c[@"scope"] isEqual:@"typed-fs-nonqueried-v1"];
+     if(![c[@"schema"] isEqual:@"botw-shader-conditional-translation-contract-v1"]||
+         ![c[@"profile"] isEqual:@"botw-switch-base-v0"]||
+         ![c[@"chain"] isEqual:chain]||
+         !capture_same(c[@"capture"],result[@"capture"])||
+-        (!typed&&![c[@"scope"] isEqual:@"noattr-vs-output0-fs-nonqueried-v1"])||
++        (!typed&&!fragment&&![c[@"scope"] isEqual:@"noattr-vs-output0-fs-nonqueried-v1"])||
++        (fragment&&vs)||
+         (typed&&!vs)||
+         !dict(q)||
+-        q.count!=6||
++        q.count!=(fragment?7:6)||
+         !dict(device)||
+         device.count!=2||
+         !integer(device[@"window_origin_mode"],1)||
+@@ -197,6 +224,7 @@
+         !dict(translation)||
+         ![translation[@"source_adapter_sha256"] isEqual:adapter]||
+         !hex(translation[@"job_sha256"],64))return reject(e,@"conditional contract identity, proof binding or first-scope requirements invalid");
++    if(fragment)return (q[@"fragment_output0"]==NSNull.null&&fragment_requirements(q[@"fragment_outputs"]))||reject(e,@"invalid typed physical fragment outputs");
+     if(vs)return q[@"fragment_output0"]==NSNull.null||reject(e,@"vertex candidate cannot require a fragment output");
+     NSDictionary *f=q[@"fragment_output0"];
+     /* This explicit first-scope list is independently admitted by publication;
+@@ -263,7 +291,9 @@
+         else if(![k isEqual:@"support"]&&![k isEqual:@"c1"])return reject(e,@"conditional resource kind outside closed first scope");
+     }
+     NSDictionary *ra=r[@"raster"];
+-    if(!dict(ra)||!arr(ra[@"colors"])||(!vs&&![ra[@"colors"] isEqual:@[@0]]))return reject(e,@"conditional raster output is not exactly output0");
++    if(!dict(ra)||!arr(ra[@"colors"])||([c[@"scope"] isEqual:@"typed-fs-nonqueried-v1"]?
++        !fragment_reflection(r[@"fragment_outputs"],c[@"requirements"][@"fragment_outputs"],ra[@"colors"]):
++        (!vs&&![ra[@"colors"] isEqual:@[@0]])))return reject(e,@"conditional raster output is not exactly output0");
+     if(r[@"fetch"] || (r[@"threadgroup_size"] && r[@"threadgroup_size"]!=NSNull.null))return reject(e,@"conditional first scope has no fetch or compute metadata");
+     for(NSString *field in @[@"discard",@"sample_mask",@"pos_attr"]){
+         id value=ra[field];if(value &&
+@@ -352,10 +382,7 @@
+         info->stage!=1)||
+         s->device_known!=1||
+         s->window_origin_mode>1||
+-        s->depth_mode>1||
+-        (info->stage==1&&
+-        (s->color0_known!=1||
+-        s->color0_present!=1))){reject(e,@"conditional draw has unknown identity, device modes or effective output0 attachment");return nil;}
++        s->depth_mode>1){reject(e,@"conditional draw has unknown identity, device modes or effective output0 attachment");return nil;}
+     @synchronized(self){WholeShaderConditionalArtifact *selected=nil;
+         for(NSDictionary *r in self.byCapture[[NSString stringWithFormat:@"%s/%@",info->sha256,info->stage?@"fragment":@"vertex"]]){NSDictionary *cap=r[@"capture"];if(![cap[@"key"] isEqual:@(info->key)]||
+         ![cap[@"sha256"] isEqual:@(info->sha256)]||
+@@ -364,7 +391,9 @@
+             NSDictionary *q=a.contract[@"requirements"],*d=q[@"device"];
+             if([d[@"window_origin_mode"] unsignedIntValue]!=s->window_origin_mode||[d[@"depth_mode"] unsignedIntValue]!=s->depth_mode)continue;
+             if([a.contract[@"scope"] isEqual:@"typed-vs-nonqueried-v1"]&&!vertex_predicate(q[@"attributes"],s))continue;
+-            if(info->stage==1&&![q[@"fragment_output0"][@"nvn_formats"] containsObject:@(s->color0_format)])continue;
++            if(info->stage==1){if([a.contract[@"scope"] isEqual:@"typed-fs-nonqueried-v1"]){
++                if(!fragment_predicate(q[@"fragment_outputs"],s))continue;
++            }else if(s->color0_known!=1||s->color0_present!=1||![q[@"fragment_output0"][@"nvn_formats"] containsObject:@(s->color0_format)])continue;}
+             if(selected){reject(e,@"multiple conditional variants exactly match this draw");return nil;}selected=a;
+         }
+         if(!selected)reject(e,@"no conditional variant exactly matches this draw");return selected;
+--- a/shader_provider/adapter/whole_shader_bundle_publication.h
++++ b/shader_provider/adapter/whole_shader_bundle_publication.h
+@@ -10,6 +10,8 @@
+ int whole_runtime_shader_bundle_publication(const char *bundle_directory,
+     char *manifest_path,size_t manifest_capacity,char *error,size_t error_capacity);
+ /* A fixed supplemental root; the original botw/shaders publication is separate. */
++int whole_runtime_fragment_shader_publication(const char *bundle_directory,
++    char *manifest_path,size_t manifest_capacity,char *error,size_t error_capacity);
+ int whole_runtime_vertex_shader_publication(const char *bundle_directory,
+     char *manifest_path,size_t manifest_capacity,char *error,size_t error_capacity);
+ #ifdef __cplusplus
+--- a/shader_provider/adapter/whole_shader_bundle_publication.m
++++ b/shader_provider/adapter/whole_shader_bundle_publication.m
+@@ -145,6 +145,13 @@
+             if([scope isEqual:@"typed-vs-nonqueried-v1"])for(NSDictionary *mode in modes)
+                 if(![mode[@"gates"][@"attributes"] isEqual:contract[@"requirements"][@"attributes"]])
+                     return denied(error,error_capacity,@"typed vertex modes must retain one exact recipe");
++            if([scope isEqual:@"typed-fs-nonqueried-v1"]){
++                if(![capture[@"stage_name"] isEqual:@"fragment"]||
++                    ![contract[@"requirements"][@"fragment_outputs"] isEqual:match[@"gates"][@"fragment_outputs"]])
++                    return denied(error,error_capacity,@"fragment recipe differs from its independent CPU proof");
++                for(NSDictionary *mode in modes)if(![mode[@"gates"][@"fragment_outputs"] isEqual:contract[@"requirements"][@"fragment_outputs"]])
++                    return denied(error,error_capacity,@"fragment modes must retain one exact output recipe");
++            }
+             if(!match||!hex(match[@"job_sha256"],64)||!hex(match[@"res_sha256"],64)||
+                     !hex(match[@"translated_code_sha256"],64)||
+                     ![contract[@"translation"][@"job_sha256"] isEqual:match[@"job_sha256"]]||
+@@ -203,3 +210,18 @@
+         return conditional_publication(bundle,root,@"vertex-shaders",@"typed-vs-nonqueried-v1",index,manifest,capacity,error,error_capacity);
+     }
+ }
++
++int whole_runtime_fragment_shader_publication(const char *bundle,char *manifest,size_t capacity,char *error,size_t error_capacity) {
++    if(error&&error_capacity)error[0]=0;
++    if(!bundle||!manifest||!capacity||(error_capacity&&!error))return denied(error,error_capacity,@"invalid fragment publication caller");
++    @autoreleasepool {
++        NSString *base=[NSFileManager.defaultManager stringWithFileSystemRepresentation:bundle length:strlen(bundle)];
++        if(!base.isAbsolutePath||!contained_directories(bundle,@[@"botw",@"fragment-shaders"]))
++            return denied(error,error_capacity,@"fragment publication must remain inside the signed bundle");
++        NSString *root=[base stringByAppendingPathComponent:@"botw/fragment-shaders"];
++        NSDictionary *index=document(read_regular([root stringByAppendingPathComponent:@"shader-package.json"],65536));
++        if(![index[@"schema"] isEqual:@"botw-whole-conditional-shader-package-v1"])
++            return denied(error,error_capacity,@"missing explicit fragment conditional schema");
++        return conditional_publication(bundle,root,@"fragment-shaders",@"typed-fs-nonqueried-v1",index,manifest,capacity,error,error_capacity);
++    }
++}
+--- a/adapter/base_v0_shader_provider.m
++++ b/adapter/base_v0_shader_provider.m
+@@ -21,7 +21,7 @@
+     ([n isEqual:@0]||[n isEqual:@1]);}
+ 
+ @interface NxBaseShaderProvider ()
+-@property(nonatomic) WholeShaderConditionalManifest *manifest,*vertexManifest;
++@property(nonatomic) WholeShaderConditionalManifest *manifest,*vertexManifest,*fragmentManifest;
+ @property(nonatomic,copy) NSDictionary<NSString*,NSDictionary*> *identities;
+ @end
+ static id invalid_package(NSError **error) {
+@@ -114,14 +114,33 @@
+         provider.vertexManifest=[WholeShaderConditionalManifest conditionalManifestAtAbsolutePath:@(vertexPath) error:error];
+         if(!provider.vertexManifest)return nil;
+     } else if(errno!=ENOENT)return invalid_package(error);
++    NSString *fragmentRoot=[bundle stringByAppendingPathComponent:@"botw/fragment-shaders"];
++    struct stat fragmentExists;if(!lstat(fragmentRoot.fileSystemRepresentation,&fragmentExists)) {
++        char fragmentPath[PATH_MAX],why[256];
++        if(whole_runtime_fragment_shader_publication(bundle.fileSystemRepresentation,fragmentPath,sizeof fragmentPath,why,sizeof why))return invalid_package(error);
++        NSData *extraIndex=bridge_bytes([fragmentRoot stringByAppendingPathComponent:@"shader-package.json"],65536);
++        NSDictionary *extra=document(extraIndex),*marker=document(bridge_bytes([fragmentRoot stringByAppendingPathComponent:@"fragment-source-package.json"],65536));
++        NSDictionary *approved=document(bridge_bytes([fragmentRoot stringByAppendingPathComponent:@"conditional-admission.json"],64*1024*1024));
++        if(![marker[@"schema"] isEqual:@"nxnative-base-v0-fragment-source-package-v1"]||
++            ![marker[@"profile"] isEqual:@"botw-switch-base-v0"]||![marker[@"game_version"] isEqual:@"1.0.0"]||
++            ![marker[@"scope"] isEqual:@"typed-fs-nonqueried-v1"]||![marker[@"bridge_sha256"] isEqual:digest(bridgeBytes)]||
++            ![marker[@"conditional_index_sha256"] isEqual:digest(extraIndex)]||
++            ![marker[@"conditional_publication_sha256"] isEqual:extra[@"publication_sha256"]]||!object(approved[@"captures"]))return invalid_package(error);
++        NSMutableDictionary *byCapture=[NSMutableDictionary dictionary];for(NSDictionary *row in provider.identities.allValues)byCapture[row[@"capture_key"]]=row;
++        for(NSString *key in approved[@"captures"]){NSDictionary *row=byCapture[key],*item=approved[@"captures"][key];
++            if(!row||[row[@"stage"] unsignedIntValue]!=1||![item[@"stage_name"] isEqual:@"fragment"]||
++                ![item[@"capture_sha256"] isEqual:row[@"capture_sha256"]]||![row[@"status"] isEqual:@"only_identity"])return invalid_package(error);}
++        provider.fragmentManifest=[WholeShaderConditionalManifest conditionalManifestAtAbsolutePath:@(fragmentPath) error:error];
++        if(!provider.fragmentManifest)return nil;
++    } else if(errno!=ENOENT)return invalid_package(error);
+     return provider;
+ 
+ }
+ - (WholeShaderConditionalArtifact *)artifactForInfo:(const botw_shader_info *)info state:(const botw_conditional_draw_state *)state error:(NSError **)error {
+     WholeShaderConditionalArtifact *original=[self.manifest artifactForInfo:info state:state error:NULL];
+     WholeShaderConditionalArtifact *vertex=info&&info->stage==0?[self.vertexManifest artifactForInfo:info state:state error:NULL]:nil;
+-    if(original&&vertex){invalid_package(error);return nil;}
+-    if(!original&&!vertex){invalid_package(error);return nil;}return original?:vertex;
++    WholeShaderConditionalArtifact *fragment=info&&info->stage==1?[self.fragmentManifest artifactForInfo:info state:state error:NULL]:nil;
++    if(!!original+!!vertex+!!fragment!=1){invalid_package(error);return nil;}return original?:vertex?:fragment;
+ }
+ - (BOOL)infoForNativeDigest:(const uint8_t *)sum controlSize:(uint32_t)control codeSize:(uint32_t)code output:(botw_shader_info *)output {
+     if(!sum||!output)return NO;
+--- a/upstream/dm/gfx/nvn/nvn_mtl.m
++++ b/upstream/dm/gfx/nvn/nvn_mtl.m
+@@ -2733,6 +2733,56 @@
+ /* NX_BASE_V0_CONDITIONAL_HELPERS_BEGIN
+  * Only actual draw enters this transaction. Source compilation is outside both
+  * metadata locks; lookahead receives nil via prog_get. */
++/* NX_FRAGMENT_FORMAT_BEGIN */
++/* Metal enum classes, reached through the complete original exact-format
++ * mapper. Substitute formats and non-color/unknown formats are not facts. */
++static unsigned conditional_pixel_type(uint32_t format) {
++    switch(format){
++#define PF(name) case MTLPixelFormat##name:
++        PF(R8Unorm) PF(R8Snorm) PF(R16Unorm) PF(R16Snorm) PF(R16Float)
++        PF(RG8Unorm) PF(RG8Snorm) PF(R32Float) PF(RG16Unorm) PF(RG16Snorm) PF(RG16Float)
++        PF(RGBA8Unorm) PF(RGBA8Unorm_sRGB) PF(RGBA8Snorm) PF(BGRA8Unorm) PF(BGRA8Unorm_sRGB)
++        PF(RGB10A2Unorm) PF(RG11B10Float) PF(RGB9E5Float) PF(RG32Float)
++        PF(RGBA16Unorm) PF(RGBA16Snorm) PF(RGBA16Float) PF(RGBA32Float) return 1;
++        PF(R8Sint) PF(R16Sint) PF(RG8Sint) PF(R32Sint) PF(RG16Sint) PF(RGBA8Sint)
++        PF(RG32Sint) PF(RGBA16Sint) PF(RGBA32Sint) return 2;
++        PF(R8Uint) PF(R16Uint) PF(RG8Uint) PF(R32Uint) PF(RG16Uint) PF(RGBA8Uint)
++        PF(RGB10A2Uint) PF(RG32Uint) PF(RGBA16Uint) PF(RGBA32Uint) return 4;
++#undef PF
++        default:return 0;
++    }
++}
++static unsigned conditional_fragment_format(int format) {
++    uint32_t pixel=0;uint8_t swizzle[4];
++    return nvn_fmt_to_mtl(format,&pixel,swizzle)==1?conditional_pixel_type(pixel):0;
++}
++typedef struct {const void *program,*fragment_override;uint64_t pass_serial;uint32_t formats[8];uint8_t map[8];} conditional_pso_state;
++static void conditional_pso_capture(conditional_pso_state *out,const void *program,uint64_t pass,
++                                  const uint32_t formats[8],const uint8_t *map,const void *override) {
++    *out=(conditional_pso_state){.program=program,.fragment_override=override,.pass_serial=pass};
++    memcpy(out->formats,formats,sizeof out->formats);
++    for(unsigned i=0;i<8;i++)out->map[i]=map?map[i]:(uint8_t)i;
++}
++static int conditional_fragment_map_shape(const uint8_t *map) {
++    for(unsigned i=0;map&&i<8;i++)if(map[i]!=0xff&&map[i]>=8)return 0;
++    return 1;
++}
++static int conditional_fragment_pso_valid(const uint8_t types[8],const conditional_pso_state *selected,
++        const void *program,const void *function,uint64_t pass,const uint32_t formats[8]) {
++    if(!selected||selected->program!=program||selected->pass_serial!=pass||
++        memcmp(selected->formats,formats,sizeof selected->formats)||
++        (selected->fragment_override&&selected->fragment_override!=function))return 0;
++    for(unsigned i=0;i<8;i++)if(formats[i]){unsigned logical=selected->map[i];
++        if(logical!=0xff&&logical>=8)return 0;
++        /* A blend/chmask map does not move ordinary [[color(n)]] outputs.
++         * Native nonidentity specializations have no signed source identity. */
++        if((types[i]||(logical<8&&types[logical]))&&logical!=i)return 0;
++        if(types[i]&&conditional_pixel_type(formats[i])!=types[i])return 0;
++    }
++    return 1;
++}
++/* NX_FRAGMENT_FORMAT_END */
++
+ static unsigned conditional_vertex_format(int fmt,unsigned *width);
+ static botw_conditional_draw_state conditional_snapshot_locked(void) {
+     botw_conditional_draw_state s={0};const void *device=NULL;int valid=1;
+@@ -2748,6 +2798,10 @@
+             s.stream_stride[i]=S.stream[i].stride;s.stream_divisor[i]=S.stream[i].divisor;
+             s.vertex_address[i]=S.vbuf[i].address;s.vertex_size[i]=S.vbuf[i].size;}}
+     s.descriptor_epoch=atomic_load_explicit(&g_reg_gen,memory_order_relaxed);
++    s.colors_known=R.has_rt&&R.rt.n>=0&&R.rt.n<=8;
++    if(s.colors_known)for(unsigned i=0;i<(unsigned)R.rt.n;i++)if(R.rt.color[i]){
++        s.color_present_mask|=1u<<i;s.color_format[i]=R.rt.has_cview[i]&&R.rt.cview[i].set_format?R.rt.cview[i].format:R.rt.color[i]->d.format;
++        s.color_type_mask[i]=conditional_fragment_format((int)s.color_format[i]);}
+     s.color0_known=R.has_rt&&R.rt.n>=0&&R.rt.n<=8;s.color0_present=s.color0_known&&R.rt.n>0&&R.rt.color[0];
+     if(s.color0_present)s.color0_format=R.rt.has_cview[0]&&R.rt.cview[0].set_format?R.rt.cview[0].format:R.rt.color[0]->d.format;
+     return s;
+@@ -2800,14 +2854,30 @@
+     botw_conditional_modes_lock();pthread_mutex_lock(&g_rmu);g->held=1;
+     botw_conditional_draw_state now=conditional_snapshot_locked();botw_shader_info infos[2];unsigned mask;
+     if(!botw_conditional_state_equal(expected,&now)||!conditional_bound_infos(infos,&mask)) {conditional_draw_unlock(g);return 0;}
+-    if(resolved->sh[1]&&(!g_pass.conditional_color0_known||g_pass.conditional_color0_format!=now.color0_format)){conditional_draw_unlock(g);return 0;}
+     for(unsigned st=0;st<2;st++) {
+         if(!!resolved->sh[st]!=!!(mask>>st&1)){conditional_draw_unlock(g);return 0;}
+         if(mask>>st&1){WholeShaderConditionalArtifact *a=[nx_base_shader_provider() artifactForInfo:&infos[st] state:&now error:NULL];
+-            if(!a||g_shcache[a.cacheIdentity]!=resolved->sh[st]){conditional_draw_unlock(g);return 0;}}
++            if(!a||g_shcache[a.cacheIdentity]!=resolved->sh[st]){conditional_draw_unlock(g);return 0;}
++            if(st==1&&![a.contract[@"scope"] isEqual:@"typed-fs-nonqueried-v1"]&&
++                (!g_pass.conditional_color0_known||g_pass.conditional_color0_format!=now.color0_format)){conditional_draw_unlock(g);return 0;}}
+     }
+     return 1; /* Both locks remain held through actual argument binding/draw. */
+ }
++static int conditional_fragment_draw_valid(NvProg *resolved,const conditional_pso_state *selected) {
++    if(!resolved->sh[1])return 1;
++    botw_shader_info infos[2];unsigned mask;if(!conditional_bound_infos(infos,&mask)||!(mask&2))return 0;
++    botw_conditional_draw_state now=conditional_snapshot_locked();
++    WholeShaderConditionalArtifact *artifact=[nx_base_shader_provider() artifactForInfo:&infos[1] state:&now error:NULL];
++    if(!artifact||g_shcache[artifact.cacheIdentity]!=resolved->sh[1])return 0;
++    if(![artifact.contract[@"scope"] isEqual:@"typed-fs-nonqueried-v1"])return 1;
++    uint8_t types[8]={0};for(NSDictionary *row in artifact.contract[@"requirements"][@"fragment_outputs"]){
++        unsigned i=[row[@"location"] unsignedIntValue];if(i>=8)return 0;
++        types[i]=[row[@"component_type"] isEqual:@"float"]?1:[row[@"component_type"] isEqual:@"int"]?2:4;
++    }
++    return conditional_fragment_pso_valid(types,selected,(__bridge void *)resolved,
++        (__bridge void *)resolved->sh[1]->fn,g_pass.serial,g_pass.cfmt);
++}
++
+ /* NX_BASE_V0_CONDITIONAL_HELPERS_END */
+ static const prog_t *bind_stages(const prog_t *p, int stages) {
+     for (int st = 0; st < 5; st++) if (stages >> st & 1) S.bst[st] = p;
+@@ -5174,8 +5244,12 @@
+     if (skip_d) { g_stat_ds_omit++; if (mode == 3) g_stat_s_only++; else if (mode == 4) g_stat_d_only++; }
+     // The pipeline depends only on (program, render pass targets, blend / color / write mask / multisample state, vertex layout): if these did not change, reuse the previous one
+     static id<MTLRenderPipelineState> cur_ps; static NvProg *cur_pr; static uint64_t cur_ps_pass;
++    static conditional_pso_state conditional_pso;
+     if (g_fz.active && !g_defer_replaying) { g_pso_lmap = g_fz.phase == 1 ? g_fz.lmap1 : g_fz.lmap2; g_pso_fsfn = g_fz.phase == 1 ? nil : fz_fn; g_pso_fz = g_fz.phase == 1 ? (pso_fz_desc){0} : g_fz_desc; g_pso_dirty = 1; }   // Readable tile merge: fetch the pipeline by the physical -> logical mapping and the specialization
+-    if (g_pso_dirty || pr != cur_pr || cur_ps_pass != g_pass.serial) { cur_ps = pso_get(pr, nil); cur_pr = pr; cur_ps_pass = g_pass.serial; g_pso_dirty = !cur_ps; }
++    if(conditional_mode&&!conditional_fragment_map_shape(g_pso_lmap))MDIE("base-v0 conditional physical fragment attachment rejected");
++    if (g_pso_dirty || pr != cur_pr || cur_ps_pass != g_pass.serial) { cur_ps = pso_get(pr, nil); cur_pr = pr; cur_ps_pass = g_pass.serial; g_pso_dirty = !cur_ps;
++        if(conditional_mode&&cur_ps)conditional_pso_capture(&conditional_pso,(__bridge void *)pr,g_pass.serial,
++            g_pass.cfmt,g_pso_lmap,(__bridge void *)g_pso_fsfn); }
+     if (g_pso_lmap) { g_pso_lmap = NULL; g_pso_fsfn = nil; memset(&g_pso_fz, 0, sizeof g_pso_fz); g_pso_dirty = 1; }   // The next draw fetches again according to its own situation
+     __unsafe_unretained id<MTLRenderPipelineState> ps = cur_ps;
+     if (!ps) { PD("Z %llu 绘制跳过：没有渲染管线（顶点 %s 片元 %s）", g_stat_pass, pr->sh[0] ? pr->sh[0]->key : "-", pr->sh[1] ? pr->sh[1]->key : "-"); return; }
+@@ -5200,6 +5274,7 @@
+     conditional_draw_guard conditional_guard __attribute__((cleanup(conditional_draw_unlock)))={0};
+     if(conditional_mode&&!conditional_draw_commit(&conditional_guard,pr,&conditional_snapshot))MDIE("base-v0 conditional draw metadata changed before encode");
+     if(conditional_mode&&!conditional_vertex_draw_valid(&pr->sh[0]->rf,dw,di))MDIE("base-v0 conditional vertex descriptor or buffer range rejected");
++    if(conditional_mode&&!conditional_fragment_draw_valid(pr,&conditional_pso))MDIE("base-v0 conditional physical fragment attachment rejected");
+     { MTLViewport v = S.has_vp ? (MTLViewport){S.vp[0][0], S.vp[0][1] + vo, S.vp[0][2], S.vp[0][3] * vs, S.dr[0], S.dr[1]} : (MTLViewport){0, vo, tw, th * vs, 0, 1};
+       if (atomic_load_explicit(&g_origin_ll, memory_order_relaxed)) { v.originY += v.height; v.height = -v.height; }   // lower-left origin (see g_origin_ll)
+       enc_r_viewport(en, v); }

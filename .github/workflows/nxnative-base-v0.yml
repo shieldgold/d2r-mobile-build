@@ -98,6 +98,8 @@ jobs:
           .tools/nxnative-ci-venv/bin/python -m pip install -r requirements.botw.txt
       - name: Verify pinned source and adapter closure
         run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/verify_source.py
+      - name: Check selected iPhoneOS compiler and complete runtime recipes
+        run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/build_base_v0_runtime.py --sdk iphoneos --output outputs/nxnative-base-v0-UIKit-plan --host-only --plan-only
       - name: Test source, base-v0 admission and rewrite contracts using owned inputs
         run: .tools/nxnative-ci-venv/bin/python -m unittest discover -s tests -p 'test_nxnative_*.py' -v
       - name: Compile complete upstream baseline without game content or execution
@@ -138,6 +140,9 @@ jobs:
         with:
           name: nxnative-base-v0-UIKit-iphoneos-compile-only
           path: |
+            outputs/nxnative-base-v0-UIKit-plan/*.json
+            outputs/nxnative-base-v0-UIKit-plan/logs/*.stdout
+            outputs/nxnative-base-v0-UIKit-plan/logs/*.stderr
             outputs/nxnative-base-v0-UIKit-iphoneos/*.json
             outputs/nxnative-base-v0-UIKit-iphoneos/logs/*.stdout
             outputs/nxnative-base-v0-UIKit-iphoneos/logs/*.stderr

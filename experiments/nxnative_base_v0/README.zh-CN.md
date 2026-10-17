@@ -37,7 +37,7 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 
 新增正常运行诊断封闭和完整条件着色器模块后的 136 个单元已在 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39016541153) 编译、强链接通过，本地重新核对了 1027 件来源及 576 份日志。诊断封闭保留正常线程、脏页、纹理上传、反馈快照和 PCM 输出；条件模块在实际绘制时选择模式、核对完整着色器身份并提交。独立复核发现的窗口原点切换竞争已修复：最终检查与锁定前移至 viewport 编码之前，保持到 draw；实际代码回归覆盖切换、并发 setter 与提前返回。这些 link-only 构建仍使用原 1.9 元数据与仅返回的独立入口，不能安装或启动游戏。
 
-`tools/build_base_v0_runtime.py --host-only --sdk iphoneos --output <新目录>` 改用专属 `profile/base_v0_runtime.tsv` 和原完整 `game.header`，生成 1.0.0 六模块、NVN52.32 与完整双摇杆布局的元数据；未知的 sampler／SSBO 表保持 -1。它去掉仅返回入口，保留真实 UIKit `_main`，后台宿主为 `dm_main`，并接入完整逻辑内存与正常账户／显示层 API。原 139 单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39016958941) 编译、强链接通过；下载工件中的实际 force registry 为 616 项。新增正常装载保护后的 140 单元也已在 [官方 SDK CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39018043850) 编译、强链接通过，本地核对了 1034 件来源及 602 份日志。`--stage-only` 仅准备来源与 header。当前工具已接入完整音频、带属性 VS 和正常计数器修正，共 235 单元（新增音频 95 单元，其中 C++23 为 79）；该配置接下来进行真实 SDK 编译。产物需另行绑定最终资源、Guest、实际接口合同与签名，仍不可直接安装或执行。
+`tools/build_base_v0_runtime.py --host-only --sdk iphoneos --output <新目录>` 改用专属 `profile/base_v0_runtime.tsv` 和原完整 `game.header`，生成 1.0.0 六模块、NVN52.32 与完整双摇杆布局的元数据；未知的 sampler／SSBO 表保持 -1。它去掉仅返回入口，保留真实 UIKit `_main`，后台宿主为 `dm_main`，并接入完整逻辑内存与正常账户／显示层 API。原 139 单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39016958941) 编译、强链接通过；下载工件中的实际 force registry 为 616 项。新增正常装载保护后的 140 单元也已在 [官方 SDK CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39018043850) 编译、强链接通过，本地核对了 1034 件来源及 602 份日志。`--stage-only` 仅准备来源与 header。当前工具已接入完整音频、带属性 VS、MRT／片元输出、DebugPad 和正常计数器修正，共 235 单元（新增音频 95 单元，其中 C++23 为 79）。首轮 [235 单元 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39019104689) 在旧 libc++ 目录假设处停止，尚未开始编译；现改为用同一 clang、target 和 SDK 的实际搜索报告选择唯一标准库根，并保留完整头文件摘要及实际依赖检查，等待重新执行官方 SDK 编译。产物需另行绑定最终资源、Guest、实际接口合同与签名，仍不可直接安装或执行。
 
 着色器身份桥 `tools/shader_key_bridge.py` 已核对现有导出的 7908 个捕获，并保留其中 3173 个的四模式条件合同引用。它不生成着色器事实，也不声明整个游戏的目录完整。六模块框架由 `tools/pack_guest.py --rewrite <离线重写目录> --output <新目录>` 复用现有完整 Mach-O 生成器构建；本地框架已逐节还原验证，未签名或执行。
 
@@ -60,3 +60,7 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 1.0 音频沿原 SDK 客户端走完整 Eden audren 服务端：复用当前唯一 kernel／range 表，保留 REV1、真实 workbuffer、事件与 PCM 生命周期。独立 CPU 测试已验证 32k→48k 非零 PCM、暂停／恢复和关闭 ACK，且覆盖 4KB 子页 alias 的实际基址释放及失败保留重试；正常 logger 的 payload 也在指针 staging 前丢弃。`adapter/base_v0_audren_sources.json` 固定新增 95 个生产单元、完整原始依赖与补丁顺序，最终 iPhoneOS 的实际依赖和 C++ 强链接仍由构建收据验证，不能用 owned AudioUnit 测试代替手机出声。
 
 独立复核发现的 descriptor stream 越界已修正：纯 shape/type 检查在首次 PSO 创建之前，最终注册范围与 viewport 提交事务继续保留。正常 `RED_ONCE` 宏也已整体丢弃参数和计数器，避免原索引 84 越界；非正常配置的原 once 语义保留。上述两处都有实际旧代码失败与修复回归，尚未代替手机图形验证。
+
+片元补充范围为 `typed-fs-nonqueried-v1`：2112 个捕获、8448 个四模式变体已完成 CPU 翻译与独立合同验证。实际绘制点用当前 render pass、输出类型、附件格式和映射核对候选；正常 `color(n)` 保留物理输出槽含义。补充目录为 `botw/fragment-shaders`，与原包及 VS 包共覆盖 7593 个捕获，其余 315 个身份未发布变体。这些来源验证不代表 Metal 编译或游戏画面。
+
+1.0 的两个 DebugPad 进口复用既有 disconnected producer，沿原 vsync 线程采样，getter 不推进采样；不改变 Npad 主链。最终签名副本可用 `tools/verify_base_v0_bundle_preload.py --bundle <目录> --output <新目录>` 调用完整冻结的磁盘 preload 校验，只读十八节与装载表，不加载 Host／Guest；它不代替签名、宿主登记表或真机验收。

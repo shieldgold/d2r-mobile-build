@@ -1,0 +1,90 @@
+--- a/dm/host/hle_hid.c
++++ b/dm/host/hle_hid.c
+@@ -3,6 +3,10 @@
+ // Vibration, six-axis, mouse, keyboard: not provided by the host (device count 0 / not connected); the controller applet reports "1 player, current controller selected".
+ #include "hle.h"
+ #include "dm_input.h"
++#if defined(NXNATIVE_BASE_V0_DEBUG_PAD) && NXNATIVE_BASE_V0_DEBUG_PAD
++#include "../botw_input/input.h"
++#include "base_v0_audren_memory.h"
++#endif
+ #include <stdatomic.h>
+ #include <unistd.h>
+ #include <strings.h>
+@@ -212,3 +216,56 @@
+ // Vibration device info / actual value: no device, zeroed
+ HLE_FORCE("_ZN2nn3hid22GetVibrationDeviceInfoEPNS0_19VibrationDeviceInfoERKNS0_21VibrationDeviceHandleE", "震动设备信息：无", void, h_hid_VibInfo, uint32_t *info, const void *h) { (void)h; info[0] = 0; info[1] = 0; }
+ HLE_FORCE("_ZN2nn3hid23GetActualVibrationValueEPNS0_14VibrationValueERKNS0_21VibrationDeviceHandleE", "实际震动值：0", void, h_hid_VibActual, float *v, const void *h) { (void)h; memset(v, 0, 16); }
++
++#if defined(NXNATIVE_BASE_V0_DEBUG_PAD) && NXNATIVE_BASE_V0_DEBUG_PAD
++/* BASE_V0_DEBUG_PAD_BEGIN */
++_Static_assert(sizeof(botw_debug_pad_state) == 0x20, "base-v0 DebugPadState size");
++_Static_assert(offsetof(botw_debug_pad_state, attributes) == 8, "DebugPad attributes");
++_Static_assert(offsetof(botw_debug_pad_state, buttons) == 12, "DebugPad buttons");
++_Static_assert(offsetof(botw_debug_pad_state, rx) == 16, "DebugPad right stick");
++_Static_assert(offsetof(botw_debug_pad_state, lx) == 24, "DebugPad left stick");
++
++/* This process-owned backing never supplies Npad, shared-memory IPC or sources.
++ * Only the native DebugPad publisher and reader touch its DebugPad ring. */
++static pthread_once_t g_base_v0_debug_pad_once = PTHREAD_ONCE_INIT;
++static _Atomic(botw_input *) g_base_v0_debug_pad;
++static void botw_base_v0_debug_pad_create(void) {
++    botw_input *input = botw_input_create();
++    if (!input) die("base-v0 DebugPad producer allocation failed");
++    uint64_t ticks = botw_input_monotonic_ticks();
++    if (!ticks || botw_input_activate_debug_pad(input, ticks)) {
++        botw_input_destroy(input);
++        die("base-v0 DebugPad producer activation failed");
++    }
++    atomic_store_explicit(&g_base_v0_debug_pad, input, memory_order_release);
++}
++HLE_FORCE("_ZN2nn3hid18InitializeDebugPadEv",
++          "base-v0 DebugPad uses the complete native disconnected producer", void,
++          botw_base_v0_debug_pad_initialize, void) {
++    if (pthread_once(&g_base_v0_debug_pad_once, botw_base_v0_debug_pad_create))
++        die("base-v0 DebugPad producer initialization failed");
++}
++HLE_FORCE("_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE",
++          "base-v0 DebugPad uses the complete native disconnected producer", void,
++          botw_base_v0_debug_pad_get_state, botw_debug_pad_state *out) {
++    if (!out) die("base-v0 DebugPad GetState requires an output");
++    botw_input *input = atomic_load_explicit(&g_base_v0_debug_pad, memory_order_acquire);
++    if (!input) die("base-v0 DebugPad GetState before initialization");
++    botw_debug_pad_state state;
++    int count = botw_input_read_debug_pad(input, &state);
++    if (count < 0 || count > 1) die("base-v0 DebugPad state is unavailable");
++    if (!count) return;
++    if (!dm_guest_memory_access((uint64_t)(uintptr_t)out, sizeof state, 1) ||
++        !dm_guest_write_prepare_checked(out, sizeof state))
++        die("base-v0 DebugPad state write preparation failed");
++    memcpy(out, &state, sizeof state);
++}
++void botw_base_v0_debug_pad_tick(void) {
++    botw_input *input = atomic_load_explicit(&g_base_v0_debug_pad, memory_order_acquire);
++    if (!input) return;
++    uint64_t ticks = botw_input_monotonic_ticks();
++    if (!ticks || botw_input_sample_debug_pad(input, ticks))
++        die("base-v0 DebugPad sampling failed");
++}
++/* BASE_V0_DEBUG_PAD_END */
++#endif
+--- a/dm/host/hle_sdk16.c
++++ b/dm/host/hle_sdk16.c
+@@ -165,11 +165,17 @@
+ 
+ // ---------- vi: vsync event ----------
+ // The game passes a SystemEventType; after binding, a host thread fires it at 60 Hz (DM_VSYNC_HZ can change it)
++#if defined(NXNATIVE_BASE_V0_DEBUG_PAD) && NXNATIVE_BASE_V0_DEBUG_PAD
++void botw_base_v0_debug_pad_tick(void);
++#endif
+ static void *vsync_thread(void *ev) {
+     const char *e = getenv("DM_VSYNC_HZ"); double hz = e ? atof(e) : 60.0; if (hz <= 0) hz = 60.0;
+     uint64_t period = (uint64_t)(1e9 / hz), next = now_ns() + period;
+     for (;;) {
+         uint64_t t = now_ns(); if (next > t) { struct timespec ts = {(time_t)((next - t) / 1000000000ull), (long)((next - t) % 1000000000ull)}; nanosleep(&ts, NULL); }
++#if defined(NXNATIVE_BASE_V0_DEBUG_PAD) && NXNATIVE_BASE_V0_DEBUG_PAD
++        botw_base_v0_debug_pad_tick();
++#endif
+         hle_signal_system_event(ev); next += period; if (now_ns() > next + 4 * period) next = now_ns() + period;   // do not try to catch up when far behind
+     }
+     return NULL;

@@ -1,8 +1,8 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 10386,
-      "sha256": "b89c72a9bc9b1ccd0d62d1a4e69d607185f97cf98cd05eef875a369dde387fb7"
+      "bytes": 11572,
+      "sha256": "3dd76cc6f5fc109da5bb89d38b34d73182d8ac02a8e6135b8ebbf965d0b90bed"
     },
     "adapter/base_v0_audren.c": {
       "bytes": 7387,
@@ -100,6 +100,18 @@
       "bytes": 31662,
       "sha256": "75572ea8dc5e6e9bb1c8cc7b2d07e2abb5320e049822caebc5675677bc1c903d"
     },
+    "patches/base-v0-debug-pad-input.patch": {
+      "bytes": 4929,
+      "sha256": "1e416abdf84a3cfb1121e3b8e6a0c7c1e8de69ba804f4ed48af45e250e679c6b"
+    },
+    "patches/base-v0-fragment-shader-pipeline.patch": {
+      "bytes": 15614,
+      "sha256": "4b461632b09cc81f95786e6556621983b58b285425c4b8e8d125a0ffc647fcdd"
+    },
+    "patches/base-v0-fragment-shader-provider.patch": {
+      "bytes": 25003,
+      "sha256": "f78018c81ce6b78e21911a1e0381d647a6942b45ad1e1b2d075fb47ab65cfa96"
+    },
     "patches/base-v0-logical-memory.patch": {
       "bytes": 27553,
       "sha256": "edd66af190a0f620b2bf7b1885e3db0af100dabd2e785a998acf20bb19945ec6"
@@ -160,6 +172,14 @@
       "bytes": 9102,
       "sha256": "0b1dd117f9fc73ea2e14198730123b6e474407cd1e0737acb8cb933c2413c463"
     },
+    "tests/debug_pad_probe.c": {
+      "bytes": 4334,
+      "sha256": "3664093f6487e10e028319c1e0023c58a1a153351252595078d4c60c8bf521c2"
+    },
+    "tests/fragment_shader_provider_probe.m": {
+      "bytes": 4809,
+      "sha256": "58318bfa59c0d26f1982cc28a887a7590fa92718df435351ce0af90f9a8be110"
+    },
     "tests/shader_provider_probe.m": {
       "bytes": 14908,
       "sha256": "26891d8b2309a521f8e2235ba8204433b8d3b6692d9e6ca86c59a7bc3e513d8e"
@@ -173,8 +193,12 @@
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_base_v0_runtime.py": {
-      "bytes": 39108,
-      "sha256": "d2c40a09f2c485a31498db5e00538b8422bfb53fdda8e9c1fba9d0c9f9afef0a"
+      "bytes": 44524,
+      "sha256": "9a9a70eec677b535b521b0a1c91a7c8537fde87c9b76ed25161765746895aa64"
+    },
+    "tools/build_fragment_shader_contracts.py": {
+      "bytes": 9511,
+      "sha256": "60f861eb9f0dff4eafd3d0fea452729bcc4d90772918187826c6d334dc44630f"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,
@@ -211,6 +235,10 @@
     "tools/shader_key_bridge.py": {
       "bytes": 17966,
       "sha256": "7e4898fabe2ab289e4d35ecc3f5d089d387acf420c2e410edc46a70e3aa368b7"
+    },
+    "tools/verify_base_v0_bundle_preload.py": {
+      "bytes": 12947,
+      "sha256": "6a3b811a519f66746dffb5c10696c16af04e7f935fcc7039881646bd70b3ad93"
     },
     "tools/verify_source.py": {
       "bytes": 7879,

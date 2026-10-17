@@ -122,3 +122,11 @@ python3 experiments/nxnative_base_v0/tools/build_link_only.py \
 - 原上游 RED_ONCE 在禁用 MLOG 后仍递增日志计数器，实际 index84 超过 84 项数组；正常配置现整宏不求值，4 项独立回归通过，完整 MTL 编译仅消除此一警告，非正常配置原 once 行为保留。最终组合顺序为原9＋audio2→typedVSv2→counter。
 
 - 235 单元组合工具已冻结。根任务完成 26 模块、287 项测试，0 跳过、0 失败；来源闭合为 953 个原文件、54 个适配件、342 个外部来源。实际 stage 已完成完整音频、typedVSv2 与 counter，仍未编译／运行新 iPhone 宿主。
+
+- `3710e8c763cee336d6d59b5011776ba5cc230409` 的 CI `39019104689` 中来源、全部 owned 测试和 127／136 基线均通过；235 步骤在 libc++ 路径准入停止（0 planned、0 compiled），错误为 `selected compiler complete libc++ headers are unavailable`。音频／策略闭合标志保持 false；正在改为查询已绑定编译器的实际搜索根，保留完整标准库依赖前后核验。
+- MRT 新 2112 捕获／8448 变体已用完整 CPU 管线和 validator 复核，根任务 11 项回归与独立 78 边界通过；实际三包共 7593 捕获。315 个剩余身份没有 variant，不冒充全目录覆盖。资源副本 03 新 25352 文件、144316538 字节均逐 SHA 与原 FS 包一致。
+- DebugPad 两个固定 1.0 main 进口已由完整既有 disconnected producer 薄接，原 Npad 主链未改；根任务 7 项回归通过，getter 不推进采样，采样沿原 vsync 线程。纯静态 preload 校验工具的 7 项回归也已通过，真实 ad-hoc 资源副本待最终来源闭合后校验。
+
+- 235 单元 runtime v2 已冻结，补齐 MRT、DebugPad 与同一 clang 实际 libc++ 搜索路径查询。18 项构建回归通过，owned 旧 toolchain／新 SDK 布局取得实际 RED→GREEN；空输入本机驱动查询及完整标准库前后快照通过，仅是 Mac 查询证据，官方 iPhoneOS 构建仍待执行。完整原始来源与依赖门保留。
+- 根任务实际运行签名后 Guest 资源副本的完整 preload：32 件输入、8 个实际命令、来源／输入／builtin 前后相同，十八节 canonical 校验通过；没有加载镜像，也未改原 packer 报告。runtime v2 独立复核的 18 项回归、4 个额外负边界和 1683 份标准库前后快照无确认阻断。
+- 根任务最终完整回归为 30 模块、316 项测试，0 跳过、0 失败；953 个原文件、61 个适配件和 342 个外部来源闭合，235 单元完整 stage 及专属 header 通过。官方 SDK 编译与最终手机验收待执行。

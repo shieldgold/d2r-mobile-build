@@ -90,6 +90,7 @@ class BaseV0Runtime(unittest.TestCase):
             self.assertIn('-DNXNATIVE_BASE_V0_NORMAL_APIS=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_LOADER_GUARD=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_AUDREN=1',row['argv'])
+            self.assertIn('-DNXNATIVE_BASE_V0_DEBUG_PAD=1',row['argv'])
             self.assertIn('-march=armv8.2-a',row['argv'])
             self.assertNotIn('-mcpu=apple-a18',row['argv'])
         self.assertFalse(any('nxnative_upstream_ios_main' in arg for row in commands for arg in row['argv']))
@@ -133,6 +134,66 @@ class BaseV0Runtime(unittest.TestCase):
         with self.assertRaises(ValueError):tool.normalize_audio_dependencies(root,[{'path':'linked/../platform/memory.h',**row}])
         with self.assertRaises(ValueError):tool.normalize_audio_dependencies(root,[{'path':'platform/memory.h',**row},{'path':'platform/memory.h',**{**row,'sha256':'0'*64}}])
 
+    def cxx_layout(self):
+        toolchain=self.work/'selected-toolchain/usr';(toolchain/'bin').mkdir(parents=True)
+        clang=toolchain/'bin/clang';clang.write_text('owned path identity; never a compiler stand-in\n')
+        sdk=self.work/'SDKs/iPhoneOS-owned.sdk';sdk.mkdir(parents=True)
+        return {'clang':str(clang),'sdk_path':str(sdk)},toolchain,sdk
+
+    def cxx_root(self,root):
+        root.mkdir(parents=True);(root/'__config').write_text('/* owned config */\n');(root/'vector').write_text('/* owned vector */\n')
+        return root
+
+    def cxx_search(self,*roots):
+        return '#include "..." search starts here:\n#include <...> search starts here:\n'+''.join(' '+str(p)+'\n' for p in roots)+'End of search list.\n'
+
+    def test_cxx_driver_search_admits_both_real_toolchain_and_new_sdk_layouts(self):
+        tool=self.tool();sdk,toolchain,sdkroot=self.cxx_layout()
+        old=self.cxx_root(toolchain/'include/c++/v1')
+        chosen,proof=tool.cxx_headers(sdk,self.cxx_search(old,sdkroot/'usr/include'))
+        self.assertEqual(chosen,old);self.assertEqual(proof['reported_root'],str(old))
+        shutil.rmtree(old)
+        new=self.cxx_root(sdkroot/'usr/include/c++/v1')
+        chosen,proof=tool.cxx_headers(sdk,self.cxx_search(new,sdkroot/'usr/include'))
+        self.assertEqual(chosen,new);self.assertEqual(proof['resolved_root'],str(new))
+        self.assertEqual(set(proof['marker_files']),{'__config','vector'})
+
+    def test_cxx_search_rejects_external_ambiguous_missing_and_nonregular_roots(self):
+        tool=self.tool();sdk,toolchain,sdkroot=self.cxx_layout();inside=self.cxx_root(sdkroot/'usr/include/c++/v1')
+        outside=self.cxx_root(self.work/'external/include/c++/v1');other=self.cxx_root(toolchain/'include/c++/v1')
+        for roots in ((outside,),(inside,other),(sdkroot/'missing/c++/v1',),()):
+            with self.subTest(roots=roots),self.assertRaises(ValueError):tool.cxx_headers(sdk,self.cxx_search(*roots))
+        (inside/'vector').unlink();os.mkfifo(inside/'vector')
+        with self.assertRaises(ValueError):tool.cxx_headers(sdk,self.cxx_search(inside))
+
+    def test_cxx_sdk_alias_is_allowed_but_extra_or_internal_links_refuse(self):
+        tool=self.tool();sdk,_,sdkroot=self.cxx_layout();inside=self.cxx_root(sdkroot/'usr/include/c++/v1')
+        alias=sdkroot.parent/'iPhoneOS.sdk';alias.symlink_to(sdkroot,target_is_directory=True)
+        reported=alias/'usr/include/c++/v1';chosen,proof=tool.cxx_headers(sdk,self.cxx_search(reported))
+        self.assertEqual(chosen,inside);self.assertEqual(proof['reported_root'],str(reported))
+        extra=self.work/'extra';extra.symlink_to(inside,target_is_directory=True)
+        with self.assertRaises(ValueError):tool.cxx_headers(sdk,self.cxx_search(extra))
+        (inside/'nested').mkdir();(inside/'nested/header').symlink_to(inside/'vector')
+        with self.assertRaises(ValueError):tool.cxx_header_snapshot(inside)
+
+    def test_real_local_mac_driver_query_records_search_and_full_header_closure(self):
+        # Only an empty native-Mac preprocessing query. This never substitutes
+        # for the fixed production iPhoneOS target or an actual SDK build.
+        tool=self.tool();base=load_source(C/'tools/build_link_only.py')
+        found=subprocess.run(['/usr/bin/xcrun','--sdk','macosx','--find','clang'],capture_output=True,text=True)
+        self.assertEqual(found.returncode,0,found.stderr)
+        selected=subprocess.run(['/usr/bin/xcrun','--sdk','macosx','--show-sdk-path'],capture_output=True,text=True)
+        self.assertEqual(selected.returncode,0,selected.stderr)
+        sdk={'clang':str(Path(found.stdout.strip()).resolve()),'sdk_path':str(Path(selected.stdout.strip()).resolve())}
+        base.TARGET='arm64-apple-macos14.0';receipt={'steps':[]}
+        root=tool.query_cxx_headers(self.work,sdk,base,receipt)
+        proof=receipt['libcxx_header_selection'];self.assertEqual(proof['resolved_root'],str(root))
+        self.assertEqual(proof['query']['exit_code'],0)
+        self.assertIn(base.TARGET,proof['query']['argv']);self.assertIn('--no-default-config',proof['query']['argv'])
+        self.assertIn('End of search list.',Path(proof['query']['stderr']['path']).read_text())
+        first=tool.cxx_header_snapshot(root);self.assertIn(str(root/'vector'),first)
+        self.assertEqual(first,tool.cxx_header_snapshot(root))
+
     def test_final_symbols_require_real_entry_memory_provider_and_base0_api(self):
         tool=self.tool();adapted=load_source(C/'tools/build_adapted_link_only.py')
         required=tool.strong_symbols(adapted)
@@ -141,6 +202,8 @@ class BaseV0Runtime(unittest.TestCase):
         self.assertIn('_nxnative_base_v0_memory_reserve',required)
         self.assertIn('_botw_base_v0_heap_plan_original_logical',required)
         self.assertIn('_nxnative_base_v0_layer_scaling_mode',required)
+        self.assertIn('_whole_runtime_fragment_shader_publication',required)
+        self.assertIn('_botw_base_v0_debug_pad_tick',required)
         for suffix in ('preload','begin','layout','image','gate_count','registry','reference','complete','entry'):
             self.assertIn('_nxnative_base_v0_loader_'+suffix,required)
         for symbol in ('_nxnative_base_v0_audren_prepare','_botw_audren_update','_botw_pcm_write','_botw_whole_kernel_producer_signal'):
@@ -168,8 +231,10 @@ class BaseV0Runtime(unittest.TestCase):
         self.assertEqual(len(receipt['audren_source_inventory']['translation_units']),95)
         self.assertEqual(len(receipt['audio_staging_patches']),6)
         self.assertEqual(len(receipt['typed_vertex_patch']['changed_members']),7)
+        self.assertEqual(len(receipt['fragment_shader_patch']['changed_members']),6)
         self.assertEqual(receipt['normal_graphics_counter_patch']['changed_members'],['dm/gfx/nvn/nvn_mtl.m'])
-        for name in ('typed-vertex-private-append','normal-graphics-counter-patch'):
+        self.assertEqual(receipt['debug_pad_patch']['changed_members'],['dm/host/hle_hid.c','dm/host/hle_sdk16.c'])
+        for name in ('typed-vertex-private-append','fragment-shader-private-append','normal-graphics-counter-patch','base-v0-debug-pad-patch'):
             stdout=(self.work/'logs'/(name+'.stdout')).read_text()
             self.assertNotIn('offset',stdout);self.assertNotIn('fuzz',stdout)
         self.assertEqual((private/'adapter/base_v0_loader_guard.m').read_bytes(),(C/'adapter/base_v0_loader_guard.m').read_bytes())
@@ -178,22 +243,32 @@ class BaseV0Runtime(unittest.TestCase):
         header,record=tool.render_header(PROFILE.read_bytes(),json.loads((C/'profile/base_v0.json').read_bytes()),
             (private/'upstream/dm/games/game.py').read_bytes(),self.work)
         generated=self.work/'generated';generated.mkdir();(generated/'game_profile.h').write_text(header)
+        known={str(private/name):row for name,row in expected.items()}
+        known[str(generated/'game_profile.h')]=tool.record(header.encode())
         main=private/'upstream/dm/host/main.c';svc=private/'upstream/dm/host/hle_svc.c'
-        for source in (main,svc):
+        for source in (main,svc,private/'upstream/dm/host/hle_hid.c',private/'upstream/dm/host/hle_sdk16.c'):
+            dep=self.work/(source.name+'.d')
             command=['clang','-std=gnu11','-c','-Wall','-Wno-unused-function',
                 *['-D'+d for d in tool.DEFINES],'-Dmain=dm_main',
                 '-I'+str(generated),'-I'+str(private/'adapter'),'-I'+str(private/'memory_provider'),
                 *tool.audio_include_flags(private,receipt['audren_source_inventory']),
                 '-I'+str(private/'upstream/dm/gfx/nvn/include'),
+                '-MMD','-MF',str(dep),
                 str(source),'-o',str(self.work/(source.name+'.o'))]
             result=subprocess.run(command,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            actual=base.parse_depfile(dep)
+            sdk=next((p.parent for p in actual if p.name=='SDKSettings.json'),self.work/'sdk')
+            dependencies=base.verify_dependencies(actual,known,sdk,self.work/'builtins')
+            if source.name=='hle_hid.c':
+                self.assertIn(str(private/'audio/repository/native/botw_input/input.h'),{r['path'] for r in dependencies['bound_inputs']})
+                symbols=subprocess.run(['nm','-gU',str(self.work/(source.name+'.o'))],capture_output=True,text=True)
+                self.assertEqual(symbols.returncode,0,symbols.stdout+symbols.stderr)
+                tool.verify_symbols(symbols.stdout,{'_botw_base_v0_debug_pad_tick'})
         # Consume the actual builder recipes with the local Mac target only.
         # This verifies C++/prepared-header integration, never iPhone admission.
         units=json.loads((C/'compile_sources.json').read_bytes())['translation_units']
         plans=tool.compile_commands(private,self.work,units,{'clang':'clang','sdk_path':'/owned/sdk'},base,adapted)
-        known={str(private/name):row for name,row in expected.items()}
-        known[str(generated/'game_profile.h')]=tool.record(header.encode())
         for suffix in ('/audio/eden/src/audio_core/audio_render_manager.cpp','/audio/repository/experiments/botw_audio_renderer/native/renderer_host.cpp'):
             plan=next(row for row in plans if row['source'].endswith(suffix));command=list(plan['argv'])
             for flag in ('-target','-isysroot'):

@@ -28,12 +28,15 @@ AUDIO_ADAPTERS = tuple('adapter/' + name for name in ('base_v0_audren.c', 'base_
     'base_v0_audren_memory.c', 'base_v0_audren_memory.h', 'base_v0_audren_host_memory.c',
     'base_v0_audren_transfer_memory.inc', 'base_v0_audren_transfer_handles.inc'))
 TYPED_PATCH = 'patches/base-v0-vertex-shader-provider.patch'
+FRAGMENT_PATCH = 'patches/base-v0-fragment-shader-provider.patch'
+DEBUG_PAD_PATCH = 'patches/base-v0-debug-pad-input.patch'
 COUNTER_PATCH = 'patches/base-v0-normal-graphics-counters.patch'
 TYPED_MEMBERS = ('adapter/base_v0_shader_provider.h', 'adapter/base_v0_shader_provider.m',
     'shader_provider/adapter/whole_shader_bundle_publication.h',
     'shader_provider/adapter/whole_shader_bundle_publication.m',
     'shader_provider/adapter/whole_shader_conditional.h',
     'shader_provider/adapter/whole_shader_conditional.m', 'upstream/dm/gfx/nvn/nvn_mtl.m')
+FRAGMENT_MEMBERS = tuple(name for name in TYPED_MEMBERS if name != 'adapter/base_v0_shader_provider.h')
 MEMORY_FILES = tuple('experiments/botw_upstream_host/adapter/' + name for name in (
     'base_v0_heap.c', 'base_v0_heap.h', 'whole_address_space.c',
     'whole_address_space.h', 'whole_policy.c', 'whole_policy.h'))
@@ -55,11 +58,11 @@ REQUIRED = ('tools/build_base_v0_runtime.py', PROFILE, 'profile/base_v0.json',
     'tools/build_adapted_link_only.py', 'tools/verify_source.py', 'compile_sources.json',
     'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h',
     'adapter/base_v0_loader_guard.h', 'adapter/base_v0_loader_guard.m',
-    AUDIO_INVENTORY, TYPED_PATCH, COUNTER_PATCH, *AUDIO_ADAPTERS,
+    AUDIO_INVENTORY, TYPED_PATCH, FRAGMENT_PATCH, COUNTER_PATCH, DEBUG_PAD_PATCH, *AUDIO_ADAPTERS,
     *(name for name, _ in EXTRA_PATCHES))
 DEFINES = ('NXNATIVE_NORMAL_POLICY=1', 'DM_SHELL=1', 'NXNATIVE_BASE_V0_MEMORY=1',
            'NXNATIVE_BASE_V0_NORMAL_APIS=1', 'NXNATIVE_BASE_V0_LOADER_GUARD=1',
-           'NXNATIVE_BASE_V0_AUDREN=1', 'FMT_HEADER_ONLY=1')
+           'NXNATIVE_BASE_V0_AUDREN=1', 'FMT_HEADER_ONLY=1', 'NXNATIVE_BASE_V0_DEBUG_PAD=1')
 
 
 def record(raw):
@@ -365,11 +368,19 @@ def copy_audio_inputs(component, private, output, lock, base, adapted, receipt, 
     receipt['typed_vertex_patch'] = adapted.apply_patch(private, component / TYPED_PATCH,
         TYPED_MEMBERS, output, 'typed-vertex-private-append', base, receipt, expected_preimages=expected)
     expected.update(receipt['typed_vertex_patch']['postimages'])
+    receipt['fragment_shader_patch'] = adapted.apply_patch(private, component / FRAGMENT_PATCH,
+        FRAGMENT_MEMBERS, output, 'fragment-shader-private-append', base, receipt, expected_preimages=expected)
+    expected.update(receipt['fragment_shader_patch']['postimages'])
     preimages = {name[len('upstream/'):]: row for name, row in expected.items() if name.startswith('upstream/')}
     receipt['normal_graphics_counter_patch'] = adapted.apply_patch(private / 'upstream', component / COUNTER_PATCH,
         ('dm/gfx/nvn/nvn_mtl.m',), output, 'normal-graphics-counter-patch', base, receipt,
         expected_preimages=preimages)
     expected.update({'upstream/' + name: row for name, row in receipt['normal_graphics_counter_patch']['postimages'].items()})
+    preimages = {name[len('upstream/'):]: row for name, row in expected.items() if name.startswith('upstream/')}
+    receipt['debug_pad_patch'] = adapted.apply_patch(private / 'upstream', component / DEBUG_PAD_PATCH,
+        ('dm/host/hle_hid.c', 'dm/host/hle_sdk16.c'), output, 'base-v0-debug-pad-patch', base, receipt,
+        expected_preimages=preimages)
+    expected.update({'upstream/' + name: row for name, row in receipt['debug_pad_patch']['postimages'].items()})
     return adapted.verify_private(private, expected, base)
 
 
@@ -460,7 +471,8 @@ def strong_symbols(adapted):
         '_botw_whole_audren_create', '_botw_whole_ipc_bind', '_dm_guest_write_prepare_checked',
         '_botw_audren_host_create', '_botw_audren_open', '_botw_audren_update',
         '_botw_audren_start', '_botw_audren_stop', '_botw_audren_close',
-        '_botw_pcm_open', '_botw_pcm_write', '_botw_pcm_close', '_whole_runtime_vertex_shader_publication'}
+        '_botw_pcm_open', '_botw_pcm_write', '_botw_pcm_close', '_whole_runtime_vertex_shader_publication',
+        '_whole_runtime_fragment_shader_publication', '_botw_base_v0_debug_pad_tick'}
 
 
 def verify_symbols(text, required):
@@ -494,6 +506,7 @@ def new_receipt(base=None):
         installable=False, installable_candidate=False, host_guest_gpu_executed=False,
         audio_runtime_closed=False, whole_host_policy_closed=False, gameplay_verified=False,
         audio_source_integrated=False, typed_vertex_source_integrated=False,
+        fragment_source_integrated=False, debug_pad_source_integrated=False,
         audio_runtime_closure_scope='complete admitted source/roles/macros/actual SDK compilation and C++ strong link; no physical audio claim',
         whole_host_policy_scope='normal diagnostic, loader, memory and fixed failure policy; not shader catalogue or gameplay coverage',
         game_payload_embedded=False, resources_validated=False,
@@ -516,17 +529,86 @@ def inspect_entry_objects(commands, output, sdk, base, receipt, private):
         verify_symbols(regular_bytes(step['stdout']['path']).decode(), {symbol})
 
 
-def cxx_headers(sdk):
-    toolchain = Path(sdk['clang']).parent.parent / 'include/c++/v1'
-    if not toolchain.is_dir():
-        raise ValueError('selected compiler complete libc++ headers are unavailable')
-    return toolchain
+def cxx_headers(sdk, report):
+    """Resolve the one real libc++ root reported by the selected clang driver."""
+    lines = report.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip() == '#include <...> search starts here:']
+    ends = [i for i, line in enumerate(lines) if line.strip() == 'End of search list.']
+    if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
+        raise ValueError('actual C++ include search report is missing or ambiguous')
+    sdk_path = Path(sdk['sdk_path']).absolute()
+    sdk_root = sdk_path.resolve(strict=True)
+    toolchain_root = Path(sdk['clang']).resolve(strict=True).parent.parent
+    candidates = []
+    for line in lines[starts[0]+1:ends[0]]:
+        if not line.strip() or line.rstrip().endswith(' (framework directory)'):
+            continue
+        path = Path(line.strip())
+        if not path.is_absolute() or '..' in path.parts:
+            raise ValueError('noncanonical C++ search path')
+        markers = (path/'__config', path/'vector')
+        if path.parts[-2:] != ('c++', 'v1') and not all(p.exists() for p in markers):
+            continue
+        if not path.is_dir():
+            raise ValueError('reported libc++ root does not exist')
+        resolved = path.resolve(strict=True)
+        if not any(root == resolved or root in resolved.parents for root in (sdk_root, toolchain_root)):
+            raise ValueError('reported libc++ root is outside selected SDK/toolchain')
+        for parent in (path, *path.parents):
+            if not parent.is_symlink():
+                continue
+            # The selected system SDK may itself have its standard sibling
+            # alias. No additional links in the libc++ subtree are admitted.
+            sdk_alias = parent.resolve(strict=True) == sdk_root and (
+                parent == sdk_path or parent.parent.resolve(strict=True) == sdk_root.parent)
+            if not sdk_alias:
+                raise ValueError('reported libc++ path contains an extra symlink')
+        for marker in markers:
+            if not marker.exists() or not stat.S_ISREG(marker.lstat().st_mode):
+                raise ValueError('reported libc++ marker is missing or nonregular')
+        proof = {'reported_root': str(path), 'resolved_root': str(resolved),
+            'selected_sdk_root': str(sdk_root), 'selected_toolchain_root': str(toolchain_root),
+            'marker_files': {p.name: record(regular_bytes(resolved/p.name)) for p in markers}}
+        candidates.append((resolved, proof))
+    if len(candidates) != 1:
+        raise ValueError('actual C++ search must contain exactly one complete libc++ root')
+    return candidates[0]
+
+
+def cxx_header_snapshot(directory):
+    directory = Path(directory)
+    if not directory.is_dir() or any(p.is_symlink() for p in (directory, *directory.parents)):
+        raise ValueError('libc++ snapshot root must be a real canonical directory')
+    result = {}
+    for parent, directories, files in os.walk(directory, followlinks=False):
+        for name in directories:
+            if not stat.S_ISDIR((Path(parent)/name).lstat().st_mode):
+                raise ValueError('libc++ contains a linked or nonregular directory')
+        for name in files:
+            path = Path(parent)/name
+            if not stat.S_ISREG(path.lstat().st_mode):
+                raise ValueError('libc++ contains a linked or nonregular file')
+            result[str(path)] = record(regular_bytes(path))
+    return dict(sorted(result.items()))
+
+
+def query_cxx_headers(output, sdk, base, receipt):
+    argv = [sdk['clang'], '--no-default-config', '--driver-mode=g++', '-target', base.TARGET,
+        '-isysroot', sdk['sdk_path'], '-march=armv8.2-a', '-std=c++23', '-stdlib=libc++',
+        '-fno-modules', '-fno-implicit-modules', '-E', '-v', '-x', 'c++', '/dev/null', '-o', '/dev/null']
+    step = base.run_command(argv, output, 'libcxx-include-search', output)
+    receipt['steps'].append(step)
+    if step['exit_code']:
+        raise ValueError('selected clang actual C++ include search failed')
+    root, proof = cxx_headers(sdk, regular_bytes(step['stderr']['path']).decode())
+    receipt['libcxx_header_selection'] = {'query': step, **proof}
+    return root
 
 
 def build(args, component=COMPONENT):
     output = prepare_output(args.output, component)
     receipt = new_receipt()
-    base = adapted = before = private = private_before = artifact = sdk = resources_before = cxx_before = None
+    base = adapted = before = private = private_before = artifact = sdk = resources_before = cxx_before = cxx_root = None
     try:
         base, adapted, before, lock = load_helpers(component)
         receipt = new_receipt(base)
@@ -536,6 +618,8 @@ def build(args, component=COMPONENT):
         receipt['private_inputs_before'] = private_before
         receipt['audio_source_integrated'] = True
         receipt['typed_vertex_source_integrated'] = True
+        receipt['fragment_source_integrated'] = True
+        receipt['debug_pad_source_integrated'] = True
         identity = json_bytes(regular_bytes(component / 'profile/base_v0.json'))
         header, generated = render_header(regular_bytes(private / PROFILE), identity,
             regular_bytes(private / 'upstream/dm/games/game.py'), output)
@@ -548,7 +632,8 @@ def build(args, component=COMPONENT):
         receipt['unit_counts'] = {'upstream': 126, 'vpx_decoder': 71, 'UIKit_entry_in_upstream': 1,
             'return_only_entry': 0, 'normal_policy': 2, 'base_v0_abi': 1,
             'shader_provider': 6, 'complete_memory_provider': 4, 'loader_guard': 1,
-            'complete_audren_increment': 95, 'audren_cxx': 79, 'total': 235}
+            'complete_audren_increment': 95, 'audren_cxx': 79,
+            'fragment_added_units': 0, 'debug_pad_added_units': 0, 'total': 235}
         if args.stage_only:
             receipt['status'] = 'staged-and-profile-generated-without-compilation'
         else:
@@ -556,7 +641,8 @@ def build(args, component=COMPONENT):
             receipt['toolchain'] = sdk
             resources_before = base.resource_snapshot(Path(sdk['resource_dir']) / 'include')
             receipt['external_toolchain_headers_before'] = resources_before
-            cxx_before = base.resource_snapshot(cxx_headers(sdk))
+            cxx_root = query_cxx_headers(output, sdk, base, receipt)
+            cxx_before = cxx_header_snapshot(cxx_root)
             receipt['external_libcxx_headers_before'] = cxx_before
             known = {str((private / name).resolve()): row for name, row in private_before.items()}
             known[str(header_path)] = record(header.encode())
@@ -636,7 +722,7 @@ def build(args, component=COMPONENT):
                     if receipt['external_toolchain_headers_after'] != resources_before:
                         raise ValueError('runtime compiler builtin headers changed')
                 if cxx_before is not None:
-                    receipt['external_libcxx_headers_after'] = base.resource_snapshot(cxx_headers(sdk))
+                    receipt['external_libcxx_headers_after'] = cxx_header_snapshot(cxx_root)
                     if receipt['external_libcxx_headers_after'] != cxx_before:
                         raise ValueError('runtime compiler libc++ headers changed')
                 if 'patch_tool' in receipt and base.file_record(adapted.PATCH_TOOL) != {k: receipt['patch_tool'][k] for k in ('bytes', 'sha256')}:
