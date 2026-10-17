@@ -13,6 +13,7 @@ FIXTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FIXTURE)
 BASELINE = os.environ.get('BOTW_WHOLE_TEXFLUSH_BASELINE') == '1'
 PATCH = EXP / 'patches/ordinary-texture-flush-import.patch'
+ERROR_PATCH = EXP / 'patches/ordinary-texture-flush-error-propagation.patch'
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'actual Darwin VM and Objective-C protocols')
@@ -22,6 +23,9 @@ class WholeTextureFlushImport(unittest.TestCase):
         FIXTURE.WholeVirtualPools.setUpClass.__func__(cls)
         function = FIXTURE.BACKING.function
         path = cls.source / 'dm/gfx/nvn/hle_nvn.c'
+        if 'if (ready < 0) texwrite_stop(fn, "UNIMPL", why, o);' in path.read_text():
+            subprocess.run(['patch', '--fuzz=0', '-R', '-p1', '-i', str(ERROR_PATCH)], cwd=cls.source,
+                           capture_output=True, check=True)
         if 'if (st == NVN_TEXFLUSH_UNTRACKED)' in path.read_text():
             subprocess.run(['patch', '--fuzz=0', '-R', '-p1', '-i', str(PATCH)], cwd=cls.source,
                            capture_output=True, check=True)
