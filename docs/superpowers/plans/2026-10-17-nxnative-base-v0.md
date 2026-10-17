@@ -140,3 +140,6 @@ python3 experiments/nxnative_base_v0/tools/build_link_only.py \
 - 当前手机 CoreDevice 实读开发者模式 disabled，应用查询实际返回 error10005；已请求用户在手机开启并按系统提示重启确认。标准本地目录与项目签名产物共 86 份配置、16 个唯一 UUID 全部正常解码，均未包含这台新手机，冻结 validate_profile 正确拒绝；原 1017.38 签名候选及其 iPhone15Pro 准入记录保留，不能当成新手机的签名许可。
 - Apple Developer 官方签名入口已打开，设备注册／开发配置材料已在本地准备；等待用户自行完成账户登录及手机设置，再经正规设备登记和 profile 重签。未修改现有 profile、未导出私钥、未安装或启动候选，原文稿与存档未改。
 - 随后再次实读，当前 iPhone12 的开发者模式已 enabled、DDI services true、wired tunnel connected。仅查询 `local.botw.native` 得到未安装，普通磁盘元数据可用空间 101009825792 字节；手机设置这项前置条件已完成。Apple 官方页面仍为登录页，剩余签名配置尚未签发，未尝试以不匹配 profile 安装。
+
+- 用户完成 Apple Developer 登录；页面确认当前签名团队正确，公开开发证书的下载指纹与本地 CAD28… 身份完全相同，可复用。手机 fresh 独立核验仍为 iPhone12／iOS26.5、developer enabled、DDI 可用、有线连接且已解锁，应用目前未安装。
+- Apple 新增设备前强制先完成年度设备名单确认。最终预览保留 21 台已启用设备，并自动移除 1 台原已停用设备；账号的这项其他设备变更超出单台手机安装范围，已出具真实预览截图并请求用户选择。确认框未勾选、Reset 未提交，当前手机未注册、新 profile 未生成。只读准备同时确认需新增本应用的 App ID；未改其他应用标识或证书。
