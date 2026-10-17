@@ -269,13 +269,13 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.c": {
-      "sha256": "9ae3d0dcece42b48c962d8b76065bd358e8fba40617f58a9b6e2ba9204d01043",
-      "bytes": 6929,
+      "sha256": "e9af183203726d4886adbd04bcb8f93f2c0d2ac98609c1621e173c7a68473124",
+      "bytes": 7755,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_policy.h": {
-      "sha256": "5ac51807f66a71554ad6c91f70af0e978994ee9faef776ab7829e997a8a0a759",
-      "bytes": 2639,
+      "sha256": "0d89f415b9a8c61139f02cad34627f5a8ffe8b86000dc3c044c0176dd5f00378",
+      "bytes": 2803,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing.json": {
@@ -638,6 +638,11 @@
       "bytes": 2462,
       "role": "thin-adapter-or-verification"
     },
+    "patches/normal-signal-kind.patch": {
+      "sha256": "de84db9ea36956fa03edd9ccea87269b5ef5f2dcf2d5a70c5e5502c7e54defe0",
+      "bytes": 784,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/normal-thread-tlr.patch": {
       "sha256": "5001c69a5cb212cbf798feef7c0cad70d17a8a51ece6d44ea6008c6e12dc0986",
       "bytes": 915,
@@ -966,6 +971,11 @@
     "tests/whole_shader_source_probe.m": {
       "sha256": "af296a7f9a2fc80919d7cb6388114ac7d045f3688e964174c49ceaf14c434d01",
       "bytes": 15273,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_signal_kind_probe.c": {
+      "sha256": "b29ce71381b2adeb40d4a0c6fcdfaa26f35ff128e578d3aaa8588349dc073a75",
+      "bytes": 4397,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_stack_allocator_probe.c": {
@@ -1767,7 +1777,8 @@
     "patches/base-v0-stack-allocator.patch",
     "patches/base-v0-debug-pad.patch",
     "patches/base-v0-account-open.patch",
-    "patches/normal-account-result-status.patch"
+    "patches/normal-account-result-status.patch",
+    "patches/normal-signal-kind.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1795,7 +1806,7 @@
     "dm/host/botw_oe.c": "4ead179f9672de5bc6a86dd9554cfcff1d1022c6b02267d2f688a5c93d9c28bb",
     "dm/host/botw_pcm.c": "7b77d126af15ab5015770f823d47cf67ab08e4fdb52b9f167ae8179365e6a17e",
     "dm/host/botw_pcm.h": "de8e71d559f744a2959d0afb4e768633663aa88590e571ddb417d7db40dc9cd1",
-    "dm/host/crash.c": "f3ae211a438aee136ac2f7307fed57d620da204107959f1433aa97b44cf5b311",
+    "dm/host/crash.c": "7e6e20579861ffce2c11fcee7f657c0d422791b56ed21b332c77e4a0348e8b49",
     "dm/host/dm.h": "27cbad1e7034cf33726e0328259acf70e2d7b234c50b2e5bdb06c50772c49756",
     "dm/host/dm_title.c": "3967eb6b141445f192bd7bc28d4ced1fcbde021a43ea3bb9282f87c1715a87c9",
     "dm/host/hle.c": "721c43f02f361e0ace50a9b7ed7561109f27cf8e9494e34e4371b55d03bdf552",

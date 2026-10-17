@@ -2,6 +2,7 @@
 #define BOTW_WHOLE_POLICY_IMPLEMENTATION
 #include "whole_policy.h"
 #include <errno.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <string.h>
 /* Also support a build-wide -include applied before this source is parsed. */
@@ -129,6 +130,21 @@ _Noreturn void botw_whole_host_signal_failure(int signal_number) {
     static const char message[] = "[botw whole-host] unhandled host signal\n";
     (void)write(STDERR_FILENO, message, sizeof message - 1);
     _exit(signal_number > 0 && signal_number < 128 ? 128 + signal_number : 1);
+}
+_Noreturn void botw_whole_host_signal_failure_kind(int signal_number, int signal_code) {
+    /* These two closed OS codes carry no fault address or execution context.
+     * Keep the signal path limited to a bounded write and _exit. */
+    if (signal_number == SIGSEGV && signal_code == SEGV_MAPERR) {
+        static const char message[] = "[botw whole-host] unhandled host mapping fault\n";
+        (void)write(STDERR_FILENO, message, sizeof message - 1);
+        _exit(128 + SIGSEGV);
+    }
+    if (signal_number == SIGSEGV && signal_code == SEGV_ACCERR) {
+        static const char message[] = "[botw whole-host] unhandled host protection fault\n";
+        (void)write(STDERR_FILENO, message, sizeof message - 1);
+        _exit(128 + SIGSEGV);
+    }
+    botw_whole_host_signal_failure(signal_number);
 }
 _Noreturn void botw_whole_host_exit(int status) {
     if (status) {

@@ -49,6 +49,8 @@ void botw_whole_host_backtrace_symbols_fd(void *const *buffer, int size, int fd)
 _Noreturn void botw_backend_host_diagnostic_denied(const char *operation);
 _Noreturn void botw_whole_host_failure(void);
 _Noreturn void botw_whole_host_signal_failure(int signal_number);
+/* OS signal classification only; neither argument contains guest state. */
+_Noreturn void botw_whole_host_signal_failure_kind(int signal_number, int signal_code);
 _Noreturn void botw_whole_host_exit(int status);
 
 #ifndef BOTW_WHOLE_POLICY_IMPLEMENTATION

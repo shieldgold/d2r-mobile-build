@@ -1,0 +1,11 @@
+--- a/dm/host/crash.c
++++ b/dm/host/crash.c
+@@ -118,7 +118,7 @@
+     }
+     /* A handled dirty-page write resumes exactly as upstream; every other
+      * signal fails without inspecting PC, SP, registers, stack or callbacks. */
+-    botw_whole_host_signal_failure(sig);
++    botw_whole_host_signal_failure_kind(sig, si ? si->si_code : 0);
+ }
+ // The signal alternate stack is per thread: every guest thread must call this when it starts running (only then can the crash state be printed on the alternate stack on a stack overflow)
+ // The alternate stack is released when the thread exits: the pthread key destructor is called at thread exit (disable the alternate stack first, then free). The game frequently starts short-lived threads, and without releasing each one leaks 64 KiB.
