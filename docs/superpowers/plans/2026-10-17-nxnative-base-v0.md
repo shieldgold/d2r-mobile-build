@@ -130,3 +130,8 @@ python3 experiments/nxnative_base_v0/tools/build_link_only.py \
 - 235 单元 runtime v2 已冻结，补齐 MRT、DebugPad 与同一 clang 实际 libc++ 搜索路径查询。18 项构建回归通过，owned 旧 toolchain／新 SDK 布局取得实际 RED→GREEN；空输入本机驱动查询及完整标准库前后快照通过，仅是 Mac 查询证据，官方 iPhoneOS 构建仍待执行。完整原始来源与依赖门保留。
 - 根任务实际运行签名后 Guest 资源副本的完整 preload：32 件输入、8 个实际命令、来源／输入／builtin 前后相同，十八节 canonical 校验通过；没有加载镜像，也未改原 packer 报告。runtime v2 独立复核的 18 项回归、4 个额外负边界和 1683 份标准库前后快照无确认阻断。
 - 根任务最终完整回归为 30 模块、316 项测试，0 跳过、0 失败；953 个原文件、61 个适配件和 342 个外部来源闭合，235 单元完整 stage 及专属 header 通过。官方 SDK 编译与最终手机验收待执行。
+
+- 提交 `811572d64fdc49d0803f9ea78d4531cde8143e01` 的官方 iPhoneOS CI `39020136804` 全部成功；实际 235 单元、95 音频／79 C++、83 个必需强符号均通过。根任务核对 1008 份日志、1685 份 libc++ 前后及本地完整私有 stage；独立 peer 另核 1540 个私有文件、4530 条 MMD 绑定记录和实际二进制。原工件 2776296B，SHA256 `72dcc5d18c7720caabee161589c641df5a4b43da62e147f7c6111f7e270b4c42`，仍保 0444、未执行。
+- 实际最终 registry 为 614 项，canonical SHA256 `36b462b95e1d17e1337db733f22d7cc45a2f7f7f3dbf1dd66cfb6040d46aa5f1`；新的完整合同绑定 236 个选用接口、283 处引用与 230 个正常门。此为本次实际读数，并未复用早期 614／616 合同。
+- 本地正常开发签名候选 `outputs/nxnative-base-v0-normal-1017.38-01/BOTWNative.app` 已生成（1017.38），91,176 件准备资源逐 SHA 与 typed-03 一致；按目标 profile 先签 Guest、后签外 app，strict verify 通过。签后完整 preload 与 Host registry 不变量再次通过；原 packed Guest、原 CI 工件和全部构建收据保持不变。
+- 当前仍未安装、未执行 Host／Guest／GPU。fresh CoreDevice 目标 iPhone 15 Pro 仍 unavailable，USB iPhone 清单为空；候选应用内不重复内嵌 14GB RomFS，连接后需传入 Documents/romfs，并保留原 Documents/save。实际画面、操作、声音与保存重开仍全部待验。
