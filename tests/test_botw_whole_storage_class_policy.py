@@ -41,6 +41,7 @@ class WholeStorageClassPolicy(unittest.TestCase):
                  '-I',str(cls.source/'dm/host'),'-I',str(EXP/'adapter'),'-I',str(cls.work),
                  '-include',str(EXP/'adapter/whole_policy.h'),
                  str(EXP/'tests/whole_storage_class_policy_probe.m'),str(bridge),
+                 str(cls.source/'dm/gfx/nvn/nvn_vpool.c'),
                  str(EXP/'adapter/whole_pool_backing_memory.m'),str(EXP/'adapter/whole_pool_backing_gate.c'),
                  str(EXP/'adapter/whole_policy.c'),'-framework','Foundation','-framework','Metal','-o',str(cls.binary)]
         # The original fixture owns its normal LOG/die stand-ins. The production

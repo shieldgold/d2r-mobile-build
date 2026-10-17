@@ -2,6 +2,7 @@
  * algorithms come from native/botw_graphics/memory_pool_family.inc. Only
  * explicit operands are queried; no VM enumeration or diagnostic capture. */
 #include "whole_pool_backing_memory.h"
+#include "whole_pool_policy.h"
 #include "../../../native/botw_host/protected_copy.h"
 #include <stdatomic.h>
 #include <stdio.h>
@@ -119,8 +120,10 @@ int botw_whole_pool_backing_create(BotwWholePoolBacking *p,id<MTLDevice> gpu,
     if(error&&capacity)error[0]=0;
     if(!p||!gpu)return failed(error,capacity,"missing backing/device");
     unsigned cpu=p.flags&7,gpu_flags=p.flags&0x38;
-    if((p.flags&~0xffu)||(cpu&&(cpu&(cpu-1)))||(gpu_flags&&(gpu_flags&(gpu_flags-1))))
-        return failed(error,capacity,"unsupported or conflicting ordinary flags");
+    if(p.kind!=botw_whole_pool_kind_of(p.flags)||
+       !botw_whole_pool_initialization_valid(p.flags,p.kind==BOTW_WHOLE_POOL_VIRTUAL?NULL:p.memory,p.size))
+        return failed(error,capacity,"unsupported or conflicting pool flags/storage");
+    if(p.kind==BOTW_WHOLE_POOL_VIRTUAL)return p.registered&&p.gpuBase&&p.memory==(void*)(uintptr_t)p.gpuBase;
     if(!p.size)return 1;
     if(!cpu||!gpu_flags||!p.memory||p.size>UINTPTR_MAX-(uintptr_t)p.memory)
         return failed(error,capacity,"invalid ordinary backing/flags/range");
@@ -129,13 +132,15 @@ int botw_whole_pool_backing_create(BotwWholePoolBacking *p,id<MTLDevice> gpu,
     if(p.size>gpu.maxBufferLength)return failed(error,capacity,"backing exceeds maxBufferLength");
     void *base=NULL;size_t span=0,bias=0;NSArray<BotwWholePoolSegment*> *segments=nil;
     BotwWholePoolNoCopyAdmission admission;
-    BOOL noCopy=poolNoCopyGeometry(logical_range,NULL,p.memory,p.size,NO,&base,&span,&bias,&segments,&admission);
+    BOOL physical=p.kind==BOTW_WHOLE_POOL_PHYSICAL;
+    BOOL noCopy=poolNoCopyGeometry(logical_range,NULL,p.memory,p.size,physical,&base,&span,&bias,&segments,&admission);
     BOOL ordinaryProtected=noCopy&&(admission.vmProtection&3)!=3;
     @try{
         if(noCopy&&!ordinaryProtected){
             if(span>gpu.maxBufferLength)return failed(error,capacity,"rounded span exceeds maxBufferLength");
             if(!poolCreateNoCopySegments(p,gpu,segments,bias))return failed(error,capacity,"NoCopy factory failed");
-        }else if((p.flags&4)&&(!ordinaryProtected||(admission.vmProtection&VM_PROT_READ))){
+        }else if(physical)return failed(error,capacity,"physical backing requires complete RW NoCopy segments");
+        else if((p.flags&4)&&(!ordinaryProtected||(admission.vmProtection&VM_PROT_READ))){
             /* The full snapshot fallback is conditional on CPU_CACHED and
              * actual readability; it is never used for all pool creations. */
             if(!botw_whole_pool_readable(p.memory,p.size))return failed(error,capacity,"cached backing is not fully readable");
@@ -152,7 +157,7 @@ int botw_whole_pool_backing_create(BotwWholePoolBacking *p,id<MTLDevice> gpu,
 int botw_whole_pool_backing_ensure(BotwWholePoolBacking *p,id<MTLDevice> gpu,char *error,size_t capacity){
     @synchronized(p){
         if(!p.live||p.retiring)return failed(error,capacity,"backing is unpublished/retiring");
-        if(!p.noCopyDeferred)return p.buffer!=nil;
+        if(!p.noCopyDeferred)return p.buffer!=nil||p.segments.count!=0;
         BotwWholePoolNoCopyAdmission admission={0};
         NSArray<BotwWholePoolSegment*> *segments=poolVMRegions(p.memory,p.size,NO,YES,&admission);
         if(!segments)return failed(error,capacity,"deferred backing needs a RW single VM leaf");

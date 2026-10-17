@@ -25,6 +25,17 @@ __attribute__((noreturn)) static void stop(const char *fmt,...) {
 }
 #define MDIE(...) stop(__VA_ARGS__)
 #define die(...) stop(__VA_ARGS__)
+#if !defined(WHOLE_POOL_BASELINE) && !defined(WHOLE_POOL_OWNED_MAP_HOOKS)
+/* This legacy fixture exercises ordinary pools only. A Map path must never
+ * mistake these explicit unreachable stand-ins for real authority checks. */
+int botw_whole_pool_map_preflight(const void *owner,const NVNmappingRequest *requests,int count,char *error,size_t capacity) {
+    (void)owner;(void)requests;(void)count;(void)error;(void)capacity;
+    stop("ordinary owned fixture unexpectedly entered virtual Map preflight");
+}
+void botw_whole_pool_map_committed(const void *owner) {
+    (void)owner;stop("ordinary owned fixture unexpectedly committed virtual Map");
+}
+#endif
 #define LOG(...) ((void)0)
 #define MLOG(...) ((void)0)
 #define OLOG(...) ((void)0)

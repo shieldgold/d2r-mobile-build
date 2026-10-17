@@ -304,18 +304,18 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing_memory.h": {
-      "sha256": "03b8be1102e4f7c455c61fe2093ff43381807580d77c831ab99975c76a7157d2",
-      "bytes": 1668,
+      "sha256": "155b737dacd5545c3a0453757e6b87dcd1088beb980c528389357903535d33f3",
+      "bytes": 3310,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing_memory.m": {
-      "sha256": "dc9954223cc99d8e45dff77d5549a1cd37033856289ea77c6e70f45ed2e4b725",
-      "bytes": 13531,
+      "sha256": "b77a555c295ef9f3c254354e2f8a2436273e4e9074c9469f58428704b57c6639",
+      "bytes": 13938,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_backing_registry.inc": {
-      "sha256": "c0d4d3d4af545199a96a8419e7dbf8c834cf05b5ed0ab8c27b2675b78361586b",
-      "bytes": 6961,
+      "sha256": "3a1fea8e4f53d5b6fcb443f2dc604793e27957a2ffb13811abd2d1eaffc4d87b",
+      "bytes": 19169,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_pool_builder.c": {
@@ -331,6 +331,11 @@
     "adapter/whole_pool_builder.json": {
       "sha256": "2d55b56cf86365311a769b5369420102854c43c9e1d9784d96569bf3b947576e",
       "bytes": 2735,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/whole_pool_policy.h": {
+      "sha256": "0f1ad32f0afb972407209025c79e17b5b5f399a006a511bcfba62c83b0435ae9",
+      "bytes": 2592,
       "role": "thin-adapter-or-verification"
     },
     "adapter/whole_romfs.c": {
@@ -578,6 +583,16 @@
       "bytes": 4742,
       "role": "thin-adapter-or-verification"
     },
+    "patches/base-v0-vpool-consumers.patch": {
+      "sha256": "82114601f3e29db275377ece4b260c514d6cf7d27b723709f16ce977ed9271bc",
+      "bytes": 23813,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-vpool-strict-token.patch": {
+      "sha256": "0a04e0d3244c6f244825fb696c82500e0a0b90128fe1abc721e64017ebefcec7",
+      "bytes": 2207,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/bounded-address-space.patch": {
       "sha256": "a548a06d59e33d9f32ad253e9d98c7e9fd14596e0ea88aeba1b251ca1509ec84",
       "bytes": 5957,
@@ -731,6 +746,21 @@
     "patches/transfer-memory.patch": {
       "sha256": "f7cc530a43520c4d414d4e90507597d4559c5e9c862cb2b2c0c82b2ad8cc7934",
       "bytes": 17870,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/virtual-pool-backing.patch": {
+      "sha256": "75b1918fb7e3587f39ccab71eb9a6afbc3977b002808f16a135567987598ba3a",
+      "bytes": 227,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/virtual-pool-cpu-boundaries.patch": {
+      "sha256": "fdb6cd79e3b0c1815eb0ce39306125a0e16f6df6b19a75b2cb1a4b4a415333ce",
+      "bytes": 5609,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/virtual-pool-entrypoints.patch": {
+      "sha256": "a3fdd7e49e80c875145300a828d5a165d9e12d9dd541994c6212350db8310ce9",
+      "bytes": 6737,
       "role": "thin-adapter-or-verification"
     },
     "patches/weak-import-resolution.patch": {
@@ -949,8 +979,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pool_backing_probe.m": {
-      "sha256": "42f78856f199af84acff6a0fc41bd19d78c476b25ab1703063015c6171e6e108",
-      "bytes": 26115,
+      "sha256": "9ff080f7e71d254823f3e3fd87ae81635bd1abd6dc379a9f9d8a7197fb7ddbff",
+      "bytes": 26770,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pool_builder_probe.c": {
@@ -1046,6 +1076,26 @@
     "tests/whole_vi_layer_probe.m": {
       "sha256": "17b830750a7337926c5eefc2d9674a364f3658c07df76fe708aee8c93b8ad8e7",
       "bytes": 4434,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_virtual_consumers_probe.m": {
+      "sha256": "bdde9526eeba6101eb43d13141a19a25e9eb6d419d91a4a11d00af29c9491098",
+      "bytes": 12864,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_virtual_cpu_boundaries_probe.m": {
+      "sha256": "3fe43fc6cc0fe67942962f50cce4d3ada864ff2a299e7e187a639661d1a365dd",
+      "bytes": 6608,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_virtual_pools_probe.m": {
+      "sha256": "a6117ee15842234468198c9b5eb4e269555487b025c951b54d407cb0b9ff756b",
+      "bytes": 11926,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_vpool_strict_probe.c": {
+      "sha256": "0ec74f48293b5488a1d6e0ab917246bca14e98c89425a71d8806525444088af6",
+      "bytes": 5547,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_weak_import_probe.c": {
@@ -1826,25 +1876,33 @@
     "patches/normal-signal-kind.patch",
     "patches/base-v0-allocation-failure.patch",
     "patches/original-logical-heap.patch",
-    "patches/base-v0-storage-class-policy.patch"
+    "patches/base-v0-storage-class-policy.patch",
+    "patches/base-v0-vpool-strict-token.patch",
+    "patches/virtual-pool-backing.patch",
+    "patches/virtual-pool-entrypoints.patch",
+    "patches/base-v0-vpool-consumers.patch",
+    "patches/virtual-pool-cpu-boundaries.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
-    "dm/gfx/nvn/botw_shader.c": "7ea4bef46ebb2bbc31435490377acb491536ccb14c438607df839ad170613f1b",
+    "dm/gfx/nvn/botw_shader.c": "64a5ac27887fff81839debb256c923cfe20a9b5d68ce8a32ae926ff6826c41ff",
+    "dm/gfx/nvn/botw_shader.h": "37b0d1e71e12901d7cc08a5c261a227f8d7a923858c408bdacfb890c18a2ae91",
     "dm/gfx/nvn/botw_shader_manifest.h": "a95145b9f7fbeb9a72f082ecf38cab776af078d7ecf91c99e6824afd24386501",
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
     "dm/gfx/nvn/botw_storage_class.c": "f300d8474acf8be8ed17e829d74d8add3d47331a0bb03792ec2292555ffc9c22",
-    "dm/gfx/nvn/hle_nvn.c": "8fee859bb9cea33319ebdfed8379381229b792c2cc0f86cd0bdc8d1dbd2b6b8b",
+    "dm/gfx/nvn/hle_nvn.c": "8a9431063065c7382d745cc7e20f5ea503b3f77fe36a12cdb3bc26086b308da0",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
-    "dm/gfx/nvn/nvn_mtl.h": "18a45e5f00a93f16959697407c0e810029e591071947463a759804f8bd58790d",
-    "dm/gfx/nvn/nvn_mtl.m": "2bcd5d0c200ec4370ac03d28a9eee612b716b3ba2b4c2752e48f2159b2ca46c3",
+    "dm/gfx/nvn/nvn_mtl.h": "9b5baec3edda933a70932c74139e39237c073cee4dd93656e566c95255a97e0b",
+    "dm/gfx/nvn/nvn_mtl.m": "e6dcacf07866143ea409c17361bfacb92214eb8d0af89f512afb9b8d2db02f1d",
     "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
     "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
+    "dm/gfx/nvn/nvn_vpool.c": "5a42f2946dd63baba548b821f44bfccf67d0bdcb26868abbfb46fc3c8a108a61",
+    "dm/gfx/nvn/nvn_vpool.h": "cbae4b8e25129f1f82b92e4653418dae59d7e4c667434fb8dec5134f99127962",
     "dm/host/botw_account.c": "bfc9344704a6c01a6e031c306a44f2cc2b28ae681fa3df2e310aeb9b0dec226c",
     "dm/host/botw_account.h": "58a08325f2eb46c7a0112678e68ad7f57eaf889a0a9f4a15be13ffc8faaafe41",
     "dm/host/botw_audio_device.c": "60988a9f330f8356cecf601256a47995110577a3ef0f2895b54420d924ac329f",

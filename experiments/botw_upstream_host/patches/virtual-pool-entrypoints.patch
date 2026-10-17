@@ -1,0 +1,99 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -31,6 +31,7 @@
+ #include "nvn_dirty.h"
+ #include "whole_pool_backing_memory.h"
+ #include "whole_pool_backing_gate.h"
++#include "whole_pool_policy.h"
+ #include "whole_policy.h"
+ #include <errno.h>
+ #include "botw_shader.h"
+@@ -312,21 +313,31 @@
+ // WHOLE_POOL_BACKING_ENTRIES_END
+ static NVNboolean botw_nvn_memory_pool_initialize_impl(NVNmemoryPool *p, const NVNmemoryPoolBuilder *b) {
+     POOL_MUTATION();pool_builder_t builder;char error[192];int anchored=0,shader=0,dirty=0;
+-    if(!p||!botw_whole_pool_read(&builder,b,28)||!botw_whole_pool_writable(p,sizeof(pool_t))||!mtl_pool_available(p,builder.mem,builder.size))return 0;
++    if(!p||!botw_whole_pool_read(&builder,b,28)||!botw_whole_pool_writable(p,sizeof(pool_t)))return 0;
+     uint32_t device_magic=0;
+     if(!botw_whole_pool_read(&device_magic,builder.dev,sizeof device_magic)||device_magic!=MAGIC('D','E','V',0))return 0;
+-    if(builder.flags&~0xffu)return 0; // physical/virtual remain explicitly unavailable in this ordinary slice
+-    unsigned cpu=builder.flags&7,gpu_flags=builder.flags&0x38;
+-    if((cpu&&(cpu&(cpu-1)))||(gpu_flags&&(gpu_flags&(gpu_flags-1)))||(builder.size&&(!cpu||!gpu_flags)))return 0;
+-    if(builder.size&&!pool_owned_range(builder.mem,builder.size))return 0;
+-    if(builder.mem&&builder.size){
++    if(!botw_whole_pool_initialization_valid(builder.flags,builder.mem,builder.size)||
++       !mtl_pool_available(p,builder.mem,builder.size))return 0;
++    botw_whole_pool_kind kind=botw_whole_pool_kind_of(builder.flags);
++    if(kind!=BOTW_WHOLE_POOL_VIRTUAL&&builder.size&&!pool_owned_range(builder.mem,builder.size))return 0;
++    /* Retain the ordinary transaction ordering. Physical NoCopy preparation
++     * precedes its dirty registration; virtual tokens are never dirty ranges. */
++    if(kind==BOTW_WHOLE_POOL_ORDINARY&&builder.mem&&builder.size){
+         if(!botw_shader_pool_add(p,builder.mem,(uint64_t)(uintptr_t)builder.mem,builder.size,error,sizeof error))return 0;
+         shader=1;
+         if(!nvn_dirty_add_range_checked(builder.mem,builder.size))goto failed;
+         dirty=1;
+     }
+-    if(!mtl_pool_prepare(p,builder.mem,builder.size,builder.flags,nvn_new_serial(),pool_owned_range,&anchored,error,sizeof error))goto failed;
+-    pool_t object={.magic=MAGIC('P','O','O','L'),.flags=builder.flags,.mem=builder.mem,.size=builder.size};
++    if(!mtl_pool_prepare_typed(p,builder.dev,builder.mem,builder.size,builder.flags,nvn_new_serial(),pool_owned_range,&anchored,error,sizeof error))goto failed;
++    void *logical=mtl_pool_logical_memory(p);
++    if(kind==BOTW_WHOLE_POOL_VIRTUAL){
++        if(!logical||!botw_shader_pool_add(p,logical,(uint64_t)(uintptr_t)logical,builder.size,error,sizeof error))goto failed;
++        shader=1;
++    }else if(kind==BOTW_WHOLE_POOL_PHYSICAL&&builder.size){
++        if(!nvn_dirty_add_range_checked(builder.mem,builder.size))goto failed;
++        dirty=1;
++    }
++    pool_t object={.magic=MAGIC('P','O','O','L'),.flags=builder.flags,.mem=logical,.size=builder.size};
+     if(!botw_whole_pool_write(p,&object,sizeof object))goto failed;
+     if(!mtl_pool_publish(p))die("prepared pool publication invariant failed");
+     return 1;
+@@ -348,7 +359,7 @@
+     POOL_MUTATION();pool_t object=pool_checked(p);char error[192];
+     if(!botw_whole_pool_writable(p,sizeof object))die("pool finalize output is not writable");
+     if(!mtl_pool_retire(p,error,sizeof error))die("%s",error);
+-    if(object.mem&&object.size)nvn_dirty_remove_range(object.mem);
++    if(!(object.flags&NVN_MEMORY_POOL_FLAGS_VIRTUAL)&&object.mem&&object.size)nvn_dirty_remove_range(object.mem);
+     botw_shader_pool_remove(p);object.magic=0;
+     if(!botw_whole_pool_write(p,&object,sizeof object))die("pool finalization checked write failed");
+ }
+@@ -365,11 +376,37 @@
+     if(off<0||(uint64_t)off>object.size||n>object.size-(uint64_t)off)die("pool cache range outside backing");
+     if(!mtl_pool_flush(p,(size_t)off,n,1,error,sizeof error))die("%s",error);
+ }
+-NVN(nvnMemoryPoolMap, void *, const NVNmemoryPool *p) { POOL_CAPTURE();pool_t object=pool_checked(p);return (object.flags&1)?NULL:object.mem; }
++NVN(nvnMemoryPoolMap, void *, const NVNmemoryPool *p) { POOL_CAPTURE();pool_t object=pool_checked(p);return (object.flags&(NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS|NVN_MEMORY_POOL_FLAGS_VIRTUAL))?NULL:object.mem; }
+ NVN(nvnMemoryPoolSetDebugLabel, void, NVNmemoryPool *p, const char *label) { (void)p; (void)label; }
+ NVN(nvnMemoryPoolGetSize, size_t, const NVNmemoryPool *p) { POOL_CAPTURE();pool_t object=pool_checked(p);return object.size; }
+ NVN(nvnMemoryPoolGetFlags, NVNmemoryPoolFlags, const NVNmemoryPool *p) { POOL_CAPTURE();pool_t object=pool_checked(p);return (NVNmemoryPoolFlags)object.flags; }
+-NVN(nvnMemoryPoolGetBufferAddress, NVNbufferAddress, const NVNmemoryPool *p) { POOL_CAPTURE();pool_t object=pool_checked(p);return (NVNbufferAddress)(uintptr_t)object.mem; }
++NVN(nvnMemoryPoolGetBufferAddress, NVNbufferAddress, const NVNmemoryPool *p) { POOL_CAPTURE();(void)pool_checked(p);return (NVNbufferAddress)mtl_pool_buffer_address(p); }
++NVN(nvnMemoryPoolMapVirtual, NVNboolean, NVNmemoryPool *p, int count, const NVNmappingRequest *requests) {
++    POOL_MUTATION();pool_t target;char error[192];
++    if(!p||!botw_whole_pool_read(&target,p,sizeof target)||target.magic!=MAGIC('P','O','O','L')||
++       !mtl_pool_validate(p,target.mem,target.size,target.flags)||
++       botw_whole_pool_kind_of(target.flags)!=BOTW_WHOLE_POOL_VIRTUAL||
++       count<0||count>BOTW_WHOLE_POOL_MAX_MAPPING_REQUESTS)return 0;
++    if(!count)return mtl_pool_map_virtual(p,0,NULL,error,sizeof error);
++    if(!requests||(size_t)count>SIZE_MAX/sizeof *requests)return 0;
++    size_t bytes=(size_t)count*sizeof *requests;
++    if(!botw_whole_pool_readable(requests,bytes))return 0;
++    NVNmappingRequest *owned=malloc(bytes);if(!owned)return 0;
++    int result=0;
++    if(!botw_whole_pool_read(owned,requests,bytes))goto done;
++    /* Snapshot the complete batch once. Source identities are checked without
++     * trusting a mutated raw object; the sole registry validates kind/device,
++     * alignment, bounds and class before its interval transaction commits. */
++    for(int i=0;i<count;i++)if(owned[i].physicalPool){
++        pool_t physical;
++        if(!botw_whole_pool_read(&physical,owned[i].physicalPool,sizeof physical)||
++           physical.magic!=MAGIC('P','O','O','L')||
++           !mtl_pool_validate(owned[i].physicalPool,physical.mem,physical.size,physical.flags))goto done;
++    }
++    result=mtl_pool_map_virtual(p,count,owned,error,sizeof error);
++done:
++    free(owned);return result;
++}
+ 
+ 
+ // ---------- Descriptor pools ----------

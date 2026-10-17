@@ -39,6 +39,7 @@ class WholePoolBacking(unittest.TestCase):
         patches = ['checked-dirty-write.patch', 'base-v0-pool-builder.patch']
         if not BASELINE:
             patches += ['ordinary-pool-backing.patch']
+        patches += ['base-v0-vpool-strict-token.patch']
         for name in patches:
             subprocess.run(['patch', '-p1', '-i', str(EXP / 'patches' / name)], cwd=cls.source,
                            check=True, capture_output=True, text=True)
@@ -113,7 +114,8 @@ class WholePoolBacking(unittest.TestCase):
                    '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                    '-I', str(cls.source / 'dm/gfx/nvn'), '-I', str(cls.source / 'dm/gfx/nvn/include'),
                    '-I', str(EXP / 'adapter'), '-I', str(cls.work),
-                   str(EXP / 'tests/whole_pool_backing_probe.m'), '-framework', 'Foundation', '-framework', 'Metal',
+                   str(EXP / 'tests/whole_pool_backing_probe.m'),
+                   str(cls.source / 'dm/gfx/nvn/nvn_vpool.c'), '-framework', 'Foundation', '-framework', 'Metal',
                    '-o', str(cls.binary)]
         if BASELINE:
             command += ['-DWHOLE_POOL_BASELINE']

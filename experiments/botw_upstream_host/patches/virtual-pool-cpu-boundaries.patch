@@ -1,0 +1,74 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -409,13 +409,28 @@
+ }
+ 
+ 
++/* GPU-only logical storage must not become a raw CPU pointer in consumers
++ * whose ordinary implementation has no virtual mapping/cache contract yet. */
++static int pool_cpu_kind_supported(const NVNmemoryPool *raw) {
++    pool_t pool;
++    return raw&&botw_whole_pool_read(&pool,raw,sizeof pool)&&pool.magic==MAGIC('P','O','O','L')&&
++        mtl_pool_validate(raw,pool.mem,pool.size,pool.flags)&&
++        botw_whole_pool_kind_of(pool.flags)==BOTW_WHOLE_POOL_ORDINARY;
++}
++static void pool_texture_require_cpu(const tex_t *texture) {
++    if(texture&&texture->pool&&!pool_cpu_kind_supported((const NVNmemoryPool*)texture->pool))
++        die("virtual or physical texture CPU access is unsupported");
++}
++
+ // ---------- Descriptor pools ----------
+ NVN(nvnTexturePoolInitialize, NVNboolean, NVNtexturePool *tp, const NVNmemoryPool *p, ptrdiff_t off, int n) { POOL_CAPTURE();
++    if(!pool_cpu_kind_supported(p))return 0;
+     *(dpool_t *)tp = (dpool_t){(const pool_t *)p, off, n}; OLOG("TexturePool n=%d", n); mtl_set_tex_pool_n(n); return 1;
+ }
+ NVN(nvnTexturePoolFinalize, void, NVNtexturePool *tp) { (void)tp; }
+ NVN(nvnTexturePoolRegisterTexture, void, const NVNtexturePool *tp, int id, const NVNtexture *t, const NVNtextureView *v) { POOL_CAPTURE(); (void)tp; mtl_reg_tex(id, (const tex_t *)t, (const view_t *)v); }
+ NVN(nvnSamplerPoolInitialize, NVNboolean, NVNsamplerPool *sp, const NVNmemoryPool *p, ptrdiff_t off, int n) { POOL_CAPTURE();
++    if(!pool_cpu_kind_supported(p))return 0;
+     *(dpool_t *)sp = (dpool_t){(const pool_t *)p, off, n}; OLOG("SamplerPool n=%d", n); return 1;
+ }
+ NVN(nvnSamplerPoolFinalize, void, NVNsamplerPool *sp) { (void)sp; }
+@@ -646,7 +661,7 @@
+ }
+ 
+ // CPU texture read (NVN ReadTexels): for packaged textures the pool memory is the ground truth (de-layout and read directly); GPU-written textures are read back from the MTLTexture (nvn_mtl.m)
+-static void read_texels(const tex_t *o, const view_t *v, const NVNcopyRegion *r, uint8_t *dst, ptrdiff_t row, ptrdiff_t img) { POOL_CAPTURE();
++static void read_texels(const tex_t *o, const view_t *v, const NVNcopyRegion *r, uint8_t *dst, ptrdiff_t row, ptrdiff_t img) { POOL_CAPTURE();pool_texture_require_cpu(o);
+     if(o->pool&&!mtl_pool_texture_valid(o->pool,o->serial,o->mem,o->L.size))die("texture uses retired/outside ordinary pool");
+     int bw, bh, bpb = nvn_fmt_bpb(o->d.format, &bw, &bh);
+     uint32_t wb = (uint32_t)((r->width + bw - 1) / bw) * bpb, hb = (uint32_t)(r->height + bh - 1) / bh;
+@@ -809,7 +824,7 @@
+     OLOG("texture replace: serial=%llu layers=%u+%u certified=%d", (unsigned long long)o->serial, first, count, ok);
+     free(expect);
+ }
+-static void write_texels(const char *fn, const tex_t *o, const view_t *v, const NVNcopyRegion *r, const void *src, ptrdiff_t row, ptrdiff_t img) { POOL_CAPTURE();
++static void write_texels(const char *fn, const tex_t *o, const view_t *v, const NVNcopyRegion *r, const void *src, ptrdiff_t row, ptrdiff_t img) { POOL_CAPTURE();pool_texture_require_cpu(o);
+     if(o->pool&&!mtl_pool_texture_valid(o->pool,o->serial,o->mem,o->L.size))die("texture uses retired/outside ordinary pool");
+     if (o->magic != MAGIC('T', 'E', 'X', 0)) texwrite_stop(fn, "invalid", "texture is not initialized", o);
+     nvn_texwrite_plan p; const char *why = NULL;
+@@ -883,7 +898,7 @@
+ //     reconcile with possibly newer GPU content, which stops explicitly.
+ // Pools without CPU_CACHED get no native flush and the view is not read; the host still checks every layer, because
+ // uncached CPU stores are GPU-visible on hardware without any flush.
+-static void flush_texels(const tex_t *o, const view_t *v) { POOL_CAPTURE();
++static void flush_texels(const tex_t *o, const view_t *v) { POOL_CAPTURE();pool_texture_require_cpu(o);
+     if(o->pool&&!mtl_pool_texture_valid(o->pool,o->serial,o->mem,o->L.size))die("texture uses retired/outside ordinary pool");
+     const char *fn = "nvnTextureFlushTexels";
+     if (o->magic != MAGIC('T', 'E', 'X', 0)) texwrite_stop(fn, "invalid", "texture is not initialized", o);
+@@ -1026,6 +1041,7 @@
+ NVN(nvnEventInitialize, NVNboolean, NVNevent *e, const NVNeventBuilder *b){
+     POOL_CAPTURE();ev_builder_t builder;if(!botw_whole_pool_read(&builder,b,sizeof builder)||!builder.pool)return 0;
+     pool_t pool=pool_checked((const NVNmemoryPool*)builder.pool);
++    if(botw_whole_pool_kind_of(pool.flags)!=BOTW_WHOLE_POOL_ORDINARY)return 0;
+     if(!pool.mem||builder.off<0||(uint64_t)builder.off>pool.size||4>pool.size-(uint64_t)builder.off)return 0;
+     ev_t value={MAGIC('E','V','N','T'),(volatile uint32_t*)(pool.mem+builder.off)};
+     return botw_whole_pool_write(e,&value,sizeof value);
+@@ -1161,6 +1177,7 @@
+         if (cs_on()) { pthread_mutex_lock(&g_cs_mu); g_cs.hostseg++; pthread_mutex_unlock(&g_cs_mu); }
+         size_t sz; uint8_t *m = hostseg_take(0, &sz);
+         cmda_add(c, m, m + sz, 1, CB(c)->recording ? CB(c)->cur : NULL, __builtin_return_address(0)); cmd_new_segment(CB(c), m, sz); return; }
++    if(!pool_cpu_kind_supported(p))die("virtual or physical command memory is unsupported");
+     if (!pl->mem) { LOG("[ERROR] AddCommandMemory pool has no CPU storage"); return; }
+     if (cs_on()) { pthread_mutex_lock(&g_cs_mu); g_cs.grants++; g_cs.grant_bytes += n; if (!g_cs.grant_min || n < g_cs.grant_min) g_cs.grant_min = n; if (n > g_cs.grant_max) g_cs.grant_max = n; pthread_mutex_unlock(&g_cs_mu); }
+     cmda_add(c, pl->mem + off, pl->mem + off + n, 0, CB(c)->recording ? CB(c)->cur : NULL, __builtin_return_address(0));

@@ -135,6 +135,7 @@ class WholePoolInitializeStatus(unittest.TestCase):
                    '-I', str(cls.source / 'dm/gfx/nvn/include'),
                    '-I', str(BACKING.EXP / 'adapter'), '-I', str(cls.work),
                    str(probe_path), str(logger_path),
+                   str(cls.source / 'dm/gfx/nvn/nvn_vpool.c'),
                    str(BACKING.EXP / 'adapter/whole_pool_backing_memory.m'),
                    str(BACKING.EXP / 'adapter/whole_pool_backing_gate.c'),
                    '-framework', 'Foundation', '-framework', 'Metal', '-o', str(cls.binary)]

@@ -1,0 +1,10 @@
+--- a/dm/gfx/nvn/nvn_mtl.h
++++ b/dm/gfx/nvn/nvn_mtl.h
+@@ -7,6 +7,7 @@
+ #pragma once
+ #include <stdint.h>
+ #include <stddef.h>
++#include "whole_pool_backing_memory.h"
+ 
+ void mtl_init(void);
+ void bf_want_note(const char *key);

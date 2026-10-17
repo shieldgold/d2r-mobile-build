@@ -1,0 +1,48 @@
+--- a/dm/gfx/nvn/nvn_vpool.c
++++ b/dm/gfx/nvn/nvn_vpool.c
+@@ -230,7 +230,7 @@
+     return b;
+ }
+ 
+-int nvn_vpool_virt_register(const void *owner, uint64_t size, uint64_t *base, int *above_va_limit) {
++static int register_virtual(const void *owner, uint64_t size, uint64_t *base, int *above_va_limit, int strict) {
+     if (base) *base = 0;
+     if (above_va_limit) *above_va_limit = 0;
+     if (!owner || !base || !size || size % NVN_VPOOL_PAGE || size > UINT64_MAX / 2) return NVN_VPOOL_INVALID;
+@@ -238,6 +238,9 @@
+     int above;
+     uint64_t b = reserve(size, &above);
+     if (!b) return NVN_VPOOL_E_NOMEM;
++    if (strict && (b >= NVN_VPOOL_VA_LIMIT || size > NVN_VPOOL_VA_LIMIT - b)) {
++        munmap((void *)(uintptr_t)b, size); return NVN_VPOOL_E_NOMEM;
++    }
+     int st = wr_lock();
+     if (st) { munmap((void *)(uintptr_t)b, size); return st; }
+     virt_t *v = NULL;
+@@ -256,6 +259,14 @@
+     *base = b;
+     if (above_va_limit) *above_va_limit = above;
+     return NVN_VPOOL_OK;
++}
++
++int nvn_vpool_virt_register(const void *owner, uint64_t size, uint64_t *base, int *above_va_limit) {
++    return register_virtual(owner, size, base, above_va_limit, 0);
++}
++
++int nvn_vpool_virt_register_strict(const void *owner, uint64_t size, uint64_t *base) {
++    return register_virtual(owner, size, base, NULL, 1);
+ }
+ 
+ int nvn_vpool_virt_finalize(const void *owner) {
+--- a/dm/gfx/nvn/nvn_vpool.h
++++ b/dm/gfx/nvn/nvn_vpool.h
+@@ -52,6 +52,9 @@
+ // GPU address (64 KiB aligned). *above_va_limit (optional) is set when no reservation below
+ // NVN_VPOOL_VA_LIMIT could be found without overwriting existing mappings.
+ int nvn_vpool_virt_register(const void *owner, uint64_t size, uint64_t *base, int *above_va_limit);
++// Host opt-in: require the full reservation below the preferred token bound. This is a
++// host support policy, not a hardware GPU address-width claim. Failure publishes no token.
++int nvn_vpool_virt_register_strict(const void *owner, uint64_t size, uint64_t *base);
+ // Drops all mappings and keeps the reservation as a PROT_NONE tombstone: its addresses then
+ // resolve as NVN_VPOOL_STALE and are never handed to another pool.
+ int nvn_vpool_virt_finalize(const void *owner);

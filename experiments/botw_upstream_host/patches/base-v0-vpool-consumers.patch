@@ -1,0 +1,341 @@
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -702,8 +702,13 @@
+     if (g_npost == g_postcap) { g_postcap = g_postcap ? g_postcap * 2 : 64; g_post = realloc(g_post, g_postcap * sizeof *g_post); }
+     g_post[g_npost++] = o;
+ }
+-void mtl_sub_event(volatile uint32_t *val, uint32_t mode, uint32_t v) { void *buffer;uint64_t offset;if(!mtl_addr((uintptr_t)val,4,&buffer,&offset))MDIE("event completion destination is not live ordinary backing");post((post_op){1, val, mode, v, 0, 0, NULL}); }
+-void mtl_sub_counter(uint64_t addr, uint32_t type) { void *buffer;uint64_t offset;if(!mtl_addr(addr,16,&buffer,&offset))MDIE("counter completion destination is not live ordinary backing");post((post_op){2, NULL, 0, 0, addr, type, NULL}); }
++static void pool_direct_cpu_only(uint64_t address,uint64_t length) {
++    nvn_vpool_lease lease={0};int status=nvn_vpool_lease_acquire(&lease,address,length);
++    if(status==NVN_VPOOL_OK)nvn_vpool_lease_release(&lease);
++    if(status!=NVN_VPOOL_NOT_VIRTUAL)MDIE("virtual event or counter completion is unsupported");
++}
++void mtl_sub_event(volatile uint32_t *val, uint32_t mode, uint32_t v) { pool_direct_cpu_only((uintptr_t)val,4); void *buffer;uint64_t offset;if(!mtl_addr((uintptr_t)val,4,&buffer,&offset))MDIE("event completion destination is not live ordinary backing");post((post_op){1, val, mode, v, 0, 0, NULL}); }
++void mtl_sub_counter(uint64_t addr, uint32_t type) { pool_direct_cpu_only(addr,16); void *buffer;uint64_t offset;if(!mtl_addr(addr,16,&buffer,&offset))MDIE("counter completion destination is not live ordinary backing");post((post_op){2, NULL, 0, 0, addr, type, NULL}); }
+ void mtl_counter_stats(uint64_t rep[32], uint64_t rst[32]) { memcpy(rep, g_cnt_report, sizeof g_cnt_report); memcpy(rst, g_cnt_reset, sizeof g_cnt_reset); }
+ 
+ static uint64_t gpu_ticks(void) { return nvn_clock_now_ticks(); }
+@@ -977,13 +982,54 @@
+ static void serial_put_pool(uint64_t k,id object,const void *owner){pool_tag_owned_object(object,owner);serial_put(k,object);}
+ // Gives an ordinary texture the shared Metal texture of its storage, if there is one: on hardware it would see exactly
+ // that storage's current content. Returns the texture, or nil when the storage has no shared texture.
++static const uint8_t *pool_texture_canonical(const tex_t *t) {
++    if(!t||!t->mem)return NULL;
++    botw_whole_pool_identity identity;char error[160];
++    if(!mtl_pool_resolve_identity((uintptr_t)t->mem,t->L.size,&identity,error,sizeof error)||identity.logical_owner!=t->pool)
++        MDIE("texture has no contiguous live canonical backing");
++    return identity.canonical;
++}
++static void pool_texture_cpu_authority(const tex_t *t,const uint8_t *memory) {
++    if(!t||!t->mem)return;
++    nvn_vpool_lease lease={0};
++    int status=nvn_vpool_lease_acquire(&lease,(uintptr_t)t->mem,t->L.size);
++    if(status==NVN_VPOOL_NOT_VIRTUAL)return;
++    if(status!=NVN_VPOOL_OK)MDIE("virtual texture has no live CPU source authority");
++    int conflict=nvn_texown_find(memory,t->L.size,NULL);
++    nvn_vpool_lease_release(&lease);
++    if(conflict)MDIE("virtual texture CPU source has unresolved private authority");
++}
++static int pool_virtual_authority_span(const botw_whole_pool_identity *identity,void *context) {
++    (void)context;
++    return identity&&identity->canonical&&identity->length&&
++        !nvn_texown_find(identity->canonical,identity->length,NULL);
++}
++int botw_whole_pool_map_preflight(const void *owner,const NVNmappingRequest *requests,int count,char *error,size_t capacity) {
++    if(!owner||count<0||(count&&!requests))return 0;
++    if(!botw_shader_pool_can_remap(owner,error,capacity)||
++       !mtl_pool_visit_virtual(owner,pool_virtual_authority_span,NULL,error,capacity))return 0;
++    for(int i=0;i<count;i++)if(requests[i].physicalPool){
++        botw_whole_pool_identity physical;
++        if(!mtl_pool_physical_identity(requests[i].physicalPool,requests[i].physicalOffset,requests[i].size,&physical,error,capacity)||
++           !pool_virtual_authority_span(&physical,NULL)){
++            if(error&&capacity)snprintf(error,capacity,"mapping source has unresolved private texture authority");
++            return 0;
++        }
++    }
++    return 1;
++}
++void botw_whole_pool_map_committed(const void *owner) {
++    /* Preflight proved no active/retired private or immutable-code authority is
++     * discarded. Drop only cached views/bindings; never clear texown claims. */
++    pool_retire_references(owner);
++}
+ static id alias_attach(const tex_t *t) {
+     if (!t->pool || t->has_layout) return nil;
+     alias_key ak; alias_key_of(&ak, t);
+     pthread_mutex_lock(&g_smu); id shared = hm_get_id(&g_alias, &ak); uint64_t owner = alias_owner(shared); pthread_mutex_unlock(&g_smu);
+     if (!shared) return nil;
+     if (owner) nvn_texown_share(t->serial, owner);
+-    else if (t->mem) nvn_texown_claim(t->serial, t->mem, t->L.size);
++    else if (t->mem) nvn_texown_claim(t->serial, pool_texture_canonical(t), t->L.size);
+     serial_put_pool(t->serial, shared,t->pool);
+     return shared;
+ }
+@@ -1360,14 +1406,16 @@
+ void mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns) { *lib_ns = g_bp_lib_ns; *pso_ns = g_bp_pso_ns; }   //Cumulative time spent synchronously creating shader libraries / pipelines on the spot (the long-frame log takes the per-frame difference)
+ uint64_t mtl_upload_bytes(void) { return g_bp_up_bytes; }   //Cumulative texture upload bytes
+ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp) {
+-    if(t->has_layout&&t->mem&&!botw_whole_pool_readable(t->mem,t->L.size))MDIE("packaged texture ordinary backing is not readable");
++    const uint8_t *memory=pool_texture_canonical(t);
++    pool_texture_cpu_authority(t,memory);
++    if(t->has_layout&&memory&&!botw_whole_pool_readable(memory,t->L.size))MDIE("packaged texture ordinary backing is not readable");
+     MTLTextureDescriptor *d = tex_desc(t, 1);
+     if (!d) return nil;
+     id<MTLTexture> mt = [g_dev newTextureWithDescriptor:d];
+     if (!mt) { RED_ONCE(2, "failed to create MTLTexture %ux%u format %#x target %d", t->d.width, t->d.height, t->d.format, t->d.target); return nil; }
+     res_add(mt);   //Both first upload and re-upload register residency here (Metal 4 does not make resources resident automatically; a missed registration = GPU address page fault)
+     *stamp = nvn_dirty_now();
+-    if (!nvn_dirty_protect_checked(t->mem, t->L.size)) *stamp = 0;
++    if (!nvn_dirty_protect_checked(memory, t->L.size)) *stamp = 0;
+     int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+     unsigned layers = (t->d.target == 4 || t->d.target == 9) ? t->d.depth : t->d.target == 8 ? 6 : t->d.target == 3 ? t->d.height : 1;
+     if (t->d.target == 9) layers *= 6;
+@@ -1434,14 +1482,14 @@
+         for (unsigned y = 0; y < layers; y++) {
+             if (unp) {   //No BC: first deswizzle into a temporary area (compressed blocks), then decompress layer by layer into the staging area
+                 uint8_t *cb = malloc(pitch * rows * z); size_t up = (size_t)w * ubpp;
+-                if (!cb || nvn_deswizzle(&t->d, l, y, t->mem, cb, pitch)) { free(cb); RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
++                if (!cb || nvn_deswizzle(&t->d, l, y, memory, cb, pitch)) { free(cb); RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
+                 for (uint32_t zi = 0; zi < z; zi++) nvn_bc_decode(t->d.format, cb + zi * pitch * rows, pitch, w, h, (uint8_t *)stg.contents + off + zi * up * h, up);
+                 free(cb);
+                 up_blit_add(stg, off, up, up * h, MTLSizeMake(w, h, z), mt, y, l);
+                 off += up * h * z;
+                 continue;
+             }
+-            if (nvn_deswizzle(&t->d, l, y, t->mem, (uint8_t *)stg.contents + off, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
++            if (nvn_deswizzle(&t->d, l, y, memory, (uint8_t *)stg.contents + off, pitch)) { RED_ONCE(9, "deswizzle failed format %#x target %d", t->d.format, t->d.target); break; }
+             up_blit_add(stg, off, pitch, pitch * rows, MTLSizeMake(w, h, z), mt, y, l);
+             off += pitch * rows * z;
+         }
+@@ -1504,33 +1552,35 @@
+     if(ct&&ct->pool&&!mtl_pool_texture_valid(ct->pool,ct->serial,ct->mem,ct->L.size))MDIE("texture refers to stale/outside ordinary pool backing");
+     tex_t *t = (tex_t *)ct;
+     if (!t || !t->serial) return nil;
++    const uint8_t *memory=pool_texture_canonical(t);
+     int packaged = t->has_layout && t->mem;
+     id have = serial_get(t->serial);
+     if (packaged) {
+         NvPkg *pk = have;
+         if (pk) {   //Already uploaded: check the covered pages only if there has been a guest write since the last check
+             uint64_t now = nvn_dirty_now();
+-            int tracked = nvn_dirty_tracked(t->mem, t->L.size);
+-            int clean = pk->stamp && tracked && (now == pk->seen || !nvn_dirty_since(t->mem, t->L.size, pk->stamp));
++            int tracked = nvn_dirty_tracked(memory, t->L.size);
++            int clean = pk->stamp && tracked && (now == pk->seen || !nvn_dirty_since(memory, t->L.size, pk->stamp));
+             if (clean && atomic_load_explicit(&g_up_lost_n, memory_order_relaxed) && up_lost_take(pk->tex)) { clean = 0; uint64_t k = atomic_load(&g_up_lost_redo); if (k <= 3 || !atomic_load(&g_up_lost_n)) MLOG("re-uploading texture whose upload was dropped ser=%llu (%llu total, %d left in record)", (unsigned long long)t->serial, (unsigned long long)k, atomic_load(&g_up_lost_n)); }
+             if (clean) {
+                 pk->seen = now;
+-                if (dirtycheck() && full_hash(t->mem, t->L.size) != pk->hash && !g_pkg_miss++)
++                if (dirtycheck() && (pool_texture_cpu_authority(t,memory), full_hash(memory, t->L.size)) != pk->hash && !g_pkg_miss++)
+                     MLOG("[ERROR] dirty-page miss: texture ser=%llu pool content changed but was not detected", t->serial);
+                 return pk->tex;
+             }
+             uint64_t st; id<MTLTexture> nt = pkg_upload(t, &st);   //Pool content changed (streamed assets written into the same storage): switch to a new texture; in-flight draws still read the old one
+-            if (nt) { id<MTLTexture> old = pk->tex; pk->tex = nt;pool_tag_owned_object(pk,t->pool); defer_obj_release(old); res_add(nt); g_ser_gen++; pk->stamp = st; pk->seen = st; g_pkg_reuploads++; if (dirtycheck()) pk->hash = full_hash(t->mem, t->L.size); }
++            if (nt) { id<MTLTexture> old = pk->tex; pk->tex = nt;pool_tag_owned_object(pk,t->pool); defer_obj_release(old); res_add(nt); g_ser_gen++; pk->stamp = st; pk->seen = st; g_pkg_reuploads++; if (dirtycheck()) pk->hash = (pool_texture_cpu_authority(t,memory), full_hash(memory, t->L.size)); }
+             return pk->tex;
+         }
+         pk = [NvPkg new];
+         pk->tex = pkg_upload(t, &pk->stamp);
+         if (!pk->tex) return nil;
+-        pk->seen = pk->stamp; g_pkg_uploads++; if (dirtycheck()) pk->hash = full_hash(t->mem, t->L.size);
+-        nvn_texown_claim(t->serial, t->mem, t->L.size);   //Claim before publication: copies and render passes can write packaged storage without IMAGE
++        pk->seen = pk->stamp; g_pkg_uploads++; if (dirtycheck()) pk->hash = (pool_texture_cpu_authority(t,memory), full_hash(memory, t->L.size));
++        nvn_texown_claim(t->serial, memory, t->L.size);   //Claim before publication: copies and render passes can write packaged storage without IMAGE
+         serial_put_pool(t->serial, pk,t->pool);
+         return pk->tex;
+     }
++    if (t->d.target == 10) pool_texture_cpu_authority(t,memory);
+     if (have) return have;
+     if (t->d.target == 10) {   //Buffer texture (TARGET_BUFFER): create the texture-buffer view directly on the memory pool buffer (zero copy; the GPU reads the pool's current content at execution time, same as NVN semantics)
+         uint32_t pf = 0; uint8_t swz[4]; int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+@@ -1551,11 +1601,12 @@
+     }
+     id shared = alias_attach(t);
+     if (shared) return shared;
++    pool_texture_cpu_authority(t,memory);
+     alias_key ak; alias_key_of(&ak, t);
+     // DM_NVN_ALIASLOG=1: every new ordinary Metal texture, and the other live or retired storage over the same bytes
+     // (memory the game reuses with another description), to study aliasing. Capped at 4000 lines.
+     { static int on = -1, n; if (on < 0) on = getenv("DM_NVN_ALIASLOG") != NULL;
+-      if (on && t->mem && n < 4000) { nvn_texown_hit h = {0}; int other = nvn_texown_find(t->mem, t->L.size, &h); n++;
++      if (on && t->mem && n < 4000) { nvn_texown_hit h = {0}; int other = nvn_texown_find(memory, t->L.size, &h); n++;
+         MLOG("[alias] new ser=%llu pool=%p+%#llx size=%#llx fmt=%#x %ux%ux%u lv%u tgt=%d flags=%#x%s ser=%llu [%#lx,%#lx) %s",
+              (unsigned long long)t->serial, (void *)t->pool, (unsigned long long)t->off, (unsigned long long)t->L.size, t->d.format, t->d.width, t->d.height,
+              t->d.depth, t->d.levels, t->d.target, t->d.flags, other ? "; overlaps" : "", other ? (unsigned long long)h.serial : 0ull,
+@@ -1565,7 +1616,7 @@
+     id<MTLTexture> mt = [g_dev newTextureWithDescriptor:d];
+     if (!mt) { RED_ONCE(2, "failed to create MTLTexture %ux%u format %#x target %d", t->d.width, t->d.height, t->d.format, t->d.target); return nil; }
+     res_add(mt); tex_zero_fill(mt);   // resident before zeroing: the copy destination must be resident
+-    if (t->mem) nvn_texown_claim(t->serial, t->mem, t->L.size);   //Claim before publication: GPU writes never reach the pool bytes
++    if (t->mem) nvn_texown_claim(t->serial, memory, t->L.size);   //Claim before publication: GPU writes never reach the pool bytes
+     if (t->pool) { pthread_mutex_lock(&g_smu); alias_insert(&ak, mt, t->serial); pthread_mutex_unlock(&g_smu); }
+     serial_put_pool(t->serial, mt,t->pool);
+     return mt;
+@@ -6074,20 +6125,22 @@
+ 
+ // CPU texture read (ReadTexels): for packaged textures the pool memory is the ground truth, de-layout and read directly; the rest are read back from the MTLTexture by blit (the caller has already waited for the GPU per NVN rules)
+ void mtl_read_texels(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, uint8_t *dst, size_t row, size_t img) {
+-    if(t->has_layout&&t->mem&&!botw_whole_pool_readable(t->mem,t->L.size))MDIE("packaged texture ordinary backing is not readable");
++    const uint8_t *memory=pool_texture_canonical(t);
++    if(t->has_layout&&memory&&!botw_whole_pool_readable(memory,t->L.size))MDIE("packaged texture ordinary backing is not readable");
+     if (!on_sub_thread()) while (atomic_load(&g_up_pending)) usleep(200);   //Translation runs on the translation thread: the caller has already drained the queue (batches were flushed with the submit), so here we only wait for uploads to finish on the GPU (on the submit thread q_cb flushes and waits)
+     xv_check(t->serial, level, layer0, "CPU readback");
+     PD("U cpu_read ser=%llu lv%u sl%u xyz=%d,%d,%d size=%d,%d,%d dst=%p row=%lu img=%lu", t->serial, level, layer0, r->xoffset, r->yoffset, r->zoffset, r->width, r->height, r->depth, dst, (unsigned long)row, (unsigned long)img);
+     int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh);
+     size_t wb = (size_t)((r->width + bw - 1) / bw) * bpb, hb = (r->height + bh - 1) / bh, x0 = (size_t)(r->xoffset / bw) * bpb, y0 = r->yoffset / bh;
+     int nz = r->depth ? r->depth : 1, is3d = t->d.target == 2;
+-    if (t->has_layout && t->mem) {
++    if (t->has_layout && memory) {
++        pool_texture_cpu_authority(t,memory);
+         uint32_t lw = MAX(t->d.width >> level, 1u), lh = MAX(t->d.height >> level, 1u), lz = is3d ? MAX(t->d.depth >> level, 1u) : 1;
+         size_t lp = (size_t)((lw + bw - 1) / bw) * bpb, lr = (lh + bh - 1) / bh;
+         uint8_t *lin = malloc(lp * lr * lz);
+         for (int z = 0; z < nz; z++) {
+             unsigned layer = is3d ? 0 : layer0 + r->zoffset + z;
+-            if ((is3d && z == 0) || !is3d) if (nvn_deswizzle(&t->d, level, layer, t->mem, lin, lp)) { RED_ONCE(32, "ReadTexels deswizzle failed"); free(lin); return; }
++            if ((is3d && z == 0) || !is3d) if (nvn_deswizzle(&t->d, level, layer, memory, lin, lp)) { RED_ONCE(32, "ReadTexels deswizzle failed"); free(lin); return; }
+             const uint8_t *src = lin + (is3d ? (size_t)(r->zoffset + z) * lp * lr : 0);
+             for (size_t y = 0; y < hb; y++) memcpy(dst + z * img + y * row, src + (y0 + y) * lp + x0, wb);
+         }
+@@ -6189,6 +6242,7 @@
+          (unsigned long long)h->serial, (unsigned long)h->lo, (unsigned long)h->hi);
+ }
+ int mtl_tex_import_check(const tex_t *t, const char **why) {
++    const uint8_t *memory=pool_texture_canonical(t);
+     if (why) *why = NULL;
+     if (!on_sub_thread()) while (atomic_load(&g_up_pending)) usleep(200);
+     mtl_finish_gpu();
+@@ -6200,7 +6254,7 @@
+         if (!d || !texels_storage_ok(d.pixelFormat)) return import_fail(why, -1, "no direct Metal upload for this texture format or target");
+     }
+     nvn_texown_hit hit;
+-    if (nvn_texown_find(t->mem, t->L.size, &hit)) {
++    if (nvn_texown_find(memory, t->L.size, &hit)) {
+         import_conflict_log(t, &hit);
+         return import_fail(why, -2, hit.retired
+             ? "texture storage overlaps released Metal storage whose GPU writes never reached the pool; its bytes are not authoritative"
+@@ -6209,6 +6263,7 @@
+     return 1;
+ }
+ int mtl_tex_import(const tex_t *t, const mtl_texel_upload *u, unsigned n, const char **why) {
++    const uint8_t *memory=pool_texture_canonical(t);
+     if (why) *why = NULL;
+     if (!on_sub_thread()) while (atomic_load(&g_up_pending)) usleep(200);
+     if (!import_target_ok(t) || !texels_format_ok(t)) return import_fail(why, -1, "no direct Metal upload for this texture format or target");
+@@ -6242,7 +6297,7 @@
+         uint64_t k = t->serial; nvn_texown_hit hit = {0}; int st = 0;
+         pthread_mutex_lock(&g_smu);
+         if (hm_get_id(&g_by_serial, &k)) st = -3;
+-        else if (nvn_texown_claim_fresh(k, t->mem, t->L.size, &hit) != 1) st = -2;
++        else if (nvn_texown_claim_fresh(k, memory, t->L.size, &hit) != 1) st = -2;
+         else {
+             objc_setAssociatedObject(mt,&pool_owner_key,[NSValue valueWithPointer:t->pool],OBJC_ASSOCIATION_RETAIN_NONATOMIC);hm_put_id(&g_by_serial, &k, mt); g_ser_gen++;
+             if (t->pool) { alias_key ak; alias_key_of(&ak, t); alias_insert(&ak, mt, k); }   // later objects on this storage share it
+@@ -6706,7 +6761,7 @@
+                 PD("Y signal_event cmd=%p dst=%p mode=%u value=%u", p, val, m, v); mtl_sub_event(val, m, v); break; }
+             case OP_REPORT_COUNTER: { uint64_t t, ad; memcpy(&t, a, 8); memcpy(&ad, (const uint8_t *)a + 8, 8); g_cnt_report[t & 31]++;
+                 PD("Q report type=%llu cmd=%p dst=%#llx", (unsigned long long)t, p, (unsigned long long)ad);
+-                if (t == NVN_COUNTER_TYPE_SAMPLES_PASSED) { post((post_op){3, NULL, 0, 0, ad, (uint32_t)t, vis_snapshot()}); g_vis_cur = -1; }
++                if (t == NVN_COUNTER_TYPE_SAMPLES_PASSED) { pool_direct_cpu_only(ad,16); void *buffer;uint64_t offset;if(!mtl_addr(ad,16,&buffer,&offset))MDIE("counter completion destination is not live ordinary backing");post((post_op){3, NULL, 0, 0, ad, (uint32_t)t, vis_snapshot()}); g_vis_cur = -1; }
+                 else mtl_sub_counter(ad, (uint32_t)t);
+                 break; }
+             case OP_RESET_COUNTER: { uint64_t t; memcpy(&t, a, 8); g_cnt_reset[t & 31]++; PD("Q reset type=%llu cmd=%p", (unsigned long long)t, p);
+--- a/dm/gfx/nvn/botw_shader.c
++++ b/dm/gfx/nvn/botw_shader.c
+@@ -1,4 +1,6 @@
+ #include "botw_shader.h"
++#include "whole_pool_backing_memory.h"
++#include "nvn_texown.h"
+ #include "shader_v8_control.h"
+ #include <CommonCrypto/CommonDigest.h>
+ #include <mach/mach.h>
+@@ -33,6 +35,7 @@
+     uint64_t gpu;
+     size_t size;
+     struct shader_pool *next;
++    int captured; /* Existing candidate owner has published immutable code. */
+ } shader_pool;
+ 
+ typedef struct shader_snapshot {
+@@ -68,6 +71,24 @@
+ 
+ static int read_safe(void *out, const void *in, size_t n) {
+     if (!in || n > UINTPTR_MAX - (uintptr_t)in) return 0;
++    nvn_vpool_lease lease = {0};
++    int status = nvn_vpool_lease_acquire(&lease, (uintptr_t)in, n);
++    if (status == NVN_VPOOL_OK) {
++        /* A mapping established before another alias gained private Metal
++         * storage cannot make the physical CPU bytes authoritative again. */
++        for (unsigned i = 0; i < lease.nspans; ++i) {
++            nvn_vpool_span span;
++            if (nvn_vpool_lease_span(&lease, i, &span) != NVN_VPOOL_OK ||
++                nvn_texown_find(span.cpu, span.len, NULL)) {
++                nvn_vpool_lease_release(&lease);
++                return 0;
++            }
++        }
++        int ok = mtl_pool_read_address((uintptr_t)in, out, n, NULL, 0);
++        nvn_vpool_lease_release(&lease);
++        return ok;
++    }
++    if (status != NVN_VPOOL_NOT_VIRTUAL) return 0;
+     mach_vm_size_t copied = 0;
+     return botw_backend_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)in,
+                                   n, (mach_vm_address_t)out, &copied) == KERN_SUCCESS && copied == n;
+@@ -93,7 +114,7 @@
+         return fail(error, error_size, "invalid or overflowing shader memory pool range");
+     shader_pool *fresh = malloc(sizeof *fresh);
+     if (!fresh) return fail(error, error_size, "shader memory pool allocation failed");
+-    *fresh = (shader_pool){owner, (uintptr_t)cpu, gpu, size, NULL};
++    *fresh = (shader_pool){owner, (uintptr_t)cpu, gpu, size, NULL, 0};
+     pthread_mutex_lock(&shader_lock);
+     shader_pool **at = &pools;
+     while (*at && (*at)->owner != owner) at = &(*at)->next;
+@@ -106,6 +127,14 @@
+     pools = fresh;
+     pthread_mutex_unlock(&shader_lock);
+     return 1;
++}
++
++int botw_shader_pool_can_remap(const void *owner, char *error, size_t error_size) {
++    int allowed = 1;
++    pthread_mutex_lock(&shader_lock);
++    for (shader_pool *p = pools; p; p = p->next) if (p->owner == owner && p->captured) { allowed = 0; break; }
++    pthread_mutex_unlock(&shader_lock);
++    return allowed ? 1 : fail(error, error_size, "mapping would discard immutable shader source authority");
+ }
+ 
+ void botw_shader_pool_remove(const void *owner) {
+@@ -274,9 +303,11 @@
+     if (!s->code) { fail(error, error_size, "shader code allocation failed"); goto done; }
+     pthread_mutex_lock(&shader_lock);
+     const void *cpu = NULL;
++    const void *source_owner = NULL;
+     for (shader_pool *p = pools; p; p = p->next) {
+         if (sd.data >= p->gpu && sd.data - p->gpu <= p->size && i->code_size <= p->size - (sd.data - p->gpu)) {
+             cpu = (const void *)(p->cpu + (size_t)(sd.data - p->gpu));
++            source_owner = p->owner;
+             break;
+         }
+     }
+@@ -330,6 +361,7 @@
+         s = NULL;
+         ok = 1;
+     }
++    if (ok) for (shader_pool *p = pools; p; p = p->next) if (p->owner == source_owner) { p->captured = 1; break; }
+     pthread_mutex_unlock(&shader_lock);
+ done:
+     if (s) { free(s->control); free(s->code); free(s); }
+--- a/dm/gfx/nvn/botw_shader.h
++++ b/dm/gfx/nvn/botw_shader.h
+@@ -16,6 +16,8 @@
+ int botw_shader_pool_add(const void *owner, const void *cpu, uint64_t gpu,
+                          size_t size, char *error, size_t error_size);
+ void botw_shader_pool_remove(const void *owner);
++/* Read-only Map guard: candidate code already published into immutable snapshots. */
++int botw_shader_pool_can_remap(const void *owner, char *error, size_t error_size);
+ 
+ /* Reads the descriptor and its buffers with fault-safe copies. The output
+  * descriptor references owned snapshots, never the caller's storage. Optional

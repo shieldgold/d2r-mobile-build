@@ -46,6 +46,8 @@ class WholeBufferInitializeStatus(unittest.TestCase):
         cls.applied_patches = []
         for name in patches:
             cls.apply(name)
+        if 'patches/base-v0-vpool-strict-token.patch' not in cls.applied_patches:
+            cls.apply('patches/base-v0-vpool-strict-token.patch')
         if PATCH in cls.applied_patches:
             cls.apply(PATCH, reverse=True)
         buffer_path = cls.source / 'dm/gfx/nvn/botw_buffer.c'
@@ -103,6 +105,7 @@ class WholeBufferInitializeStatus(unittest.TestCase):
         command = common + ['-fobjc-arc', '-fobjc-arc-exceptions', '-fblocks',
                             '-DWHOLE_BUFFER_HAS_STATUS=' + str(int(cls.has_status)),
                             str(EXP / 'tests/whole_buffer_initialize_status_probe.m'),
+                            str(cls.source / 'dm/gfx/nvn/nvn_vpool.c'),
                             str(logger), str(EXP / 'adapter/whole_pool_backing_memory.m'),
                             str(EXP / 'adapter/whole_pool_backing_gate.c'),
                             '-framework', 'Foundation', '-framework', 'Metal', '-o', str(cls.binary)]
