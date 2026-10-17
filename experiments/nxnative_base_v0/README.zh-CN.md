@@ -33,8 +33,12 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 
 完整 126 个上游编译单元加独立入口已在 iPhoneOS SDK 26.5 中编译、强链接通过，见[固定提交的 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39012668489)。该结果只确认原始宿主的编译基线。
 
-`tools/build_adapted_link_only.py --sdk iphoneos --adapters-only --output <新目录>` 进一步在私有源码副本应用正常入口、NVN52 TextureView、HLE／异常处理和地址唤醒四个补丁，编译 130 个单元。它仍使用原 1.9 元数据，仅用于编译验证；GPU、线程及 memstat 的诊断路径尚未全部封闭，不能据此运行游戏。
+`tools/build_adapted_link_only.py --sdk iphoneos --adapters-only --output <新目录>` 进一步在私有源码副本应用正常入口、NVN52 TextureView、HLE／异常处理和地址唤醒四个补丁。130 个单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39014320818) 编译、强链接通过。本地重新核对了全部 983 件来源文件、544 份构建日志及下载的宿主摘要。它仍使用原 1.9 元数据，仅用于编译验证；GPU、线程及 memstat 的诊断路径尚未全部封闭，不能据此运行游戏。
 
 着色器身份桥 `tools/shader_key_bridge.py` 已核对现有导出的 7908 个捕获，并保留其中 3173 个的四模式条件合同引用。它不生成着色器事实，也不声明整个游戏的目录完整。六模块框架由 `tools/pack_guest.py --rewrite <离线重写目录> --output <新目录>` 复用现有完整 Mach-O 生成器构建；本地框架已逐节还原验证，未签名或执行。
+
+`tools/package_shader_sources.py --source <本地条件发布目录> --bridge <已核身份桥报告> --output <新目录>` 完整复用既有条件发布验证器和源码构建模块。它在新私有目录核对并加载来源代码及完整 374 文件工具链，再逐项验证四模式合同、原始分析与 MSL 摘要。输出仅保留原发布的允许文件、完整身份桥和连接两者的摘要索引；捕获字节和工具链不进入包。实际 3173 个捕获／12692 个变体已生成 38085 件文件，并复核了精确文件集合和每份源工件摘要。手机上的 Metal 编译及实际绘制尚待验证。
+
+正常资源目录已用既有 `RomFSImage.export` 从本地镜像完整导出，39678 个文件的每份 payload 均与固定 manifest 摘要一致。这项导出和核验不执行游戏。
 
 正常游戏入口、base-v0 ABI、六模块完整重写、新着色器包和资源装载仍须逐项接通。编译、输入校验、安装和进程存活均不代表可玩。最终验收要求真实游戏画面、按键与双摇杆、声音、保存及重开。

@@ -129,6 +129,42 @@ class AdaptedHost(unittest.TestCase):
         self.assertEqual(receipt['steps'][0]['exit_code'], 0)
         self.assertIn('--fuzz=0', receipt['steps'][0]['argv'])
 
+    def test_ordered_overlapping_patches_bind_each_predecessor_and_final_copy(self):
+        tool = self.tool()
+        base = self.base_tool()
+        component = self.directory / 'repository/experiments/component'
+        source = component / 'upstream/owned.txt'
+        source.parent.mkdir(parents=True)
+        source.write_text('before\n')
+        patches = component / 'patches'; patches.mkdir()
+        for label, old, new in (('one', 'before', 'middle'), ('two', 'middle', 'after')):
+            (patches / (label + '.patch')).write_text(
+                '--- a/owned.txt\n+++ b/owned.txt\n@@ -1 +1 @@\n-' + old + '\n+' + new + '\n')
+        inventory = (('patches/one.patch', ('owned.txt',)), ('patches/two.patch', ('owned.txt',)))
+        lock = {'upstream_files': {'owned.txt': record(source)}}
+        output = self.directory / 'ordered'; output.mkdir()
+        receipt = tool.new_receipt(base)
+        with patch.object(tool, 'PATCHES', inventory), patch.object(tool, 'COPIED_ADAPTERS', ()), patch.object(tool, 'ABI_FILES', ()):
+            private, snapshot = tool.copy_private_inputs(component, output, lock, base, receipt)
+        self.assertEqual((private / 'upstream/owned.txt').read_text(), 'after\n')
+        self.assertEqual(source.read_text(), 'before\n')
+        self.assertEqual(receipt['patches'][1]['preimages']['owned.txt'], receipt['patches'][0]['postimages']['owned.txt'])
+        self.assertEqual(snapshot['upstream/owned.txt'], record(private / 'upstream/owned.txt'))
+
+    def test_ordered_chain_refuses_changed_predecessor_before_second_patch(self):
+        tool = self.tool()
+        base = self.base_tool()
+        inputs = self.directory / 'chain'; inputs.mkdir()
+        member = inputs / 'owned.txt'; member.write_text('middle\n')
+        expected = tool.private_snapshot(inputs, base)
+        member.write_text('injected\n')
+        receipt = tool.new_receipt(base)
+        with self.assertRaisesRegex(ValueError, 'predecessor'):
+            tool.apply_patch(inputs, self.owned_patch(old='injected', new='after'), {'owned.txt'},
+                             self.directory, 'must-not-run', base, receipt, expected_preimages=expected)
+        self.assertEqual(member.read_text(), 'injected\n')
+        self.assertEqual(receipt['steps'], [])
+
     def test_patch_paths_traversal_and_undeclared_member_are_rejected(self):
         tool = self.tool()
         base = self.base_tool()

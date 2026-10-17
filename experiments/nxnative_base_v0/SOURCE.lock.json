@@ -1,8 +1,8 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 4316,
-      "sha256": "6a3ebefa89129ad0faf30fdb4d44e545596c1f05cdccad2ab69163e660689560"
+      "bytes": 5363,
+      "sha256": "7b036d86c26ba61fe8c820740ec9896f744a819c42a3c40c22d610f5f83b0a45"
     },
     "adapter/link_only_main.c": {
       "bytes": 313,
@@ -53,16 +53,24 @@
       "sha256": "1269ab1df53a1a19852cb7c65dcd5da1baa49b23e96e5d691b005fc4bbf26312"
     },
     "tools/build_adapted_link_only.py": {
-      "bytes": 21888,
-      "sha256": "63d856977f5e015f7fd844891c760b662b8194b408f431e9718d18a8d6840852"
+      "bytes": 22053,
+      "sha256": "90236ebb4b2d6ed5f1f9564276733d2515dd6dd981b9c9a7d27ef240aa27cc7c"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,
       "sha256": "981d18933452df66af6dd3eda69689d0a0cb331dc6818861e9314800631cce7e"
     },
+    "tools/generate_base_v0_contract.py": {
+      "bytes": 21031,
+      "sha256": "c5a8b8fa076a2a7acf17f06e4a352ddffff9acf7b80c22752e85a5e51e4307b4"
+    },
     "tools/pack_guest.py": {
       "bytes": 8102,
       "sha256": "03c8994dcf252ad1fe14769a34623d15df2d1dad2c4d71015fa8ec77ba6ab40b"
+    },
+    "tools/package_shader_sources.py": {
+      "bytes": 15106,
+      "sha256": "b76ca6f0773292d71bc5220e271915e1838d43ffc8f53a94014171df396cb784"
     },
     "tools/preflight_profile.py": {
       "bytes": 13582,
@@ -95,6 +103,38 @@
       "bytes": 4447,
       "sha256": "850080d27627d6091cd0146eb24d2640fb31f6dd1630599aff76452699dee217"
     },
+    "experiments/botw_upstream_host/adapter/base_v0_graphics_binding.json": {
+      "bytes": 4969,
+      "sha256": "480e8ed95dc002acc574d90294234e11aaf99caf2afa647c8950ccffe9abe8a3"
+    },
+    "experiments/botw_upstream_host/adapter/base_v0_graphics_formats.json": {
+      "bytes": 20374,
+      "sha256": "3f46576221f48db69abb5b553529fea2dd5f9a2ac1d14a50d5e7c57a499a2865"
+    },
+    "experiments/botw_upstream_host/adapter/shader_conditional_build.py": {
+      "bytes": 33099,
+      "sha256": "a91e56c76b22571bba5985acf168694ba84445d256a6e56b0660237171647fe6"
+    },
+    "experiments/botw_upstream_host/adapter/shader_source_build.py": {
+      "bytes": 16774,
+      "sha256": "eff60d07e85a420c039dada90362770231ff16a933dd731c45a329ff67cee529"
+    },
+    "experiments/botw_upstream_host/adapter/shader_v8_control.json": {
+      "bytes": 4821,
+      "sha256": "90c6fe0d77ae2fc684959ce255029d9210a76565774a5ff90c8cf887bb5ad30f"
+    },
+    "experiments/botw_upstream_host/scripts/package_conditional.py": {
+      "bytes": 22027,
+      "sha256": "b31cadabff5fdea65b95ac432d671fa4b64744ee6a7bf8be6349509ff24d49a7"
+    },
+    "experiments/botw_upstream_host/scripts/read_swforce_registry.py": {
+      "bytes": 12881,
+      "sha256": "fb741c7f4aefec893096af7c213560a3035001e21f8e2bfe49dfab95ffdd3e86"
+    },
+    "native/botw_resources/shader_toolchain/UPSTREAM.json": {
+      "bytes": 105718,
+      "sha256": "89b362bf6a18153840ece18a3ab3e616d535dbcf9f01a917406c05e2842775ed"
+    },
     "scripts/botw_native/__init__.py": {
       "bytes": 75,
       "sha256": "5029578e70eaf1233a549057e4323eb38e527963de0257d9658736f2fa2c3c8a"
@@ -111,6 +151,10 @@
       "bytes": 28981,
       "sha256": "fe6fef1ede112aa567dd39e1d285da3fc9c59403438386297c81a30f57dfb495"
     },
+    "scripts/botw_native/ios.py": {
+      "bytes": 23102,
+      "sha256": "f551febb55e4b987cfe70f131f9263b1af222ba11327ae03598b7c9314fb0373"
+    },
     "scripts/botw_native/nso.py": {
       "bytes": 5174,
       "sha256": "8f5b491b1718d88b96ac24892c4816512e71f173e07718ade49399e698f6a272"
@@ -118,6 +162,14 @@
     "scripts/botw_native/romfs.py": {
       "bytes": 20878,
       "sha256": "7ba025d205f09cec6af52e18ad3fe949b23c9fafb7b377a156e25951a16ac472"
+    },
+    "scripts/botw_native/shader_bindings.py": {
+      "bytes": 15347,
+      "sha256": "6f7b0316541dd0225c656c5eddb68ff4bb2b10b313bb2b424a22c1f2d374a935"
+    },
+    "scripts/botw_native/upstream_shaders.py": {
+      "bytes": 14044,
+      "sha256": "f72c980ef7d3f220fa9ad00aad5b9f5e0cd091d53d098cf78a45192498632fc4"
     },
     "scripts/source/select_xcode.py": {
       "bytes": 966,

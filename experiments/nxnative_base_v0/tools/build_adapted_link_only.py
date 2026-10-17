@@ -147,10 +147,12 @@ def verify_private(root, expected, base):
     return actual
 
 
-def apply_patch(upstream, patch, allowed, output, label, base, receipt):
+def apply_patch(upstream, patch, allowed, output, label, base, receipt, *, expected_preimages=None):
     if patch_members(patch) != set(allowed):
         raise ValueError('patch modifies undeclared members')
     before = private_snapshot(upstream, base)
+    if expected_preimages is not None and before != expected_preimages:
+        raise ValueError('fixed patch predecessor differs from its bound image')
     if not set(allowed) <= set(before):
         raise ValueError('patch member is absent from copied upstream')
     step = base.run_command([PATCH_TOOL, '--fuzz=0', '--batch', '--forward',
@@ -182,14 +184,13 @@ def copy_private_inputs(component, output, lock, base, receipt):
         shutil.copy2(source, destination, follow_symlinks=False)
     base.snapshot_files(upstream, original)
     receipt['patch_tool'] = {'path': str(PATCH_TOOL), **base.file_record(PATCH_TOOL)}
-    changed = set()
+    predecessor = dict(original)
     receipt['patches'] = []
     for index, (name, allowed) in enumerate(PATCHES):
-        if changed & set(allowed):
-            raise ValueError('fixed patches overlap')
-        changed.update(allowed)
-        receipt['patches'].append(apply_patch(upstream, component / name, allowed,
-                                              output, 'patch-%02d' % index, base, receipt))
+        applied = apply_patch(upstream, component / name, allowed, output,
+                              'patch-%02d' % index, base, receipt, expected_preimages=predecessor)
+        receipt['patches'].append(applied)
+        predecessor.update(applied['postimages'])
     for name in COPIED_ADAPTERS:
         base.snapshot_files(component, {name: lock['adapter_files'][name]})
         destination = private / name
