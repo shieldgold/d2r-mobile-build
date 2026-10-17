@@ -44,7 +44,7 @@ jobs:
       - name: Compile with the original shader and iOS build functions
         run: |
           .venv/bin/python - <<'PY'
-          import importlib.util, os, subprocess, sys
+          import importlib.util, os, re, subprocess, sys
           from pathlib import Path
           repo = Path('upstream-official').resolve()
           work = Path('build').resolve()
@@ -58,8 +58,21 @@ jobs:
           logs.mkdir(exist_ok=True)
           (work / 'tmp').mkdir(exist_ok=True)
           env = dict(os.environ, DM_GAME=profile.id, DM_ROOT=str(work), WORK=str(work / 'tmp'))
+          # Follow upstream's documented complete rebuild after a compiler change.
+          official.run([sys.executable, repo / 'dm/gfx/tools/dmsh_chain.py', '--update-lock'],
+              logs / 'chain_update.log', env=env)
+          official.run([sys.executable, repo / 'dm/gfx/tools/dmsh_chain.py', '--header'],
+              logs / 'chain_header.log', env=env)
+          official.run([sys.executable, repo / 'dm/gfx/tools/dmsh_chain.py', '--check-tools'],
+              logs / 'chain_check.log', env=env)
           ios = official.build_shaders(sys.executable, repo, work / 'shader',
               repo / 'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate', env, logs, profile)
+          chain = re.search(r'#define DMSH_CHAIN "(.*)"', profile.table('dmsh_chain.h').read_text()).group(1)
+          official.run([sys.executable, repo / 'dm/gfx/tools/c1_guard.py',
+              work / 'shader/cache' / f'b-{chain}', profile.table('c1_full.tsv')],
+              logs / 'c1_guard.log', env=env)
+          (logs / 'effective_chain.lock').write_bytes((repo / 'dm/gfx/tools/dmsh_chain.lock').read_bytes())
+          (logs / 'effective_chain.h').write_bytes(profile.table('dmsh_chain.h').read_bytes())
           env.update(GAME=profile.id, W=str(work / 'ipa'),
               PATCHED=str(work / 'patched_v1114112'),
               ROMFS=str(work / 'extract/v1114112/RomFS'), MSL_IOS=str(ios),
