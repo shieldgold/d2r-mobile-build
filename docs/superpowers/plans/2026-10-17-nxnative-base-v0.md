@@ -135,3 +135,7 @@ python3 experiments/nxnative_base_v0/tools/build_link_only.py \
 - 实际最终 registry 为 614 项，canonical SHA256 `36b462b95e1d17e1337db733f22d7cc45a2f7f7f3dbf1dd66cfb6040d46aa5f1`；新的完整合同绑定 236 个选用接口、283 处引用与 230 个正常门。此为本次实际读数，并未复用早期 614／616 合同。
 - 本地正常开发签名候选 `outputs/nxnative-base-v0-normal-1017.38-01/BOTWNative.app` 已生成（1017.38），91,176 件准备资源逐 SHA 与 typed-03 一致；按目标 profile 先签 Guest、后签外 app，strict verify 通过。签后完整 preload 与 Host registry 不变量再次通过；原 packed Guest、原 CI 工件和全部构建收据保持不变。
 - 当前仍未安装、未执行 Host／Guest／GPU。fresh CoreDevice 目标 iPhone 15 Pro 仍 unavailable，USB iPhone 清单为空；候选应用内不重复内嵌 14GB RomFS，连接后需传入 Documents/romfs，并保留原 Documents/save。实际画面、操作、声音与保存重开仍全部待验。
+
+- 用户再次连接后，独立 IORegistry／usbmux 核验纠正 USB 报告盲区：`system_profiler SPUSBDataType` 空清单不等于没有物理手机。实际有线设备为 Cookie 的 iPhone（iPhone 12），普通 lockdown／CoreDevice 当前实读 iOS 26.5（23F77）、wired tunnel connected；旧 iOS 18.1 结论不可继续沿用。此设备满足 Apple 公布的 iPhone12／iOS26 Metal4 平台范围，仍不是游戏实际输出证明。
+- 当前手机 CoreDevice 实读开发者模式 disabled，应用查询实际返回 error10005；已请求用户在手机开启并按系统提示重启确认。标准本地目录与项目签名产物共 86 份配置、16 个唯一 UUID 全部正常解码，均未包含这台新手机，冻结 validate_profile 正确拒绝；原 1017.38 签名候选及其 iPhone15Pro 准入记录保留，不能当成新手机的签名许可。
+- Apple Developer 官方签名入口已打开，设备注册／开发配置材料已在本地准备；等待用户自行完成账户登录及手机设置，再经正规设备登记和 profile 重签。未修改现有 profile、未导出私钥、未安装或启动候选，原文稿与存档未改。
