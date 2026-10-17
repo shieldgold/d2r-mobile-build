@@ -26,7 +26,7 @@
     },
     "adapter/base_v0_audren_sources.json": {
       "bytes": 112222,
-      "sha256": "986ad4da6c5ef31980cf23ff91333a9c276320cf84c945731eceb9f372cbc30e"
+      "sha256": "71ed8af45f73662bcc144b08de7eefb3efb1fa5ee6f3ee29b2dbf4c00bbcc779"
     },
     "adapter/base_v0_audren_transfer_handles.inc": {
       "bytes": 5436,
@@ -308,8 +308,8 @@
       "sha256": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868"
     },
     "experiments/botw_audio_renderer/native/wire.cpp": {
-      "bytes": 5811,
-      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54"
+      "bytes": 6735,
+      "sha256": "b44d6a837e1030c7c6c20d932371daa18ea806a666cbc4fecf2532f868858a58"
     },
     "experiments/botw_audio_renderer/native/wire.h": {
       "bytes": 821,

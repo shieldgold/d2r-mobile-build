@@ -2135,8 +2135,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/NATIVE.lock.json": {
-      "sha256": "dbf80320f187e883c071654b8c9264b30d3d67bbc3b7380d5844958ec48dbc30",
-      "bytes": 9200,
+      "sha256": "65aaa6d74258459036dd1b0d7c0cb661af8c9e93edc259a984297ceb1581a97d",
+      "bytes": 9201,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/README.md": {
@@ -2225,8 +2225,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/wire.cpp": {
-      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
-      "bytes": 5811,
+      "sha256": "b44d6a837e1030c7c6c20d932371daa18ea806a666cbc4fecf2532f868858a58",
+      "bytes": 6735,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/native/wire.h": {
@@ -2285,8 +2285,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/audren_host_probe.cpp": {
-      "sha256": "795c5ad3df7ebf0c1e68383655c114d8be88f1f3143b45a76b170d86c6cef8ee",
-      "bytes": 9163,
+      "sha256": "970f803e7ffae10ee3c213ec2f4cfdfd488640887588bca2a2ec58a2010fcc1b",
+      "bytes": 13246,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/audren_provider_probe.cpp": {
@@ -2400,8 +2400,8 @@
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tests/wire_probe.cpp": {
-      "sha256": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d",
-      "bytes": 2411,
+      "sha256": "9f685c1c286f91c67407286659f649af9f3b96f5af0834a0fbf5fd6c4aa897d8",
+      "bytes": 3889,
       "role": "complete-verified-audio-component"
     },
     "experiments/botw_audio_renderer/tools/prepare_eden.py": {
@@ -3681,7 +3681,7 @@
     "files": {
       "CMakeLists.txt": "45c2dfa6e2b14db6f5360ffab811e8bec8cdec496732de459a3ef52efb4fba3e",
       "DEPENDENCIES.lock.json": "d03405dfea28cbbd970401894cf4fd576e78145c4d88dbf67b5d01cf3bcbcc79",
-      "NATIVE.lock.json": "dbf80320f187e883c071654b8c9264b30d3d67bbc3b7380d5844958ec48dbc30",
+      "NATIVE.lock.json": "65aaa6d74258459036dd1b0d7c0cb661af8c9e93edc259a984297ceb1581a97d",
       "README.md": "165ecfbe922d4fec62b5a58cccb67d2a5982cfbf2d57a090679713d9c74b91f3",
       "SOURCE.lock.json": "bf9a925daf4f704cbb994e047c9e66246dedcbac72d6b8cdb69aa388625cf121",
       "adapter/native_sink_stream.cpp": "862a9cc09e756c023b485cff7bf410b8ea09818440653609b783c183f83585c2",
@@ -3699,7 +3699,7 @@
       "native/renderer_host.h": "096cad29d15a1d7014f20993850d531bc5853d7e0e16e6cc3603b2ae434ac35f",
       "native/renderer_memory.cpp": "53919fa753bd108bb010591cf228d16bd29308016713e23336e4ccdd4e1a19da",
       "native/renderer_memory.h": "3a236251cf2cfd39cf1428e4d1e8502459085b282a3548878eb58f9cad5f2868",
-      "native/wire.cpp": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
+      "native/wire.cpp": "b44d6a837e1030c7c6c20d932371daa18ea806a666cbc4fecf2532f868858a58",
       "native/wire.h": "a89673593b6fafab3e51906f9393f441dd58d0071649f06a83b77829ffb12b11",
       "native/worker.h": "1f687dd228841c01b5ce32ee3561ab70dfca5f6b26547b2fa568f04be0c41423",
       "patches/native-host.patch": "79e0a59b1d28c4fb1fab6f31ce7593014f703ffe8ac973136e1632ee220f52d1",
@@ -3711,7 +3711,7 @@
       "platform/platform.cpp": "d22211206c263b09f03968b3ac7ce54c29f428bea47544698225e2c46b0c785b",
       "platform/platform.h": "3e0fe6b6f59de83b35357b215a757b51a5e8522a05f208451a73936a87aeb1cb",
       "provenance/eden-cpmfile.json": "e1a263a2825e1204a243998cd5254c600201a0d3ed9b542f7a25ef99f2bdb157",
-      "tests/audren_host_probe.cpp": "795c5ad3df7ebf0c1e68383655c114d8be88f1f3143b45a76b170d86c6cef8ee",
+      "tests/audren_host_probe.cpp": "970f803e7ffae10ee3c213ec2f4cfdfd488640887588bca2a2ec58a2010fcc1b",
       "tests/audren_provider_probe.cpp": "edd9323908cf9295e36cece52f2010d69c704a5ef0c0b5851d839481e2ba0eb1",
       "tests/memory_provider_probe.cpp": "f5368ae35e1a2cfb03dff55f2594693b3dbc010ecd9754b01b18fed7edf7e938",
       "tests/native_sink_stream_probe.cpp": "f55513466e436c23d5a88e043d2da96ac6817df62448059630c8a6c93ef5e035",
@@ -3734,7 +3734,7 @@
       "tests/test_renderer_memory.py": "67025f2f80f29297a34b1c9061e29dec9e7a316c0dfff2208b116e53aaa5f125",
       "tests/test_renderer_module.py": "0b12d7f17dbfd84cb71cb225b31a9f224f99189ce2d44fec96538f4cdec7d5c4",
       "tests/test_renderer_ports.py": "1dd913c708a2245d9772e679247375da8e8d636158ce98d39223e86dfab686fa",
-      "tests/wire_probe.cpp": "cca8a43b7a00703a313cc2e1b65b9ac09b127ac786e7ce7c7379874ea8b50e2d",
+      "tests/wire_probe.cpp": "9f685c1c286f91c67407286659f649af9f3b96f5af0834a0fbf5fd6c4aa897d8",
       "tools/prepare_eden.py": "4e7afdc60b8b2f250357e31b4082f632e2bddcff3eb27e56578c4de480072da4",
       "tools/vendor_from_receipts.py": "e76f4b07a84e5903a1d8806b03f3dc41b4b60957ba6559e116c6229d95a67963",
       "tools/verify_native.py": "07408d54d4babf5dbc5767517b1f6757c379a27300b59fe7f84d5d608499265a",

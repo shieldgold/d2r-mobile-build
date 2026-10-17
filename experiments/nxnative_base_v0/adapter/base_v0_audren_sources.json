@@ -683,8 +683,8 @@
     },
     {
       "source": "experiments/botw_audio_renderer/native/wire.cpp",
-      "bytes": 5811,
-      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54",
+      "bytes": 6735,
+      "sha256": "b44d6a837e1030c7c6c20d932371daa18ea806a666cbc4fecf2532f868858a58",
       "language": "c++",
       "group": "original-native-CAPI-ABI2"
     },
@@ -1004,8 +1004,8 @@
     },
     {
       "path": "experiments/botw_audio_renderer/native/wire.cpp",
-      "bytes": 5811,
-      "sha256": "b3361b80ee3b27dc02c5083236bb6be24b24ceaa0a393621ce631cef400a3d54"
+      "bytes": 6735,
+      "sha256": "b44d6a837e1030c7c6c20d932371daa18ea806a666cbc4fecf2532f868858a58"
     },
     {
       "path": "experiments/botw_audio_renderer/native/wire.h",

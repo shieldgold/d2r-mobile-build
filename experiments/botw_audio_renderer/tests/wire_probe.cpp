@@ -16,6 +16,19 @@ int main() {
     AudioCore::AudioRendererParameterInternal parameters{};
     CHECK(parse_rev1_parameters(wire, parameters) == Status::Ok);
     CHECK(parameters.sample_rate == 48000 && parameters.sample_count == 240 && parameters.effects == 1);
+    // Aggregate buffers may span multiple independently bounded mix nodes.
+    put(wire, 0x0c, 1); put(wire, 0x10, 96); put(wire, 0x18, 14);
+    for (auto count : {24u, 25u, 30u, 32761u}) {
+        put(wire, 8, count);
+        CHECK(parse_rev1_parameters(wire, parameters) == Status::Ok);
+        CHECK(parameters.mixes == count && parameters.sub_mixes == 1);
+    }
+    for (auto count : {32762u, std::numeric_limits<std::uint32_t>::max()}) {
+        put(wire, 8, count);
+        CHECK(parse_rev1_parameters(wire, parameters) == Status::OutOfBounds);
+    }
+    put(wire, 8, 0); CHECK(parse_rev1_parameters(wire, parameters) == Status::InvalidArgument);
+    put(wire, 8, 1); put(wire, 0x0c, 0); put(wire, 0x10, 1); put(wire, 0x18, 1);
     std::array<std::byte, 64> sdk_client{};
     CHECK(parse_rev1_parameters(sdk_client, parameters) == Status::InvalidArgument);
     wire[0x23] = std::byte{1}; CHECK(parse_rev1_parameters(wire, parameters) == Status::Unsupported);
@@ -32,6 +45,18 @@ int main() {
     CHECK(validate_rev1_update_layout(dimensions, {input.data(), 63}, output) == Status::OutOfBounds);
     CHECK(validate_rev1_update_layout(dimensions, input, {output.data(), output.size() - 1}) == Status::OutOfBounds);
     put(input, 4, 0); CHECK(validate_rev1_update_layout(dimensions, input, output) == Status::InvalidArgument);
+    CHECK(output[0] == std::byte{0x55});
+    // The fixed 24x24 routing matrix is a per-node bound, checked before
+    // the original updater clears output or commits any renderer state.
+    put(input, 4, layout.sections[0]);
+    std::size_t mix = 0x40;
+    for (std::size_t i = 0; i < 5; ++i) mix += layout.sections[i];
+    input[mix + 0xc] = std::byte{1}; put(input, mix + 8, 24);
+    CHECK(validate_rev1_update_layout(dimensions, input, output) == Status::Ok);
+    put(input, mix + 8, 25);
+    CHECK(validate_rev1_update_layout(dimensions, input, output) == Status::InvalidArgument);
+    put(input, mix + 8, 1); input[mix + 0xc] = std::byte{2};
+    CHECK(validate_rev1_update_layout(dimensions, input, output) == Status::InvalidArgument);
     CHECK(output[0] == std::byte{0x55});
     CHECK(rev1_update_layout({0, std::numeric_limits<std::uint32_t>::max(), 0, 0, 0}, layout) == Status::OutOfBounds);
     return 0;

@@ -7,6 +7,7 @@
 #include "audio_core/renderer/voice/voice_channel_resource.h"
 #include "audio_core/renderer/voice/voice_info.h"
 #include <bit>
+#include <cstddef>
 #include <limits>
 
 namespace botw::audio {
@@ -71,9 +72,14 @@ Status parse_rev1_parameters(std::span<const std::byte> wire,
     // Other renderer modes/rates must gain a real implementation before admission.
     if (!((result.sample_rate == 48000 && result.sample_count == 240) ||
           (result.sample_rate == 32000 && result.sample_count == 160))) return Status::Unsupported;
-    if (!result.voices || !result.sinks || !result.mixes || result.mixes > MaxMixBuffers ||
+    if (!result.voices || !result.sinks || !result.mixes ||
         result.effects > MaxEffects || result.sub_mixes == UINT32_MAX ||
         result.perf_frames == UINT32_MAX) return Status::InvalidArgument;
+    // mixes is the aggregate sample-buffer allocation across all mix nodes.
+    // System stores it in s16 and adds MaxChannels in its s16 command header;
+    // MaxMixBuffers bounds each node's fixed routing matrix instead.
+    if (std::uint64_t(result.mixes) + MaxChannels >
+        std::uint64_t(std::numeric_limits<s16>::max())) return Status::OutOfBounds;
     if (result.splitter_infos || result.splitter_destinations || result.external_context_size)
         return Status::Unsupported; // These are not REV1 features; never silently emulate them.
     const auto pool_count = std::uint64_t(result.effects) + std::uint64_t(result.voices) * MaxWaveBuffers;
@@ -96,6 +102,16 @@ Status validate_rev1_update_layout(UpdateDimensions dimensions,
         return Status::OutOfBounds;
     for (std::size_t i = 0; i < layout.sections.size(); ++i)
         if (load32(input, 4 + i * 4) != layout.sections[i]) return Status::InvalidArgument;
+    std::size_t mix_offset = 0x40;
+    for (std::size_t i = 0; i < 5; ++i) mix_offset += layout.sections[i];
+    for (std::uint32_t i = 0; i < dimensions.mixes; ++i) {
+        const auto offset = mix_offset + std::size_t(i) * sizeof(MixInfo::InParameter);
+        const auto active = std::to_integer<unsigned char>(
+            input[offset + offsetof(MixInfo::InParameter, in_use)]);
+        if (active > 1 || (active && load32(input,
+                offset + offsetof(MixInfo::InParameter, buffer_count)) > MaxMixBuffers))
+            return Status::InvalidArgument;
+    }
     return Status::Ok;
 }
 } // namespace botw::audio

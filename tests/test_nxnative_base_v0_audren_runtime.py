@@ -100,7 +100,7 @@ target_link_libraries(owned_nxnative_audren PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIV
   # Optional persistent owned build is only a test output, never an install product.
   cls.project=Path(os.environ.get('NXNATIVE_AUDREN_OWNED_BUILD',str(cls.w/'project'))).resolve();cls.project.mkdir(parents=True,exist_ok=True)
   (cls.project/'CMakeLists.txt').write_text(text);cls.build=cls.project/'build'
-  for command in (['cmake','-S',str(cls.project),'-B',str(cls.build),'-DCMAKE_BUILD_TYPE=Debug'],['cmake','--build',str(cls.build),'--target','owned_nxnative_audren','--parallel','3']):
+  for command in (['cmake','-S',str(cls.project),'-B',str(cls.build),'-DCMAKE_BUILD_TYPE=Debug'],['cmake','--build',str(cls.build),'--target','owned_nxnative_audren','botw_owned_renderer_wire','botw_owned_audren_host','--parallel','3']):
    p=subprocess.run(command,capture_output=True,text=True,timeout=300)
    if p.returncode:raise AssertionError(p.stdout+p.stderr)
  def run_owned(self,mode,code=0):
@@ -111,4 +111,9 @@ target_link_libraries(owned_nxnative_audren PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIV
  def test_actual_rev1_sm_tlr_transfer_event_update_voice_and_pcm_lifecycle(self):self.run_owned('voice')
  def test_bad_revision_is_a_real_service_failure_not_a_fake_open(self):self.run_owned('invalid-wire',70)
  def test_wrong_aruid_cannot_publish_a_renderer_owner(self):self.run_owned('wrong-aruid',70)
+ def run_shared_audio_fixture(self,name):
+  p=subprocess.run([str(self.build/'native'/name)],capture_output=True,text=True,timeout=30,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0:halt_on_error=1','UBSAN_OPTIONS':'halt_on_error=1:print_stacktrace=0'})
+  self.assertEqual(p.returncode,0,p.stdout+p.stderr)
+ def test_aggregate_mix_buffers_preserve_signed_header_and_per_node_bounds(self):self.run_shared_audio_fixture('botw_owned_renderer_wire')
+ def test_complete_thirty_buffer_two_mix_native_open_update_dsp_and_cleanup(self):self.run_shared_audio_fixture('botw_owned_audren_host')
 if __name__=='__main__':unittest.main()

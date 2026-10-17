@@ -128,5 +128,60 @@ int main() {
     CHECK(platform_ok(botw_audren_host_destroy(&host,error,sizeof error))&&!host);
     CHECK(fatal.calls==1 && backing.retains==backing.releases && event.retains==event.releases);
     std::free(bytes);
+    // Two individually valid mix nodes use 6+24 aggregate buffers. Exercise
+    // the real size calculation, session allocation, updater and DSP workers.
+    put(wire,8,30); put(wire,0xc,1); put(wire,0x10,96); put(wire,0x18,14);
+    put(wire,0x20,1);
+    uint64_t wide_size=0;
+    CHECK(service_ok(botw_audren_get_work_buffer_size(wire.data(),wire.size(),&wide_size,error,sizeof error)));
+    CHECK(wide_size>size && wide_size%4096==0);
+    Fatal wide_fatal; config.failure_context=&wide_fatal;
+    CHECK(platform_ok(botw_audren_host_create(&config,&host,error,sizeof error))&&host);
+    void* wide_bytes=nullptr; CHECK(posix_memalign(&wide_bytes,4096,wide_size)==0);
+    std::memset(wide_bytes,0,wide_size);
+    Resource wide_backing,wide_event;
+    botw_audren_backing wide_region{wide_bytes,wide_size,&wide_backing,retain,release};
+    botw_audren_event wide_port{&wide_event,signal,clear,retain,release};
+    CHECK(platform_ok(botw_audren_register_region(host,99,0x400000,wide_region,3,error,sizeof error)));
+    CHECK(service_ok(botw_audren_open(host,99,wire.data(),wire.size(),0x400000,wide_size,123,wide_port,&session,error,sizeof error))&&session);
+    CHECK(platform_ok(botw_audren_get_info(session,&info,error,sizeof error))&&info.mix_count==30);
+    Rev1UpdateLayout wide_layout{};
+    CHECK(rev1_update_layout({398,96,14,2,1},wide_layout)==Status::Ok);
+    std::vector<std::byte> wide_input(wide_layout.input_size),wide_output(wide_layout.output_size);
+    put(wide_input,0,0x31564552); put(wide_input,0x40,0x31564552);
+    for(size_t i=0;i<wide_layout.sections.size();++i)put(wide_input,4+i*4,wide_layout.sections[i]);
+    put(wide_input,60,uint32_t(wide_input.size()));
+    size_t wide_mix=0x40;
+    for(size_t i=0;i<5;++i)wide_mix+=wide_layout.sections[i];
+    AudioCore::Renderer::MixInfo::InParameter final_mix{},sub_mix{};
+    final_mix.volume=sub_mix.volume=1.0f;
+    final_mix.sample_rate=sub_mix.sample_rate=48000;
+    final_mix.in_use=sub_mix.in_use=true;
+    final_mix.buffer_count=6; sub_mix.buffer_count=24; sub_mix.mix_id=1;
+    final_mix.dest_mix_id=AudioCore::UnusedMixId; sub_mix.dest_mix_id=0;
+    final_mix.dest_splitter_id=sub_mix.dest_splitter_id=AudioCore::UnusedSplitterId;
+    sub_mix.mix_volumes[0][0]=1.0f; sub_mix.mix_volumes[1][1]=1.0f;
+    std::memcpy(wide_input.data()+wide_mix,&final_mix,sizeof final_mix);
+    std::memcpy(wide_input.data()+wide_mix+sizeof final_mix,&sub_mix,sizeof sub_mix);
+    std::memcpy(wide_input.data()+wide_mix+2*sizeof final_mix,&device,sizeof device);
+    CHECK(service_ok(botw_audren_update(session,wide_input.data(),wide_input.size(),nullptr,0,wide_output.data(),wide_output.size(),error,sizeof error)));
+    // 4+25 fits the aggregate reservation but exceeds one node's fixed matrix.
+    // Rejection must precede any output mutation or event/state commitment.
+    put(wide_input,wide_mix+8,4); put(wide_input,wide_mix+sizeof final_mix+8,25);
+    std::fill(wide_output.begin(),wide_output.end(),std::byte{0xa5});
+    bad=botw_audren_update(session,wide_input.data(),wide_input.size(),nullptr,0,wide_output.data(),wide_output.size(),error,sizeof error);
+    CHECK(bad.host_status || (bad.service_result_valid&&bad.service_result));
+    CHECK(wide_output.front()==std::byte{0xa5}&&wide_event.clears==1);
+    CHECK(platform_ok(botw_audren_start(session,error,sizeof error)));
+    CHECK(platform_ok(botw_audren_host_set_active(host,1,error,sizeof error)));
+    CHECK(wide_event.event.wait_for(std::chrono::seconds(1))==Status::Ok);
+    CHECK(!wide_fatal.calls);
+    CHECK(platform_ok(botw_audren_host_set_active(host,0,error,sizeof error)));
+    CHECK(platform_ok(botw_audren_stop(session,error,sizeof error)));
+    CHECK(platform_ok(botw_audren_close(&session,error,sizeof error))&&!session);
+    CHECK(platform_ok(botw_audren_unregister_region(host,99,0x400000,error,sizeof error)));
+    CHECK(platform_ok(botw_audren_host_destroy(&host,error,sizeof error))&&!host);
+    CHECK(wide_backing.retains==wide_backing.releases&&wide_event.retains==wide_event.releases&&!wide_fatal.calls);
+    std::free(wide_bytes);
     return 0;
 }
