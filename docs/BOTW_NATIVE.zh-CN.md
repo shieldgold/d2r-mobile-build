@@ -14,6 +14,8 @@
 
 已开始将旧 `botw-romfs.bin` 完整备份到 Mac，计划只有在 14,420,017,152 字节及固定原镜像 SHA256 全部匹配后才释放手机副本。备份至 4,500,488,192 字节时设备断开，USB 清单为空、CoreDevice 显示 unavailable；原件未删除。断点及带最终全量摘要校验的续传脚本保留于本地 `outputs/botw-iphone15pro-20261017-1927/`，需重新连接并解锁同一台手机后继续。该阶段没有游戏画面、声音或保存重开验收结果。
 
+用户重新接回后，再次核对型号、UDID、iOS、开发者模式及连接通道，从原断点恢复。随后约两分钟再次失去 USB 连接，当前已备份 8,900,313,088 字节，完整校验尚未完成，旧手机原件仍未移除。已请求确认断开时的屏幕状态并保持亮屏；若亮屏仍断开，则更换数据线或直连接口后再续传，尚不能认定具体硬件或系统根因。
+
 新宿主使用 `Documents/romfs` 中的完整资源目录，旧宿主的 `Documents/botw-romfs.bin` 不能直接代替它。保存位置为 `Documents/save`，旧 `Documents/botw-saves` 保留。覆盖安装时保留文稿，游戏内容与生成的着色器仅存放在本地忽略目录。
 
 本机只有 Command Line Tools，`xcrun devicectl` 找不到工具，但 CoreDevice 的独立工具位于 `/Library/Developer/PrivateFrameworks/CoreDevice.framework/Versions/A/Resources/bin/devicectl`。真机截图已用以下方式实际取得，避免把旧 screenshotr 或 WebDriverAgent 的连接失败当成游戏渲染结果：
