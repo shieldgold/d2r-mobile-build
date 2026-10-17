@@ -1,0 +1,84 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -263,6 +263,7 @@
+ #define POOL_CAPTURE() botw_whole_pool_guard pool_guard __attribute__((cleanup(botw_whole_pool_guard_leave)))=pool_capture()
+ #define POOL_MUTATION() botw_whole_pool_guard pool_guard __attribute__((cleanup(botw_whole_pool_guard_leave)))=pool_mutation()
+ void dm_gfx_suspend(int on){
++    mtl_present_discard(on);
+     if(!botw_whole_pool_gate_suspend(&g_pool_gate,on))die("graphics lifecycle admission failed");
+     if(on){x_drain();mtl_drain();botw_whole_pool_gate_leave(&g_pool_gate,2);}
+ }
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -7579,19 +7579,22 @@
+ // Before going to the background (mtl_drain): when the display link drives presents, frames queued but not yet presented can only be taken by the display-link callback, and in the background the system no longer calls back --
+ // waiting as-is for "the present queue to empty" would wait forever, the enter-background callback would not return, and the system would kill the process (the process disappears within 22 seconds after switching to another App).
+ // These frames will not be seen anyway: discard them directly (accounted as dropped frames) and only wait for the one present already submitted to the GPU to finish.
++static uint64_t present_cancel_queued_locked(void) {
++    uint64_t first = g_pq_read + 1, n = g_pq_in - g_pq_read;
++    for (uint64_t k = first; k <= g_pq_in; k++) g_pres[k % PRING] = (pres_ent){k, -1};
++    g_link_dropped += n; g_pq_read = g_pq_in;
++    pthread_cond_broadcast(&g_pq_cv);
++    return n;
++}
+ static void present_drop_for_suspend(void) {
+     pthread_mutex_lock(&g_pq_mu);
+-    if (g_link_owns_layer) {
+-        uint64_t n = g_pq_in - g_pq_read;
+-        for (uint64_t k = g_pq_read + 1; k <= g_pq_in; k++) g_pres[k % PRING] = (pres_ent){k, -1};
+-        g_link_dropped += n; g_pq_read = g_pq_in;
+-        // A display-link callback can own a dequeued frame before committing
+-        // its command buffer. Do not publish done while that CPU borrow lives.
+-        while (g_pq_inflight || g_pool_present_busy) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
+-        if (g_pq_done < g_pq_in) g_pq_done = g_pq_in;
+-        pthread_cond_broadcast(&g_pq_cv);
+-        if (n) MLOG("entering background: dropping %llu queued frames not yet on screen (display link does not fire in background)", (unsigned long long)n);
+-    }
++    uint64_t n = present_cancel_queued_locked();
++    // Queued frames are cancelled, but a dequeued CPU borrow and committed GPU
++    // work must finish in either present mode before the suffix is acknowledged.
++    while (g_pq_inflight || g_pool_present_busy) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
++    if (g_pq_done < g_pq_in) g_pq_done = g_pq_in;
++    pthread_cond_broadcast(&g_pq_cv);
++    if (n && g_link_owns_layer) MLOG("entering background: dropping %llu queued frames not yet on screen (display link does not fire in background)", (unsigned long long)n);
+     pthread_mutex_unlock(&g_pq_mu);
+ }
+ static void *present_main(void *arg) {
+@@ -7627,7 +7630,16 @@
+ // The short period when the front end goes to the background and waits for the game to save: presents are dropped directly (the display link does not call back in the background, enqueueing would block the game thread; nobody sees the picture anyway).
+ // When turned on, also clear the frames already queued: the system first stops the display-link callback and only afterwards notifies about going to the background, and in that gap the game has already filled the swapchain and is stuck at "before acquiring the next texture, wait for its previous present to be processed"
+ // (hle_nvn.c nvnWindowAcquireTexture -> mtl_present_wait). Without clearing, the game cannot advance a single tick during those 2.5 seconds of waiting for the save, and the save is not written (the same pattern three times in player logs: 3 frames queued, 0 submits)
+-void mtl_present_discard(int on) { atomic_store(&g_present_discard, on != 0); if (on) present_drop_for_suspend(); }
++void mtl_present_discard(int on) {
++    atomic_store(&g_present_discard, on != 0);
++    if (on) {
++        pthread_mutex_lock(&g_pq_mu);
++        // This runs before admission waits: cancel only unclaimed tickets now.
++        // The final drain retains every active CPU/GPU borrower before ACK.
++        present_cancel_queued_locked();
++        pthread_mutex_unlock(&g_pq_mu);
++    }
++}
+ uint64_t mtl_present(const tex_t *t, double period, const int crop[4]) {
+     if (atomic_load(&g_present_discard)) return 0;   //Ticket number 0 = no pending present; the swapchain texture acquire does not wait
+     if (t) { xv_check(t->serial, 0, 0, "present"); if (g_xv_npresent < 128) g_xv_present[g_xv_npresent++] = t->serial; }
+@@ -7640,7 +7652,8 @@
+         else if (st == 2 && now - t0 >= at + dur) { st = 3; mtl_link_pause(0); MLOG("DM_TEST_LINK_STALL: releasing display link (frame %llu)", (unsigned long long)atomic_load(&g_cur_frame)); }
+     }
+     pthread_mutex_lock(&g_pq_mu);
+-    while (g_pq_in - g_pq_done >= PQ) pthread_cond_wait(&g_pq_cv, &g_pq_mu);   //Wait only when the queue is full; normally AcquireTexture blocks first
++    while (g_pq_in - g_pq_done >= PQ && !atomic_load(&g_present_discard)) pthread_cond_wait(&g_pq_cv, &g_pq_mu);
++    if (atomic_load(&g_present_discard)) { pthread_mutex_unlock(&g_pq_mu); return 0; }
+     pq_item *it = &g_pq[g_pq_in % PQ]; *it = (pq_item){*t, period, atomic_load(&g_cur_frame), {0}, CACurrentMediaTime()};
+     if (crop) memcpy(it->crop, crop, sizeof it->crop);   //The current frame's state is enqueued with the ticket number, rather than reading the mutable window late on the present thread
+     uint64_t tk = ++g_pq_in;
+--- a/dm/gfx/nvn/nvn_mtl.h
++++ b/dm/gfx/nvn/nvn_mtl.h
+@@ -49,6 +49,7 @@
+ int mtl_wait(uint64_t fence, uint64_t timeout_ns);   //Returns 1 when the GPU has completed up to fence, 0 on timeout
+ void mtl_finish(void);                               //Wait for all submitted commands to complete
+ void mtl_drain(void);                                //Wait for all commands on the queue (including presents) to complete: submit an empty command buffer and wait for it
++void mtl_present_discard(int on);                    //Cancel queued-only presents before suspend admission; final drain retains active borrowers
+ void mtl_xv_window_tex(uint64_t serial);   //Register a window (swapchain) texture: the cross-submit validity ledger never collects it
+ void mtl_ui_ghost(int on, float px, float py, const float grid[4], float cx, float cy);   //Drag-follow image for shop items: when on=1, the icon of the item that covers screen point (px,py) and sits on the shop shelf grid `grid` (top-left x,y, width and height of one cell) is translated to center (cx,cy) and drawn once more at the end of the UI pass (normalized, top-left origin); callable from any thread
+ int mtl_ui_ghost_rect(float r[4]);   //Screen rectangle (normalized) of the item recognized above; returns 0 if not recognized yet

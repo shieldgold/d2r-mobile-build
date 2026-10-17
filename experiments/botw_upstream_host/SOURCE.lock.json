@@ -703,6 +703,11 @@
       "bytes": 849,
       "role": "thin-adapter-or-verification"
     },
+    "patches/ordinary-present-suspend-cancellation.patch": {
+      "sha256": "92e5b606ff8cb84888082a9b0af1ae00249a464b7bd605edd811a44445643001",
+      "bytes": 7004,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/ordinary-texture-array-first-write.patch": {
       "sha256": "449c8067461c708d7bed10c9c1a1dfeca37f000bed2126541bacf5e990843711",
       "bytes": 817,
@@ -994,8 +999,8 @@
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pool_backing_probe.m": {
-      "sha256": "9ff080f7e71d254823f3e3fd87ae81635bd1abd6dc379a9f9d8a7197fb7ddbff",
-      "bytes": 26770,
+      "sha256": "76f7f7253013e95a6011e37c7832772585b8f397277c07bd355ddf23bb643f1f",
+      "bytes": 27045,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pool_builder_probe.c": {
@@ -1011,6 +1016,11 @@
     "tests/whole_pool_suspend_probe.c": {
       "sha256": "22fc31169325cbcc5b61ef6c0e6ad640daca0bb28ec3ac434bde48b0a41ed67a",
       "bytes": 2118,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_present_suspend_probe.m": {
+      "sha256": "27792af85d25b2cbf144bca2d678d03a5030c500836ae99a0d9c07bc73f33d74",
+      "bytes": 10442,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_queue_acquire_probe.c": {
@@ -1914,7 +1924,8 @@
     "patches/virtual-pool-cpu-boundaries.patch",
     "patches/ordinary-texture-flush-import.patch",
     "patches/ordinary-texture-flush-error-propagation.patch",
-    "patches/ordinary-texture-array-first-write.patch"
+    "patches/ordinary-texture-array-first-write.patch",
+    "patches/ordinary-present-suspend-cancellation.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1925,13 +1936,13 @@
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
     "dm/gfx/nvn/botw_storage_class.c": "f300d8474acf8be8ed17e829d74d8add3d47331a0bb03792ec2292555ffc9c22",
-    "dm/gfx/nvn/hle_nvn.c": "e42d93530714d25cabdab7f19351ea80a6c2ac09564f24d5933270331b4f12a3",
+    "dm/gfx/nvn/hle_nvn.c": "10d6266459434acd2296445bd42230b2ff4e7d0bb7fd533b1a860503f406be2f",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",
     "dm/gfx/nvn/nvn_dirty.c": "7840b542b10feef9282186acdfbef431c15762d19606bdd04144f2fcc70f95f5",
     "dm/gfx/nvn/nvn_dirty.h": "caef4f1b1e42d3abf92ecd7e5e8664ba5cd642e79da435806021a7b29ee9d174",
-    "dm/gfx/nvn/nvn_mtl.h": "9b5baec3edda933a70932c74139e39237c073cee4dd93656e566c95255a97e0b",
-    "dm/gfx/nvn/nvn_mtl.m": "e6dcacf07866143ea409c17361bfacb92214eb8d0af89f512afb9b8d2db02f1d",
+    "dm/gfx/nvn/nvn_mtl.h": "745d9cefc46d3a28cf6c5f8b777dfb8c0d7f18b70f387b5e39582d6975cec5d6",
+    "dm/gfx/nvn/nvn_mtl.m": "e1d1b75fd07ed6b78931c21a3615c7015048a183e2eb449acc532fb4435e5fbb",
     "dm/gfx/nvn/nvn_obj.h": "c1265fe5414292928b6c5ddb520f3fc8d6eb171c929df21b4d3ddcbdcf6a06c9",
     "dm/gfx/nvn/nvn_protos.h": "aab79fe963aa4b718ee595ac8c4c52067d3dc7d3d65e511f7d1b4df5c05c00f8",
     "dm/gfx/nvn/nvn_vpool.c": "5a42f2946dd63baba548b821f44bfccf67d0bdcb26868abbfb46fc3c8a108a61",

@@ -89,6 +89,10 @@ void mtl_alias_drop_pool(const void *owner){(void)owner;atomic_store(&retire_ent
 void nvn_texown_retire(uint64_t serial){(void)serial;}
 void mtl_finish(void){drains++;}
 void mtl_drain(void){drains++;}
+/* Complete-source buffer/vpool fixtures only reuse this gate declaration;
+ * they never suspend presentation. The dedicated present fixture runs that
+ * implementation. Fail closed if one of these pool cases enters it. */
+void mtl_present_discard(int on){(void)on;abort();}
 static void x_drain(void){drains++;atomic_store(&drain_entered,1);while(atomic_load(&queue_pending)&&!atomic_load(&queue_done))pause_cpu();}
 void mtl_present_flush(void){drains++;}
 int mtl_wait(uint64_t fence,uint64_t timeout){(void)timeout;return fence<=g_done;}
