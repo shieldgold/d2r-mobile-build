@@ -1,0 +1,9 @@
+--- a/dm/host/hle_movie.c
++++ b/dm/host/hle_movie.c
+@@ -156,1 +156,5 @@
+-__attribute__((constructor)) static void movie_ring_gates(void) { gate_obs_set(OBS_MOVIE_RING_LINK, movie_ring_wait); gate_obs_set(OBS_MOVIE_RING_UNLINK, movie_ring_wait); }
++__attribute__((constructor)) static void movie_ring_gates(void) {
++#if !defined(NXNATIVE_NORMAL_POLICY) || !NXNATIVE_NORMAL_POLICY
++    gate_obs_set(OBS_MOVIE_RING_LINK, movie_ring_wait); gate_obs_set(OBS_MOVIE_RING_UNLINK, movie_ring_wait);
++#endif
++}

@@ -8,13 +8,11 @@
 
 本地候选 `1017.38` 已完成六模块装载表、实际宿主接口表和签名校验。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
 
-本次在项目专用 Python 环境重跑 316 项 nxnative 测试，全部通过且无跳过；GitHub 回读也确认上述 CI 的 head 和成功状态。iPhone 15 Pro 实读 iOS 27.2 Beta，已覆盖安装 `1.0.0 / 1017.38`。安装前后旧文稿的五个条目元数据一致；资源目录仍需完整传输后才能启动验收。
+iPhone 15 Pro 已实读 iOS 27.2 Beta，并覆盖安装 `1.0.0 / 1017.38`。资源迁移现已完成：手机 `Documents/romfs` 的 39,678 个文件路径和大小与本地来源逐项一致，合计 14,417,240,079 字节；`Pack/Bootup.pack` 与 `Pack/Bootup_Graphics.pack` 另外做了完整回读 SHA256 校验。并未对手机全部资源宣称全量哈希验证。
 
-本次资源传输的实际阻塞是空间不足：普通 `TotalDataAvailable` 显示约 189 GB，但应用文稿的 AFC `FSFreeBytes` 仅 167,809,024 字节，`FILE_OPEN` 返回 `NO_SPACE_LEFT`。不能仅凭前一个字段判断可写空间。新目录实存 13,577 份文件，按本地目录核对仍缺或大小不符 26,135 份、9,698,881,942 字节，尚未启动游戏。
+传输曾因实际 AFC 可用空间仅 167,809,024 字节而停止。旧 `botw-romfs.bin` 已先完整备份到 Mac，核对 14,420,017,152 字节及 SHA256 `00f26f19441fce157ca3f2e1d6590db783da6b1b9a6b55571e9871e50e8d00cc` 后，才移除手机上的旧镜像以回收空间。备份保存在本地忽略目录；原保存路径保留。用户确认中途曾拔线，随后已重连并解锁。最终清单还发现 34 个先前中断 CoreDevice 传输产生的 root 所有、零字节残留文件；仅删除并从原资源重建这些确定的截断副本，现有资源均为 mobile 所有。完成后 AFC 可用空间约 10.1 GB。
 
-已开始将旧 `botw-romfs.bin` 完整备份到 Mac，计划只有在 14,420,017,152 字节及固定原镜像 SHA256 全部匹配后才释放手机副本。备份至 4,500,488,192 字节时设备断开，USB 清单为空、CoreDevice 显示 unavailable；原件未删除。断点及带最终全量摘要校验的续传脚本保留于本地 `outputs/botw-iphone15pro-20261017-1927/`，需重新连接并解锁同一台手机后继续。该阶段没有游戏画面、声音或保存重开验收结果。
-
-用户重新接回后，再次核对型号、UDID、iOS、开发者模式及连接通道，从原断点恢复。随后约两分钟再次失去 USB 连接，当前已备份 8,900,313,088 字节，完整校验尚未完成，旧手机原件仍未移除。已请求确认断开时的屏幕状态并保持亮屏；若亮屏仍断开，则更换数据线或直连接口后再续传，尚不能认定具体硬件或系统根因。
+正常启动 `1017.38` 的实际控制台首错为 `[nxnative normal] diagnostic entry disabled`，程序在进入 UIKit 和游戏前退出。定位到上游 `hle_movie.c` 的 Metroid Dread ring 观测门构造函数：它无条件调用正常配置明确拒绝的 `gate_obs_set`。BOTW 本次改写没有观测门，因此修复仅在正常配置跳过该构造函数的两次登记，完整电影解码模块和观测 API 的拒绝策略保留；非正常配置继续登记。新增真实 C 构造函数测试先复现同样的退出码 77，再验证修复后进入 main；另覆盖显式非正常配置、默认上游配置及函数外源码不变。修复后 320 项 nxnative 回归测试全部通过，固定源码清单核验通过；等待新的 iPhoneOS 构建及实机安装，尚无新版本真机游戏画面、触控、声音或保存重开验收。
 
 新宿主使用 `Documents/romfs` 中的完整资源目录，旧宿主的 `Documents/botw-romfs.bin` 不能直接代替它。保存位置为 `Documents/save`，旧 `Documents/botw-saves` 保留。覆盖安装时保留文稿，游戏内容与生成的着色器仅存放在本地忽略目录。
 
@@ -50,7 +48,7 @@ uvx --from pymobiledevice3==11.34.0 pymobiledevice3 developer dvt screenshot \
 
 独立宿主位于 `native/botw_host/`，实现六个业务模块的装载、重定位、动态符号解析、线程槽与系统调用门。`rtld` 的装载职责由宿主接管；七个输入均审计和改写，实际宿主只需六个业务模块进入框架。遇到未知系统服务时记录原程序偏移并停止。
 
-当前目标是用户更换后的 **iPhone 12 / iOS 18.1**。当前安装 `3aaca29` 显式诊断版，argv仅 `--observe-graphics-lock`，PID1215；固定本机1055项中1054通过、1项条件跳过，精确head双CI成功，官方98项源码工件核验、组装签名后保数据更新。四个有界宿主锁样本已取齐，generation变化且包含idle，不支持同一轮持续持锁跨采样的解释；217.463秒完整采样无host_return/新error/真实帧，约600秒只查metadata仍无frame，后者不冒充重读boot内容。随后3a的observation-4已完整host_return=1，实际首错是 `nvnMemoryPoolInitialize: Memory pool CPU snapshot allocation failed`，在Metal工厂之前；与此前b7的Metal allocation generic首错不同，不能据此认为旧问题已修。正常日志的footprint287821504、resident350535680、available1912090944仅为当次advisory，不保证连续分配成功也不证明OOM。UID、14,420,017,152字节RomFS大小mtime、shader与权限均保留。**尚不能游玩**。
+以下为先前 **iPhone 12 / iOS 18.1** 实验记录；当前目标已切回上节的 iPhone 15 Pro。当前安装 `3aaca29` 显式诊断版，argv仅 `--observe-graphics-lock`，PID1215；固定本机1055项中1054通过、1项条件跳过，精确head双CI成功，官方98项源码工件核验、组装签名后保数据更新。四个有界宿主锁样本已取齐，generation变化且包含idle，不支持同一轮持续持锁跨采样的解释；217.463秒完整采样无host_return/新error/真实帧，约600秒只查metadata仍无frame，后者不冒充重读boot内容。随后3a的observation-4已完整host_return=1，实际首错是 `nvnMemoryPoolInitialize: Memory pool CPU snapshot allocation failed`，在Metal工厂之前；与此前b7的Metal allocation generic首错不同，不能据此认为旧问题已修。正常日志的footprint287821504、resident350535680、available1912090944仅为当次advisory，不保证连续分配成功也不证明OOM。UID、14,420,017,152字节RomFS大小mtime、shader与权限均保留。**尚不能游玩**。
 
 后续主线已纠正为固定上游21f的完整host、NVN和shader工具链，平台差异通过薄适配接入，见[完整后端计划](superpowers/plans/2026-10-16-complete-upstream-backend.md)。当前手机图形核心仍有本地子集实现，37个shader只覆盖内置UI/字体；kernel/IPC/HID也不能统称整模块移植。旧上游5f已落后98提交。[21f README](https://github.com/TommyLau/botw-mobile/blob/21f026e0c7fd9fee575a1bfa8d925553bb4db88e/README.md)实际记载：Mac实验已播完开场、进入复苏神庙并到达玩家操作提示，运行五分钟；19,612个shader阶段中19,606个已有私有Metal产物，同时仍有渲染错误、静音，作者明确尚无可玩构建。此前概括为仅到开场文字不准确。这些是上游文档记录，不是本机iPhone实测。新上游面向1.9/SDK20.5.22/NVN55.15，不能直接套用到当前base-v0/NVN52.32。完整工具与隔离后端的编译通过不代表已经替换手机生产实现。
 

@@ -128,6 +128,10 @@
       "bytes": 9194,
       "sha256": "5140394b6720796f9c6f5703b7925df487fdb2d214287fd8ec69db375d30f3d9"
     },
+    "patches/base-v0-normal-movie-constructor.patch": {
+      "bytes": 501,
+      "sha256": "81a843a19bf52fd03201aabb6a5c3fbba75912179567d820a7efda2edccfd869"
+    },
     "patches/base-v0-signed-jump-table.patch": {
       "bytes": 2583,
       "sha256": "4bcb82fb7385e9105e8d42fb090dace02bcbed02679a7176c00ffa5ce5481f21"
@@ -193,8 +197,8 @@
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_base_v0_runtime.py": {
-      "bytes": 44524,
-      "sha256": "9a9a70eec677b535b521b0a1c91a7c8537fde87c9b76ed25161765746895aa64"
+      "bytes": 44606,
+      "sha256": "7b175453eb96ba937f4b7f92e24d1275fedfbd2f822ea0b66ed8cc0abc5503bc"
     },
     "tools/build_fragment_shader_contracts.py": {
       "bytes": 9511,
