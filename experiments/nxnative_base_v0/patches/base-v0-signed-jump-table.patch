@@ -1,0 +1,39 @@
+--- a/dm/tools/patch_nso.py
++++ b/dm/tools/patch_nso.py
+@@ -582,13 +582,21 @@
+     sub w0,w18,#0xd1; cmp w0,#0x31; b.hi; ldrsw x18,[x17,x0,lsl #2], its movie module (subsdk1+0xae9a4) cmp w21,#7; b.hi; ...; mov w18,w21; ldrsw x18,[x4,x18,lsl #2].
+     For the table base xB, search back for the nearest writer: it must be add xB,xB,#lo, and the writer before it must be adrp xB. Returns all targets, or None if not recognized"""
+     ctx = insl[max(0, j - 16):j]
+-    add = next((p for p in reversed(ctx) if p.mnemonic == 'add' and re.fullmatch(r'x18, x18, x\d+', p.op_str)), None)
++    add = next((p for p in reversed(ctx) if p.mnemonic == 'add' and re.fullmatch(r'x18, x\d+, x\d+', p.op_str)), None)
+     if not add: return None
+-    rb = add.op_str.split(', ')[2]
+-    ld = next((p for p in reversed(ctx) if p.mnemonic == 'ldrsw' and re.fullmatch(rf'x18, \[{rb}, x(\d+), lsl #2\]', p.op_str)), None)
++    loaded, rb = add.op_str.split(', ')[1:]
++    ld = next((p for p in reversed(ctx) if p.mnemonic == 'ldrsw' and re.fullmatch(rf'{loaded}, \[{rb}, x(\d+), lsl #2\]', p.op_str)), None)
+     if not ld: return None
++    proven = None
++    if loaded != 'x18':
++        # Only the newly admitted temporary-register form needs this extra
++        # complete CFG/readonly-table proof. Keep the native x18 path unchanged.
++        from botw_native.branch_tables import signed_jump_range
++        proven = signed_jump_range(insl[:j + 1], IMG, TEXT_END, RO_OFF, DATA_OFF,
++                                   all_instructions=insl)
++        if proven is None: return None
+     # GLSLC subsdk0+0x2f403c checks a masked copy instead: and w16,w18,#0x3f; cmp w16,#0xe; b.hi; ...; and x18,x18,#0x3f; ldrsw x18,[x15,x18,lsl #2]
+-    idx = {'w' + re.fullmatch(rf'x18, \[{rb}, x(\d+), lsl #2\]', ld.op_str).group(1)}
++    idx = {'w' + re.fullmatch(rf'{loaded}, \[{rb}, x(\d+), lsl #2\]', ld.op_str).group(1)}
+     masked = None   # (source, mask, position) when the index is "source & mask"
+     k0 = ctx.index(ld); cmp = None
+     def wname(r): return 'w' + r[1:]
+@@ -622,7 +630,9 @@
+         break
+     if page is None: return None
+     tb = page + lo
+-    return [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
++    targets = [tb + struct.unpack_from('<i', IMG, tb + 4 * i)[0] for i in range(n)]
++    if proven is not None and (min(targets), (max(targets) - min(targets)) // 4 + 1) != proven: return None
++    return targets
+ funcs = sorted({func_of(a) for a, (k, _) in kinds.items() if k == 'x18'})
+ for fa, fb in funcs:
+     insl = list(md.disasm(bytes(IMG[fa:fb]), fa))

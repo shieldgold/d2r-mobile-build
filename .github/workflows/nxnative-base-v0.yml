@@ -1,0 +1,59 @@
+name: Verify nxnative base-v0 admission and upstream iOS build
+on:
+  push:
+    paths:
+      - 'experiments/nxnative_base_v0/**'
+      - 'tests/test_nxnative_*.py'
+      - 'scripts/botw_native/branch_tables.py'
+      - 'scripts/botw_native/romfs.py'
+      - 'scripts/botw_native/archive.py'
+      - 'scripts/botw_native/__init__.py'
+      - 'scripts/source/select_xcode.py'
+      - '.github/workflows/nxnative-base-v0.yml'
+  pull_request:
+    paths:
+      - 'experiments/nxnative_base_v0/**'
+      - 'tests/test_nxnative_*.py'
+      - 'scripts/botw_native/branch_tables.py'
+      - 'scripts/botw_native/romfs.py'
+      - 'scripts/botw_native/archive.py'
+      - 'scripts/botw_native/__init__.py'
+      - 'scripts/source/select_xcode.py'
+      - '.github/workflows/nxnative-base-v0.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select iPhoneOS SDK
+        run: python3 scripts/source/select_xcode.py
+      - name: Prepare isolated owned-test dependencies
+        run: |
+          python3 -m venv .tools/nxnative-ci-venv
+          .tools/nxnative-ci-venv/bin/python -m pip install -r requirements.botw.txt
+      - name: Verify pinned source and adapter closure
+        run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/verify_source.py
+      - name: Test source, base-v0 admission and rewrite contracts using owned inputs
+        run: .tools/nxnative-ci-venv/bin/python -m unittest discover -s tests -p 'test_nxnative_*.py' -v
+      - name: Compile complete upstream baseline without game content or execution
+        run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/build_link_only.py --sdk iphoneos --output outputs/nxnative-host-iphoneos --baseline-only
+      - name: Preserve link-only baseline receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nxnative-upstream-iphoneos-link-only
+          path: |
+            outputs/nxnative-host-iphoneos/*.json
+            outputs/nxnative-host-iphoneos/logs/*.stdout
+            outputs/nxnative-host-iphoneos/logs/*.stderr
+            outputs/nxnative-host-iphoneos/link.map
+            outputs/nxnative-host-iphoneos/*LINK-ONLY-DO-NOT-RUN*
+          if-no-files-found: warn
+          retention-days: 7

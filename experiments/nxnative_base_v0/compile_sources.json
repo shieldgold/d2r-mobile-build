@@ -1,0 +1,899 @@
+{
+  "schema": "nxnative-original-ios-host-link-only-inventory-v1",
+  "upstream_commit": "65fa9caab486768f70da98c51c2421aff76f676d",
+  "upstream_tree": "5b1545c089970a2aca0325aa31fa71bce217813f",
+  "baseline": "original-1.9-metadata-baseline-compile-only",
+  "frozen_design_inventory_sha256": "3de8c0d39e1df963ffd5d45cc01a5f5a90c47e4b5b62c82b5025056a15a14f05",
+  "target": "arm64-apple-ios26.0",
+  "isa": "armv8.2-a",
+  "upstream_unit_count": 126,
+  "libvpx_unit_count": 71,
+  "translation_units": [
+    {
+      "path": "dm/host/main.c",
+      "role": "host",
+      "bytes": 9844,
+      "sha256": "08360c13e8880152f7f3fd4fcb4191a58db482c3b712b17d637a4cdbeabd379c",
+      "defines": [
+        "main=dm_main"
+      ]
+    },
+    {
+      "path": "dm/host/loader.c",
+      "role": "host",
+      "bytes": 30285,
+      "sha256": "f4476a945a4b0f5436af684e66b3d6a88b2b41afa7b10290d04d9caafea922b4",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle.c",
+      "role": "host",
+      "bytes": 5580,
+      "sha256": "4a207739d9034cc98a80f43dd2d21606fc0a7f79eeaf85d7f2cc64c58187f02a",
+      "defines": []
+    },
+    {
+      "path": "dm/host/host_stubs.c",
+      "role": "host",
+      "bytes": 1646,
+      "sha256": "2b4a8ddaf6153f0cee5c201939455e6e19770914f651b17848584afccb03a49e",
+      "defines": []
+    },
+    {
+      "path": "dm/host/crash.c",
+      "role": "host",
+      "bytes": 14908,
+      "sha256": "c3636a01456deb5d990a682c3c9d4c3ed64daf5b0baeb79f3cc54bb6564dcbee",
+      "defines": []
+    },
+    {
+      "path": "dm/host/probe.c",
+      "role": "host",
+      "bytes": 11638,
+      "sha256": "f7022478676d429b0b2f5987679a9f82b53db4c897edbe11c92e6939f8e26a4c",
+      "defines": []
+    },
+    {
+      "path": "dm/host/thread.c",
+      "role": "host",
+      "bytes": 4264,
+      "sha256": "329faccdcf62d835b91818a7a808011b66c7bb7c03b6d7ec3242c4009be3b35e",
+      "defines": []
+    },
+    {
+      "path": "dm/host/memstat.m",
+      "role": "host",
+      "bytes": 11383,
+      "sha256": "20bf5f5edac09a76e17deffdb97c924e7a974d9cc37d07d4b2c088f606c03e88",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_account.c",
+      "role": "host",
+      "bytes": 9178,
+      "sha256": "14d55b29c83354092ed326ee179af595d379b512819444c77fc1fcd7a145d4cc",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_audio.c",
+      "role": "host",
+      "bytes": 22686,
+      "sha256": "78b9b2e91aeeb424bdda823ee9a5f9d5d09e73d9cc2fe012f4e4b8fec1c29807",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_audren.c",
+      "role": "host",
+      "bytes": 21286,
+      "sha256": "56a2b4f214edcbdf1aeb0e5ca9e41da2e455668531c1fb3b675aae3e29ce0063",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_bigstack.c",
+      "role": "host",
+      "bytes": 4507,
+      "sha256": "28f6e71a3aa54bc71ebad09460cd78dcc4fdf629cf20a217344e0f240c631a1a",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_codec.c",
+      "role": "host",
+      "bytes": 1052,
+      "sha256": "89d39e4c44ba5e4bba7385b17884571e52a42a55466d5b6e62bf65108b41b81a",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_count.c",
+      "role": "host",
+      "bytes": 4418,
+      "sha256": "141b2d804f4aed0efa14639de4d0db625efbccccd9d777e47179bd55208dbffe",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_fdstat.c",
+      "role": "host",
+      "bytes": 3234,
+      "sha256": "2dd76a19deebd502116fea52c1bc92bbf08f53b72bdc62625cafb3be2d336490",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_friends.c",
+      "role": "host",
+      "bytes": 6896,
+      "sha256": "1d88391396d5a5194c5437b47b141128828305a744b21d54bbde6970cc2fc45f",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_fs.c",
+      "role": "host",
+      "bytes": 74345,
+      "sha256": "12cef8e3d4bc295edc9666ad56d2c0b2a2b44a508df46cf92eea23ebc279d0ca",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_guestthread.c",
+      "role": "host",
+      "bytes": 4443,
+      "sha256": "bce9c56b9719c70d1e0ff9842319a35a00bc0dff9decd3ff3151df72c5e7e57c",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_hid.c",
+      "role": "host",
+      "bytes": 25320,
+      "sha256": "31574eed83fdef28f72d4731a23055f3b0a53109b0ffce839dfb7da935f822d1",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_lifecycle.c",
+      "role": "host",
+      "bytes": 1840,
+      "sha256": "60fbd7a8ec3295f5d4bc49e9371bba7ba51a8c05f96b6175144ed4a63ba3fbf5",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_misc.c",
+      "role": "host",
+      "bytes": 12631,
+      "sha256": "1618bb76b0570f5a9b8dc567193487f14a373e4bf47f1a541cd24367a3f3c8f6",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_movie.c",
+      "role": "host",
+      "bytes": 44108,
+      "sha256": "8be7ad093b97484279616d1a8dac348a9ba16afbcafa4a48a6dbd600d33a2bc5",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_net.c",
+      "role": "host",
+      "bytes": 13258,
+      "sha256": "1f0fb85faa10728d0f466c6524f55638ed620bb40841dc16f81d0d992c042c7d",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_nvdrv.c",
+      "role": "host",
+      "bytes": 1875,
+      "sha256": "6a1d9c8ab6b56c2d42c24187ee9b2177eb3c4d54f67acefbf4b8982976794ea2",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_oe.c",
+      "role": "host",
+      "bytes": 25408,
+      "sha256": "73bd6be5d80f2f2d8080203aa1bc8d90efb186ccdaee473ac5229e8503d4839c",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_offline.c",
+      "role": "host",
+      "bytes": 16351,
+      "sha256": "efd32a4f065913528227c97b4c34b5c2c93a2a3ad2386365c046cedc92c54682",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_os.c",
+      "role": "host",
+      "bytes": 10208,
+      "sha256": "83981094b54f52c5f3190ab94215478ac7523de250ed16347a15bc8be58af1c1",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_ro.c",
+      "role": "host",
+      "bytes": 3013,
+      "sha256": "4aaaceb7be3cf9bea278b6ee547502844dbdb79f4adc0c8e7d200284bb2425e0",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_sdk16.c",
+      "role": "host",
+      "bytes": 25733,
+      "sha256": "f4a28df01c41b8dc0f7a1233a0ebc3291a88dee1891e353da081ca2c9c1834c6",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_sdkinit.c",
+      "role": "host",
+      "bytes": 1998,
+      "sha256": "fec802058fdaa4d25590b5458be5d5e9b95ab20f6591335f79e7385c24f443dd",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_svc.c",
+      "role": "host",
+      "bytes": 21924,
+      "sha256": "a0add3e170a42ed8398e65d477ce888bb9b04256f0c65cd68b39531180e770b5",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_swkbd.c",
+      "role": "host",
+      "bytes": 13749,
+      "sha256": "6d2ee99edfd7fad324c4d5df57a223b8d55aa0b95156b543948a60c62bd9f690",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_table.c",
+      "role": "host",
+      "bytes": 1029,
+      "sha256": "9163a0947c3d51177b9dee0ef71cd90e806810e5a9f0da1c492415b03fab5a68",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_thread.c",
+      "role": "host",
+      "bytes": 60237,
+      "sha256": "11ffeb19b2fa1a5b85783aa89b90b3452bc84a2b6cc4aa9fbf3c4bcd312a6bb8",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_time.c",
+      "role": "host",
+      "bytes": 9542,
+      "sha256": "314f0a4fae8a58983fab0a40a059755b8ef79ac04985767ac5993f5a44abf429",
+      "defines": []
+    },
+    {
+      "path": "dm/host/hle_touch.c",
+      "role": "host",
+      "bytes": 5197,
+      "sha256": "fe53b765f1ef15bd5a4e0b4dcf882904df66fd70b2a25e6a536df7ad67310416",
+      "defines": []
+    },
+    {
+      "path": "dm/host/entry.S",
+      "role": "host",
+      "bytes": 4238,
+      "sha256": "ac753892dcc7d1bfdd940a6935f73d627060b1790106569cffc4fab2a1b0a102",
+      "defines": []
+    },
+    {
+      "path": "dm/host/dm_i18n.c",
+      "role": "host",
+      "bytes": 5738,
+      "sha256": "8eff02087b73763739867bf39bd6c3da815dbe9f0c2d2a49f657c45d63e8f87a",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/hle_nv.c",
+      "role": "gfx",
+      "bytes": 1563,
+      "sha256": "35c96613e42062736288ba022313343b0f644faa9bbc31192e716e06c6a19c1c",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/hle_vi.c",
+      "role": "gfx",
+      "bytes": 2058,
+      "sha256": "008752b98820cd5543ec90e2bb6874eb53b9e8b24d2c894b632879a6c78eab47",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/hle_nvn.c",
+      "role": "gfx",
+      "bytes": 147715,
+      "sha256": "05938554e9e3dae5b2fc307eb23af6a13a4e950cd85567f98639d6a8ce1f5730",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_dirty.c",
+      "role": "gfx",
+      "bytes": 13480,
+      "sha256": "bd1f418cbddf4f50831464bcd06462f5464f6e277ce47cc17aff873740a5158c",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_entry.S",
+      "role": "gfx",
+      "bytes": 3748,
+      "sha256": "b95e595b02bc9c92b2931f0ecc0798e2e7d9853e1fbf327d82ae67ec08128f76",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.m",
+      "role": "gfx",
+      "bytes": 631698,
+      "sha256": "9b249945a20b768e3656f3ec7d3cc83267ebe17d5126cf0f84d0e3763e7b8d2d",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_refl.m",
+      "role": "gfx",
+      "bytes": 8356,
+      "sha256": "1d5656880d73fde494c56685bdd6b1b81917e50290ddba4a40b0c55ead18f8d4",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_tex.c",
+      "role": "gfx",
+      "bytes": 7368,
+      "sha256": "cc7076f2a8377a50067ef508040513baa70b6e90f143b01148517f832cad6ed6",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_thunks.S",
+      "role": "gfx",
+      "bytes": 157610,
+      "sha256": "eacc0040b2da9e1c2ed945acf157f046b7851b1c72b4c9eb6b7028983037baf6",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/tex/nvn_bcdec.c",
+      "role": "gfx",
+      "bytes": 3172,
+      "sha256": "dee376d50ec36d9e0c82e16d20ee74bf9c212a29c8cb1501fb7eb3c847d91754",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/tex/nvn_deswizzle.c",
+      "role": "gfx",
+      "bytes": 4183,
+      "sha256": "82945a4e6311037f7f4fce97a85e249d3dcf0120430071841407cb8f3f34552d",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/tex/nvn_deswizzle_gpu.m",
+      "role": "gfx",
+      "bytes": 4504,
+      "sha256": "6f4484c234443e6531618a7de12bb1ca7784e458ddaf9f8d99489ee3e62d2e32",
+      "defines": []
+    },
+    {
+      "path": "dm/gfx/tex/nvn_fmt_mtl.c",
+      "role": "gfx",
+      "bytes": 6851,
+      "sha256": "e01dad3248973a891d5b65e66820c03cfa189177ba77f0e4391d5f2870bc697c",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/arm/neon/vp9_iht16x16_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 9440,
+      "sha256": "772026cab6941e71bb3eabd0bd5c9476923bf673c54f2d90da503c892d988e92",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/arm/neon/vp9_iht4x4_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 2336,
+      "sha256": "9d2b00551d2f6751e4f87077c1755d3cfaa68dc04ba2d6b4a7a6268b2d3525dc",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/arm/neon/vp9_iht8x8_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 2320,
+      "sha256": "83091bf02963fb2c012c9f3f0194878d9b0ba21a07821a2084c006f47c50d75b",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_alloccommon.c",
+      "role": "vpx_decoder",
+      "bytes": 5990,
+      "sha256": "3e59e9e63403ac83b279eb49c9ac04bb8cbe0dea5ad7296142822916f17c0909",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_blockd.c",
+      "role": "vpx_decoder",
+      "bytes": 5009,
+      "sha256": "9693f43fb88ec5706e2f18dac74a434a60e75db67742ebf0f9088718d5de834d",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_common_data.c",
+      "role": "vpx_decoder",
+      "bytes": 10764,
+      "sha256": "de3b11445ddab6e6704f161c2c55cac9931ee565b45c7f79114604a947c59599",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_entropy.c",
+      "role": "vpx_decoder",
+      "bytes": 36252,
+      "sha256": "d6084c983bd9848bb19a32ef87305e822873815e1ea3a30e158b6e1a489519a1",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_entropymode.c",
+      "role": "vpx_decoder",
+      "bytes": 21347,
+      "sha256": "0cb4940de5b9add383387c749c4c3f4bf13618782e0fe89677c8333d45b7e1e3",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_entropymv.c",
+      "role": "vpx_decoder",
+      "bytes": 8734,
+      "sha256": "9ec4c5ac7c35e9a7360055d91486a9d3e8e12050f8bcbf6e72bba8d1c749fee1",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_filter.c",
+      "role": "vpx_decoder",
+      "bytes": 4086,
+      "sha256": "d4097ff80fcc12bbaf395e13d6323ab7854e98cb05eb8a90c31314e77224e19f",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_frame_buffers.c",
+      "role": "vpx_decoder",
+      "bytes": 2636,
+      "sha256": "5cc3b72fb8186839cbfa8c023a240147fb681879682b87879cc7c5fa06dd6594",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_idct.c",
+      "role": "vpx_decoder",
+      "bytes": 12804,
+      "sha256": "e0a49272ea0870d8933820d4cc00ca2f78e2016af79b7dff94790896a278c693",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_loopfilter.c",
+      "role": "vpx_decoder",
+      "bytes": 60680,
+      "sha256": "5ffec54badf3b1a9b8626560f91b66e8a32be7b8001f36424e6d514bf48abd62",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_mvref_common.c",
+      "role": "vpx_decoder",
+      "bytes": 7435,
+      "sha256": "eb3a09ad2649227a2fd6086077c4d16851c7542ae6efbdd62c5fc6c956aec5d3",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_pred_common.c",
+      "role": "vpx_decoder",
+      "bytes": 12821,
+      "sha256": "f95811f5ba9fd7c31fa18d564c19916d230371996aa76625a67e316f2e4bfb86",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_quant_common.c",
+      "role": "vpx_decoder",
+      "bytes": 12192,
+      "sha256": "da0d83da3036bd6d064030aa381583dbe21b1af7585fc09a72e37190b5be050a",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_reconinter.c",
+      "role": "vpx_decoder",
+      "bytes": 12372,
+      "sha256": "ac745ced3a941b3ef57747ed83e29d38e13b16ed39f317924c32887dffd18b28",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_reconintra.c",
+      "role": "vpx_decoder",
+      "bytes": 15507,
+      "sha256": "108a51affbdcb30a7c6ee536bdedb0bcfd986ea83513bc416630fe30b1670238",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_rtcd.c",
+      "role": "vpx_decoder",
+      "bytes": 560,
+      "sha256": "aa08911047f2e075ca1d356dc20196e07f1a072393076a0f4abb0870f481111e",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_scale.c",
+      "role": "vpx_decoder",
+      "bytes": 7113,
+      "sha256": "201551b8d0078b21b2b11b4e6f1eba221c70965f9a0c5bb69b90bd5ece568c5e",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_scan.c",
+      "role": "vpx_decoder",
+      "bytes": 48194,
+      "sha256": "010507b0c768b108385bdea7f312220f222b43ff6581f08cde4662176893e5c3",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_seg_common.c",
+      "role": "vpx_decoder",
+      "bytes": 2176,
+      "sha256": "04769ba128cdb514363d9ba501091541fdf63830b5e71d92659e36ab49ad4b82",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_thread_common.c",
+      "role": "vpx_decoder",
+      "bytes": 19732,
+      "sha256": "09de6e576669a075850f213b94588cac7f3023904a1270351b0ec3449117594e",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/common/vp9_tile_common.c",
+      "role": "vpx_decoder",
+      "bytes": 2137,
+      "sha256": "f9f229f5b92ad51c671dbfe6be7cf026e61fc2d2f4e9f3aca21b30f22f73af8c",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_decodeframe.c",
+      "role": "vpx_decoder",
+      "bytes": 115254,
+      "sha256": "796aac2d4515aa4647dbd5aa59f370d5c6d7a7295eda26803ae74a0475333fd2",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_decodemv.c",
+      "role": "vpx_decoder",
+      "bytes": 31989,
+      "sha256": "17eb975fc28e2691f3ba39ecaa75890a7ba65a9f10e1bee93081013ef0a8ac62",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_decoder.c",
+      "role": "vpx_decoder",
+      "bytes": 19785,
+      "sha256": "4543211ee73906da678d882f256f14766bef8835ea9d96b7d3a24510705d3d33",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_detokenize.c",
+      "role": "vpx_decoder",
+      "bytes": 11132,
+      "sha256": "d1c752bb754750b732c6b6bcbf2b6508ba249b153e0c405e690656abac87e748",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_dsubexp.c",
+      "role": "vpx_decoder",
+      "bytes": 2964,
+      "sha256": "da858e014dbea6c19e046577d96ecdbe8f1ec54710b7778b3fe951f484f38ee1",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/decoder/vp9_job_queue.c",
+      "role": "vpx_decoder",
+      "bytes": 3160,
+      "sha256": "88abab5fab482d6c3e44c6c2df272762fc1c70638ed198bcfb07cdef7825a34d",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/vp9_dx_iface.c",
+      "role": "vpx_decoder",
+      "bytes": 24278,
+      "sha256": "0a32980632a37588a85cf026b8246e06927c796a80347c8aa9adb22f8c33eecf",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vp9/vp9_iface_common.c",
+      "role": "vpx_decoder",
+      "bytes": 5017,
+      "sha256": "90607baf56e31f2afd68afbf86b684a7180470b92eec79fe44234e715a477016",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx/src/vpx_codec.c",
+      "role": "vpx_decoder",
+      "bytes": 3835,
+      "sha256": "aa4a30998250101bfdfcf9f4def2ac9cc908b69224a0fae802d54456fb4a732b",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx/src/vpx_decoder.c",
+      "role": "vpx_decoder",
+      "bytes": 5940,
+      "sha256": "efedaa74f48c6d59e582bcb4ffbb49d3fc34970720febf5d4bb98614f3c8e916",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx/src/vpx_encoder.c",
+      "role": "vpx_decoder",
+      "bytes": 12357,
+      "sha256": "70281c8fa4c995d2c6a080f0c8899c10229d42be34eb42859281b84f166ac448",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx/src/vpx_image.c",
+      "role": "vpx_decoder",
+      "bytes": 9114,
+      "sha256": "e790ff79886e0486e590315b58416c9d91b6d3f583d1db1757267818ef0fcc1c",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct16x16_1_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 3166,
+      "sha256": "fc3b7b87012619d96a409c4c211ec0279daf35043e72093ae06c4d1f677a7f10",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct16x16_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 25997,
+      "sha256": "f59819e8b6ea1efbae088bb4436323d41a0de9536419c64df2892d16882a2648",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct32x32_135_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 26778,
+      "sha256": "c0b199c4e67f05359de60a2273dda4aa87d7ebf0316888a4c4010da3acd1fa52",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct32x32_1_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 1967,
+      "sha256": "82fc4e206ef92eeeba00616c705b68bc011981cdcc1932f8f56d037158128070",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct32x32_34_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 19824,
+      "sha256": "f5c4d38474df46a3c1b9d34a2f68967ca7a311e5ef069987eb1f36ad0fb627ee",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct32x32_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 27272,
+      "sha256": "81a6e56c21349c54cd72e854e349cd5561dfea306d448adca89c740b457149ac",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct4x4_1_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 1764,
+      "sha256": "239246dfcdf0be32a70e1aaad8c66bad5ee47ef5099bd0ec5ad558ea8e02e343",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct4x4_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 1917,
+      "sha256": "5a016c55a54541d56edb128c81a3b8a5f72957dca814b8beb802af1ea7e5b2a8",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct8x8_1_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 2373,
+      "sha256": "749c6541a1e82033006614eb2791592558c8985d6cbd07b73212269abda66f8d",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/idct8x8_add_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 2243,
+      "sha256": "ef822327f4536e2f3e53ba4a2fcfb37fb38134ff219ea17bf4095f746b6f0416",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/intrapred_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 80119,
+      "sha256": "761f006390810766de50eb75cf5c04ab657a386fe8443a86e9dc7df9353b48a8",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/loopfilter_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 61085,
+      "sha256": "2244b681274667d30a8265dd6c3d41ce668ad426eca18abd5b0f7250bd7cc09e",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/vpx_convolve8_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 27421,
+      "sha256": "ea06604bc94c6bfacc846852bb17b99ce9621e818d49b5b98271c18cb9df9d92",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/vpx_convolve_avg_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 3972,
+      "sha256": "319ad00ffe5345d556663092110ac1be1cbb8d62890b8209c56a460f52128a43",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/vpx_convolve_copy_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 2548,
+      "sha256": "2529e8092b6c221efd5e171b7117b444069372e824630b32cf0f07c86569e846",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/vpx_convolve_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 3326,
+      "sha256": "6559dc35dfd5149479cd1c3f5fb6832194417bb74926e10e58273dc4ade366d8",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/arm/vpx_scaled_convolve8_neon.c",
+      "role": "vpx_decoder",
+      "bytes": 11743,
+      "sha256": "c0bc2b8b40f023438c14f6e3c613512e0f24b0778361a342b6b1a5329b9c75bb",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/bitreader.c",
+      "role": "vpx_decoder",
+      "bytes": 3074,
+      "sha256": "2e89f06a6ab348948e52953a5386724824ca6e5eabdb7837e13e30667565a868",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/bitreader_buffer.c",
+      "role": "vpx_decoder",
+      "bytes": 1471,
+      "sha256": "8bcb377dafd1a91d9e536e5024e4a03925a1618c34f75064869901643b8fafbb",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/intrapred.c",
+      "role": "vpx_decoder",
+      "bytes": 28673,
+      "sha256": "a12832eeaf5c74b765d001f278f02698b435baad64b486522ab80de269968cea",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/inv_txfm.c",
+      "role": "vpx_decoder",
+      "bytes": 99069,
+      "sha256": "847951b1decc939d5b72d60c49fe976709bb0832a10e0ad40609fb47164867c7",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/loopfilter.c",
+      "role": "vpx_decoder",
+      "bytes": 32042,
+      "sha256": "6e4225b7168bb9f96c828d1689a874877f5b2f3dc314b484e10f775c84b17791",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/prob.c",
+      "role": "vpx_decoder",
+      "bytes": 2287,
+      "sha256": "fe4239ef8ffd2e0f36884e963c20bb87337d39b87a84c5b580372a9f1b348346",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/skin_detection.c",
+      "role": "vpx_decoder",
+      "bytes": 3045,
+      "sha256": "66f206270350caa412f4e2e88800a2ebc7541b9d5ce5308b56e4a54955629d5a",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/vpx_convolve.c",
+      "role": "vpx_decoder",
+      "bytes": 21080,
+      "sha256": "3cabc454b003551d29349d27b4f484e458e2098f40bef6b9c8ac6b33758de42b",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_dsp/vpx_dsp_rtcd.c",
+      "role": "vpx_decoder",
+      "bytes": 568,
+      "sha256": "a35c2d8d291a86d0ab4b6b3b8e342c71d029461fe1a586332b907bd9256fc025",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_mem/vpx_mem.c",
+      "role": "vpx_decoder",
+      "bytes": 2610,
+      "sha256": "6417e5f4f291bfbca66215bdc28064eb727667500c436ed06f903902804d3e86",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_ports/aarch64_cpudetect.c",
+      "role": "vpx_decoder",
+      "bytes": 7150,
+      "sha256": "8781d11c4574a917b62eef2971614a730fb34d675e58b5d242a712768b6ab6ba",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_scale/generic/gen_scalers.c",
+      "role": "vpx_decoder",
+      "bytes": 7302,
+      "sha256": "573bc1ff8509d1dc515748851a1f926bec9eb4c066deab5841a87908d7f401f5",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_scale/generic/vpx_scale.c",
+      "role": "vpx_decoder",
+      "bytes": 19895,
+      "sha256": "c334b2ce05f3c141f4af8cfe2e736e51a3aa993e6bbb5c8c04808393a8eda312",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_scale/generic/yv12config.c",
+      "role": "vpx_decoder",
+      "bytes": 10854,
+      "sha256": "4b248ec01e4ec24194247379a3a9891b4f6d3ea024bb1c209ade86c514a92148",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_scale/generic/yv12extend.c",
+      "role": "vpx_decoder",
+      "bytes": 10717,
+      "sha256": "d6b28db3b7fe03f04e291d69a993a4f01e6dc471613d9a72fc1e17a3de0d78af",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_scale/vpx_scale_rtcd.c",
+      "role": "vpx_decoder",
+      "bytes": 572,
+      "sha256": "330eaaa366691301afbc155186cd16aa64d2d6c0d01d9e08c99ebd683c05c2ff",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_util/vpx_thread.c",
+      "role": "vpx_decoder",
+      "bytes": 7665,
+      "sha256": "edf65676ab72769fdbee6961ab9f628dce36053f9602e1ba88e71245be4680a7",
+      "defines": []
+    },
+    {
+      "path": "dm/third_party/libvpx/vpx_util/vpx_write_yuv_frame.c",
+      "role": "vpx_decoder",
+      "bytes": 1166,
+      "sha256": "401cc4b088b0ba52653d75a4813f0907ea7e7e190c6ece1814102685659a64f6",
+      "defines": []
+    },
+    {
+      "path": "dm/ios/Sources/DmGamepad.m",
+      "role": "ios_app",
+      "bytes": 26140,
+      "sha256": "1e87c107bee46141e655963edf9e558e9de9e874da0aefc1ceeb968feccf3843",
+      "defines": []
+    },
+    {
+      "path": "dm/ios/Sources/dm_touch_controls.c",
+      "role": "ios_app",
+      "bytes": 59578,
+      "sha256": "0b7aff16780893661713d5d3d9f7ab623be15013404a8e26b1ffacb2b795d560",
+      "defines": []
+    },
+    {
+      "path": "dm/ios/Sources/front_ios.m",
+      "role": "ios_app",
+      "bytes": 9628,
+      "sha256": "323542bfc5dd60dc67704b1c094fee7be0e7defa99f5ce3613e02b1b618e9296",
+      "defines": []
+    },
+    {
+      "path": "dm/ios/Sources/main.m",
+      "role": "ios_app",
+      "bytes": 7425,
+      "sha256": "e31907b31df98360e4c6936decb1951fff3bd3365f3cbbe33ac3ebe435031be1",
+      "defines": [
+        "main=nxnative_upstream_ios_main"
+      ]
+    }
+  ]
+}

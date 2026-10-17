@@ -1,0 +1,120 @@
+{
+  "schema": "nxnative-base-v0-profile-v1",
+  "profile_id": "botw-switch-base-v0",
+  "title_id": "01007EF00011E000",
+  "game_version": "1.0.0",
+  "package_version": "v0",
+  "nvn_api": {
+    "major": 52,
+    "minor": 32
+  },
+  "required_modules": [
+    "main",
+    "subsdk0",
+    "subsdk1",
+    "subsdk2",
+    "subsdk3",
+    "sdk"
+  ],
+  "auxiliary_modules": {
+    "rtld": {
+      "load": false,
+      "reason": "Original NSO identity checked; rtld is not included in the six-module load set."
+    }
+  },
+  "modules": {
+    "main": {
+      "bytes": 19187529,
+      "sha256": "fa2541333fdb5a868a286ea138774d82d13a1b0b97988d7af6c60ed82d2b1c81",
+      "build_id": "2094f152836683a3632c6153fd84ab8000000000000000000000000000000000",
+      "load": true
+    },
+    "rtld": {
+      "bytes": 12995,
+      "sha256": "2bf1918e54e3d6378f150e45a264c151558198703a778408db5ac26263a3a362",
+      "build_id": "db4b66dbf275a8261e2d51375f20c47d9a729537000000000000000000000000",
+      "load": false
+    },
+    "sdk": {
+      "bytes": 3037991,
+      "sha256": "0abff9d26d975cb17c24ddfecca488a4900e20ffd7ab9bb642e6df667dde9f31",
+      "build_id": "99d55fb2a2ce9e14bd5d56428ec0397be46e48eb000000000000000000000000",
+      "load": true
+    },
+    "subsdk0": {
+      "bytes": 883020,
+      "sha256": "58b6791aff6e5cb509c5347c1dc41d01a32c0a298c7f5da0c88ea56fc8a6eb17",
+      "build_id": "9f7e69a5c5e8aa0e61199ac33dd0d2d13717c190000000000000000000000000",
+      "load": true
+    },
+    "subsdk1": {
+      "bytes": 54373,
+      "sha256": "a1b399f06db89bac005e8c7d8ce3475f931a9cdff6b7fc3509b9427e0a47be41",
+      "build_id": "fc3d9aae8b6769e2d69961c005e239f536805f19000000000000000000000000",
+      "load": true
+    },
+    "subsdk2": {
+      "bytes": 174027,
+      "sha256": "e56eec1a58d1fa53779469e6eea36a795c0deac90bbf25b54b97c44ed195bd65",
+      "build_id": "2ba5fcc00ba28cdda26c792e934949cbb5cbc513000000000000000000000000",
+      "load": true
+    },
+    "subsdk3": {
+      "bytes": 3000329,
+      "sha256": "2f344d84badf826937317e033b47f32bb2e1e8b7856553ce7356616268b5e238",
+      "build_id": "aa72f973a902c24747af4522ee67ea9a7994c3fb000000000000000000000000",
+      "load": true
+    }
+  },
+  "identity_evidence": {
+    "original_nso_report": {
+      "path": "outputs/botw-native-base/report.json",
+      "bytes": 2165398,
+      "sha256": "eb4271564ea20263db31994aa4d07326dcacbef8ef5e3230b52bc2e555651c7f"
+    },
+    "base_v0_abi": {
+      "path": "experiments/botw_upstream_host/adapter/base_v0_abi.json",
+      "bytes": 4447,
+      "sha256": "850080d27627d6091cd0146eb24d2640fb31f6dd1630599aff76452699dee217"
+    },
+    "base_v0_nvn_version": {
+      "path": "experiments/botw_upstream_host/adapter/base_v0_nvn_version.json",
+      "bytes": 3095,
+      "sha256": "8eaf118f44c706153f27cf4825e6f166043b3a1cb590f60a90a9b66e7485922c"
+    },
+    "guest29_source_report": {
+      "path": "outputs/botw-native-host39-v4-normal-allocation-guard-v1/report.json",
+      "bytes": 2215144,
+      "sha256": "e150eb3acadcfd1bf0c8f4a9ca398463ee3d240cae560850223ec8648a3ef4ec"
+    },
+    "guest29_framework_report": {
+      "path": "outputs/botw-guest-framework-host39-v4-normal-allocation-guard-v1-six-final-ios18/guest-framework-report.json",
+      "bytes": 13298,
+      "sha256": "1ef1e776387b6152403c57d53499c58da1249c7daa0d5a01868345c87daed8bc"
+    }
+  },
+  "romfs": {
+    "bytes": 14420017152,
+    "image_sha256_from_manifest": "00f26f19441fce157ca3f2e1d6590db783da6b1b9a6b55571e9871e50e8d00cc",
+    "header_sha256": "7a0059e280534712ca28ed8e78d744dae14adb441242c2e98a85ba2f3f615cdd",
+    "metadata_sha256": "5eb3833b3054312f95bee6fe30c1dadb5982e43d20b36df2a9f82a673b20c7c9",
+    "file_count": 39678,
+    "directory_count": 874,
+    "data_offset": 512,
+    "manifest": {
+      "path": "outputs/botw-romfs-base/manifest.json",
+      "bytes": 8250498,
+      "sha256": "017994710bc188652a06c6afa05ca4dcaab1539bbc594c5e3a8abc000347f123"
+    },
+    "payload_verification": "Full14GB payload hash is a pinned prior manifest value; this preflight reads header and metadata only and never claims a new full payload hash."
+  },
+  "progress": {
+    "compile": "pending",
+    "rewrite": "pending",
+    "shader": "pending",
+    "gameplay": "pending"
+  },
+  "scope": "Fixed original disk identity only. No shader table, translated image or runtime behavior is inferred.",
+  "game_execution_ready": false,
+  "runtime_verified": false
+}
