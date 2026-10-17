@@ -2,7 +2,15 @@
 
 本目录对应用户已确认的 D2R 式原生移植路线。**开发版宿主已在 iPhone 上安装和执行原始 SDK 代码，尚不能游玩。** 现有 D2R 工作流不变。
 
-## 2026-10-17 当前接入
+## 2026-10-17 当前主线：复现作者 1.9.0 原版
+
+按用户最新安排，当前重点改为复现 `seedds/nxnative` 作者的 BOTW 1.9.0 路线，使用原仓 `scripts/build_ipa_from_nsp.py`。暂停增加 1.0.0 专用补丁和自定义 Eden / HLE / 着色器接入；既有提交、资源和手机保存路径均保留。原版源码固定在 `d1d68e80f8331ab85465f763d2cb457c3e2450d5`，详细输入、工具准备和接续方式见 [原版 1.9.0 基线](BOTW_OFFICIAL_1_9.zh-CN.md)。
+
+本次重新检查找到基础 NSZ、1.9.0 更新 NSP 和两份 DLC NSZ，包目录结构检查通过；尚未解密验证更新内容或取得匹配的合并后 1.9.0 输入。原版解包器编译成功，XcodeGen、Python 依赖和现有 .NET 10 / SPIRV-Cross 已准备。当前缺口为可用的本地 `prod.keys`（或匹配的已解包 1.9.0 输入）与完整 Xcode；Apple 官方下载页要求登录。本机 Command Line Tools 不能完成原版 iPhone 与 Metal 构建。
+
+已复核目标仍是 USB 连接的 iPhone 15 Pro。此前 `1017.42` 自定义 1.0.0 构建已安装并正常启动到 UIKit，游戏区仍黑屏，没有画面、声音、触控或保存验收；为切换主线已终止该次运行。该结果不代表作者原版 1.9.0 的运行结果。
+
+## 2026-10-17 历史接入：1.0.0 实验
 
 当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `2a96a80a14ca8951c1c638a5675542e669318ce9` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39042512096) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
 
