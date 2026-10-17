@@ -30,13 +30,17 @@ EXTRA_PATCHES = (
     ('patches/base-v0-logical-memory.patch', ('dm/host/hle_svc.c', 'dm/host/main.c')),
     ('patches/base-v0-normal-api-contracts.patch', ('dm/host/hle_account.c', 'dm/gfx/hle_vi.c',
         'dm/gfx/nvn/hle_nvn.c', 'dm/gfx/nvn/nvn_mtl.m')),
+    ('patches/base-v0-normal-loader-guard.patch', ('dm/host/loader.c', 'dm/host/main.c',
+        'dm/ios/Sources/main.m')),
 )
 REQUIRED = ('tools/build_base_v0_runtime.py', PROFILE, 'profile/base_v0.json',
     'tools/generate_base_v0_contract.py', 'tools/build_link_only.py',
     'tools/build_adapted_link_only.py', 'tools/verify_source.py', 'compile_sources.json',
-    'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h', *(name for name, _ in EXTRA_PATCHES))
+    'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h',
+    'adapter/base_v0_loader_guard.h', 'adapter/base_v0_loader_guard.m',
+    *(name for name, _ in EXTRA_PATCHES))
 DEFINES = ('NXNATIVE_NORMAL_POLICY=1', 'DM_SHELL=1', 'NXNATIVE_BASE_V0_MEMORY=1',
-           'NXNATIVE_BASE_V0_NORMAL_APIS=1')
+           'NXNATIVE_BASE_V0_NORMAL_APIS=1', 'NXNATIVE_BASE_V0_LOADER_GUARD=1')
 
 
 def record(raw):
@@ -214,7 +218,8 @@ def copy_inputs(component, output, lock, base, adapted, receipt):
     # Their original source and the baseline inventory remain unchanged.
     adapted.PATCHES = (*adapted.PATCHES, *EXTRA_PATCHES)
     adapted.COPIED_ADAPTERS = (*(n for n in adapted.COPIED_ADAPTERS if n != 'adapter/link_only_main.c'),
-        'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h', PROFILE)
+        'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h',
+        'adapter/base_v0_loader_guard.h', 'adapter/base_v0_loader_guard.m', PROFILE)
     private, expected = adapted.copy_private_inputs(component, output, lock, base, receipt)
     for name in MEMORY_FILES:
         row = lock['external_code_files'][name]
@@ -232,11 +237,15 @@ def compile_commands(private, output, units, sdk, base, adapted):
     commands = adapted.compile_commands(private, output, units, sdk, base)
     commands = [row for row in commands if Path(row['source']).name != 'link_only_main.c']
     template = next(row for row in commands if row['source'].endswith('/adapter/normal_policy.c'))
-    for name in MEMORY_UNITS:
+    for name in (*MEMORY_UNITS, 'adapter/base_v0_loader_guard.m'):
         source = private / name
         argv = list(template['argv'])
         argv[argv.index('-c') + 1] = str(source)
-        commands.append({'source': str(source), 'role': 'base_v0_complete_memory', 'argv': argv})
+        role = 'base_v0_complete_memory'
+        if source.suffix == '.m':
+            argv += ['-fobjc-arc', '-fblocks']
+            role = 'base_v0_loader_guard'
+        commands.append({'source': str(source), 'role': role, 'argv': argv})
     for index, row in enumerate(commands):
         source = Path(row['source'])
         obj = output / 'objects' / ('%03d-' % index + source.name + '.o')
@@ -250,8 +259,8 @@ def compile_commands(private, output, units, sdk, base, adapted):
                   '-I', str(private / 'memory_provider')]
         argv[argv.index('-c'):argv.index('-c')] = insert
         row.update(object=str(obj), depfile=str(dep))
-    if len(commands) != 139 or len({row['source'] for row in commands}) != 139:
-        raise ValueError('base-v0 UIKit host must compile exactly 139 distinct units')
+    if len(commands) != 140 or len({row['source'] for row in commands}) != 140:
+        raise ValueError('base-v0 UIKit host must compile exactly 140 distinct units')
     return commands
 
 
@@ -260,7 +269,9 @@ def strong_symbols(adapted):
         '_nxnative_base_v0_memory_' + name for name in ('reserve', 'layout', 'admit', 'record',
         'verify', 'initial_pending', 'guard', 'failure')} | {
         '_botw_base_v0_heap_plan_original_logical', '_botw_whole_address_space_reserve',
-        '_nxnative_base_v0_layer_scaling_mode', '_dm_guest_heap_current'}
+        '_nxnative_base_v0_layer_scaling_mode', '_dm_guest_heap_current'} | {
+        '_nxnative_base_v0_loader_' + name for name in ('preload', 'begin', 'layout', 'image',
+        'gate_count', 'registry', 'reference', 'complete', 'entry')}
 
 
 def verify_symbols(text, required):
@@ -323,7 +334,7 @@ def build(args, component=COMPONENT):
         receipt['base_v0_host_metadata_configured'] = True
         receipt['unit_counts'] = {'upstream': 126, 'vpx_decoder': 71, 'UIKit_entry_in_upstream': 1,
             'return_only_entry': 0, 'normal_policy': 2, 'base_v0_abi': 1,
-            'shader_provider': 6, 'complete_memory_provider': 4, 'total': 139}
+            'shader_provider': 6, 'complete_memory_provider': 4, 'loader_guard': 1, 'total': 140}
         if args.stage_only:
             receipt['status'] = 'staged-and-profile-generated-without-compilation'
         else:

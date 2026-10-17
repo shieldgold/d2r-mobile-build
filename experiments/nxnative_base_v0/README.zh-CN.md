@@ -37,7 +37,7 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 
 新增正常运行诊断封闭和完整条件着色器模块后的 136 个单元已在 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39016541153) 编译、强链接通过，本地重新核对了 1027 件来源及 576 份日志。诊断封闭保留正常线程、脏页、纹理上传、反馈快照和 PCM 输出；条件模块在实际绘制时选择模式、核对完整着色器身份并提交。独立复核发现的窗口原点切换竞争已修复：最终检查与锁定前移至 viewport 编码之前，保持到 draw；实际代码回归覆盖切换、并发 setter 与提前返回。这些 link-only 构建仍使用原 1.9 元数据与仅返回的独立入口，不能安装或启动游戏。
 
-`tools/build_base_v0_runtime.py --host-only --sdk iphoneos --output <新目录>` 改用专属 `profile/base_v0_runtime.tsv` 和原完整 `game.header`，生成 1.0.0 六模块、NVN52.32 与完整双摇杆布局的元数据；未知的 sampler／SSBO 表保持 -1。它去掉仅返回入口，保留真实 UIKit `_main`，后台宿主为 `dm_main`，并接入完整逻辑内存与正常账户／显示层 API，共 139 单元。`--stage-only` 仅准备来源与 header，完整 iPhoneOS 编译仍须实际执行。音频服务及本地装载合同尚待接入，所有产物明确不可安装、不可执行。
+`tools/build_base_v0_runtime.py --host-only --sdk iphoneos --output <新目录>` 改用专属 `profile/base_v0_runtime.tsv` 和原完整 `game.header`，生成 1.0.0 六模块、NVN52.32 与完整双摇杆布局的元数据；未知的 sampler／SSBO 表保持 -1。它去掉仅返回入口，保留真实 UIKit `_main`，后台宿主为 `dm_main`，并接入完整逻辑内存与正常账户／显示层 API。原 139 单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39016958941) 编译、强链接通过；下载工件中的实际 force registry 为 616 项。新增正常装载保护后共 140 单元，下一步执行该配置的真实 SDK 编译。`--stage-only` 仅准备来源与 header。完整音频仍待整合，所有这些产物明确不可安装、不可执行。
 
 着色器身份桥 `tools/shader_key_bridge.py` 已核对现有导出的 7908 个捕获，并保留其中 3173 个的四模式条件合同引用。它不生成着色器事实，也不声明整个游戏的目录完整。六模块框架由 `tools/pack_guest.py --rewrite <离线重写目录> --output <新目录>` 复用现有完整 Mach-O 生成器构建；本地框架已逐节还原验证，未签名或执行。
 
@@ -52,3 +52,5 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 音频的版本差异已有静态证据：1.0 SDK 没有新上游 CPU renderer 所需的完整导出，现有参数转换还会覆盖 REV1。正在接入项目既有完整 Eden renderer 服务端，并复用当前宿主的消息、事件和映射；不以静音或空返回冒充正常输出。
 
 编译、输入校验、安装和进程存活均不代表可玩。最终验收要求真实游戏画面、按键与双摇杆、声音、保存及重开。
+
+正常装载保护在原 `dlopen` 前验证磁盘框架、六模块和三十份装载表，在映射、重定位、force 选择与九个启动入口处继续核对固定合同；失败只输出固定错误。`tools/generate_base_v0_loader_contract.py` 完整复用既有静态生产器，唯一更新其过时的 614 项准入谓词，并独立重读当前宿主的实际登记表；最终音频宿主更改后必须重新生成，不能沿用早期宿主合同。保护及合同生产器的 15 项 owned 测试覆盖错误身份、顺序、引用计数和入口拒绝，不执行游戏。

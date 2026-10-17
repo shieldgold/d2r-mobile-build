@@ -1,8 +1,16 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 7551,
-      "sha256": "5a42c91c327207b5abe3c862deddd3106385fe5b2b955325733b718c673b54e2"
+      "bytes": 8356,
+      "sha256": "f5844dbcdaeb04ab49c2507f19bc2f5ed36ecc706a0f2fefb3ad1e92d274c8c4"
+    },
+    "adapter/base_v0_loader_guard.h": {
+      "bytes": 1328,
+      "sha256": "bde8b34794fc20ca2425fbf3ca95b99a775a9f71ff536dbc4528089b21df7121"
+    },
+    "adapter/base_v0_loader_guard.m": {
+      "bytes": 25877,
+      "sha256": "5e2d67daeaa2e4839c341e4520354d5c66c57237b33690162501ed46c2cb1bac"
     },
     "adapter/base_v0_memory.c": {
       "bytes": 5001,
@@ -56,6 +64,10 @@
       "bytes": 7215,
       "sha256": "f443d5d0ce382a52963c66302e8508fc00266ef5561bbf0b54b0327fc6b7913b"
     },
+    "patches/base-v0-normal-loader-guard.patch": {
+      "bytes": 9194,
+      "sha256": "5140394b6720796f9c6f5703b7925df487fdb2d214287fd8ec69db375d30f3d9"
+    },
     "patches/base-v0-signed-jump-table.patch": {
       "bytes": 2583,
       "sha256": "4bcb82fb7385e9105e8d42fb090dace02bcbed02679a7176c00ffa5ce5481f21"
@@ -97,8 +109,8 @@
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_base_v0_runtime.py": {
-      "bytes": 24035,
-      "sha256": "ee1a81ad132def61a3d05f817579af6428f20d8253117c2de10f385c19241f3f"
+      "bytes": 24713,
+      "sha256": "8f7618dad4ce833119214fc105c37b0fa65370e3435b3f580bb27f7c7b6e90c0"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,
@@ -107,6 +119,10 @@
     "tools/generate_base_v0_contract.py": {
       "bytes": 21031,
       "sha256": "c5a8b8fa076a2a7acf17f06e4a352ddffff9acf7b80c22752e85a5e51e4307b4"
+    },
+    "tools/generate_base_v0_loader_contract.py": {
+      "bytes": 6863,
+      "sha256": "d0df4e5df5b30ce407a35b26b26d1b8c57f2f89c1528b77c84f51f6ada35b2ed"
     },
     "tools/pack_guest.py": {
       "bytes": 8102,
@@ -194,6 +210,10 @@
     "experiments/botw_upstream_host/adapter/whole_policy.h": {
       "bytes": 2939,
       "sha256": "68c74045727d97526dfa229ea5565c6febfc072b496493de6426fdd7a15c9756"
+    },
+    "experiments/botw_upstream_host/adapter/whole_runtime_resources.m": {
+      "bytes": 13074,
+      "sha256": "e47ae2399de5492ed4da970505b7968db1c85824d20b781ae9b5d7e675ea30d0"
     },
     "experiments/botw_upstream_host/adapter/whole_shader_bundle_publication.h": {
       "bytes": 522,

@@ -77,8 +77,8 @@ class BaseV0Runtime(unittest.TestCase):
         tool=self.tool();base=load_source(C/'tools/build_link_only.py');adapted=load_source(C/'tools/build_adapted_link_only.py')
         units=json.loads((C/'compile_sources.json').read_bytes())['translation_units']
         commands=tool.compile_commands(self.work/'inputs',self.work,units,{'clang':'/owned/clang','sdk_path':'/owned/sdk'},base,adapted)
-        self.assertEqual(len(commands),139)
-        self.assertEqual(len({row['source'] for row in commands}),139)
+        self.assertEqual(len(commands),140)
+        self.assertEqual(len({row['source'] for row in commands}),140)
         self.assertFalse(any('link_only_main.c' in row['source'] for row in commands))
         ios=next(row for row in commands if row['source'].endswith('/dm/ios/Sources/main.m'))
         host=next(row for row in commands if row['source'].endswith('/dm/host/main.c'))
@@ -88,9 +88,12 @@ class BaseV0Runtime(unittest.TestCase):
             self.assertIn('-DNXNATIVE_NORMAL_POLICY=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_MEMORY=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_NORMAL_APIS=1',row['argv'])
+            self.assertIn('-DNXNATIVE_BASE_V0_LOADER_GUARD=1',row['argv'])
             self.assertIn('-march=armv8.2-a',row['argv'])
             self.assertNotIn('-mcpu=apple-a18',row['argv'])
         self.assertFalse(any('nxnative_upstream_ios_main' in arg for row in commands for arg in row['argv']))
+        guard=next(row for row in commands if row['source'].endswith('/adapter/base_v0_loader_guard.m'))
+        self.assertIn('-fobjc-arc',guard['argv']);self.assertIn('-fblocks',guard['argv'])
         argv,_=base.link_command(self.work,[row['object'] for row in commands],{'clang':'/owned/clang','sdk_path':'/owned/sdk'})
         self.assertIn('-Wl,-undefined,error',argv);self.assertIn('-Wl,-e,_main',argv)
         self.assertFalse(any('dynamic_lookup' in arg for arg in argv))
@@ -103,22 +106,28 @@ class BaseV0Runtime(unittest.TestCase):
         self.assertIn('_nxnative_base_v0_memory_reserve',required)
         self.assertIn('_botw_base_v0_heap_plan_original_logical',required)
         self.assertIn('_nxnative_base_v0_layer_scaling_mode',required)
+        for suffix in ('preload','begin','layout','image','gate_count','registry','reference','complete','entry'):
+            self.assertIn('_nxnative_base_v0_loader_'+suffix,required)
         text='\n'.join('0000000000001000 T '+symbol for symbol in required)
         self.assertEqual(tool.verify_symbols(text,required),required)
-        for symbol in ('_main','_dm_main','_nxnative_base_v0_memory_verify'):
+        for symbol in ('_main','_dm_main','_nxnative_base_v0_memory_verify','_nxnative_base_v0_loader_preload','_nxnative_base_v0_loader_entry'):
             changed='\n'.join(line for line in text.splitlines() if line.split()[-1]!=symbol)
             with self.subTest(symbol=symbol),self.assertRaises(ValueError):tool.verify_symbols(changed,required)
 
     def test_actual_fixed_patch_chain_copies_complete_memory_provider_and_detects_mutation(self):
         tool=self.tool();base=load_source(C/'tools/build_link_only.py');adapted=load_source(C/'tools/build_adapted_link_only.py')
         # Owned composition fixture: the production load_helpers gate is tested
-        # separately. Only this new profile is added to the in-memory fixture;
-        # existing source, patch and complete external provider hashes stay bound.
+        # separately. Newly frozen copied adapters may await root registration;
+        # only absent rows enter this owned fixture, never the production lock.
         lock=base.read_json(C/'SOURCE.lock.json')
-        lock['adapter_files'][tool.PROFILE]=base.file_record(PROFILE)
+        for name in (tool.PROFILE,'adapter/base_v0_loader_guard.h','adapter/base_v0_loader_guard.m'):
+            lock['adapter_files'].setdefault(name,base.file_record(C/name))
         receipt=tool.new_receipt();private,expected=tool.copy_inputs(C,self.work,lock,base,adapted,receipt)
         self.assertFalse((private/'adapter/link_only_main.c').exists())
-        self.assertEqual(len(receipt['patches']),8)
+        self.assertEqual(len(receipt['patches']),9)
+        self.assertEqual(receipt['patches'][-1]['changed_members'],['dm/host/loader.c','dm/host/main.c','dm/ios/Sources/main.m'])
+        self.assertEqual((private/'adapter/base_v0_loader_guard.m').read_bytes(),(C/'adapter/base_v0_loader_guard.m').read_bytes())
+        self.assertEqual((private/'adapter/base_v0_loader_guard.h').read_bytes(),(C/'adapter/base_v0_loader_guard.h').read_bytes())
         self.assertEqual(len(list((private/'memory_provider').iterdir())),6)
         header,record=tool.render_header(PROFILE.read_bytes(),json.loads((C/'profile/base_v0.json').read_bytes()),
             (private/'upstream/dm/games/game.py').read_bytes(),self.work)

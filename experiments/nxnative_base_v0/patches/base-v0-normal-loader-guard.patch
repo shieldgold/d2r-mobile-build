@@ -1,0 +1,160 @@
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -9,6 +9,10 @@
+ #include <mach-o/getsect.h>
+ #include <mach-o/ldsyms.h>
+ #include "hle.h"
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++#include "base_v0_loader_guard.h"
++#endif
++
+ 
+ module_t g_mod[MAX_MOD];
+ int g_nmod;
+@@ -119,6 +123,9 @@
+ 
+ // Forced take-over table (hle.h HLE_FORCE, the __DATA,swforce section): a hit overrides the definition inside the module
+ static const hle_force_ent *g_force; static unsigned g_nforce; static unsigned *g_force_hits;
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++static uint8_t *g_force_selected;
++#endif
+ static void force_init(void) {
+     unsigned long sz; g_force = (const hle_force_ent *)getsectiondata(&_mh_execute_header, "__DATA", "swforce", &sz);
+     g_nforce = g_force ? (unsigned)(sz / sizeof *g_force) : 0;
+@@ -126,10 +133,22 @@
+     for (unsigned i = 0; i < g_nforce; i++)
+         for (unsigned j = i + 1; j < g_nforce; j++)
+             if (!strcmp(g_force[i].name, g_force[j].name)) die("强制接管清单重复：%s", g_force[i].name);
+-}
+-static void *force_lookup(const char *name) {
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    _Static_assert(sizeof(hle_force_ent)==sizeof(nxnative_base_v0_loader_force),"native force24 layout changed");
++    if(!g_force||sz%sizeof *g_force)die("normal force registry");
++    g_force_selected=calloc(g_nforce+1,1);
++    if(!g_force_selected||nxnative_base_v0_loader_registry(g_force,g_nforce,g_force_selected))die("normal force registry");
++#endif
++
++}
++static void *force_lookup(module_t *m, const char *name) {
++    (void)m;
+     for (unsigned i = 0; i < g_nforce; i++)
+         if (!strcmp(g_force[i].name, name)) {
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++            if(!g_force_selected[i])return NULL;
++            if(nxnative_base_v0_loader_reference(m->name,name))die("normal force reference");
++#endif
+             if (!g_force_hits[i]++ && g_flag.imports) LOG("force %s  （%s）", name, g_force[i].why);
+             void *hlecount_wrap(const char *, const char *, void *); return hlecount_wrap("FORCE", name, g_force[i].fn);   // A counting stub when DM_HLECOUNT is set
+         }
+@@ -137,6 +156,10 @@
+ }
+ // Generic host: the list serves several games, so entries a game does not reference are only noted; with DM_FORCE_STRICT=1 it still fails loudly (for checking a mistyped list)
+ static void force_check(void) {
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    if(nxnative_base_v0_loader_complete())die("normal force completion");
++    return;
++#endif
+     unsigned unused = 0; int strict = getenv("DM_FORCE_STRICT") != NULL;
+     for (unsigned i = 0; i < g_nforce; i++)
+         if (!g_force_hits[i]) { if (strict || g_flag.imports) LOG("强制接管条目无任何引用：%s", g_force[i].name); unused++; }
+@@ -197,6 +220,9 @@
+             if (sscanf(line, "%lx %15s %d %lx", &ret, kind, &arg, &orig) == 4) { gate_register((uint64_t)m->base + ret, kind, arg, orig); ng++; }
+         fclose(f);
+     }
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    if(ng<0||nxnative_base_v0_loader_gate_count(m->name,(unsigned)ng))die("normal gate count");
++#endif
+     LOG("%s: gates %d patch_off %#llx keys %lu/%lu/%lu/%lu", m->name, ng, m->patch_off, g_key18, g_keytls, g_keytlr, g_keygate);
+ }
+ 
+@@ -236,7 +262,7 @@
+             unsigned type = ELF64_R_TYPE(r->r_info), si = ELF64_R_SYM(r->r_info);
+             if (type == R_AARCH64_RELATIVE) { *where = (uint64_t)m->base + r->r_addend; cnt[0]++; continue; }
+             const Elf64_Sym *s = &m->symtab[si];
+-            uint64_t v = (uint64_t)force_lookup(m->strtab + s->st_name);
++            uint64_t v = (uint64_t)force_lookup(m, m->strtab + s->st_name);
+             // Symbols the module defines itself are also looked up globally in load order (the ELF default; Horizon's rtld does the same): the definition of an earlier-loaded module overrides a later one; only local / non-default visibility binds to itself.
+             // Engage's main defines its own operator new / delete (Unity's memory manager) and sdk has a copy too (forwarding to malloc / free): previously sdk bound its own delete,
+             // so blocks from main's new were freed by sdk's libc++ string code into the SDK heap, and CentralHeap::Free reported NotNMallocPtr
+@@ -345,6 +371,10 @@
+     int front = m->patch_off < 0;
+     if (z0 + zw != (front ? m->file_image_len : (uint64_t)m->patch_off) || (z0 & 0x3FFF) || (zw & 0x3FFF) || (z1 & 0x3FFF) || ((uintptr_t)x0 & 0x3FFF) || ((uintptr_t)w & 0x3FFF) || ((uintptr_t)x1 & 0x3FFF))
+         die("%s 内嵌节布局不符（x0 %#lx w %#lx x1 %#lx，PATCH_OFF %#llx）", m->name, z0, zw, z1, (unsigned long long)m->patch_off);
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    const void *parts[]={x0,w,x1};size_t lengths[]={z0,zw,z1};
++    if(nxnative_base_v0_loader_image(m->name,parts,lengths))die("normal signed image");
++#endif
+     m->size = front ? m->image_size : m->patch_off + z1;
+     uint64_t pre = front ? (uint64_t)-m->patch_off : 0;
+     if (front) m->patch_len = z1;
+@@ -399,6 +429,9 @@
+ #endif
+ 
+ void load_modules(const char *dir, const char **names, int n) {
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    if(n<0||nxnative_base_v0_loader_begin(dir,names,(size_t)n))die("normal module order");
++#endif
+     // Map everything and parse the symbol tables first, then relocate all at once (cross-module symbols must all be in place first)
+     // DM_BOOTPROF: breakdown of ① host loading (milliseconds), to set the upper bound for ③ pre-relocation / mmap
+     uint64_t t0 = now_ns(), tm = 0, tp = 0, tg = 0, tr = 0, t;
+@@ -406,6 +439,10 @@
+         module_t *m = &g_mod[i];
+         strlcpy(m->name, names[i], sizeof m->name);
+         read_layout(m, dir);
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++        const uint64_t fields[]={m->text_end,m->ro_off,m->data_off,(uint64_t)m->patch_off,m->key_page_off,m->key_page_size};
++        if(nxnative_base_v0_loader_layout(m->name,fields,m->key_idx,m->build_id))die("normal module layout");
++#endif
+     }
+     create_keys();
+     for (int i = 0; i < n; i++) {
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -1,5 +1,9 @@
+ // Bootstrap: after loading the modules, initialize the SDK runtime in the real order of nn::init::Start (sdk+0x2b0470) in the SDK, then enter nnMain.
+ #include "dm.h"
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++#include "base_v0_loader_guard.h"
++#endif
++
+ #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
+ #include "base_v0_memory.h"
+ size_t dm_guest_heap_current(void);
+@@ -11,7 +15,14 @@
+ #include <unistd.h>
+ void probe_install(void); void ticks_install(void); void hid_keys_init(void); void tact_prefetch_start(const char *outdir); void tact_chk_init(void); void stubs_report(void); void crash_install(void); void guest_thread_init(void); uint32_t svc_thread_main_init(void);
+ typedef void (*fn0)(void); typedef void (*fn2)(uint64_t, uint64_t); typedef void (*fnp)(void *);
+-static void *req(const char *n){ void *p=guest_sym(n); if(!p) die("缺符号 %s", n); return p; }
++static void *req(const char *n){
++    void *p=guest_sym(n);if(!p)die("缺符号 %s",n);
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    module_t *m=module_of(p);
++    if(!m||nxnative_base_v0_loader_entry(n,m->name,(uint64_t)((uint8_t*)p-m->base)))die("normal entry identity");
++#endif
++    return p;
++}
+ 
+ // Game arguments: argv[0] is fixed to "game", and whatever follows "--" is appended as is (on a real device nn::init takes them from the process argument area and hands them to the SDK through SetHostArgc/Argv)
+ static char *g_argv[64] = {"game"}; static int g_argc = 1;
+--- a/dm/ios/Sources/main.m
++++ b/dm/ios/Sources/main.m
+@@ -7,6 +7,9 @@
+ #include <unistd.h>
+ #if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
+ #include "normal_policy.h"
++#endif
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++#include "base_v0_loader_guard.h"
+ #endif
+ #include "game_profile.h"   // game profile constants (the RomFS marker path)
+ 
+@@ -43,6 +46,9 @@
+     NSFileManager *fm = NSFileManager.defaultManager;
+     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+     NSString *res = NSBundle.mainBundle.resourcePath;
++#if defined(NXNATIVE_BASE_V0_LOADER_GUARD) && NXNATIVE_BASE_V0_LOADER_GUARD
++    if(nxnative_base_v0_loader_preload(res.fileSystemRepresentation))nxnative_normal_entry_failed();
++#endif
+     for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
+ #if !defined(NXNATIVE_NORMAL_POLICY) || !NXNATIVE_NORMAL_POLICY
+     // Log: the host only writes to stderr; redirect it to Documents/log.txt (the previous one is kept as log.prev.txt), retrieve it from the Files app when something goes wrong
