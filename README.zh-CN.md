@@ -6,7 +6,7 @@
 
 基于 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile) 的 **NO_XCODE** 方案，使用 GitHub Actions 构建未签名 IPA 和配套 Data 资源。可以从 Releases 下载，也可以按下方步骤自行构建。
 
-《旷野之息》的独立原生移植实验见 [BOTW 程序准备与真机宿主验证](docs/BOTW_NATIVE.zh-CN.md)。开发版已在 iPhone 上执行原始 SDK 初始化代码，尚不能游玩。
+《旷野之息》的当前原生移植见 [nxnative 与 BOTW 1.0.0 接入](experiments/nxnative_base_v0/README.zh-CN.md)：六模块宿主、图形、音频和触控已完成 iPhoneOS 编译，正在进行真机验证，尚未通过可玩验收。早期宿主记录见 [BOTW 程序准备与真机宿主验证](docs/BOTW_NATIVE.zh-CN.md)。
 
 ## 下载与安装
 

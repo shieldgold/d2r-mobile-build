@@ -2,6 +2,27 @@
 
 本目录对应用户已确认的 D2R 式原生移植路线。**开发版宿主已在 iPhone 上安装和执行原始 SDK 代码，尚不能游玩。** 现有 D2R 工作流不变。
 
+## 2026-10-17 当前接入
+
+当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `811572d64fdc49d0803f9ea78d4531cde8143e01` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39020136804) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
+
+本地候选 `1017.38` 已完成六模块装载表、实际宿主接口表和签名校验。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
+
+本次在项目专用 Python 环境重跑 316 项 nxnative 测试，全部通过且无跳过；GitHub 回读也确认上述 CI 的 head 和成功状态。iPhone 15 Pro 实读 iOS 27.2 Beta，已覆盖安装 `1.0.0 / 1017.38`。安装前后旧文稿的五个条目元数据一致；资源目录仍需完整传输后才能启动验收。
+
+本次资源传输的实际阻塞是空间不足：普通 `TotalDataAvailable` 显示约 189 GB，但应用文稿的 AFC `FSFreeBytes` 仅 167,809,024 字节，`FILE_OPEN` 返回 `NO_SPACE_LEFT`。不能仅凭前一个字段判断可写空间。新目录实存 13,577 份文件，按本地目录核对仍缺或大小不符 26,135 份、9,698,881,942 字节，尚未启动游戏。
+
+已开始将旧 `botw-romfs.bin` 完整备份到 Mac，计划只有在 14,420,017,152 字节及固定原镜像 SHA256 全部匹配后才释放手机副本。备份至 4,500,488,192 字节时设备断开，USB 清单为空、CoreDevice 显示 unavailable；原件未删除。断点及带最终全量摘要校验的续传脚本保留于本地 `outputs/botw-iphone15pro-20261017-1927/`，需重新连接并解锁同一台手机后继续。该阶段没有游戏画面、声音或保存重开验收结果。
+
+新宿主使用 `Documents/romfs` 中的完整资源目录，旧宿主的 `Documents/botw-romfs.bin` 不能直接代替它。保存位置为 `Documents/save`，旧 `Documents/botw-saves` 保留。覆盖安装时保留文稿，游戏内容与生成的着色器仅存放在本地忽略目录。
+
+本机只有 Command Line Tools，`xcrun devicectl` 找不到工具，但 CoreDevice 的独立工具位于 `/Library/Developer/PrivateFrameworks/CoreDevice.framework/Versions/A/Resources/bin/devicectl`。真机截图已用以下方式实际取得，避免把旧 screenshotr 或 WebDriverAgent 的连接失败当成游戏渲染结果：
+
+```sh
+uvx --from pymobiledevice3==11.34.0 pymobiledevice3 developer dvt screenshot \
+  /absolute/path/phone.png --udid "$BOTW_DEVICE_UDID" --userspace
+```
+
 ## 已在当前输入上验证
 
 2026-10-15，以当前下载的 Switch 本体 `01007ef00011e000` / 包版本 `0` 为实验输入：
