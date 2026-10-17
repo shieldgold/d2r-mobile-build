@@ -77,8 +77,8 @@ class BaseV0Runtime(unittest.TestCase):
         tool=self.tool();base=load_source(C/'tools/build_link_only.py');adapted=load_source(C/'tools/build_adapted_link_only.py')
         units=json.loads((C/'compile_sources.json').read_bytes())['translation_units']
         commands=tool.compile_commands(self.work/'inputs',self.work,units,{'clang':'/owned/clang','sdk_path':'/owned/sdk'},base,adapted)
-        self.assertEqual(len(commands),140)
-        self.assertEqual(len({row['source'] for row in commands}),140)
+        self.assertEqual(len(commands),235)
+        self.assertEqual(len({row['source'] for row in commands}),235)
         self.assertFalse(any('link_only_main.c' in row['source'] for row in commands))
         ios=next(row for row in commands if row['source'].endswith('/dm/ios/Sources/main.m'))
         host=next(row for row in commands if row['source'].endswith('/dm/host/main.c'))
@@ -89,6 +89,7 @@ class BaseV0Runtime(unittest.TestCase):
             self.assertIn('-DNXNATIVE_BASE_V0_MEMORY=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_NORMAL_APIS=1',row['argv'])
             self.assertIn('-DNXNATIVE_BASE_V0_LOADER_GUARD=1',row['argv'])
+            self.assertIn('-DNXNATIVE_BASE_V0_AUDREN=1',row['argv'])
             self.assertIn('-march=armv8.2-a',row['argv'])
             self.assertNotIn('-mcpu=apple-a18',row['argv'])
         self.assertFalse(any('nxnative_upstream_ios_main' in arg for row in commands for arg in row['argv']))
@@ -97,6 +98,40 @@ class BaseV0Runtime(unittest.TestCase):
         argv,_=base.link_command(self.work,[row['object'] for row in commands],{'clang':'/owned/clang','sdk_path':'/owned/sdk'})
         self.assertIn('-Wl,-undefined,error',argv);self.assertIn('-Wl,-e,_main',argv)
         self.assertFalse(any('dynamic_lookup' in arg for arg in argv))
+
+    def test_complete_audio_inventory_uses_prepared_service_and_cxx_link(self):
+        tool=self.tool();base=load_source(C/'tools/build_link_only.py');adapted=load_source(C/'tools/build_adapted_link_only.py')
+        units=json.loads((C/'compile_sources.json').read_bytes())['translation_units']
+        sdk={'clang':'/owned/clang','sdk_path':'/owned/sdk'}
+        commands=tool.compile_commands(self.work/'inputs',self.work,units,sdk,base,adapted)
+        audio=[r for r in commands if r['role'].startswith('audren:')]
+        self.assertEqual(len(audio),95)
+        cpp=[r for r in audio if r['source'].endswith('.cpp')]
+        self.assertEqual(len(cpp),79)
+        for r in cpp:
+            self.assertIn('-std=c++23',r['argv']);self.assertIn('-fexceptions',r['argv'])
+            self.assertIn('-DFMT_HEADER_ONLY=1',r['argv']);self.assertNotIn('-std=gnu11',r['argv'])
+        services=[r for r in audio if r['source'].endswith('/native/botw_host/services.c')]
+        self.assertEqual(len(services),1);self.assertIn('/audio/services/',services[0]['source'])
+        self.assertFalse(any(r['source'].endswith('/kernel.c') or 'mock' in r['source'] for r in audio))
+        argv,_=tool.link_command(self.work,[r['object'] for r in commands],sdk,base)
+        self.assertIn('-lc++',argv);self.assertIn('Security',argv)
+        self.assertIn('-Wl,-undefined,error',argv)
+        self.assertEqual(sum(n for role,n in tool.verify_compile_roles(commands).items() if role.startswith('audren:')),95)
+        with self.assertRaises(ValueError):tool.verify_compile_roles(commands[:-1])
+        cpp[0]['argv'].remove('-fexceptions')
+        with self.assertRaises(ValueError):tool.verify_compile_roles(commands)
+
+    def test_audio_dependency_normalization_binds_duplicates_and_rejects_aliases(self):
+        tool=self.tool();root=self.work/'repo';(root/'native').mkdir(parents=True);(root/'platform').mkdir()
+        source=root/'platform/memory.h';source.write_text('/* actual owned header */\n')
+        row=tool.record(source.read_bytes())
+        normalized=tool.normalize_audio_dependencies(root,[{'path':'native/../platform/memory.h',**row},{'path':'platform/memory.h',**row}])
+        self.assertEqual(normalized,{'platform/memory.h':row})
+        with self.assertRaises(ValueError):tool.normalize_audio_dependencies(root,[{'path':'../escape',**row}])
+        (root/'linked').symlink_to(root/'native',target_is_directory=True)
+        with self.assertRaises(ValueError):tool.normalize_audio_dependencies(root,[{'path':'linked/../platform/memory.h',**row}])
+        with self.assertRaises(ValueError):tool.normalize_audio_dependencies(root,[{'path':'platform/memory.h',**row},{'path':'platform/memory.h',**{**row,'sha256':'0'*64}}])
 
     def test_final_symbols_require_real_entry_memory_provider_and_base0_api(self):
         tool=self.tool();adapted=load_source(C/'tools/build_adapted_link_only.py')
@@ -108,9 +143,11 @@ class BaseV0Runtime(unittest.TestCase):
         self.assertIn('_nxnative_base_v0_layer_scaling_mode',required)
         for suffix in ('preload','begin','layout','image','gate_count','registry','reference','complete','entry'):
             self.assertIn('_nxnative_base_v0_loader_'+suffix,required)
+        for symbol in ('_nxnative_base_v0_audren_prepare','_botw_audren_update','_botw_pcm_write','_botw_whole_kernel_producer_signal'):
+            self.assertIn(symbol,required)
         text='\n'.join('0000000000001000 T '+symbol for symbol in required)
         self.assertEqual(tool.verify_symbols(text,required),required)
-        for symbol in ('_main','_dm_main','_nxnative_base_v0_memory_verify','_nxnative_base_v0_loader_preload','_nxnative_base_v0_loader_entry'):
+        for symbol in ('_main','_dm_main','_nxnative_base_v0_memory_verify','_nxnative_base_v0_loader_preload','_nxnative_base_v0_loader_entry','_nxnative_base_v0_audren_prepare','_botw_audren_update','_botw_pcm_write'):
             changed='\n'.join(line for line in text.splitlines() if line.split()[-1]!=symbol)
             with self.subTest(symbol=symbol),self.assertRaises(ValueError):tool.verify_symbols(changed,required)
 
@@ -120,12 +157,21 @@ class BaseV0Runtime(unittest.TestCase):
         # separately. Newly frozen copied adapters may await root registration;
         # only absent rows enter this owned fixture, never the production lock.
         lock=base.read_json(C/'SOURCE.lock.json')
-        for name in (tool.PROFILE,'adapter/base_v0_loader_guard.h','adapter/base_v0_loader_guard.m'):
+        for name in tool.REQUIRED:
             lock['adapter_files'].setdefault(name,base.file_record(C/name))
+        for name in tool.AUDIO_EXTRA_FILES:
+            lock['external_code_files'].setdefault(name,base.file_record(ROOT/name))
         receipt=tool.new_receipt();private,expected=tool.copy_inputs(C,self.work,lock,base,adapted,receipt)
         self.assertFalse((private/'adapter/link_only_main.c').exists())
-        self.assertEqual(len(receipt['patches']),9)
-        self.assertEqual(receipt['patches'][-1]['changed_members'],['dm/host/loader.c','dm/host/main.c','dm/ios/Sources/main.m'])
+        self.assertEqual(len(receipt['patches']),11)
+        self.assertEqual(receipt['patches'][-1]['changed_members'],['dm/host/hle_audren.c','dm/host/main.c','dm/ios/Sources/front_ios.m'])
+        self.assertEqual(len(receipt['audren_source_inventory']['translation_units']),95)
+        self.assertEqual(len(receipt['audio_staging_patches']),6)
+        self.assertEqual(len(receipt['typed_vertex_patch']['changed_members']),7)
+        self.assertEqual(receipt['normal_graphics_counter_patch']['changed_members'],['dm/gfx/nvn/nvn_mtl.m'])
+        for name in ('typed-vertex-private-append','normal-graphics-counter-patch'):
+            stdout=(self.work/'logs'/(name+'.stdout')).read_text()
+            self.assertNotIn('offset',stdout);self.assertNotIn('fuzz',stdout)
         self.assertEqual((private/'adapter/base_v0_loader_guard.m').read_bytes(),(C/'adapter/base_v0_loader_guard.m').read_bytes())
         self.assertEqual((private/'adapter/base_v0_loader_guard.h').read_bytes(),(C/'adapter/base_v0_loader_guard.h').read_bytes())
         self.assertEqual(len(list((private/'memory_provider').iterdir())),6)
@@ -137,10 +183,30 @@ class BaseV0Runtime(unittest.TestCase):
             command=['clang','-std=gnu11','-c','-Wall','-Wno-unused-function',
                 *['-D'+d for d in tool.DEFINES],'-Dmain=dm_main',
                 '-I'+str(generated),'-I'+str(private/'adapter'),'-I'+str(private/'memory_provider'),
+                *tool.audio_include_flags(private,receipt['audren_source_inventory']),
                 '-I'+str(private/'upstream/dm/gfx/nvn/include'),
                 str(source),'-o',str(self.work/(source.name+'.o'))]
             result=subprocess.run(command,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        # Consume the actual builder recipes with the local Mac target only.
+        # This verifies C++/prepared-header integration, never iPhone admission.
+        units=json.loads((C/'compile_sources.json').read_bytes())['translation_units']
+        plans=tool.compile_commands(private,self.work,units,{'clang':'clang','sdk_path':'/owned/sdk'},base,adapted)
+        known={str(private/name):row for name,row in expected.items()}
+        known[str(generated/'game_profile.h')]=tool.record(header.encode())
+        for suffix in ('/audio/eden/src/audio_core/audio_render_manager.cpp','/audio/repository/experiments/botw_audio_renderer/native/renderer_host.cpp'):
+            plan=next(row for row in plans if row['source'].endswith(suffix));command=list(plan['argv'])
+            for flag in ('-target','-isysroot'):
+                index=command.index(flag);del command[index:index+2]
+            obj=self.work/(Path(plan['source']).name+'.o');dep=obj.with_suffix('.d')
+            for flag,value in (('-o',obj),('-MF',dep),('-MT',obj)):
+                command[command.index(flag)+1]=str(value)
+            result=subprocess.run(command,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            actual=base.parse_depfile(dep)
+            sdk=next((p.parent for p in actual if p.name=='SDKSettings.json'),self.work/'sdk')
+            dependencies=base.verify_dependencies(actual,known,sdk,self.work/'builtins')
+            self.assertIn(plan['source'],{r['path'] for r in dependencies['bound_inputs']})
         target=private/'memory_provider/base_v0_heap.c';target.write_bytes(target.read_bytes()+b'\n/* owned mutation */\n')
         with self.assertRaisesRegex(ValueError,'changed'):adapted.verify_private(private,expected,base)
 

@@ -1,0 +1,100 @@
+--- a/dm/host/hle_audren.c
++++ b/dm/host/hle_audren.c
+@@ -27,17 +27,21 @@
+ static void *gsym(const char *n) { void *p = guest_sym(n); if (!p) die("audren：缺 SDK 符号 %s", n); return p; }
+ static void cpu_manual(uint8_t *dst, const uint8_t *src) { memcpy(dst, src, P_SIZE); *(int32_t *)(dst + P_DEVICE) = 1; *(int32_t *)(dst + P_MODE) = 1; }
+ 
++#if !defined(NXNATIVE_BASE_V0_AUDREN) || !NXNATIVE_BASE_V0_AUDREN
+ HLE_FORCE("_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE", "渲染器工作区大小：按 CPU 渲染 + 手动执行的参数算",
+           size_t, h_ar_WorkSize, const uint8_t *param) {
+     static size_t (*orig)(const uint8_t *); if (!orig) orig = gsym("_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE");
+     uint8_t p[P_SIZE]; cpu_manual(p, param); return orig(p);
+ }
++#endif
++#if !defined(NXNATIVE_BASE_V0_AUDREN) || !NXNATIVE_BASE_V0_AUDREN
+ HLE_FORCE("_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleERKNS0_22AudioRendererParameterEPvm", "开渲染器：改成 CPU 渲染 + 手动执行后走 SDK 进程内渲染器",
+           Result, h_ar_Open0, void **handle, const uint8_t *param, void *work, size_t sz) {
+     static Result (*orig)(void **, const uint8_t *, void *, size_t);
+     if (!orig) orig = gsym("_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleERKNS0_22AudioRendererParameterEPvm");
+     uint8_t p[P_SIZE]; cpu_manual(p, param); return orig(handle, p, work, sz);
+ }
++#endif
+ 
+ // ---------- rendering and output ----------
+ static void *g_handle[2];                    // AudioRendererHandle (renderer object, client state)
+@@ -74,6 +78,7 @@
+     }
+ }
+ 
++#if !defined(NXNATIVE_BASE_V0_AUDREN) || !NXNATIVE_BASE_V0_AUDREN
+ HLE_FORCE("_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleEPNS_2os11SystemEventERKNS0_22AudioRendererParameterEPvm", "开渲染器（带事件）：CPU 渲染 + 手动执行，宿主起渲染线程",
+           Result, h_ar_Open, void **handle, void *ev, const uint8_t *param, void *work, size_t sz) {
+     static Result (*orig)(void **, void *, const uint8_t *, void *, size_t);
+@@ -89,11 +94,14 @@
+     dm_guest_thread_spawn(render_main, NULL, 9, 0x10000);
+     return r;
+ }
++#endif
++#if !defined(NXNATIVE_BASE_V0_AUDREN) || !NXNATIVE_BASE_V0_AUDREN
+ HLE_FORCE("_ZN2nn5audio18CloseAudioRendererENS0_19AudioRendererHandleE", "关渲染器：先停宿主渲染线程再交 SDK", void, h_ar_Close, void *obj, void *state) {
+     static void (*orig)(void *, void *); if (!orig) orig = gsym("_ZN2nn5audio18CloseAudioRendererENS0_19AudioRendererHandleE");
+     if (obj == g_handle[0]) { atomic_store(&g_open, 0); usleep(20000); }   // the render thread checks every round; wait a little over one frame
+     orig(obj, state);
+ }
++#endif
+ 
+ // DeviceSink input mix buffers → int16 stereo. The command ID is 0x13 in SDK 16; SDK 20 inserted a command before it, making it 0x14 (written at sdk+0x233f44, same layout: 0x148 bytes,
+ //   +0x128 upsample buffer, +0x130 input count, +0x134 input indices). render_once sets it by layout
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -9,6 +9,7 @@
+ size_t dm_guest_heap_current(void);
+ #endif
+ #include "front.h"
++#include "base_v0_audren.h"
+ #include <stdatomic.h>
+ #include <sys/sysctl.h>
+ #include <sys/time.h>
+@@ -33,6 +34,7 @@
+     { void inflate_bench_maybe(void); inflate_bench_maybe(); }   // DM_INFLATE_BENCH test mode (for diagnostics, exits when done)
+     crash_sample_self();   // DM_SAMPLE sampling (for diagnostics)
+     uint32_t hmain = svc_thread_main_init();   // Main thread handle: x0 of nnosInitialize (stored in an sdk global, used by ThreadManagerImplByHorizon); x1 = pointer to the argument area
++    if(nxnative_base_v0_audren_prepare())nxnative_normal_failure();
+     // Copy Start step by step: _init_libc1 = __nnmusl_init_locks (initializes the stdio etc. locks as recursive locks; skipping it self-deadlocks on nested locking in putc) + __init_ssp.
+     // The three callbacks passed in by rtld: A only sets an rtld flag (skipped), B = each module's DT_INIT (before nnMain), C = destructors (not done)
+     ((fn0)req("_init_libc0"))();
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -8,6 +8,7 @@
+ #include "front.h"
+ #include "hle.h"
+ #include "dm.h"
++#include "base_v0_audren.h"
+ 
+ UIView *dm_gamepad_view(CGRect frame);
+ void dm_gamepad_reset(void);
+@@ -128,7 +129,9 @@
+     if (![s setCategory:AVAudioSessionCategorySoloAmbient error:&e]) LOG("【红】音频会话类别设不上：%s", e.localizedDescription.UTF8String);
+     [s setPreferredSampleRate:48000 error:nil];
+     if (![s setPreferredIOBufferDuration:0.005 error:&e]) LOG("【红】音频会话 I/O 缓冲时长设不上：%s", e.localizedDescription.UTF8String);
+-    if (![s setActive:YES error:&e]) LOG("【红】音频会话激活失败：%s", e.localizedDescription.UTF8String);
++    BOOL audio_available=[s setActive:YES error:&e];
++    if (!audio_available) LOG("【红】音频会话激活失败：%s", e.localizedDescription.UTF8String);
++    if(nxnative_base_v0_audren_audio_available(audio_available?1:0))nxnative_normal_failure();
+     LOG("音频会话：采样率 %.0f Hz，I/O 缓冲 %.2f ms（要 5 ms）", s.sampleRate, s.IOBufferDuration * 1000);
+ }
+ 
+@@ -136,9 +139,9 @@
+ void front_ios_focus_event(int ev) {
+     if (!g_layer) return;
+     switch (ev) {
+-        case 0: dm_gamepad_reset(); dm_focus_set(2); break;
+-        case 1: dm_focus_set(3); dm_audio_suspend(1); guest_clock_freeze_for(1, 1); dm_gfx_suspend(1); break;
+-        case 2: dm_gfx_suspend(0); guest_clock_freeze_for(1, 0); front_ios_audio_session(); dm_audio_suspend(0); dm_focus_set(2); break;
+-        case 3: dm_focus_set(1); break;
++        case 0: if(nxnative_base_v0_audren_focus(1,0))nxnative_normal_failure(); dm_gamepad_reset(); dm_focus_set(2); break;
++        case 1: if(nxnative_base_v0_audren_focus(0,0))nxnative_normal_failure(); dm_focus_set(3); dm_audio_suspend(1); guest_clock_freeze_for(1, 1); dm_gfx_suspend(1); break;
++        case 2: dm_gfx_suspend(0); guest_clock_freeze_for(1, 0); front_ios_audio_session(); dm_audio_suspend(0); if(nxnative_base_v0_audren_focus(1,0))nxnative_normal_failure(); dm_focus_set(2); break;
++        case 3: if(nxnative_base_v0_audren_focus(1,1))nxnative_normal_failure(); dm_focus_set(1); break;
+     }
+ }

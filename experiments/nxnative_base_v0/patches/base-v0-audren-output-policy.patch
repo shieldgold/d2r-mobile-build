@@ -1,0 +1,78 @@
+--- a/eden/src/common/logging.h
++++ b/eden/src/common/logging.h
+@@ -37,6 +37,15 @@
+     }
+ };
+ 
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++/* No format arguments are evaluated in the ordinary product. */
++#define LOG_TRACE(...) ((void)0)
++#define LOG_DEBUG(...) ((void)0)
++#define LOG_INFO(...) ((void)0)
++#define LOG_WARNING(...) ((void)0)
++#define LOG_ERROR(...) ((void)0)
++#define LOG_CRITICAL(...) ((void)0)
++#else
+ #ifdef _DEBUG
+ #define LOG_TRACE(log_class, ...) \
+     Common::Log::FmtLogMessage(Common::Log::Class::log_class, Common::Log::Level::Trace, \
+@@ -60,6 +69,8 @@
+ #define LOG_CRITICAL(log_class, ...) \
+     ::Common::Log::FmtLogMessage(::Common::Log::Class::log_class, ::Common::Log::Level::Critical, \
+        __FILE__, __LINE__, __func__, __VA_ARGS__)
++
++#endif
+ 
+ namespace Common::Log {
+ 
+--- a/native/common_ports.cpp
++++ b/native/common_ports.cpp
+@@ -12,12 +12,16 @@
+ namespace Common::Log {
+ void FmtLogMessageImpl(Class, Level level, const char*, unsigned, const char*,
+                        fmt::string_view format, const fmt::format_args& args) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)level;(void)format;(void)args;
++#else
+     const auto message = fmt::vformat(format, args);
+     static std::mutex output;
+     std::lock_guard lock(output);
+     std::fprintf(stderr, "[native audio:%u] ", static_cast<unsigned>(level));
+     std::fwrite(message.data(), 1, message.size(), stderr);
+     std::fputc('\n', stderr);
++#endif
+ }
+ } // namespace Common::Log
+ 
+--- a/pcm/dm/host/botw_pcm.c
++++ b/pcm/dm/host/botw_pcm.c
+@@ -60,7 +60,11 @@
+ 
+ #include <AudioToolbox/AudioToolbox.h>
+ 
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#define PCM_LOG(...) ((void)0)
++#else
+ #define PCM_LOG(...) do { fprintf(stderr, "[dm] BotW PCM: " __VA_ARGS__); fputc('\n', stderr); } while (0)
++#endif
+ 
+ enum {
+     PCM_RATE = 48000,
+--- a/services/native/botw_host/services.c
++++ b/services/native/botw_host/services.c
+@@ -2086,6 +2086,15 @@
+     }
+     if (!o) return problem(error, cap, "CMIF session has no live root object");
+     if (o->borrowed || o->initializing) return problem(error, cap, "IPC object Busy during backend initialization/borrow");
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* The normal logger discards its explicit diagnostic payload before any
++     * pointer staging, text read, LEB decoding or formatting. Reply writes
++     * still use the complete existing checked IPC output path. */
++    if (o->kind == OBJECT_LOGGER && r.command == 0) {
++        if (s->write_guest && prepare_host_output(s, transfer->ipc_address, capacity, "IPC logger reply preflight", error, cap)) return -1;
++        response(ipc, capacity, &r, NULL, 0, 0, 0); return 0;
++    }
++#endif
+     if (stage_pointers(s, o, &r, ipc, transfer, capacity, error, cap)) return -1;
+     if (r.output_count && o->kind != OBJECT_STORAGE_ACCESSOR && o->kind != OBJECT_DISPLAY_CONTROLLER && o->kind != OBJECT_ROMFS_STORAGE && o->kind != OBJECT_ROMFS_FILE && o->kind != OBJECT_AOC && o->kind != OBJECT_ACCOUNT && o->kind != OBJECT_SAVE_FILE &&
+             !(o->kind == OBJECT_SETTINGS && r.command == 1 && r.output_static_count == 1) &&

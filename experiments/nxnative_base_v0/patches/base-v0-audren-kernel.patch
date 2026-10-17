@@ -1,0 +1,522 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -1,6 +1,9 @@
+ // Horizon kernel system calls (triggered by the SDK runtime once the SDK is loaded). Only what the P1 boot chain needs is implemented: memory layout + heap + query + debug output + timing.
+ // Register convention: inputs w1.. / outputs w0=Result, x1=value (GetInfo / SetHeapSize), consistent with the public Horizon ABI.
+ #include "dm.h"
++#include "base_v0_audren_memory.h"
++#include "whole_transfer_internal.h"
++#include "whole_ipc.h"
+ #if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
+ #include "normal_failures.h"
+ #endif
+@@ -32,7 +35,7 @@
+ #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
+ int dm_guest_heap_readable(uint64_t a, size_t n);
+ #else
+-int dm_guest_heap_readable(uint64_t a, size_t n) { uint64_t b = (uint64_t)(uintptr_t)g_heap; size_t cur = g_heap_cur; return g_heap && a >= b && n <= cur && a - b <= cur - n; }
++int dm_guest_heap_readable(uint64_t a,size_t n) { return nxnative_audren_heap_readable(a,n); }
+ #endif
+ static uint8_t *g_alias; static size_t g_alias_cap;
+ static _Atomic uint64_t *g_alias_bits;   // alias region page bitmap (alias_pages)
+@@ -123,20 +126,28 @@
+ 
+ // Registry of mapped ranges (MapMemory stacks, MapPhysicalMemory alias pages), QueryMemory reports from it; the SDK relies on it to find free space
+ #define MAX_MAP 4096
+-static struct { uint64_t base, size, src; uint32_t state; } g_map[MAX_MAP];
++static struct { uint64_t base, size, src; uint32_t state; botw_whole_transfer_object *transfer; int normal_pin; uint64_t alias_source; size_t alias_size; void *alias_backing; } g_map[MAX_MAP];
+ static int g_nmap;
+ static pthread_mutex_t g_map_lock = PTHREAD_MUTEX_INITIALIZER;
+ static int map_find(uint64_t a, uint64_t n) {       // returns a 1-based index, 0 = no overlap
+     for (int i = 0; i < g_nmap; i++) if (a < g_map[i].base + g_map[i].size && g_map[i].base < a + n) return i + 1;
+     return 0;
+ }
+-static void map_add(uint64_t b, uint64_t n, uint64_t src, uint32_t st) {
+-    pthread_mutex_lock(&g_map_lock);
+-    if (g_nmap >= MAX_MAP) die("映射表满");
+-    g_map[g_nmap++] = (typeof(g_map[0])){b, n, src, st};
+-    pthread_mutex_unlock(&g_map_lock);
+-}
+-static void map_del(int i) { pthread_mutex_lock(&g_map_lock); g_map[i] = g_map[--g_nmap]; pthread_mutex_unlock(&g_map_lock); }
++/* Reuse the complete one-catalog transfer/heap lease implementation.
++ * V6 remains the sole outer memory lock; G -> dirty -> memory -> map. */
++#define g_heap_resize_lock g_memory_lock
++static int nxnative_audren_alias_access_locked(uint64_t,size_t);
++#define dm_guest_heap_readable nxnative_audren_heap_readable
++#include "base_v0_audren_transfer_memory.inc"
++#undef dm_guest_heap_readable
++#include "whole_heap_lease_memory.inc"
++int nxnative_base_v0_audren_mapping_overlap(uint64_t a,size_t n) {
++    pthread_mutex_lock(&g_memory_lock); pthread_mutex_lock(&g_map_lock);
++    int overlap=0;
++    for(int i=0;i<g_nmap;i++) if(g_map[i].transfer &&
++        (whole_range_overlap(a,n,g_map[i].src,g_map[i].size)||whole_range_overlap(a,n,g_map[i].base,g_map[i].size))){overlap=1;break;}
++    pthread_mutex_unlock(&g_map_lock);pthread_mutex_unlock(&g_memory_lock);return overlap;
++}
+ 
+ // One bit per 4 KB page of the alias region (mapped = 1): Map sets bits, Unmap clears them; returns the number of pages whose state really changed (signed: positive for Map, negative for Unmap)
+ static int64_t alias_pages(uint64_t off, uint64_t n, int map) {
+@@ -163,14 +174,14 @@
+     return 0;
+ }
+ static int normal_heap_plain(uint64_t a,size_t n) {
+-    return normal_range((uintptr_t)g_heap,g_heap_cur,a,n)&&!normal_borrowed(a,n);
++    return normal_range((uintptr_t)g_heap,g_heap_cur,a,n)&&whole_logical_overlay_locked(a,n,1,1);
+ }
+ int dm_guest_heap_readable(uint64_t a,size_t n) {
+-    pthread_mutex_lock(&g_memory_lock); int valid=g_heap&&normal_heap_plain(a,n);
+-    pthread_mutex_unlock(&g_memory_lock);return valid;
++    return nxnative_audren_heap_readable(a,n);
+ }
+ static int normal_alias_bit(size_t page);
+ static int normal_output(uint64_t a,size_t n) {
++    if(!whole_logical_overlay_locked(a,n,1,1))return 0;
+     if((a&7)||!a) return 0;
+     if(normal_heap_plain(a,n)) return 1;
+     if(n&&normal_range((uintptr_t)g_alias,g_alias_cap,a,n)) {
+@@ -178,7 +189,7 @@
+         for(size_t page=offset>>12;page<=(offset+n-1)>>12;page++)if(!normal_alias_bit(page))return 0;
+         return 1;
+     }
+-    for(int i=0;i<g_nmap;i++) if(normal_range(g_map[i].base,g_map[i].size,a,n)) return 1;
++    for(int i=0;i<g_nmap;i++) if(!g_map[i].transfer&&normal_range(g_map[i].base,g_map[i].size,a,n)) return 1;
+     for(int i=0;i<g_nmod;i++) {
+         module_t *m=&g_mod[i]; uint64_t start=(uintptr_t)m->base;
+         if(normal_range(start,m->size,a,n) && a-start>=m->data_off && m->patch_off>0 &&
+@@ -189,6 +200,12 @@
+     return top>=size&&normal_range(top-size,size,a,n);
+ }
+ static int normal_alias_bit(size_t page) { return (atomic_load(&g_alias_bits[page>>6])>>(page&63))&1; }
++static int nxnative_audren_alias_access_locked(uint64_t a,size_t n) {
++    if(!n||!normal_range((uintptr_t)g_alias,g_alias_cap,a,n))return 0;
++    size_t off=a-(uintptr_t)g_alias;
++    for(size_t p=off>>12;p<=(off+n-1)>>12;p++)if(!normal_alias_bit(p))return 0;
++    return 1;
++}
+ static int normal_alias_query(uint64_t a,uint64_t *base,uint64_t *size,uint64_t *state,uint64_t *perm) {
+     if(!normal_range((uintptr_t)g_alias,g_alias_cap,a,1)) return 0;
+     size_t page=(a-(uintptr_t)g_alias)>>12,first=page,last=page+1,count=g_alias_cap>>12;
+@@ -209,6 +226,13 @@
+ #endif
+     { void hlecount_svc(int); hlecount_svc(num); }   // DM_HLECOUNT: svc counts by number
+     mem_init();
++    { char error[256];
++      int handled=botw_whole_transfer_dispatch(num,regs,error,sizeof error);
++      if(handled<0)nxnative_normal_failure();
++      if(handled)return regs[0];
++      handled=botw_whole_ipc_dispatch(num,regs,error,sizeof error);
++      if(handled<0)nxnative_normal_failure();
++      if(handled)return regs[0]; }
+     if (svc_thread(num, regs)) return regs[0];
+     { uint64_t svc_host_call(int, uint64_t *); if (num >= 0x80 && svc_host_call(num, regs)) return regs[0]; }   // from 0x80: host calls by cut convention (hle_tact.c)
+     switch (num) {
+@@ -255,12 +279,12 @@
+         uint64_t dst=regs[0],src=regs[1],n=regs[2];regs[0]=0xd401;
+         pthread_mutex_lock(&g_memory_lock);
+         if(!n||((dst|src|n)&0xfff)||!normal_range((uintptr_t)g_stack,g_stack_cap,dst,n)||
+-           !normal_heap_plain(src,n)||normal_borrowed(dst,n)||g_nmap>=MAX_MAP)goto normal_map_done;
++           !normal_heap_plain(src,n)||normal_borrowed(src,n)||normal_borrowed(dst,n)||g_nmap>=MAX_MAP)goto normal_map_done;
+         size_t pg=(size_t)getpagesize();uintptr_t lo=dst&~(pg-1),hi=(dst+n+pg-1)&~(pg-1);
+         if(!normal_range((uintptr_t)g_stack,g_stack_cap,lo,hi-lo))goto normal_map_done;
+         if(mprotect((void*)lo,hi-lo,PROT_READ|PROT_WRITE)) {regs[0]=0xd001;goto normal_map_done;}
+         memcpy((void*)(uintptr_t)dst,(void*)(uintptr_t)src,n);
+-        g_map[g_nmap++]=(typeof(g_map[0])){dst,n,src,0xb};regs[0]=0;
++        g_map[g_nmap++]=(typeof(g_map[0])){.base=dst,.size=n,.src=src,.state=0xb};regs[0]=0;
+ normal_map_done:
+         pthread_mutex_unlock(&g_memory_lock);return 0;
+     }
+@@ -282,7 +306,7 @@
+ case 0x05: {
+         uint64_t dst=regs[0],src=regs[1],n=regs[2];regs[0]=0xd401;
+         pthread_mutex_lock(&g_memory_lock);
+-        for(int i=0;i<g_nmap;i++)if(g_map[i].base==dst&&g_map[i].src==src&&g_map[i].size==n&&
++        for(int i=0;i<g_nmap;i++)if(!g_map[i].transfer&&g_map[i].base==dst&&g_map[i].src==src&&g_map[i].size==n&&
+             normal_range((uintptr_t)g_heap,g_heap_cur,src,n)) {
+             memcpy((void*)(uintptr_t)src,(void*)(uintptr_t)dst,n);g_map[i]=g_map[--g_nmap];regs[0]=0;break;
+         }
+@@ -304,12 +328,12 @@
+         uint64_t mi = regs[0], addr = regs[2];
+         pthread_mutex_lock(&g_memory_lock);
+         if(mi&&!normal_output(mi,40)) {regs[0]=0xd401;pthread_mutex_unlock(&g_memory_lock);return 0;}
+-        uint64_t attribute=0;
+         // MemoryInfo: base(0) size(8) state(0x10) attr(0x14) perm(0x18) ...
+         uint8_t *a = (uint8_t *)addr;
+-        uint64_t base, size, state, perm;
++        uint64_t base, size, state, perm, attribute=0;
+         int k;
+-        if(normal_alias_query(addr,&base,&size,&state,&perm)) {}
++        if(whole_query_overlay_locked(addr,&base,&size,&state,&attribute,&perm)) {}
++        else if(normal_alias_query(addr,&base,&size,&state,&perm)) {}
+         else if((k=map_find(addr,1))) {base=g_map[k-1].base;size=g_map[k-1].size;state=g_map[k-1].state;perm=3;}
+         else if(normal_borrowed(addr,1)) {
+             for(int i=0;i<g_nmap;i++)if(normal_range(g_map[i].src,g_map[i].size,addr,1)) {base=g_map[i].src;size=g_map[i].size;break;}
+@@ -356,15 +380,21 @@
+                 for(int j=0;j<4;j++){uint64_t b=boundaries[j];if(b>addr&&b<end)end=b;else if(b<=addr&&b>base)base=b;}}
+             size=end-base;
+         }
+-        if (mi) { memset((void*)(uintptr_t)mi,0,40); uint64_t *m=(uint64_t*)mi; m[0]=base; m[1]=size; ((uint32_t*)mi)[4]=state; ((uint32_t*)mi)[5]=attribute; ((uint32_t*)mi)[6]=perm; ((uint32_t*)mi)[7]=0; ((uint32_t*)mi)[8]=0; }
+-        regs[0] = 0; regs[1] = 0; pthread_mutex_unlock(&g_memory_lock); return 0;
++        pthread_mutex_unlock(&g_memory_lock);
++        if(mi) {
++            unsigned char output[40]={0};uint32_t fields[5]={(uint32_t)state,(uint32_t)attribute,(uint32_t)perm,0,0};
++            memcpy(output,&base,8);memcpy(output+8,&size,8);memcpy(output+16,fields,sizeof fields);
++            if(!dm_guest_memory_access(mi,sizeof output,1)||!dm_guest_write_prepare_checked((void*)(uintptr_t)mi,sizeof output)||
++               !botw_whole_transfer_vm_write((void*)(uintptr_t)mi,output,sizeof output)){regs[0]=0xd401;return 0;}
++        }
++        regs[0]=0;regs[1]=0;return 0;
+     }
+ #else
+ case 0x06: {  // QueryMemory(MemoryInfo* out, PageInfo* pout, addr) → x1 = pageinfo
+         uint64_t mi = regs[0], addr = regs[2];
+         // MemoryInfo: base(0) size(8) state(0x10) attr(0x14) perm(0x18) ...
+         uint8_t *a = (uint8_t *)addr;
+-        uint64_t base, size, state, perm;
++        uint64_t base, size, state, perm, attribute=0;
+         int k;
+         if (a >= g_heap && a < g_heap + g_heap_cur) { base=(uint64_t)g_heap; size=g_heap_cur; state=5/*Heap*/; perm=3; }
+         else if ((k = map_find(addr, 1))) { base=g_map[k-1].base; size=g_map[k-1].size; state=g_map[k-1].state; perm=3; }
+@@ -401,7 +431,7 @@
+             if (addr < top && addr >= top - ssz) { base = top - ssz; size = ssz; state = 0xB/*Stack*/; perm = 3; }
+             // Other host memory: report "free, no permissions" (the 4 KiB page around it) as Horizon does for unmapped addresses. It used to report Code+RX, and GetExceptionInfo walking back from main merged on through host memory down to 0
+             else { base=addr & ~0xFFFull; size=0x1000; state=0/*Free*/; perm=0; } }
+-        if (mi) { uint64_t *m=(uint64_t*)mi; m[0]=base; m[1]=size; ((uint32_t*)mi)[4]=state; ((uint32_t*)mi)[5]=0; ((uint32_t*)mi)[6]=perm; ((uint32_t*)mi)[7]=0; ((uint32_t*)mi)[8]=0; }
++        if (mi) { uint64_t *m=(uint64_t*)mi; m[0]=base; m[1]=size; ((uint32_t*)mi)[4]=state; ((uint32_t*)mi)[5]=attribute; ((uint32_t*)mi)[6]=perm; ((uint32_t*)mi)[7]=0; ((uint32_t*)mi)[8]=0; }
+         regs[0] = 0; regs[1] = 0; return 0;
+     }
+ #endif
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -10,6 +10,9 @@
+ // Semantics follow the public Horizon kernel behavior (KConditionVariable / KAddressArbiter / KSynchronization of Atmosphère mesosphère).
+ // All waits hang on one global lock G, with one condition variable per thread; correctness first, performance to be measured later.
+ #include "dm.h"
++#include "base_v0_audren_memory.h"
++#include "whole_transfer_internal.h"
++#include "whole_heap_lease_internal.h"
+ #if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
+ #include "normal_failures.h"
+ #endif
+@@ -31,7 +34,7 @@
+ #define WAITERS_BIT   0x40000000u
+ #define H_CUR_THREAD  0xFFFF8000u
+ 
+-enum { O_FREE, O_THREAD, O_EVENT_R, O_EVENT_W };
++enum { O_FREE, O_THREAD, O_EVENT_R, O_EVENT_W, O_TRANSPORT, O_TRANSFER };
+ typedef struct event { int signaled; int refs; } event_t;
+ typedef struct thr {
+     uint32_t handle; uint64_t id;
+@@ -657,15 +660,17 @@
+     case 0x1A: {  // ArbitrateLock(w0 owner handle, x1 address, w2 this thread's tag)
+         thr_t *t = cur(); uint64_t addr = regs[1];
+         pthread_mutex_lock(&G);
++        if((addr&3u)||!dm_guest_memory_access(addr,4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;}
+         int64_t r = 0;
+         if (ld32(addr) == ((uint32_t)regs[0] | WAITERS_BIT)) { t->waddr = addr; t->wtag = (uint32_t)regs[2]; r = block(t, 1, -1); }
+         pthread_mutex_unlock(&G);
+         regs[0] = (uint64_t)r; return 1;
+     }
+-    case 0x1B: pthread_mutex_lock(&G); lock_handoff(regs[0]); pthread_mutex_unlock(&G); regs[0] = 0; return 1;
++    case 0x1B: pthread_mutex_lock(&G); if((regs[0]&3u)||!dm_guest_memory_access(regs[0],4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;} lock_handoff(regs[0]); pthread_mutex_unlock(&G); regs[0] = 0; return 1;
+     case 0x1C: {  // WaitProcessWideKeyAtomic(x0 lock address, x1 condition key, w2 tag, x3 timeout)
+         thr_t *t = cur(); uint64_t addr = regs[0], key = regs[1];
+         pthread_mutex_lock(&G);
++        if((addr&3u)||(key&3u)||!dm_guest_memory_access(addr,4,1)||!dm_guest_memory_access(key,4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;}
+         // The order matters: first set the condition key = 1, then release the mutex. The SDK's InternalConditionVariable::Signal first reads the condition key in user mode, and does not issue svc 0x1D if it is 0;
+         // grabbing the mutex in user mode does not go through G either. It used to do lock_handoff first and set the key after: after the release and before the key was set, another thread could grab the lock in user mode, change the condition, read key 0 and not wake anyone,
+         // and this thread would then link itself in and wait forever (under parallel load the resource table read-write lock main+0x320e5e0 deadlocked: reader count 0, lock free, writer condition key 1, writer still waiting).
+@@ -691,6 +696,7 @@
+     case 0x1D: {  // SignalProcessWideKey(x0 condition key, w1 count, <=0 all)
+         uint64_t key = regs[0]; int cnt = (int)regs[1], n = 0;
+         pthread_mutex_lock(&G);
++        if((key&3u)||!dm_guest_memory_access(key,4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;}
+         for (thr_t *w; (cnt <= 0 || n < cnt) && (w = pick(2, key)); n++) lock_acquire_for(w, w->waddr, w->wtag);   // In kernel order; once turned into a lock wait or woken it is no longer kind 2
+         int left = 0; for (thr_t *w = g_wait; w; w = w->next) if (w->wkind == 2 && w->wkey == key) { left = 1; break; }
+         if (!left) st32(key, 0);
+@@ -701,6 +707,7 @@
+     case 0x34: {  // WaitForAddress(x0 address, w1 type, w2 value, x3 timeout): 0 wait if less than, 1 decrement if less than then wait, 2 wait if equal
+         thr_t *t = cur(); uint64_t addr = regs[0]; int type = (int)regs[1]; int32_t val = (int32_t)regs[2];
+         pthread_mutex_lock(&G);
++        if((addr&3u)||!dm_guest_memory_access(addr,4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;}
+         int64_t r; uint32_t v = ld32(addr);
+         int ok = type == 2 ? (int32_t)v == val : (int32_t)v < val;
+         if (ok && type == 1) { while (!cas32(addr, &v, v - 1)) if (!((int32_t)v < val)) { ok = 0; break; } }
+@@ -712,6 +719,7 @@
+     case 0x35: {  // SignalToAddress(x0 address, w1 type, w2 value, w3 count): 0 wake, 1 increment if equal and wake, 2 if equal modify the value by waiter count and wake
+         uint64_t addr = regs[0]; int type = (int)regs[1]; int32_t val = (int32_t)regs[2]; int cnt = (int)regs[3];
+         pthread_mutex_lock(&G);
++        if((addr&3u)||!dm_guest_memory_access(addr,4,1)){pthread_mutex_unlock(&G);regs[0]=0xd401;return 1;}
+         int nw = 0; for (thr_t *w = g_wait; w; w = w->next) if (w->wkind == 3 && w->waddr == addr) nw++;
+         int64_t r = 0;
+         if (type != 0) {
+@@ -752,9 +760,14 @@
+         regs[0] = (uint64_t)r; return 1;
+     }
+     case 0x18: {  // WaitSynchronization(→w1 index; x1 handle array, w2 count, x3 timeout)
+-        thr_t *t = cur(); const uint32_t *hs = (const uint32_t *)regs[1]; int n = (int)regs[2]; int64_t ns = (int64_t)regs[3];
++        thr_t *t = cur(); uint32_t hs[64]; int n = (int)regs[2]; int64_t ns = (int64_t)regs[3];
++        if(n<0||n>64){regs[0]=0xee01;regs[1]=0;return 1;}
+         int64_t deadline = ns > 0 ? (dm_detclock_enabled() ? (int64_t)guest_ns() : now_mono_ns()) + ns : 0;
+         pthread_mutex_lock(&G);
++        if(n&&(!dm_guest_memory_access(regs[1],(size_t)n*4,0)||
++            !botw_whole_transfer_vm_read(hs,(const void*)(uintptr_t)regs[1],(size_t)n*4))){
++            pthread_mutex_unlock(&G);regs[0]=0xcc01;regs[1]=0;return 1;
++        }
+         int64_t r; int idx = -1;
+         for (;;) {
+             if (t->cancel) { t->cancel = 0; r = R_CANCELLED; break; }
+@@ -829,3 +842,170 @@
+     e->signaled = 1; wake_sync_waiters();
+     pthread_mutex_unlock(&G);
+ }
++
++// ---------- Checked native service kernel bridge ----------
++#include "whole_kernel.h"
++#include <limits.h>
++
++struct botw_whole_event_producer { event_t *event; };
++static int whole_kernel_problem(char *error, size_t capacity, const char *message) {
++    if (error && capacity) snprintf(error, capacity, "%s", message);
++    return -1;
++}
++static int whole_kernel_free_slots(void) { // G held; no reservation or second table.
++    int count = 0;
++    for (unsigned i = 1; i < MAX_H; ++i) count += g_h[i].type == O_FREE;
++    return count;
++}
++enum botw_whole_handle_kind botw_whole_kernel_handle_kind(uint32_t handle) {
++    unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    int type = i && i < MAX_H ? g_h[i].type : O_FREE;
++    pthread_mutex_unlock(&G);
++    switch (type) {
++    case O_THREAD: return BOTW_WHOLE_HANDLE_THREAD;
++    case O_EVENT_R: return BOTW_WHOLE_HANDLE_EVENT_READ;
++    case O_EVENT_W: return BOTW_WHOLE_HANDLE_EVENT_WRITE;
++    case O_TRANSPORT: return BOTW_WHOLE_HANDLE_TRANSPORT;
++    case O_TRANSFER: return (enum botw_whole_handle_kind)BOTW_WHOLE_HANDLE_TRANSFER;
++    default: return BOTW_WHOLE_HANDLE_NONE;
++    }
++}
++int botw_whole_kernel_transport_allocate(void *opaque, const void *owner, uint32_t *out,
++                                        char *error, size_t capacity) {
++    (void)opaque;
++    if (!owner || !out) return whole_kernel_problem(error, capacity, "transport allocation requires owner and output");
++    pthread_mutex_lock(&G);
++    for (unsigned i = 1; i < MAX_H; ++i) {
++        if (g_h[i].type == O_TRANSPORT && g_h[i].obj == owner) {
++            pthread_mutex_unlock(&G);
++            return whole_kernel_problem(error, capacity, "transport owner is already borrowed");
++        }
++    }
++    if (!whole_kernel_free_slots()) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "kernel handle capacity exhausted");
++    }
++    *out = h_new(O_TRANSPORT, (void *)owner);
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_transport_release(void *opaque, const void *owner, uint32_t handle,
++                                       char *error, size_t capacity) {
++    (void)opaque; unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    if (!owner || !i || i >= MAX_H || g_h[i].type != O_TRANSPORT || g_h[i].obj != owner) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "transport handle and owner do not match");
++    }
++    g_h[i].type = O_FREE; g_h[i].obj = NULL;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_create_event(void *opaque, int signaled, uint32_t *write_handle,
++                                  uint32_t *read_handle, char *error, size_t capacity) {
++    (void)opaque;
++    if (!write_handle || !read_handle || write_handle == read_handle || (signaled != 0 && signaled != 1))
++        return whole_kernel_problem(error, capacity, "event creation requires distinct outputs and boolean state");
++    event_t *event = calloc(1, sizeof *event);
++    if (!event) return whole_kernel_problem(error, capacity, "event allocation failed");
++    event->signaled = signaled; event->refs = 2;
++    pthread_mutex_lock(&G);
++    if (whole_kernel_free_slots() < 2) {
++        pthread_mutex_unlock(&G); free(event);
++        return whole_kernel_problem(error, capacity, "event requires two free kernel handle slots");
++    }
++    uint32_t write = h_new(O_EVENT_W, event), read = h_new(O_EVENT_R, event);
++    *write_handle = write; *read_handle = read;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_duplicate_event(void *opaque, uint32_t source, uint32_t *out,
++                                     char *error, size_t capacity) {
++    (void)opaque; unsigned i = source - 0x1000;
++    if (!out) return whole_kernel_problem(error, capacity, "event duplicate requires output");
++    pthread_mutex_lock(&G);
++    if (!i || i >= MAX_H || (g_h[i].type != O_EVENT_R && g_h[i].type != O_EVENT_W)) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event duplicate requires a live endpoint");
++    }
++    event_t *event = g_h[i].obj;
++    if (event->refs == INT_MAX || !whole_kernel_free_slots()) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event duplicate capacity exhausted");
++    }
++    uint32_t handle = h_new(g_h[i].type, event); ++event->refs; *out = handle;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++static int whole_kernel_event_action(uint32_t handle, int signal, char *error, size_t capacity) {
++    pthread_mutex_lock(&G);
++    event_t *event = h_peek(handle, O_EVENT_W);
++    if (!event && !signal) event = h_peek(handle, O_EVENT_R);
++    if (!event) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event action requires the correct live endpoint");
++    }
++    event->signaled = signal;
++    if (signal) wake_sync_waiters();
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_signal_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; return whole_kernel_event_action(handle, 1, error, capacity);
++}
++int botw_whole_kernel_clear_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; return whole_kernel_event_action(handle, 0, error, capacity);
++}
++int botw_whole_kernel_close_event(void *opaque, uint32_t handle, char *error, size_t capacity) {
++    (void)opaque; unsigned i = handle - 0x1000;
++    pthread_mutex_lock(&G);
++    if (!i || i >= MAX_H || (g_h[i].type != O_EVENT_R && g_h[i].type != O_EVENT_W)) {
++        pthread_mutex_unlock(&G);
++        return whole_kernel_problem(error, capacity, "event close requires a live endpoint");
++    }
++    event_t *event = g_h[i].obj;
++    g_h[i].type = O_FREE; g_h[i].obj = NULL;
++    if (--event->refs == 0) free(event);
++    wake_sync_waiters(); // Existing waits must revalidate a closed endpoint.
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_retain_event_producer(uint32_t write_handle,
++        botw_whole_event_producer **out, char *error, size_t capacity) {
++    if (!out) return whole_kernel_problem(error, capacity, "event producer requires output");
++    botw_whole_event_producer *producer = calloc(1, sizeof *producer);
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer allocation failed");
++    pthread_mutex_lock(&G);
++    event_t *event = h_peek(write_handle, O_EVENT_W);
++    if (!event || event->refs == INT_MAX) {
++        pthread_mutex_unlock(&G); free(producer);
++        return whole_kernel_problem(error, capacity, "event producer requires a retainable write endpoint");
++    }
++    ++event->refs; producer->event = event; *out = producer;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_signal(botw_whole_event_producer *producer, char *error, size_t capacity) {
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G);
++    producer->event->signaled = 1; wake_sync_waiters();
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_clear(botw_whole_event_producer *producer, char *error, size_t capacity) {
++    if (!producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G); producer->event->signaled = 0; pthread_mutex_unlock(&G);
++    return 0;
++}
++int botw_whole_kernel_producer_release(botw_whole_event_producer **producer, char *error, size_t capacity) {
++    if (!producer || !*producer) return whole_kernel_problem(error, capacity, "event producer is absent");
++    pthread_mutex_lock(&G);
++    if (--(*producer)->event->refs == 0) free((*producer)->event);
++    free(*producer); *producer = NULL;
++    pthread_mutex_unlock(&G);
++    return 0;
++}
++
++#include "base_v0_audren_transfer_handles.inc"
++#include "whole_heap_lease_handles.inc"
+--- a/dm/gfx/nvn/nvn_dirty.c
++++ b/dm/gfx/nvn/nvn_dirty.c
+@@ -3,6 +3,9 @@
+ // (measured: the game writes streamed assets into texture storage that is still being sampled, without re-registering).
+ // Signal handler constraint: the page-fault path uses only atomic operations and mprotect, no allocation, no locks.
+ #include "nvn_dirty.h"
++#include "base_v0_audren_memory.h"
++#include "whole_heap_lease_internal.h"
++#include <errno.h>
+ #include "../../host/dm.h"
+ #include <stdatomic.h>
+ #include <pthread.h>
+@@ -102,6 +105,15 @@
+     if (!inited) { inited = 1; g_pg = (uintptr_t)getpagesize(); g_shift = __builtin_ctzl(g_pg); mach_timebase_info(&g_tb); dm_fault_hook_register(on_fault); dm_guest_write_prep_register(prep_write); }
+     atomic_fetch_add(&g_adds_total, 1);
+     pthread_mutex_lock(&g_slot_mu);
++    uintptr_t checked_base=(uintptr_t)mem&~(g_pg-1);
++    if(!mem||!size||size>UINTPTR_MAX-(uintptr_t)mem||
++       (uintptr_t)mem+size>UINTPTR_MAX-(g_pg-1)){
++        pthread_mutex_unlock(&g_slot_mu);nxnative_normal_failure();
++    }
++    uintptr_t checked_end=((uintptr_t)mem+size+g_pg-1)&~(g_pg-1);
++    if(nxnative_base_v0_audren_mapping_overlap(checked_base,checked_end-checked_base)){
++        pthread_mutex_unlock(&g_slot_mu);nxnative_normal_failure();
++    }
+     int n = atomic_load(&g_nr);
+     int slot = -1;
+     for (int i = 0; i < n; i++) if (!atomic_load_explicit(&g_r[i].live, memory_order_acquire)) { slot = i; break; }
+@@ -177,3 +189,16 @@
+     static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
+     *calls = atomic_load(&g_mp_calls); *pages = atomic_load(&g_mp_pages); *ns = atomic_load(&g_mp_ticks) * tb.numer / tb.denom;
+ }
++
++/* The complete original dirty catalog is authoritative; the slot lock is held
++ * across heap lease reservation, and dirtyAdd takes the inverse metadata check. */
++int botw_whole_dirty_untracked_begin(uint64_t source,size_t size) {
++    if(!source||!size||size>UINT64_MAX-source){errno=EINVAL;return 0;}
++    pthread_mutex_lock(&g_slot_mu);int n=atomic_load(&g_nr);
++    for(int i=0;i<n;i++)if(atomic_load_explicit(&g_r[i].live,memory_order_acquire)&&
++       source<g_r[i].end&&g_r[i].base<source+size){
++        pthread_mutex_unlock(&g_slot_mu);errno=EBUSY;return 0;
++    }
++    return 1;
++}
++void botw_whole_dirty_untracked_end(void){pthread_mutex_unlock(&g_slot_mu);}
+--- a/dm/host/thread.c
++++ b/dm/host/thread.c
+@@ -1,14 +1,18 @@
+ // Guest thread environment: gate slot = host gate entry; x18 slot cleared; tpidr_el0 slot = ELF TLS block; tpidrro_el0 slot = Horizon ThreadLocalRegion (0x200).
+ // The SDK's internal critical section takes the current thread object pointer from TLR[0x1f8]; here each thread gets a zero-initialized object allocated and written in.
+ #include "dm.h"
++#include <stdatomic.h>
++#include "whole_host_memory.h"
++#include "whole_thread_memory.h"
+ #define TLS_SIZE 8192
+ #define TLR_SIZE 0x200
+ #define THREAD_OBJ_SIZE 0x400
+ extern void dm_gate(void);            // entry.S: common gate entry
+ static pthread_key_t g_keyown;   // raw pointers of the TLS block / thread-local region this thread allocated (see the end of guest_thread_init)
++static _Atomic int g_audren_thread_ready;
+ static pthread_once_t g_keyown_once = PTHREAD_ONCE_INIT;
+ static void own_free(void *p) { void **own = p; free(own[0]); free(own[1]); free(own); }
+-static void own_key_init(void) { if (pthread_key_create(&g_keyown, own_free)) die("创建线程本地块的释放键失败"); }
++static void own_key_init(void) { if (pthread_key_create(&g_keyown, own_free)) die("创建线程本地块的释放键失败"); atomic_store_explicit(&g_audren_thread_ready,1,memory_order_release); }
+ #include "front.h"
+ #include "dm_uiscreen.h"
+ void guest_thread_init(void) {
+@@ -40,3 +44,17 @@
+     void **prev = pthread_getspecific(g_keyown); if (prev) own_free(prev);   // re-initialised on the same thread: free the previous set first (the new one is what the slots now point to)
+     pthread_setspecific(g_keyown, own);
+ }
++
++int botw_whole_current_thread_memory(uint64_t address,size_t length) {
++    if(!address||!length||length>UINT64_MAX-address||!atomic_load_explicit(&g_audren_thread_ready,memory_order_acquire))return 0;
++    void **own=pthread_getspecific(g_keyown);if(!own)return 0;
++    const size_t sizes[2]={TLS_SIZE,TLR_SIZE+THREAD_OBJ_SIZE};
++    for(int i=0;i<2;i++){uint64_t base=(uintptr_t)own[i];if(base&&address>=base&&length<=sizes[i]&&address-base<=sizes[i]-length)return 1;}
++    return 0;
++}
++int botw_whole_current_tlr(void **out,size_t *size) {
++    if(!out||!size||!atomic_load_explicit(&g_audren_thread_ready,memory_order_acquire))return -1;
++    if(!pthread_getspecific(g_keyown))return -1;
++    void *tlr=pthread_getspecific(g_keytlr);if(!tlr)return -1;
++    *out=tlr;*size=TLR_SIZE;return 0;
++}

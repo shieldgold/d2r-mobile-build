@@ -1,0 +1,375 @@
+--- a/shader_provider/adapter/whole_shader_conditional.h
++++ b/shader_provider/adapter/whole_shader_conditional.h
+@@ -8,6 +8,12 @@
+     uint32_t device_known, window_origin_mode, depth_mode;
+     uint32_t color0_known, color0_present, color0_format;
+     uint64_t descriptor_epoch;
++    /* Normal replay operands, captured and rechecked in the original mode/
++     * registry transaction. No vertex bytes or index scanning. */
++    uint32_t vertex_known, vertex_count, stream_count;
++    uint32_t vertex_type_mask[16], vertex_format[16], vertex_offset[16], vertex_stream[16];
++    uint32_t stream_stride[16], stream_divisor[16];
++    uint64_t vertex_address[16], vertex_size[16];
+ } botw_conditional_draw_state;
+ 
+ #ifdef __cplusplus
+--- a/shader_provider/adapter/whole_shader_conditional.m
++++ b/shader_provider/adapter/whole_shader_conditional.m
+@@ -15,7 +15,16 @@
+ int botw_conditional_state_equal(const botw_conditional_draw_state *a,const botw_conditional_draw_state *b) {
+     return a && b && a->device_known==b->device_known && a->window_origin_mode==b->window_origin_mode &&
+         a->depth_mode==b->depth_mode && a->color0_known==b->color0_known && a->color0_present==b->color0_present &&
+-        a->color0_format==b->color0_format && a->descriptor_epoch==b->descriptor_epoch;
++        a->color0_format==b->color0_format && a->descriptor_epoch==b->descriptor_epoch &&
++        a->vertex_known==b->vertex_known && a->vertex_count==b->vertex_count && a->stream_count==b->stream_count &&
++        !memcmp(a->vertex_type_mask,b->vertex_type_mask,sizeof a->vertex_type_mask) &&
++        !memcmp(a->vertex_format,b->vertex_format,sizeof a->vertex_format) &&
++        !memcmp(a->vertex_offset,b->vertex_offset,sizeof a->vertex_offset) &&
++        !memcmp(a->vertex_stream,b->vertex_stream,sizeof a->vertex_stream) &&
++        !memcmp(a->stream_stride,b->stream_stride,sizeof a->stream_stride) &&
++        !memcmp(a->stream_divisor,b->stream_divisor,sizeof a->stream_divisor) &&
++        !memcmp(a->vertex_address,b->vertex_address,sizeof a->vertex_address) &&
++        !memcmp(a->vertex_size,b->vertex_size,sizeof a->vertex_size);
+ }
+ static BOOL reject(NSError **error,NSString *why) {
+     if(error)*error=[NSError errorWithDomain:BotwShaderManifestErrorDomain code:BotwShaderManifestErrorInvalidArtifact userInfo:@{NSLocalizedDescriptionKey:why}];return NO;
+@@ -133,21 +142,52 @@
+ @property(nonatomic,strong) NSMutableDictionary<NSString *,WholeShaderConditionalArtifact *> *loaded;
+ @end
+ 
++static BOOL vertex_requirements(id rows) {
++    if(!arr(rows)||![rows count]||[rows count]>16)return NO;
++    NSInteger last=-1;
++    for(id row in rows){if(!dict(row)||[row count]!=2||!integer(row[@"location"],15)||
++        ![@[@"float",@"int",@"uint"] containsObject:row[@"component_type"]]||
++        [row[@"location"] integerValue]<=last)return NO;
++        last=[row[@"location"] integerValue];}
++    return YES;
++}
++static BOOL vertex_reflection(id inputs,id requirements) {
++    if(!vertex_requirements(requirements)||!arr(inputs)||[inputs count]!=[requirements count])return NO;
++    NSMutableSet *seen=[NSMutableSet set];
++    for(id row in inputs){if(!dict(row)||[row count]!=2||!integer(row[@"location"],15)||
++        [seen containsObject:row[@"location"]]||!str(row[@"msl_type"]))return NO;
++        [seen addObject:row[@"location"]];NSDictionary *want=nil;
++        for(NSDictionary *q in requirements)if([q[@"location"] isEqual:row[@"location"]])want=q;
++        if(!want)return NO;NSString *base=want[@"component_type"],*ty=row[@"msl_type"];
++        if(![ty isEqual:base]&&![@[[base stringByAppendingString:@"2"],[base stringByAppendingString:@"3"],
++            [base stringByAppendingString:@"4"]] containsObject:ty])return NO;
++    }return YES;
++}
++static BOOL vertex_predicate(NSArray *rows,const botw_conditional_draw_state *s) {
++    if(!s||s->vertex_known!=1||s->vertex_count>16||!vertex_requirements(rows))return NO;
++    for(NSDictionary *row in rows){unsigned loc=[row[@"location"] unsignedIntValue];
++        unsigned mask=[row[@"component_type"] isEqual:@"float"]?1:[row[@"component_type"] isEqual:@"int"]?2:4;
++        if(loc>=s->vertex_count||!(s->vertex_type_mask[loc]&mask))return NO;}
++    return YES;
++}
++
+ static BOOL contract_valid(NSDictionary *c,NSDictionary *result,NSString *chain,NSString *adapter,NSError **e) {
+     NSDictionary *q=c[@"requirements"],*device=dict(q)?q[@"device"]:nil,*proof=c[@"proofs"],*translation=c[@"translation"];
+     BOOL vs=[result[@"capture"][@"stage_name"] isEqual:@"vertex"];
++    BOOL typed=[c[@"scope"] isEqual:@"typed-vs-nonqueried-v1"];
+     if(![c[@"schema"] isEqual:@"botw-shader-conditional-translation-contract-v1"]||
+         ![c[@"profile"] isEqual:@"botw-switch-base-v0"]||
+         ![c[@"chain"] isEqual:chain]||
+         !capture_same(c[@"capture"],result[@"capture"])||
+-        ![c[@"scope"] isEqual:@"noattr-vs-output0-fs-nonqueried-v1"]||
++        (!typed&&![c[@"scope"] isEqual:@"noattr-vs-output0-fs-nonqueried-v1"])||
++        (typed&&!vs)||
+         !dict(q)||
+         q.count!=6||
+         !dict(device)||
+         device.count!=2||
+         !integer(device[@"window_origin_mode"],1)||
+         !integer(device[@"depth_mode"],1)||
+-        !empty(q[@"attributes"])||
++        (typed?!vertex_requirements(q[@"attributes"]):!empty(q[@"attributes"]))||
+         !empty(q[@"texture_queries"])||
+         !empty(q[@"images"])||
+         !empty(q[@"storage_buffers"])||
+@@ -189,7 +229,8 @@
+         ds.count!=2||
+         ![ds[@"window_origin_mode"] isEqual:([device[@"window_origin_mode"] unsignedIntValue]?@"upper_left":@"lower_left")]||
+         ![ds[@"depth_mode"] isEqual:([device[@"depth_mode"] unsignedIntValue]?@"near_is_zero":@"near_is_minus_w")]||
+-        !empty(r[@"vertex_inputs"])||
++        ([c[@"scope"] isEqual:@"typed-vs-nonqueried-v1"]?
++            !vertex_reflection(r[@"vertex_inputs"],c[@"requirements"][@"attributes"]):!empty(r[@"vertex_inputs"]))||
+         !empty(r[@"drv_unfillable"])||
+         !arr(r[@"bindings"])||
+         !dict(r[@"drv_reads"])||
+@@ -322,6 +363,7 @@
+             WholeShaderConditionalArtifact *a=self.loaded[r[@"variant_sha256"]];if(!a){a=[self loadResult:r error:e];if(!a)return nil;self.loaded[a.variantSHA256]=a;}
+             NSDictionary *q=a.contract[@"requirements"],*d=q[@"device"];
+             if([d[@"window_origin_mode"] unsignedIntValue]!=s->window_origin_mode||[d[@"depth_mode"] unsignedIntValue]!=s->depth_mode)continue;
++            if([a.contract[@"scope"] isEqual:@"typed-vs-nonqueried-v1"]&&!vertex_predicate(q[@"attributes"],s))continue;
+             if(info->stage==1&&![q[@"fragment_output0"][@"nvn_formats"] containsObject:@(s->color0_format)])continue;
+             if(selected){reject(e,@"multiple conditional variants exactly match this draw");return nil;}selected=a;
+         }
+--- a/shader_provider/adapter/whole_shader_bundle_publication.h
++++ b/shader_provider/adapter/whole_shader_bundle_publication.h
+@@ -9,6 +9,9 @@
+  * Metal, or permits an artifact before its real draw predicate succeeds. */
+ int whole_runtime_shader_bundle_publication(const char *bundle_directory,
+     char *manifest_path,size_t manifest_capacity,char *error,size_t error_capacity);
++/* A fixed supplemental root; the original botw/shaders publication is separate. */
++int whole_runtime_vertex_shader_publication(const char *bundle_directory,
++    char *manifest_path,size_t manifest_capacity,char *error,size_t error_capacity);
+ #ifdef __cplusplus
+ }
+ #endif
+--- a/shader_provider/adapter/whole_shader_bundle_publication.m
++++ b/shader_provider/adapter/whole_shader_bundle_publication.m
+@@ -62,7 +62,7 @@
+     return bytes;
+ }
+ 
+-static int conditional_publication(const char *bundle,NSString *root,NSDictionary *package,
++static int conditional_publication(const char *bundle,NSString *root,NSString *rootName,NSString *scope,NSDictionary *package,
+         char *output,size_t capacity,char *error,size_t error_capacity) {
+     if(![package[@"profile"] isEqual:Profile]||!hex(package[@"chain"],12)||
+             !hex(package[@"publication_sha256"],64)||!hex(package[@"admission_sha256"],64)||
+@@ -70,7 +70,7 @@
+             ![package[@"format_contract_sha256"] isEqual:@BOTW_BASE_FORMAT_CONTRACT_SHA256])
+         return denied(error,error_capacity,@"conditional package identity/proof authority invalid");
+     NSString *directory=[@"botw-c-" stringByAppendingString:package[@"chain"]];
+-    if(![package[@"directory"] isEqual:directory]||!contained_directories(bundle,@[@"botw",@"shaders",directory]))
++    if(![package[@"directory"] isEqual:directory]||!contained_directories(bundle,@[@"botw",rootName,directory]))
+         return denied(error,error_capacity,@"conditional artifact directory must remain inside the signed bundle");
+     NSDictionary *publication,*admission,*proof,*bindings,*formats;
+     if(!pinned_document(root,@"conditional-publication.json",package[@"publication_sha256"],65536,&publication)||
+@@ -95,7 +95,7 @@
+                 ![value[@"format_contract_sha256"] isEqual:@BOTW_BASE_FORMAT_CONTRACT_SHA256])
+             return denied(error,error_capacity,@"conditional proof/source identities differ");
+     }
+-    if(![admission[@"scope"] isEqual:Scope]||![proof[@"scope"] isEqual:Scope]||
++    if(![admission[@"scope"] isEqual:scope]||![proof[@"scope"] isEqual:scope]||
+             ![publication[@"subset_sha256"] isEqual:package[@"subset_sha256"]]||
+             ![admission[@"subset_sha256"] isEqual:package[@"subset_sha256"]]||
+             !exact_keys(admission[@"captures"],proof[@"accepted"])||![admission[@"captures"] count])
+@@ -137,6 +137,14 @@
+             for(id mode in modes)if(mode_same(mode,device)) {
+                 if(match)return denied(error,error_capacity,@"duplicate mode in conditional static proof");match=mode;
+             }
++            if(![contract[@"scope"] isEqual:scope]||
++                    ([scope isEqual:@"typed-vs-nonqueried-v1"]&&
++                     (![contract[@"requirements"][@"attributes"] isEqual:match[@"gates"][@"attributes"]]||
++                      ![capture[@"stage_name"] isEqual:@"vertex"])))
++                return denied(error,error_capacity,@"typed vertex recipe differs from its independent CPU proof");
++            if([scope isEqual:@"typed-vs-nonqueried-v1"])for(NSDictionary *mode in modes)
++                if(![mode[@"gates"][@"attributes"] isEqual:contract[@"requirements"][@"attributes"]])
++                    return denied(error,error_capacity,@"typed vertex modes must retain one exact recipe");
+             if(!match||!hex(match[@"job_sha256"],64)||!hex(match[@"res_sha256"],64)||
+                     !hex(match[@"translated_code_sha256"],64)||
+                     ![contract[@"translation"][@"job_sha256"] isEqual:match[@"job_sha256"]]||
+@@ -176,7 +184,22 @@
+         if([index[@"schema"] isEqual:@"botw-whole-shader-package-v1"])
+             return whole_runtime_shader_publication(bundle,manifest,capacity,error,error_capacity);
+         if([index[@"schema"] isEqual:@"botw-whole-conditional-shader-package-v1"])
+-            return conditional_publication(bundle,root,index,manifest,capacity,error,error_capacity);
++            return conditional_publication(bundle,root,@"shaders",Scope,index,manifest,capacity,error,error_capacity);
+         return denied(error,error_capacity,@"missing explicit shader publication schema");
+     }
+ }
++
++int whole_runtime_vertex_shader_publication(const char *bundle,char *manifest,size_t capacity,char *error,size_t error_capacity) {
++    if(error&&error_capacity)error[0]=0;
++    if(!bundle||!manifest||!capacity||(error_capacity&&!error))return denied(error,error_capacity,@"invalid vertex publication caller");
++    @autoreleasepool {
++        NSString *base=[NSFileManager.defaultManager stringWithFileSystemRepresentation:bundle length:strlen(bundle)];
++        if(!base.isAbsolutePath||!contained_directories(bundle,@[@"botw",@"vertex-shaders"]))
++            return denied(error,error_capacity,@"vertex publication must remain inside the signed bundle");
++        NSString *root=[base stringByAppendingPathComponent:@"botw/vertex-shaders"];
++        NSDictionary *index=document(read_regular([root stringByAppendingPathComponent:@"shader-package.json"],65536));
++        if(![index[@"schema"] isEqual:@"botw-whole-conditional-shader-package-v1"])
++            return denied(error,error_capacity,@"missing explicit vertex conditional schema");
++        return conditional_publication(bundle,root,@"vertex-shaders",@"typed-vs-nonqueried-v1",index,manifest,capacity,error,error_capacity);
++    }
++}
+--- a/adapter/base_v0_shader_provider.h
++++ b/adapter/base_v0_shader_provider.h
+@@ -23,6 +23,8 @@
+ @interface NxBaseShaderProvider : NSObject
+ @property(nonatomic,readonly) WholeShaderConditionalManifest *manifest;
+ + (nullable instancetype)providerAtBundle:(NSString *)bundle error:(NSError * _Nullable * _Nullable)error;
++- (nullable WholeShaderConditionalArtifact *)artifactForInfo:(const botw_shader_info *)info
++    state:(const botw_conditional_draw_state *)state error:(NSError * _Nullable * _Nullable)error;
+ - (BOOL)infoForNativeDigest:(const uint8_t *)digest controlSize:(uint32_t)control
+                   codeSize:(uint32_t)code output:(botw_shader_info *)output;
+ @end
+--- a/adapter/base_v0_shader_provider.m
++++ b/adapter/base_v0_shader_provider.m
+@@ -21,7 +21,7 @@
+     ([n isEqual:@0]||[n isEqual:@1]);}
+ 
+ @interface NxBaseShaderProvider ()
+-@property(nonatomic) WholeShaderConditionalManifest *manifest;
++@property(nonatomic) WholeShaderConditionalManifest *manifest,*vertexManifest;
+ @property(nonatomic,copy) NSDictionary<NSString*,NSDictionary*> *identities;
+ @end
+ static id invalid_package(NSError **error) {
+@@ -92,9 +92,36 @@
+         ![wrapper[@"conditional_index_sha256"] isEqual:digest(indexBytes)])return invalid_package(error);
+     WholeShaderConditionalManifest *manifest=[WholeShaderConditionalManifest conditionalManifestAtAbsolutePath:@(path) error:error];
+     if(!manifest)return nil;
+-    return [self checkedManifest:manifest bridge:document(bridgeBytes)
++    NxBaseShaderProvider *provider=[self checkedManifest:manifest bridge:document(bridgeBytes)
+         admission:document(read_regular([root stringByAppendingPathComponent:@"conditional-admission.json"],64*1024*1024)) error:error];
++    if(!provider)return nil;
++    NSString *vertexRoot=[bundle stringByAppendingPathComponent:@"botw/vertex-shaders"];
++    struct stat exists;if(!lstat(vertexRoot.fileSystemRepresentation,&exists)) {
++        char vertexPath[PATH_MAX],why[256];
++        if(whole_runtime_vertex_shader_publication(bundle.fileSystemRepresentation,vertexPath,sizeof vertexPath,why,sizeof why))return invalid_package(error);
++        NSData *extraIndex=bridge_bytes([vertexRoot stringByAppendingPathComponent:@"shader-package.json"],65536);
++        NSDictionary *extra=document(extraIndex),*marker=document(bridge_bytes([vertexRoot stringByAppendingPathComponent:@"vertex-source-package.json"],65536));
++        NSDictionary *approved=document(bridge_bytes([vertexRoot stringByAppendingPathComponent:@"conditional-admission.json"],64*1024*1024));
++        if(![marker[@"schema"] isEqual:@"nxnative-base-v0-vertex-source-package-v1"]||
++            ![marker[@"profile"] isEqual:@"botw-switch-base-v0"]||![marker[@"game_version"] isEqual:@"1.0.0"]||
++            ![marker[@"scope"] isEqual:@"typed-vs-nonqueried-v1"]||![marker[@"bridge_sha256"] isEqual:digest(bridgeBytes)]||
++            ![marker[@"conditional_index_sha256"] isEqual:digest(extraIndex)]||
++            ![marker[@"conditional_publication_sha256"] isEqual:extra[@"publication_sha256"]]||!object(approved[@"captures"]))return invalid_package(error);
++        NSMutableDictionary *byCapture=[NSMutableDictionary dictionary];for(NSDictionary *row in provider.identities.allValues)byCapture[row[@"capture_key"]]=row;
++        for(NSString *key in approved[@"captures"]){NSDictionary *row=byCapture[key],*item=approved[@"captures"][key];
++            if(!row||[row[@"stage"] unsignedIntValue]!=0||![item[@"stage_name"] isEqual:@"vertex"]||
++                ![item[@"capture_sha256"] isEqual:row[@"capture_sha256"]]||![row[@"status"] isEqual:@"only_identity"])return invalid_package(error);}
++        provider.vertexManifest=[WholeShaderConditionalManifest conditionalManifestAtAbsolutePath:@(vertexPath) error:error];
++        if(!provider.vertexManifest)return nil;
++    } else if(errno!=ENOENT)return invalid_package(error);
++    return provider;
+ 
++}
++- (WholeShaderConditionalArtifact *)artifactForInfo:(const botw_shader_info *)info state:(const botw_conditional_draw_state *)state error:(NSError **)error {
++    WholeShaderConditionalArtifact *original=[self.manifest artifactForInfo:info state:state error:NULL];
++    WholeShaderConditionalArtifact *vertex=info&&info->stage==0?[self.vertexManifest artifactForInfo:info state:state error:NULL]:nil;
++    if(original&&vertex){invalid_package(error);return nil;}
++    if(!original&&!vertex){invalid_package(error);return nil;}return original?:vertex;
+ }
+ - (BOOL)infoForNativeDigest:(const uint8_t *)sum controlSize:(uint32_t)control codeSize:(uint32_t)code output:(botw_shader_info *)output {
+     if(!sum||!output)return NO;
+--- a/upstream/dm/gfx/nvn/nvn_mtl.m
++++ b/upstream/dm/gfx/nvn/nvn_mtl.m
+@@ -2733,6 +2733,7 @@
+ /* NX_BASE_V0_CONDITIONAL_HELPERS_BEGIN
+  * Only actual draw enters this transaction. Source compilation is outside both
+  * metadata locks; lookahead receives nil via prog_get. */
++static unsigned conditional_vertex_format(int fmt,unsigned *width);
+ static botw_conditional_draw_state conditional_snapshot_locked(void) {
+     botw_conditional_draw_state s={0};const void *device=NULL;int valid=1;
+     for(unsigned st=0;st<5;st++)if(S.bst[st]) {
+@@ -2740,6 +2741,12 @@
+     }
+     const dev_t_ *d=device;
+     if(valid&&d&&d->magic==MAGIC('D','E','V',0)) {s.device_known=1;s.window_origin_mode=d->origin;s.depth_mode=d->depth_mode;}
++    s.vertex_known=S.nattr>=0&&S.nattr<=16&&S.nstream>=0&&S.nstream<=16;
++    if(s.vertex_known){s.vertex_count=S.nattr;s.stream_count=S.nstream;
++        for(unsigned i=0;i<16;i++){s.vertex_format[i]=S.attr[i].fmt;s.vertex_offset[i]=S.attr[i].offset;s.vertex_stream[i]=S.attr[i].stream;
++            if(i<s.vertex_count)s.vertex_type_mask[i]=conditional_vertex_format(S.attr[i].fmt,NULL);
++            s.stream_stride[i]=S.stream[i].stride;s.stream_divisor[i]=S.stream[i].divisor;
++            s.vertex_address[i]=S.vbuf[i].address;s.vertex_size[i]=S.vbuf[i].size;}}
+     s.descriptor_epoch=atomic_load_explicit(&g_reg_gen,memory_order_relaxed);
+     s.color0_known=R.has_rt&&R.rt.n>=0&&R.rt.n<=8;s.color0_present=s.color0_known&&R.rt.n>0&&R.rt.color[0];
+     if(s.color0_present)s.color0_format=R.rt.has_cview[0]&&R.rt.cview[0].set_format?R.rt.cview[0].format:R.rt.color[0]->d.format;
+@@ -2780,7 +2787,7 @@
+     pthread_mutex_unlock(&g_rmu);botw_conditional_modes_unlock();
+     if(!valid)MDIE("base-v0 conditional immutable graphics stages unavailable");
+     WholeShaderConditionalArtifact *selected[2]={nil,nil};
+-    for(unsigned st=0;st<2;st++)if(mask>>st&1){selected[st]=[provider.manifest artifactForInfo:&infos[st] state:snapshot error:NULL];if(!selected[st])MDIE("base-v0 conditional actual draw predicate rejected");}
++    for(unsigned st=0;st<2;st++)if(mask>>st&1){selected[st]=[provider artifactForInfo:&infos[st] state:snapshot error:NULL];if(!selected[st])MDIE("base-v0 conditional actual draw predicate rejected");}
+     NSString *tuple=[NSString stringWithFormat:@"%@|%@",selected[0].cacheIdentity,selected[1]?selected[1].cacheIdentity:@"no-fragment"];
+     if(!conditional_programs)conditional_programs=[NSMutableDictionary dictionary];
+     NvProg *resolved=conditional_programs[tuple];if(resolved)return resolved;
+@@ -2796,7 +2803,7 @@
+     if(resolved->sh[1]&&(!g_pass.conditional_color0_known||g_pass.conditional_color0_format!=now.color0_format)){conditional_draw_unlock(g);return 0;}
+     for(unsigned st=0;st<2;st++) {
+         if(!!resolved->sh[st]!=!!(mask>>st&1)){conditional_draw_unlock(g);return 0;}
+-        if(mask>>st&1){WholeShaderConditionalArtifact *a=[nx_base_shader_provider().manifest artifactForInfo:&infos[st] state:&now error:NULL];
++        if(mask>>st&1){WholeShaderConditionalArtifact *a=[nx_base_shader_provider() artifactForInfo:&infos[st] state:&now error:NULL];
+             if(!a||g_shcache[a.cacheIdentity]!=resolved->sh[st]){conditional_draw_unlock(g);return 0;}}
+     }
+     return 1; /* Both locks remain held through actual argument binding/draw. */
+@@ -2868,6 +2875,69 @@
+     }
+     return MTLVertexFormatInvalid;
+ }
++/* NX_VERTEX_FORMAT_BEGIN */
++static unsigned conditional_vertex_format(int fmt,unsigned *width) {
++    MTLVertexFormat f=vfmt(fmt);unsigned bytes=0,mask=0;
++#define VF4(name,size,types) case MTLVertexFormat##name:bytes=size;mask=types;break; \
++    case MTLVertexFormat##name##2:bytes=2*size;mask=types;break; \
++    case MTLVertexFormat##name##3:bytes=3*size;mask=types;break; \
++    case MTLVertexFormat##name##4:bytes=4*size;mask=types;break
++    switch(f){VF4(Float,4,7);VF4(Half,2,1);VF4(UChar,1,6);VF4(Char,1,6);VF4(UShort,2,6);VF4(Short,2,6);VF4(UInt,4,6);VF4(Int,4,6);
++#undef VF4
++#define VN4(name,size) case MTLVertexFormat##name##Normalized:bytes=size;mask=1;break; \
++    case MTLVertexFormat##name##2Normalized:bytes=2*size;mask=1;break; \
++    case MTLVertexFormat##name##3Normalized:bytes=3*size;mask=1;break; \
++    case MTLVertexFormat##name##4Normalized:bytes=4*size;mask=1;break
++        VN4(UChar,1);VN4(Char,1);VN4(UShort,2);VN4(Short,2);
++#undef VN4
++        case MTLVertexFormatUInt1010102Normalized:case MTLVertexFormatInt1010102Normalized:
++        case MTLVertexFormatFloatRG11B10:case MTLVertexFormatUChar4Normalized_BGRA:bytes=4;mask=1;break;
++        default:break;
++    }if(width)*width=bytes;return mask;
++}
++/* NX_VERTEX_FORMAT_END */
++
++/* NX_VERTEX_BINDING_BEGIN */
++/* Descriptor construction runs before the final registry transaction. This
++ * check uses only normal replay shape/type metadata; no resource lookup. */
++static int conditional_vertex_shape_valid(const nvn_refl *rf) {
++    if(!rf||rf->nv<0||rf->nv>16||S.nattr<0||S.nattr>16||S.nstream<0||S.nstream>16)return 0;
++    uint32_t seen=0;
++    for(int i=0;i<rf->nv;i++){int a=rf->v[i].nvn,loc=rf->v[i].loc,ct=rf->v[i].ct;
++        if(a<0||a>=S.nattr||a>=16||loc!=a||(seen>>a&1)||ct<NVN_CT_FLOAT||ct>NVN_CT_INT)return 0;seen|=1u<<a;
++        va_st attr=S.attr[a];unsigned width=0,mask=conditional_vertex_format(attr.fmt,&width);
++        unsigned required=ct==NVN_CT_UINT?4:ct==NVN_CT_INT?2:1;
++        if(!(mask&required)||!width||attr.stream>=S.nstream||attr.stream>=16)return 0;
++    }return 1;
++}
++static int conditional_vertex_draw_valid(const nvn_refl *rf,const p_draw *dw,const p_draw_idx *di) {
++    if(!rf||rf->nv<0||rf->nv>16||(!dw==!di)||S.nattr<0||S.nattr>16||S.nstream<0||S.nstream>16)return 0;
++    int count=dw?dw->count:di->count,instances=dw?dw->instances:di->instances,base=dw?dw->base_instance:di->base_instance;
++    if(count<0||instances<0||base<0||(dw&&dw->first<0))return 0;
++    if(!instances)instances=1;
++    if(di){if(di->itype<0||di->itype>2)return 0;uint64_t length=(uint64_t)count<<di->itype;
++        if(length){void *buf;uint64_t offset,gpu;if(!di->ibuf||length>UINT64_MAX-di->ibuf||!mtl_gpu_addr(di->ibuf,length,&buf,&offset,&gpu))return 0;}}
++    uint32_t seen=0;
++    for(int i=0;i<rf->nv;i++){int a=rf->v[i].nvn,loc=rf->v[i].loc,ct=rf->v[i].ct;
++        if(a<0||a>=S.nattr||a>=16||loc!=a||(seen>>a&1)||ct<NVN_CT_FLOAT||ct>NVN_CT_INT)return 0;seen|=1u<<a;
++        va_st attr=S.attr[a];unsigned width=0,mask=conditional_vertex_format(attr.fmt,&width);
++        unsigned required=ct==NVN_CT_UINT?4:ct==NVN_CT_INT?2:1;int stream=attr.stream;
++        if(!(mask&required)||!width||stream>=S.nstream||stream>=16)return 0;
++        NVNbufferRange range=S.vbuf[stream];vs_st layout=S.stream[stream];void *buf;uint64_t offset,gpu;
++        if(!range.address||!range.size||range.size>UINT64_MAX-range.address||
++            !mtl_gpu_addr(range.address,range.size,&buf,&offset,&gpu)||attr.offset>range.size||width>range.size-attr.offset)return 0;
++        uint64_t last=0;
++        if(layout.stride&&count){
++            if(layout.divisor)last=(uint64_t)base+((uint64_t)instances-1)/layout.divisor;
++            else if(dw)last=(uint64_t)dw->first+(uint64_t)count-1;
++            else continue; /* The normal GPU index consumer supplies per-vertex indices. */
++            uint64_t available=range.size-attr.offset-width;
++            if(last>available/layout.stride)return 0;
++        }
++    }return 1;
++}
++/* NX_VERTEX_BINDING_END */
++
+ static MTLBlendFactor bfac(int f) {
+     switch (f) { case 1: return MTLBlendFactorZero; case 2: return MTLBlendFactorOne; case 3: return MTLBlendFactorSourceColor; case 4: return MTLBlendFactorOneMinusSourceColor;
+         case 5: return MTLBlendFactorSourceAlpha; case 6: return MTLBlendFactorOneMinusSourceAlpha; case 7: return MTLBlendFactorDestinationAlpha; case 8: return MTLBlendFactorOneMinusDestinationAlpha;
+@@ -4996,6 +5066,7 @@
+     int conditional_mode=nx_base_shader_enabled();
+     NvProg *conditional_program=conditional_mode?conditional_program_for_draw(&conditional_snapshot):nil;
+     __unsafe_unretained NvProg *pr=conditional_mode?conditional_program:prog_get(S.prog);
++    if(conditional_mode&&(!pr||!pr->sh[0]||!conditional_vertex_shape_valid(&pr->sh[0]->rf)))MDIE("base-v0 conditional vertex descriptor or buffer range rejected");
+     if (g_ruler_truth == 0) {   // Ruler negative control (DM_NVN_RULER_NEG=<fragment key>): in the mode under test drop this shader's draws, and the ruler must report non-equivalence
+         static const char *neg; static int ng = -1; if (ng < 0) { neg = getenv("DM_NVN_RULER_NEG"); ng = neg && *neg; }
+         if (ng && pr) for (int st = 0; st < 5; st++) { __unsafe_unretained NvShader *sh = pr->sh[st]; if (sh && sh->stage == 1 && !strncmp(sh->key, neg, strlen(neg))) { static int once; if (!once++) MLOG("DM_NVN_RULER_NEG：被测模式丢弃着色器 %s 的绘制", sh->key); return; } }
+@@ -5128,6 +5199,7 @@
+     /* Hold the final tuple through every mode-dependent encode, including viewport/winding. */
+     conditional_draw_guard conditional_guard __attribute__((cleanup(conditional_draw_unlock)))={0};
+     if(conditional_mode&&!conditional_draw_commit(&conditional_guard,pr,&conditional_snapshot))MDIE("base-v0 conditional draw metadata changed before encode");
++    if(conditional_mode&&!conditional_vertex_draw_valid(&pr->sh[0]->rf,dw,di))MDIE("base-v0 conditional vertex descriptor or buffer range rejected");
+     { MTLViewport v = S.has_vp ? (MTLViewport){S.vp[0][0], S.vp[0][1] + vo, S.vp[0][2], S.vp[0][3] * vs, S.dr[0], S.dr[1]} : (MTLViewport){0, vo, tw, th * vs, 0, 1};
+       if (atomic_load_explicit(&g_origin_ll, memory_order_relaxed)) { v.originY += v.height; v.height = -v.height; }   // lower-left origin (see g_origin_ll)
+       enc_r_viewport(en, v); }

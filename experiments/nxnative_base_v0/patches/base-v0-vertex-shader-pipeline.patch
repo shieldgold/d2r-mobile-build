@@ -1,0 +1,198 @@
+--- a/adapter/shader_conditional_build.py
++++ b/adapter/shader_conditional_build.py
+@@ -22,7 +22,7 @@
+ from scripts.botw_native.shader_bindings import _Snapshot, _source_records
+ 
+ PROFILE = 'botw-switch-base-v0'
+-SCOPE = 'noattr-vs-output0-fs-nonqueried-v1'
++SCOPE = 'typed-vs-nonqueried-v1'
+ HEX64 = re.compile(r'[0-9a-f]{64}')
+ KEY = re.compile(r'[0-9a-f]{16}')
+ LIMIT = 64 * 1024 * 1024
+@@ -86,17 +86,35 @@
+     return module
+ 
+ 
++def attribute_map(rows):
++    require(isinstance(rows, list) and 1 <= len(rows) <= 16, 'vertex recipe must have one to sixteen attributes')
++    result = {}
++    for row in rows:
++        require(isinstance(row, dict) and set(row) == {'location', 'component_type'} and
++                type(row['location']) is int and 0 <= row['location'] < 16 and
++                row['component_type'] in ('float', 'int', 'uint') and row['location'] not in result,
++                'invalid or duplicate typed vertex recipe')
++        result[row['location']] = row['component_type']
++    require(rows == attribute_rows(result), 'vertex recipe must use sorted canonical locations')
++    return result
++
++
++def attribute_rows(attributes):
++    require(isinstance(attributes, dict) and 1 <= len(attributes) <= 16 and
++            all(type(k) is int and 0 <= k < 16 and v in ('float', 'int', 'uint')
++                for k, v in attributes.items()), 'invalid typed vertex recipe')
++    return [{'location': k, 'component_type': v} for k, v in sorted(attributes.items())]
++
++
+ def requested_keys(path):
+-    raw = read(path)
+-    value = upstream_shaders._json(raw)
+-    require(isinstance(value, dict) and set(value) == {'schema', 'profile', 'keys'} and
+-            value['schema'] == 'botw-shader-conditional-candidates-v1' and value['profile'] == PROFILE,
+-            'conditional candidates are explicit requests, not review or facts admission')
+-    keys = value['keys']
+-    require(isinstance(keys, list) and 1 <= len(keys) <= 100000 and
+-            all(isinstance(k, str) and KEY.fullmatch(k) for k in keys) and len(set(keys)) == len(keys),
+-            'invalid or duplicate conditional candidate keys')
+-    return sorted(keys), digest(raw)
++    raw = read(path); value = upstream_shaders._json(raw)
++    require(isinstance(value, dict) and set(value) == {'schema', 'profile', 'recipes'} and
++            value['schema'] == 'nxnative-base-v0-vertex-recipes-v1' and value['profile'] == PROFILE,
++            'typed vertex request is a condition, not a game facts declaration')
++    recipes = value['recipes']
++    require(isinstance(recipes, dict) and 1 <= len(recipes) <= 100000 and
++            all(isinstance(k, str) and KEY.fullmatch(k) for k in recipes), 'invalid vertex candidate keys')
++    return sorted(recipes), digest(raw), {key: attribute_map(rows) for key, rows in recipes.items()}
+ 
+ 
+ def format_contract():
+@@ -235,9 +253,10 @@
+             'verified_pairs': [list(pair) for pair in sorted(verified_pairs)]}
+ 
+ 
+-def assess_mode(tool, capture, res, msl, device):
++def assess_mode(tool, capture, res, msl, device, *, attributes):
+     """Use typed requests only inside original analysis; never serialize facts."""
+-    require(capture.stage in (0, 1), 'scope rejects compute and other non-graphics stages')
++    require(capture.stage == 0, 'typed vertex scope rejects all other shader stages')
++    attribute_rows(attributes)
+     require(device in MODES, 'unknown conditional device mode')
+     require(isinstance(res, dict) and res.get('key') == capture.key and
+             res.get('stage') == tool.XLATE_STAGE[capture.stage], 'fresh translator result identity differs')
+@@ -246,6 +265,7 @@
+     require(not res['notes'], 'translator query fallback is outside the nonqueried scope')
+     require(not res['images'] and not res['sbufs'], 'image/storage-buffer resources are outside scope')
+     request = tool.Facts()
++    request.attributes = dict(attributes)
+     request.device_state = {'window_origin_mode': WINDOW[device[0]], 'depth_mode': DEPTH[device[1]]}
+     request.constant_buffers = {bank: bank - 3 for bank in range(3, 17)}
+     format_contract()
+@@ -277,7 +297,12 @@
+                                   {'unknowns': unknowns, 'conflicts': conflicts})
+     require(all(row['slot'] in (1, 2, *range(3, 17)) for row in res['cbufs']),
+             'constant bank is outside C1/C2 or the proven fourteen uniforms')
+-    require(not inputs, 'actual vertex attributes are outside the no-attribute scope')
++    require(inputs and len(inputs) == len(attributes) and
++            len({row['location'] for row in inputs}) == len(inputs) and
++            {row['location'] for row in inputs} == set(attributes) and
++            all(re.fullmatch(r'(float|int|uint)[234]?', row['msl_type']) and
++                re.sub(r'[234]$', '', row['msl_type']) == attributes[row['location']] for row in inputs),
++            'actual vertex inputs do not exactly match the explicit typed draw predicate')
+     if capture.stage == 1:
+         require(tool.fragment_raster(msl)['colors'] == [0], 'fragment must write exactly output0 with float type')
+     for binding in bindings:
+@@ -307,7 +332,7 @@
+     require(type(jobs) is int and 1 <= jobs <= 256, 'invalid CPU worker count')
+     destination = checked(destination)
+     require(not os.path.lexists(destination), 'conditional output must be a fresh directory')
+-    selected, request_sha = requested_keys(candidates)
++    selected, request_sha, recipes = requested_keys(candidates)
+     source = ports()
+     source.stage_source_toolchain(destination / 'toolchain')
+     # Every Python byte is verified before importing this private local stage.
+@@ -377,15 +402,16 @@
+             work = Path(temporary) / f'{window}-{depth}'; work.mkdir()
+             requests = []
+             for key, capture in complete.items():
+-                if capture.stage not in (0, 1):
+-                    failures[key].append('scope rejects non-graphics stage'); continue
+-                request = tool.Facts(); request.device_state = {'window_origin_mode': WINDOW[window], 'depth_mode': DEPTH[depth]}
++                if capture.stage != 0:
++                    failures[key].append('typed vertex scope rejects all other shader stages'); continue
++                request = tool.Facts(); request.attributes = dict(recipes[key]); request.device_state = {'window_origin_mode': WINDOW[window], 'depth_mode': DEPTH[depth]}
+                 if capture.stage == 1:
+                     request.outputs = {0: 'float'}
+                 path = work / (key + '.code'); path.write_bytes(capture.translator_code)
+                 job = tool.make_job(capture, request, str(path), options)
+-                require(job['tex'] == {} and job['img'] == {} and job['attr'] == {},
+-                        'conditional translation may not answer texture/image/attribute queries')
++                require(job['tex'] == {} and job['img'] == {} and
++                        job['attr'] == {str(k): v for k, v in sorted(recipes[key].items())},
++                        'typed vertex translation may only answer its explicit attribute conditions')
+                 requests.append(job)
+             actual_jobs, errors, retries = tool.translate_with_retry(tools, requests, str(work), jobs) if requests else ([], {}, {})
+             for job in actual_jobs:
+@@ -410,7 +436,7 @@
+                     if capture.stage == 0 and want:
+                         msl, padded = tool.pad_vertex_outputs(msl, set(want))
+                         require(padded is not None, 'original vertex output padding could not resolve the actual source pair')
+-                    request, bindings, vertex_inputs, entry = assess_mode(tool, capture, res, msl, (window, depth))
++                    request, bindings, vertex_inputs, entry = assess_mode(tool, capture, res, msl, (window, depth), attributes=recipes[key])
+                     reflection = tool.reflection(capture, chain, entry, bindings, vertex_inputs, request, 'B')
+                     reflection.pop('facts_sha256', None)
+                     reflection.update(translator_options={'debug': job['debug'], 'reduced': job['reduced']}, vs_pad=padded)
+@@ -423,7 +449,7 @@
+                         'fresh_msl_sha256': digest(raw_msl), 'msl_sha256': digest(msl.encode()),
+                         'reflection_core_sha256': digest(canonical(reflection)), 'vs_pad': padded,
+                         'gates': {'original_analyze_unknowns': 0, 'original_analyze_conflicts': 0,
+-                                  'texture_queries': [], 'attributes': [], 'images': [], 'storage_buffers': []}}
++                                  'texture_queries': [], 'attributes': attribute_rows(recipes[key]), 'images': [], 'storage_buffers': []}}
+                     results[key].append((mode, reflection, msl))
+                 except (ValueError, tool.ToolError, tool.CaptureError, KeyError, TypeError) as error:
+                     failure = {'device': [window, depth], 'error': str(error)}
+@@ -477,7 +503,7 @@
+             contract = {'schema': 'botw-shader-conditional-translation-contract-v1', 'profile': PROFILE,
+                 'chain': chain, 'capture': capture.summary(), 'scope': SCOPE,
+                 'requirements': {'device': {name: mode[name] for name in ('window_origin_mode', 'depth_mode')},
+-                    'attributes': [], 'texture_queries': [],
++                    'attributes': attribute_rows(recipes[key]), 'texture_queries': [],
+                     'images': [], 'storage_buffers': [], 'fragment_output0':
+                         {'type': 'float', 'nvn_formats': [37, 41, 46, 154]} if capture.stage == 1 else None},
+                 'proofs': {'binding_contract_sha256': digest(binding_raw), 'subset_sha256': proof_sha},
+--- a/scripts/package_conditional.py
++++ b/scripts/package_conditional.py
+@@ -170,7 +170,7 @@
+             capture = tool.load_capture(str(temporary / 'admitted/captures'), key)
+         except tool.CaptureError as error:
+             raise ValueError('conditional full capture validation failed: ' + str(error)) from error
+-        require(capture.stage in (0, 1) and row.get('capture') == capture.summary() and
++        require(capture.stage == 0 and row.get('capture') == capture.summary() and
+                 row.get('capture_sha256') == capture.sha256 and row.get('stage_name') == capture.stage_name and
+                 row.get('c1_sha256') == digest(capture.c1), 'full capture/C1 identity differs from original load_capture')
+         admitted = captures[key]
+@@ -195,9 +195,12 @@
+             require(mode.get('translated_code_sha256') == digest(capture.translator_code), 'actual translated code SHA differs')
+             require(publisher.canonical(mode.get('gates')) == publisher.canonical(
+                     {'original_analyze_unknowns': 0, 'original_analyze_conflicts': 0,
+-                     'texture_queries': [], 'attributes': [], 'images': [], 'storage_buffers': []}),
++                     'texture_queries': [], 'attributes': publisher.attribute_rows(publisher.attribute_map(
++                         mode.get('gates', {}).get('attributes'))), 'images': [], 'storage_buffers': []}),
+                     'mode has an unresolved original analysis/query/resource gate')
+         require(seen == set(publisher.MODES), 'incomplete four-mode conditional capture')
++        require(all(mode['gates']['attributes'] == modes[0]['gates']['attributes'] for mode in modes),
++                'all four modes must retain the same vertex recipe')
+         for variant in variants:
+             require(variant not in by_variant, 'variant is reused by multiple full capture identities')
+             by_variant[variant] = (capture, modes)
+@@ -248,7 +251,7 @@
+         require(mode is not None, 'contract mode has no admitted actual CPU proof')
+         expected_contract = {'schema': 'botw-shader-conditional-translation-contract-v1', 'profile': PROFILE,
+             'chain': chain, 'capture': capture.summary(), 'scope': publisher.SCOPE,
+-            'requirements': {'device': device_map, 'attributes': [], 'texture_queries': [], 'images': [],
++            'requirements': {'device': device_map, 'attributes': mode['gates']['attributes'], 'texture_queries': [], 'images': [],
+                 'storage_buffers': [], 'fragment_output0': {'type': 'float', 'nvn_formats': [37, 41, 46, 154]} if capture.stage == 1 else None},
+             'proofs': {'binding_contract_sha256': BINDING_SHA, 'subset_sha256': digest(proof_raw)},
+             'translation': {'source_adapter_sha256': adapter_sha, 'job_sha256': mode['job_sha256']}}
+@@ -263,10 +266,12 @@
+                 (padded or mode['fresh_msl_sha256'] == mode['msl_sha256']), 'fresh MSL/padding proof differs')
+         msl = values['metal_source'].decode('utf-8', errors='strict')
+         res = parse((temporary / 'admitted' / mode['res_file']).read_bytes())
+-        request, bindings, vertex_inputs, entry = publisher.assess_mode(tool, capture, res, msl, device)
++        request, bindings, vertex_inputs, entry = publisher.assess_mode(tool, capture, res, msl, device,
++            attributes=publisher.attribute_map(mode['gates']['attributes']))
+         job_raw = (temporary / 'admitted' / mode['job_file']).read_bytes(); job = parse(job_raw)
+         require(type(job.get('debug')) is bool and job.get('reduced') is False, 'invalid final translator retry options')
+         job_request = tool.Facts()
++        job_request.attributes = publisher.attribute_map(mode['gates']['attributes'])
+         job_request.device_state = {'window_origin_mode': publisher.WINDOW[device[0]], 'depth_mode': publisher.DEPTH[device[1]]}
+         if capture.stage == 1: job_request.outputs = {0: 'float'}
+         expected_job = tool.make_job(capture, job_request, '/private/verified-code', options)
