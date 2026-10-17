@@ -142,8 +142,9 @@ static int prepare(void *opaque,char *error,size_t capacity) {
     const char *save=whole_identity_save_directory();
     if(!save) {code=problem(error,capacity,EPERM,"existing UID/save binding was not established");goto failed;}
     const char *keys[]={"DM_ROOT","DM_ROMFS","DM_SAVE","DM_TEMP","DM_ARGV0","DM_GAME_VERSION","DM_LANG","DM_OPMODE",
-        "DM_BOTW_AUDIO_CPU","DM_AUDIO","DM_BOTW_SHADER_MANIFEST"};
-    const char *values[]={context->documents,context->romfs,save,context->temporary,"BotW","1.0.0","en-US","0","0","1",context->manifest};
+        "DM_BOTW_AUDIO_CPU","DM_AUDIO","DM_BOTW_SHADER_MANIFEST","DM_BOTW_POOL_POLICY"};
+    const char *values[]={context->documents,context->romfs,save,context->temporary,"BotW","1.0.0","en-US","0","0","1",context->manifest,
+        "ordinary-pools-base-v0-v1"};
     for(size_t i=0;i<sizeof keys/sizeof *keys;i++)if((code=set_environment(keys[i],values[i],error,capacity)))goto failed;
     context->process_owner=context->aruid=(uint64_t)(unsigned)getpid();
     if(!context->process_owner) {code=problem(error,capacity,EPERM,"current process identity unavailable");goto failed;}

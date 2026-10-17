@@ -464,8 +464,8 @@
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_runtime_configuration.m": {
-      "sha256": "d14bb7e32b062a032a093711175bb6533fa1b143d0b6fdd9c8d39f8ec54c846f",
-      "bytes": 15666,
+      "sha256": "e89f7a2460d806c0964be9020f4290fe0f57ba6e5c9f9c9b0f8be78bf76b31b6",
+      "bytes": 15725,
       "role": "thin-adapter-or-verification"
     },
     "frontend/whole_runtime_configuration_private.h": {
@@ -561,6 +561,11 @@
     "patches/base-v0-stack-allocator.patch": {
       "sha256": "51f2f95639f9e254728334e257da0644e68c443412d2a482c3fa1cdf51c29d07",
       "bytes": 3023,
+      "role": "thin-adapter-or-verification"
+    },
+    "patches/base-v0-storage-class-policy.patch": {
+      "sha256": "1fe04343907f38b2e749667b47a1521da75f1a1200835d8b8bd98b92a6748f75",
+      "bytes": 997,
       "role": "thin-adapter-or-verification"
     },
     "patches/base-v0-sync-wait.patch": {
@@ -978,6 +983,11 @@
       "bytes": 3328,
       "role": "thin-adapter-or-verification"
     },
+    "tests/whole_runtime_pool_policy_probe.m": {
+      "sha256": "d35d51a563ba9dff46b891a7c2591848f3517d21fcba76d89ea5b857f8f8e2ea",
+      "bytes": 3878,
+      "role": "thin-adapter-or-verification"
+    },
     "tests/whole_runtime_resources_probe.c": {
       "sha256": "caf47bab5176eb920b6166d4ab461762d756a32e848ac338982243139e3c1dca",
       "bytes": 1162,
@@ -1011,6 +1021,11 @@
     "tests/whole_stack_allocator_probe.c": {
       "sha256": "42b5c00e244133b069c39a1407d3eb9ce8f8b3b10b91cefa5e9826ef2cf24a56",
       "bytes": 9172,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_storage_class_policy_probe.m": {
+      "sha256": "f064ca6071833708580305c3b30572873d6cbc0db3abcc67872d2361a1f7e73b",
+      "bytes": 4013,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_sync_wait_probe.c": {
@@ -1810,7 +1825,8 @@
     "patches/normal-account-result-status.patch",
     "patches/normal-signal-kind.patch",
     "patches/base-v0-allocation-failure.patch",
-    "patches/original-logical-heap.patch"
+    "patches/original-logical-heap.patch",
+    "patches/base-v0-storage-class-policy.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1819,6 +1835,7 @@
     "dm/gfx/nvn/botw_shader_manifest.m": "65ac62d1789afa8193351eedef54922775e79190910f88399fe78f42e8c01772",
     "dm/gfx/nvn/botw_shader_observation.c": "9521363bb66da6027333d0bdfd4bdc1a09706aadf4c7b74cf40d8c9fd91fa136",
     "dm/gfx/nvn/botw_shader_runtime.m": "b7aa426b0ad2678d2eefa0e42719b527da8c03b3918cf2f5d27ee18a038a31fb",
+    "dm/gfx/nvn/botw_storage_class.c": "f300d8474acf8be8ed17e829d74d8add3d47331a0bb03792ec2292555ffc9c22",
     "dm/gfx/nvn/hle_nvn.c": "8fee859bb9cea33319ebdfed8379381229b792c2cc0f86cd0bdc8d1dbd2b6b8b",
     "dm/gfx/nvn/include/nvn.h": "9ab74a3dede5d96fc5b16ec3cdd3ac1f5721d92a3659c8b5801db71327d3b88c",
     "dm/gfx/nvn/nvn_cmd_audit.c": "3aa12a16d1ca8fddf8f72ddba7acd3b118199a72fab1b90f8b15a7d479bae9f4",

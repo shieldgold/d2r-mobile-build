@@ -1,0 +1,17 @@
+--- a/dm/gfx/nvn/botw_storage_class.c
++++ b/dm/gfx/nvn/botw_storage_class.c
+@@ -20,8 +20,13 @@
+     abort();
+ }
+ static NVNstorageClass ordinary_class(const pool_t *pool) {
++    // The fixed base-v0 whole host selects the same ordinary backing. Its
++    // single 0x100 class is a host representation, not a native raw-kind claim.
++    // Callers own the normal object lifetime; actual resource consumers keep
++    // the existing registry/generation checks. This query adds no stale lease.
+     const char *policy = getenv("DM_BOTW_POOL_POLICY");
+-    if (!policy || strcmp(policy, "ordinary-pools-1.9.0-probe-v1"))
++    if (!policy || (strcmp(policy, "ordinary-pools-1.9.0-probe-v1") &&
++                    strcmp(policy, "ordinary-pools-base-v0-v1")))
+         class_unsupported("requires the explicit ordinary-pool experiment");
+     if (pool && (pool->magic != MAGIC('P', 'O', 'O', 'L') ||
+                  (pool->flags & (NVN_MEMORY_POOL_FLAGS_PHYSICAL | NVN_MEMORY_POOL_FLAGS_VIRTUAL))))

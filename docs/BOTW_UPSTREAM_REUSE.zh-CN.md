@@ -54,6 +54,7 @@ Texture 组的 untyped `GetRawStorageClass` 未计入 typed 合计，也不因�
 ## 必须补证据的差异
 
 - **NVN 对象布局**：两份上游的 Texture、TextureView、Program 与 Sampler 对象大小存在差异。按当前原 SDK 的实际读写上界验证；不套用 1.9 的较小对象或 D2R 的较大对象。
+- **普通池存储类别**：whole base-v0 使用显式策略 `ordinary-pools-base-v0-v1`，复用完整上游的两项 storage-class 查询。返回的 `0x100` 是 Metal 普通池的单类标记；原 SDK 会返回不同的硬件 kind，两者不能视为数值等价。builder 可在绑定 pool 前查询；物理池、虚拟池与 MapVirtual 能力不随该策略开放。查询保留原对象检查，不新增同地址复用后的代际保证，实际纹理访问仍受既有唯一池 registry 的生命周期检查约束。
 - **Shader scratch**：两份上游的 setter 都是 `g_nops`，本项目没有照搬。零容量 pool 保留设备、身份、代际、flags 与 token，不解引用 token、不建立空 MTLBuffer；非空用途拒绝，Finalize 等待真实 GPU 完成。`ed9f354` 已将实际 Rust SPIR-V 1.4 → 原工具链 raw MSL → 完整后处理 → 最终 MSL 与 scratch 证明逐字节闭环；独立 Ryujinx 路径只保留为历史交叉验证。iPhone 12 的 `4fb5b23`、`3e9c786` 已装载 direct-v2 bundle，37 份来源均核验；这仍不是原游戏实际绘制的证明。
 - **着色器环境**：当前主程序与资源中的 control 版本并不统一。上游只支持的版本不能通过改版本号来冒充；缺少纹理/图像环境时，不能沿用默认 2D 解释而声称整条翻译链已经通过。
 - **AudioRenderer**：固定 BOTW 上游没有完整 audren/mixer/执行实现。AudioOut 与原 SDK CPU/manual 探针都不等于持续处理真实 voice、PCM/ADPCM、混音和完成事件的渲染器。
