@@ -4,9 +4,9 @@
 
 ## 2026-10-17 当前接入
 
-当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `7548795edf0052f9a867880234c9f2534d872f5f` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39039791557) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
+当前实现见 [nxnative 与 BOTW 1.0.0 接入](../experiments/nxnative_base_v0/README.zh-CN.md)。提交 `f13562ea35cbc58365a87c9fd7a95c5ab929cc2d` 的 [iPhoneOS CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39041227538) 已完成最终 235 个单元的编译和强链接，包含完整音频、带属性顶点着色器、片元多输出、DebugPad 和真实 UIKit 入口。实现文档保留各批历史验证边界，其中等待组合编译的步骤已由此构建覆盖。
 
-`1017.39` 已完成六模块装载表、实际宿主接口表和签名校验，并覆盖安装到 iPhone 15 Pro。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
+`1017.40` 已完成六模块装载表、实际宿主接口表和签名校验，并覆盖安装到 iPhone 15 Pro。用户选择以已登记的 iPhone 15 Pro 进行安装测试；新登记的 iPhone 12 仍需 Apple 放行及匹配描述文件。游戏画面、触控、声音与保存重开均须在目标手机实际验证，不能由编译或签名结果推断。
 
 iPhone 15 Pro 已实读 iOS 27.2 Beta，并覆盖安装 `1.0.0 / 1017.38`。资源迁移现已完成：手机 `Documents/romfs` 的 39,678 个文件路径和大小与本地来源逐项一致，合计 14,417,240,079 字节；`Pack/Bootup.pack` 与 `Pack/Bootup_Graphics.pack` 另外做了完整回读 SHA256 校验。并未对手机全部资源宣称全量哈希验证。
 
@@ -14,7 +14,9 @@ iPhone 15 Pro 已实读 iOS 27.2 Beta，并覆盖安装 `1.0.0 / 1017.38`。资�
 
 正常启动 `1017.38` 的实际控制台首错为 `[nxnative normal] diagnostic entry disabled`，程序在进入 UIKit 和游戏前退出。定位到上游 `hle_movie.c` 的 Metroid Dread ring 观测门构造函数：它无条件调用正常配置明确拒绝的 `gate_obs_set`。BOTW 本次改写没有观测门，因此修复仅在正常配置跳过该构造函数的两次登记，完整电影解码模块和观测 API 的拒绝策略保留；非正常配置继续登记。新增真实 C 构造函数测试先复现同样的退出码 77，再验证修复后进入 main；另覆盖显式非正常配置、默认上游配置及函数外源码不变。修复后 320 项 nxnative 回归测试全部通过，固定源码清单核验和新的 iPhoneOS CI 均通过。签名后静态装载验证通过，实际 614 行宿主接口表在签名前后保持一致。`1017.39` 实机正常启动已越过原退出点并记录原逻辑堆规划 3,261,071,360 字节，随后停止于 `unimplemented import`。覆盖安装后 39,678 个资源文件路径及大小保持一致；系统容器管理器添加了数据保护扩展属性，不能据此宣称所有元数据逐字节不变。
 
-通过实机 LLDB 在 `unimpl_c` 入口捕获 stub 12，具体符号为 `nnosGetDefaultUserExceptionStackForApplication`。实读 sdk 符号表第 11 项 `st_info=0x20`（STB_WEAK / STT_NOTYPE）、`st_shndx=0`；实际调用前存在空指针检查。当前装载器把未解析弱引用填入非空诊断 stub，导致原 SDK 错走可选回调。修复保留完整模块与 HLE 查找顺序，仅将缺失的未定义弱引用保持为 NULL，并在复用同名强引用 stub 之前检查；已定义符号的当前跨模块抢占、指定强制接口、强引用失败和 RELA 加数语义保留。9 项带 ASan/UBSan 的真实装载器 CPU 测试先复现 4 项失败，修复后全部通过；新补丁的 329 项 nxnative 全量回归及固定源码清单核验均通过，等待 iPhoneOS 构建和实机更新，尚未证明越过此停止点。
+通过实机 LLDB 在 `unimpl_c` 入口捕获 stub 12，具体符号为 `nnosGetDefaultUserExceptionStackForApplication`。实读 sdk 符号表第 11 项 `st_info=0x20`（STB_WEAK / STT_NOTYPE）、`st_shndx=0`；实际调用前存在空指针检查。当前装载器把未解析弱引用填入非空诊断 stub，导致原 SDK 错走可选回调。修复保留完整模块与 HLE 查找顺序，仅将缺失的未定义弱引用保持为 NULL，并在复用同名强引用 stub 之前检查；已定义符号的当前跨模块抢占、指定强制接口、强引用失败和 RELA 加数语义保留。9 项带 ASan/UBSan 的真实装载器 CPU 测试先复现 4 项失败，修复后全部通过；该补丁的 329 项 nxnative 全量回归、固定源码清单及 iPhoneOS 构建均通过。`1017.40` 已签名安装，正常启动越过该弱引用停止点，随后实测 `guest requested fatal break` / 退出 42；进一步实机调用栈证实已进入 `nnMain`，在创建第一个线程时由 SDK `ThreadManager::CreateAliasStackUnsafe` 中断，仍无游戏画面验收。
+
+实机构造函数断点另确认旧 SDK 两个地址分配器仍以 `begin=0x08000000`、`guard=0x4000` 调用，alias 的 end 为 `0x1000000000`，stack 的 end 为 `0x80000000`；宿主实际保留区间则为 alias `0x7010000000 + 0x20000000`、stack `0x7030000000 + 0x10000000`。栈地址分配器的实读页字段也匹配旧低地址范围。复用项目既有 `base-v0-stack-allocator` 的完整构造转接主体，增加同样已实读的 alias 参数分支，从 GetInfo 2/3 或 14/15 取得实际保留区间，并转调实际 sdk 模块中的原构造函数。SDK 私有对象仍由原函数处理，未知参数保持原样；两端 guard、原返回值和 errno 语义保留。当前 SDK 构造函数 76 字节的 SHA256 与先前固定输入审计一致。8 项拥有独立数据的 ASan/UBSan 测试覆盖两种实际参数、保护区、原函数委派、模块身份、失败查询及不可读私有对象；先复现旧低地址范围失败，修复后通过，337 项 nxnative 全量回归及源码清单核验全部通过，等待下一次 iPhoneOS 构建和实机更新。
 
 新宿主使用 `Documents/romfs` 中的完整资源目录，旧宿主的 `Documents/botw-romfs.bin` 不能直接代替它。保存位置为 `Documents/save`，旧 `Documents/botw-saves` 保留。覆盖安装时保留文稿，游戏内容与生成的着色器仅存放在本地忽略目录。
 

@@ -55,11 +55,12 @@ EXTRA_PATCHES = (
     ('patches/base-v0-normal-movie-constructor.patch', ('dm/host/hle_movie.c',)),
     ('patches/base-v0-weak-import-resolution.patch', ('dm/host/dm.h', 'dm/host/hle.c',
         'dm/host/loader.c')),
+    ('patches/base-v0-address-allocator.patch', ('dm/host/hle_os.c',)),
 )
 REQUIRED = ('tools/build_base_v0_runtime.py', PROFILE, 'profile/base_v0.json',
     'tools/generate_base_v0_contract.py', 'tools/build_link_only.py',
     'tools/build_adapted_link_only.py', 'tools/verify_source.py', 'compile_sources.json',
-    'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h',
+    'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h', 'adapter/base_v0_stack_allocator.h',
     'adapter/base_v0_loader_guard.h', 'adapter/base_v0_loader_guard.m',
     AUDIO_INVENTORY, TYPED_PATCH, FRAGMENT_PATCH, COUNTER_PATCH, DEBUG_PAD_PATCH, *AUDIO_ADAPTERS,
     *(name for name, _ in EXTRA_PATCHES))
@@ -393,6 +394,7 @@ def copy_inputs(component, output, lock, base, adapted, receipt):
     adapted.PATCHES = (*adapted.PATCHES, *EXTRA_PATCHES)
     adapted.COPIED_ADAPTERS = (*(n for n in adapted.COPIED_ADAPTERS if n != 'adapter/link_only_main.c'),
         'adapter/base_v0_memory.c', 'adapter/base_v0_memory.h',
+        'adapter/base_v0_stack_allocator.h',
         'adapter/base_v0_loader_guard.h', 'adapter/base_v0_loader_guard.m', PROFILE, *AUDIO_ADAPTERS)
     private, expected = adapted.copy_private_inputs(component, output, lock, base, receipt)
     for name in MEMORY_FILES:

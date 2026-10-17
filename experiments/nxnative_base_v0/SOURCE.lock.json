@@ -60,6 +60,10 @@
       "bytes": 9745,
       "sha256": "d353e19c3f211eb1e7d0f3328ac6ca358392ad7c7f79158c59c4b9f3bb033aeb"
     },
+    "adapter/base_v0_stack_allocator.h": {
+      "bytes": 603,
+      "sha256": "6c0d25be7e4b5613f916449aef88c10fa13b8e8a32432ebca5deb608a9db8731"
+    },
     "adapter/link_only_main.c": {
       "bytes": 313,
       "sha256": "da68ff5f8e5e42f157eea25dfe4fdc42922a75b6ecd0c377a48d4b8d059dd0e3"
@@ -83,6 +87,10 @@
     "compile_sources.json": {
       "bytes": 28143,
       "sha256": "7977e6dfba24e57f21ad04b2bdb9445122bd26864bbb5bdbff8add84601bf6c8"
+    },
+    "patches/base-v0-address-allocator.patch": {
+      "bytes": 2986,
+      "sha256": "dc1a4459cbc7e782afd3bf971716528489c7a775064dae242ba841f8acfc90ed"
     },
     "patches/base-v0-audren-kernel.patch": {
       "bytes": 30112,
@@ -201,8 +209,8 @@
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_base_v0_runtime.py": {
-      "bytes": 44723,
-      "sha256": "068ff3826f33a64047c7a12b1cd330d0785d9a0aa06170d168b7a78907f2d7b3"
+      "bytes": 44877,
+      "sha256": "e5806930a9f7926360d5b0261e701313e54f56b410a4303b3ff85097cdc820ce"
     },
     "tools/build_fragment_shader_contracts.py": {
       "bytes": 9511,
