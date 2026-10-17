@@ -1,0 +1,82 @@
+name: Build official nxnative BOTW 1.9 runtime
+on:
+  push:
+    branches: [codex/botw-190-official-ci]
+    paths: [.github/workflows/botw-190-official.yml]
+permissions:
+  contents: write  # GitHub restricts access to draft release assets to repository writers.
+concurrency:
+  group: botw-190-official
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 100
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_TRANSPORT_PASSWORD: ${{ secrets.BOTW190_TRANSPORT_PASSWORD }}
+      INPUT_SHA256: ${{ vars.BOTW190_INPUT_SHA256 }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select Xcode and install compiler dependencies
+        run: |
+          python3 scripts/source/select_xcode.py
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          brew list spirv-cross >/dev/null 2>&1 || brew install spirv-cross
+          brew list zstd >/dev/null 2>&1 || brew install zstd
+          xcrun -sdk macosx metal -v || xcodebuild -downloadComponent MetalToolchain
+          python3 -m venv .venv
+          .venv/bin/pip install lz4 capstone fonttools
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Fetch the exact unmodified upstream and private build input
+        run: |
+          git clone --quiet https://github.com/seedds/nxnative.git upstream-official
+          git -C upstream-official checkout --quiet d1d68e80f8331ab85465f763d2cb457c3e2450d5
+          gh release download botw-190-private-input-20261017 --repo "$GITHUB_REPOSITORY" --pattern input.tar.enc
+          printf '%s  input.tar.enc\n' "$INPUT_SHA256" | shasum -a 256 -c -
+          openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -in input.tar.enc -out input.tar.gz -pass env:BUILD_TRANSPORT_PASSWORD
+          tar -xzf input.tar.gz
+      - name: Compile with the original shader and iOS build functions
+        run: |
+          .venv/bin/python - <<'PY'
+          import importlib.util, os, subprocess, sys
+          from pathlib import Path
+          repo = Path('upstream-official').resolve()
+          work = Path('build').resolve()
+          sys.path.insert(0, str(repo / 'dm/games'))
+          import game
+          spec = importlib.util.spec_from_file_location('official', repo / 'scripts/build_ipa_from_nsp.py')
+          official = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(official)
+          profile = game.by_title(int('01007EF00011E000', 16))
+          logs = work / 'logs'
+          logs.mkdir(exist_ok=True)
+          (work / 'tmp').mkdir(exist_ok=True)
+          env = dict(os.environ, DM_GAME=profile.id, DM_ROOT=str(work), WORK=str(work / 'tmp'))
+          ios = official.build_shaders(sys.executable, repo, work / 'shader',
+              repo / 'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate', env, logs, profile)
+          env.update(GAME=profile.id, W=str(work / 'ipa'),
+              PATCHED=str(work / 'patched_v1114112'),
+              ROMFS=str(work / 'extract/v1114112/RomFS'), MSL_IOS=str(ios),
+              FONT_PY=sys.executable, DM_DISPLAY_NAME='Zelda Breath of the Wild',
+              DM_BUNDLE_ID='local.botw.native', AOC='', STD_FONT=str(work / 'standard.ttf'),
+              DM_ICON=str(work / 'extract/v1114112/icon.jpg'))
+          # CI compiles the runtime and shaders. Complete RomFS/DLC assembly stays local.
+          official.run(['bash', repo / 'dm/ios/tools/build_ipa.sh', Path('runtime.ipa').resolve()],
+              logs / 'build_ipa.log', env=env)
+          PY
+      - name: Encrypt the intermediate runtime for local resource assembly
+        run: |
+          tar -czf result.tar.gz runtime.ipa build/logs
+          openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -salt -in result.tar.gz -out result.tar.enc -pass env:BUILD_TRANSPORT_PASSWORD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: botw-190-encrypted-runtime
+          path: result.tar.enc
+          retention-days: 1
+          compression-level: 0
