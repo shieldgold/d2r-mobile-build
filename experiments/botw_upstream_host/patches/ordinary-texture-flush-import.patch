@@ -1,0 +1,67 @@
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -752,7 +752,7 @@
+     }
+     uint8_t *image = texwrite_read_storage(o), *lin = malloc(total ? total : 1);
+     if (!image || !lin) texwrite_stop(fn, "invalid", "texture storage cannot be snapshotted for import", o);
+-    nvn_texwrite_apply(&o->d, p, copy, image);
++    if (p) nvn_texwrite_apply(&o->d, p, copy, image);
+     size_t off = 0;
+     for (unsigned l = 0; l < levels; l++) {
+         nvn_texwrite_extract(&o->d, &lp[l], image, lin + off);
+@@ -763,8 +763,10 @@
+     int rc = mtl_tex_import(o, up, levels, &why);
+     free(lin);
+     if (rc) texwrite_stop(fn, rc == -1 || rc == -2 ? "UNIMPL" : "ERROR", why, o);
+-    dm_guest_write_prepare(o->mem + p->span_lo, (size_t)(p->span_hi - p->span_lo));
+-    nvn_texwrite_apply(&o->d, p, copy, o->mem);
++    if (p) {
++        dm_guest_write_prepare(o->mem + p->span_lo, (size_t)(p->span_hi - p->span_lo));
++        nvn_texwrite_apply(&o->d, p, copy, o->mem);
++    }
+     nvn_texflush_note(o->serial, o->mem, o->L.layer_size, layers, 0, layers, 1);
+     if (memcmp(o->mem, image, (size_t)o->L.size) ||
+         nvn_texflush_verify(o->serial, o->mem, o->L.layer_size, layers, 0, layers) != NVN_TEXFLUSH_CLEAN) {
+@@ -885,9 +887,9 @@
+ NVN(nvnTextureWriteTexelsStrided, void, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r, const void *src, ptrdiff_t row, ptrdiff_t img) {
+     write_texels("nvnTextureWriteTexelsStrided", CTX(t), (const view_t *)v, r, src, row, img);
+ }
+-// CPU texel flush (NVN FlushTexels): natively a data cache flush of the selected whole-layer allocations, done only
+-// for CPU_CACHED pools; the region is ignored (nvn_texflush.c). The host has no cache to flush, so a flush is where
+-// it proves that what the CPU wrote is what the GPU will see:
++// CPU texel flush (NVN FlushTexels): fixed base-v0 forwards selected whole-layer allocations to its pool flush;
++// the copy region is unused (nvn_texflush.c). The host has no native data cache to flush, so it must establish
++// that the CPU pool bytes are the content that Metal will see:
+ //   - no CPU mapping (CPU_NO_ACCESS or virtual pool): nothing to do, natively no flush either;
+ //   - packaged and buffer textures: the pool is the source of truth (dirty-page re-upload / zero-copy buffer view),
+ //     so CPU stores reach Metal at the next use;
+@@ -896,8 +898,9 @@
+ //     complete selected layers remain clean, Metal content (including later GPU writes) is
+ //     current and nothing is uploaded. Changed or never-synchronized storage means CPU stores the host cannot
+ //     reconcile with possibly newer GPU content, which stops explicitly.
+-// Pools without CPU_CACHED get no native flush and the view is not read; the host still checks every layer, because
+-// uncached CPU stores are GPU-visible on hardware without any flush.
++// The fixed base-v0 frontend reads the view independently of CPU_CACHED; the underlying driver cache policy is
++// not established here. This backend applies the view only for CPU_CACHED pools and otherwise checks all layers
++// conservatively, to avoid silently missing uncached CPU stores in other layers.
+ static void flush_texels(const tex_t *o, const view_t *v) { POOL_CAPTURE();pool_texture_require_cpu(o);
+     if(o->pool&&!mtl_pool_texture_valid(o->pool,o->serial,o->mem,o->L.size))die("texture uses retired/outside ordinary pool");
+     const char *fn = "nvnTextureFlushTexels";
+@@ -918,6 +921,17 @@
+ 
+     int st = nvn_texflush_verify(o->serial, o->mem, o->L.layer_size, layers, first, count);
+     if (st == NVN_TEXFLUSH_CLEAN) return;
++    if (st == NVN_TEXFLUSH_UNTRACKED) {
++        // Translate earlier submissions before proving that pool bytes have no
++        // competing Metal authority. A NULL overlay imports without a pool write.
++        x_drain();
++        const char *why = NULL;
++        if (mtl_tex_import_check(o, &why) > 0) {
++            texwrite_import(fn, o, NULL, NULL, layers);
++            if (nvn_texflush_verify(o->serial, o->mem, o->L.layer_size, layers, first, count) == NVN_TEXFLUSH_CLEAN)
++                return;
++        }
++    }
+     OLOG("texture flush boundary: serial=%llu pool_flags=%#x tracked=%d unambiguous=%d layers=%u range=%u+%u",
+          (unsigned long long)o->serial, pool->flags, nvn_dirty_tracked(o->mem, o->L.size),
+          nvn_dirty_unambiguous(o->mem, o->L.size), layers, first, count);
