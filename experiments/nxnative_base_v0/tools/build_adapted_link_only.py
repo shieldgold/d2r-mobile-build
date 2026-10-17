@@ -3,7 +3,7 @@
 
 Reuses the source-bound baseline builder's compiler, SDK, inventory, dependency
 and receipt helpers. Patches affect a fresh private copy only. Metadata remains
-the original 1.9 profile; GPU/thread/memstat policy is still pending.
+the original 1.9 profile, with a separate return-only entry; never execute it.
 """
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -27,20 +28,55 @@ PATCHES = (
     ('patches/normal-hle-crash.patch', ('dm/host/hle.c', 'dm/host/hle_svc.c',
                                       'dm/host/hle_sdk16.c', 'dm/host/crash.c')),
     ('patches/horizon-address-signal.patch', ('dm/host/hle_thread.c',)),
+    ('patches/normal-runtime-diagnostics.patch', ('dm/host/hle_thread.c','dm/host/memstat.m','dm/host/probe.c',
+        'dm/host/hle_count.c','dm/host/hle_fs.c','dm/host/loader.c','dm/host/hle_audio.c','dm/host/hle_time.c',
+        'dm/ios/Sources/main.m','dm/gfx/nvn/hle_nvn.c','dm/gfx/nvn/nvn_mtl.m')),
+    ('patches/base-v0-conditional-shader-provider.patch', ('dm/gfx/nvn/hle_nvn.c','dm/gfx/nvn/nvn_mtl.m','dm/gfx/nvn/include/nvn.h')),
 )
 REQUIRED_ADAPTERS = ('tools/build_adapted_link_only.py', 'adapter/normal_policy.c',
                      'adapter/normal_policy.h', 'patches/normal-entry.patch',
                      'patches/base-v0-texture-view.patch', 'adapter/normal_failures.c',
                      'adapter/normal_failures.h', 'patches/normal-hle-crash.patch',
-                     'patches/horizon-address-signal.patch')
+                     'patches/horizon-address-signal.patch', 'patches/normal-runtime-diagnostics.patch',
+                     'patches/base-v0-conditional-shader-provider.patch',
+                     'adapter/base_v0_shader_provider.h', 'adapter/base_v0_shader_provider.m')
 COPIED_ADAPTERS = ('adapter/link_only_main.c', 'adapter/normal_policy.c', 'adapter/normal_policy.h',
-                   'adapter/normal_failures.c', 'adapter/normal_failures.h')
+                   'adapter/normal_failures.c', 'adapter/normal_failures.h',
+                   'adapter/base_v0_shader_provider.h','adapter/base_v0_shader_provider.m')
 ABI_FILES = tuple('experiments/botw_upstream_host/adapter/base_v0_abi.' + extension
                   for extension in ('c', 'h', 'json'))
+# Complete original modules, with their existing paths below a private shader
+# root. No old NVN header, botw_shader.c pool registry, or old Metal layer is copied.
+SHADER_FILES = tuple(('experiments/botw_upstream_host/' + source, target) for source, target in (
+    *[('adapter/' + name,'adapter/' + name) for name in (
+        'whole_shader_conditional.h','whole_shader_conditional.m',
+        'whole_shader_publication.h','whole_shader_publication.m','whole_shader_publication_files.h',
+        'whole_shader_bundle_publication.h','whole_shader_bundle_publication.m','base_v0_graphics_format_identity.h')],
+    *[('upstream/dm/gfx/nvn/' + name,'dm/gfx/nvn/' + name) for name in (
+        'botw_shader.h','botw_shader_manifest.h','botw_shader_manifest.m',
+        'botw_shader_runtime.h','botw_shader_runtime.m')]))
+# Each original patch is source-bound in full. Only complete per-file sections
+# for reused modules apply here; its old HLE/Metal integration is not imported.
+SHADER_PATCHES = (
+    ('experiments/botw_upstream_host/patches/portable-shader-source.patch',
+     ('dm/gfx/nvn/botw_shader_manifest.h','dm/gfx/nvn/botw_shader_manifest.m','dm/gfx/nvn/botw_shader_runtime.m'),
+     ('dm/gfx/nvn/botw_shader_manifest.h','dm/gfx/nvn/botw_shader_manifest.m','dm/gfx/nvn/botw_shader_runtime.m')),
+    ('experiments/botw_upstream_host/patches/conditional-shader-runtime.patch',
+     ('dm/gfx/nvn/botw_shader_manifest.m',),
+     ('dm/gfx/nvn/botw_shader_manifest.m','dm/gfx/nvn/nvn_mtl.m','dm/gfx/nvn/hle_nvn.c')),
+)
+SHADER_UNITS = ('adapter/whole_shader_conditional.m','adapter/whole_shader_publication.m',
+                'adapter/whole_shader_bundle_publication.m','dm/gfx/nvn/botw_shader_manifest.m',
+                'dm/gfx/nvn/botw_shader_runtime.m')
 STRONG_SYMBOLS = {'_main', '_dm_main', '_nxnative_upstream_ios_main',
                   '_nxnative_normal_getenv', '_nxnative_normal_environment_apply',
                   '_nxnative_normal_failure', '_nxnative_normal_entry_failed',
-                  '_nxnative_normal_fail', '_nxnative_normal_signal_failure'} | {
+                  '_nxnative_normal_fail', '_nxnative_normal_signal_failure',
+                  '_nx_base_shader_enabled','_nx_base_shader_provider','_nx_base_shader_info',
+                  '_nx_base_program_info','_nx_base_program_device',
+                  '_whole_runtime_shader_publication','_whole_runtime_shader_bundle_publication',
+                  '_botw_shader_runtime_function','_botw_conditional_modes_lock',
+                  '_botw_conditional_modes_unlock','_botw_conditional_state_equal'} | {
     '_botw_base_v0_nvnTextureView' + name for name in (
         'SetDefaults', 'SetLevels', 'SetLayers', 'SetFormat', 'SetSwizzle',
         'SetDepthStencilMode', 'SetTarget', 'GetLevels', 'GetLayers', 'GetFormat',
@@ -170,8 +206,69 @@ def apply_patch(upstream, patch, allowed, output, label, base, receipt, *, expec
             'postimages': {name: after[name] for name in sorted(changed)}}
 
 
+def copy_shader_provider(component, private, output, lock, base, receipt):
+    root = component.parents[1]
+    shader = private / 'shader_provider'
+    shader.mkdir()
+    expected = {}
+    for source, target in SHADER_FILES:
+        row = lock.get('external_code_files', {}).get(source)
+        if row is None:
+            raise ValueError('reused shader provider input is not frozen: ' + source)
+        checked = base.snapshot_files(root, {source: row})[source]
+        destination = shader / target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(base.canonical_file(root, source), destination, follow_symlinks=False)
+        expected[target] = checked
+    receipt['shader_provider_patches'] = []
+    for index, (source, selected, members) in enumerate(SHADER_PATCHES):
+        row = lock.get('external_code_files', {}).get(source)
+        if row is None:
+            raise ValueError('reused shader patch is not frozen: ' + source)
+        checked = base.snapshot_files(root, {source: row})[source]
+        original = base.canonical_file(root, source)
+        if patch_members(original) != set(members):
+            raise ValueError('reused shader patch complete member set differs')
+        raw = original.read_bytes()
+        # Keep the full original patch inside the immutable private closure.
+        copy = private / 'shader_provider_patches' / Path(source).name
+        copy.parent.mkdir(exist_ok=True)
+        copy.write_bytes(raw)
+        if base.file_record(copy) != checked:
+            raise ValueError('reused shader patch changed while copying')
+        parts = re.split(rb'(?m)(?=^--- a/)', raw)
+        if parts[0]:
+            raise ValueError('unexpected shader patch preamble')
+        selected_parts = []
+        for part in parts[1:]:
+            name = part.split(b'\n', 1)[0][6:].split(b'\t', 1)[0].decode('utf-8')
+            if name in selected:
+                selected_parts.append(part)
+        scoped = output / ('shader-provider-%02d.patch' % index)
+        scoped.write_bytes(b''.join(selected_parts))
+        step = apply_patch(shader, scoped, selected, output, 'shader-provider-patch-%02d' % index,
+                           base, receipt, expected_preimages=expected)
+        step['original_patch'] = {'path': source, **checked, 'all_members': list(members)}
+        receipt['shader_provider_patches'].append(step)
+        expected.update(step['postimages'])
+    if private_snapshot(shader, base) != expected:
+        raise ValueError('complete reused shader module closure differs')
+    result = {'shader_provider/' + name: row for name, row in expected.items()}
+    result.update({'shader_provider_patches/' + Path(source).name:
+        lock['external_code_files'][source] for source, _, _ in SHADER_PATCHES})
+    return result
+
+
+def verify_strong_symbols(text):
+    symbols = {fields[-1] for line in text.splitlines()
+               if len(fields := line.split()) >= 3 and fields[-2] == 'T'}
+    if not STRONG_SYMBOLS <= symbols:
+        raise ValueError('adapted strong symbols absent: ' + ', '.join(sorted(STRONG_SYMBOLS - symbols)))
+    return symbols
+
+
 def copy_private_inputs(component, output, lock, base, receipt):
-    """Copy bound bytes, apply only the four fixed patches, and bind all postimages."""
+    """Copy bound bytes, apply the fixed ordered chain, and bind all postimages."""
     private = output / 'inputs'
     private.mkdir()
     upstream = private / 'upstream'
@@ -204,12 +301,14 @@ def copy_private_inputs(component, output, lock, base, receipt):
         destination = private / 'external_abi' / Path(name).name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(base.canonical_file(component.parents[1], name), destination, follow_symlinks=False)
+    shader_inputs = copy_shader_provider(component, private, output, lock, base, receipt)
     snapshot = private_snapshot(private, base)
     expected = {'upstream/' + name: row for name, row in original.items()}
     for patch in receipt['patches']:
         expected.update({'upstream/' + name: row for name, row in patch['postimages'].items()})
     expected.update({name: lock['adapter_files'][name] for name in COPIED_ADAPTERS})
     expected.update({'external_abi/' + Path(name).name: lock['external_code_files'][name] for name in ABI_FILES})
+    expected.update(shader_inputs)
     if snapshot != expected:
         raise ValueError('copied input closure differs from locked originals and patch postimages')
     return private, snapshot
@@ -220,20 +319,26 @@ def compile_commands(private, output, units, sdk, base):
     template = commands[-1]
     for index, (name, role) in enumerate((('adapter/normal_policy.c', 'owned_normal_policy'),
                                          ('adapter/normal_failures.c', 'owned_normal_failures'),
-                                         ('external_abi/base_v0_abi.c', 'reused_base_v0_abi')), start=127):
+                                         ('external_abi/base_v0_abi.c', 'reused_base_v0_abi'),
+                                         *((('shader_provider/' + name), 'reused_shader_provider') for name in SHADER_UNITS),
+                                         ('adapter/base_v0_shader_provider.m','owned_shader_provider')), start=127):
         source = private / name
         obj = output / 'objects' / ('%03d-' % index + source.name + '.o')
         dep = obj.with_suffix('.d')
         argv = list(template['argv'])
         for flag, value in (('-c', source), ('-o', obj), ('-MF', dep), ('-MT', obj)):
             argv[argv.index(flag) + 1] = str(value)
+        if source.suffix == '.m':
+            argv += ['-fobjc-arc','-fblocks']
         commands.append({'source': str(source), 'role': role, 'object': str(obj), 'depfile': str(dep), 'argv': argv})
     for command in commands:
         index = command['argv'].index('-c')
         command['argv'][index:index] = ['-DNXNATIVE_NORMAL_POLICY=1', '-DDM_SHELL=1', '-I', str(private / 'adapter'),
-                                         '-I', str(private / 'external_abi')]
-    if len(commands) != 130 or len({row['source'] for row in commands}) != 130:
-        raise ValueError('adapted host must compile exactly 130 distinct units')
+                                         '-I', str(private / 'external_abi'),
+                                         '-I',str(private/'shader_provider/adapter'),
+                                         '-I',str(private/'shader_provider/dm/gfx/nvn')]
+    if len(commands) != 136 or len({row['source'] for row in commands}) != 136:
+        raise ValueError('adapted host must compile exactly 136 distinct units')
     return commands
 
 
@@ -285,7 +390,8 @@ def build(args, component=COMPONENT):
         private, private_before = copy_private_inputs(component, output, lock, base, receipt)
         receipt['private_inputs_before'] = private_before
         receipt['unit_counts'] = {'upstream': 126, 'vpx_decoder': 71, 'owned_entry': 1,
-                                  'normal_policy': 1, 'normal_failures': 1, 'reused_base_v0_abi': 1, 'total': 130}
+                                  'normal_policy': 1, 'normal_failures': 1, 'reused_base_v0_abi': 1,
+                                  'reused_shader_provider': 5, 'owned_shader_provider': 1, 'total': 136}
         sdk = base.query_toolchain(output, component, receipt)
         receipt['toolchain'] = sdk
         resources_before = base.resource_snapshot(Path(sdk['resource_dir']) / 'include')
@@ -326,11 +432,8 @@ def build(args, component=COMPONENT):
             receipt['final_strong_symbols'] = step
             if step['exit_code']:
                 raise ValueError('adapted strong symbol inspection failed')
-            symbols = {fields[-1] for line in Path(step['stdout']['path']).read_text().splitlines()
-                       if len(fields := line.split()) >= 3 and fields[-2] == 'T'}
+            verify_strong_symbols(Path(step['stdout']['path']).read_text())
             receipt['required_strong_symbols'] = sorted(STRONG_SYMBOLS)
-            if not STRONG_SYMBOLS <= symbols:
-                raise ValueError('adapted strong symbols absent: ' + ', '.join(sorted(STRONG_SYMBOLS - symbols)))
             receipt['objects_after_link'] = {name: base.file_record(name) for name in objects}
             if receipt['objects_after_link'] != objects:
                 raise ValueError('adapted objects changed during link')

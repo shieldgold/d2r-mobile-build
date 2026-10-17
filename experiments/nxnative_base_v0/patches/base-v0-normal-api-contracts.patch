@@ -1,0 +1,109 @@
+--- a/dm/host/hle_account.c
++++ b/dm/host/hle_account.c
+@@ -88,3 +88,15 @@
+ HLE_FORCE("_ZN2nn7account12AsyncContext7HasDoneEPb", "异步上下文：恒已完成", Result, h_acc_AcHasDone, void *self, uint8_t *done) { (void)self; *done = 1; return RES_OK; }
+ HLE_FORCE("_ZN2nn7account12AsyncContextD1Ev", "异步上下文析构；无会话可关", void, h_acc_AcDtor, void *self) { (void)self; }
+ HLE_FORCE("_ZN2nn7account12AsyncContextaSEOS1_", "异步上下文移动赋值；对象里没有宿主状态", void *, h_acc_AcMove, void *self, void *other) { (void)other; return self; }
++
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++#if !(defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY)
++#error "base-v0 normal APIs require NXNATIVE_NORMAL_POLICY"
++#endif
++/* Base-v0 Result ABI; the existing local handle producer remains the owner. */
++HLE_FORCE("_ZN2nn7account19OpenPreselectedUserEPNS0_10UserHandleE",
++          "base-v0 preselected user uses the complete native account handle",
++          Result, h_base_v0_acc_OpenPreselected, UserHandle *out) {
++    return h_acc_TryOpenPre(out) ? RES_OK : RES_FAIL;
++}
++#endif
+--- a/dm/gfx/hle_vi.c
++++ b/dm/gfx/hle_vi.c
+@@ -22,3 +22,19 @@
+ HLE_FORCE("_ZN2nn2vi12DestroyLayerEPNS0_5LayerE", "销毁图层；宿主静态对象", void, h_vi_DestroyLayer, void *layer) { (void)layer; }
+ HLE_FORCE("_ZN2nn2vi12CloseDisplayEPNS0_7DisplayE", "关显示；宿主静态对象", void, h_vi_CloseDisp, void *disp) { (void)disp; }
+ HLE_FORCE("_ZN2nn2vi8FinalizeEv", "显示服务收尾；宿主无 vi 服务", void, h_vi_Fini, void) {}
++
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++#include <stdatomic.h>
++/* One process-owned layer; never interpret an SDK/private Layer layout. */
++static _Atomic int g_base_v0_layer_scaling = 4;
++int nxnative_base_v0_layer_scaling_mode(void) {
++    return atomic_load_explicit(&g_base_v0_layer_scaling, memory_order_relaxed);
++}
++HLE_FORCE("_ZN2nn2vi19SetLayerScalingModeEPNS0_5LayerENS0_11ScalingModeE",
++          "base-v0 native layer scaling uses the complete host present paths",
++          Result, h_base_v0_vi_SetLayerScalingMode, void *layer, int mode) {
++    if (layer != &g_layer || (mode != 2 && mode != 4)) return RES_FAIL;
++    atomic_store_explicit(&g_base_v0_layer_scaling, mode, memory_order_relaxed);
++    return RES_OK;
++}
++#endif
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -464,7 +464,12 @@
+ NVN(nvnCommandBufferSaveZCullData, void, NVNcommandBuffer *c, NVNbufferAddress a, size_t n) { (void)c; (void)a; (void)n; }
+ NVN(nvnSyncWait, NVNsyncWaitResult, const NVNsync *s, uint64_t timeout) {
+     const sync_t *o = (const sync_t *)s;
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++    /* Fixed base-v0 NVN52 primary state0 returns FAILED3 without waiting. */
++    if (!o->fenced) return NVN_SYNC_WAIT_RESULT_FAILED;
++#else
+     if (!o->fenced) return NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
++#endif
+     if (mtl_wait(o->fence, 0)) return NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED;
+     return mtl_wait(o->fence, timeout) ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED;
+ }
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -6386,6 +6386,9 @@
+ // Present samples the raw bytes stored in the swapchain texture (the Switch's scan-out sends the stored bytes as they are): an sRGB source is replaced by a non-sRGB view of the same storage,
+ // otherwise sampling decodes to linear first, the BGRA8Unorm layer does not encode again, and the whole picture comes out dark. Other formats are returned as they are (Mario's swapchain is RGBA8 and does not come here).
+ // View cache of 4 entries: swapchain textures live long and are few; a view holds its parent, so an equal parent pointer means the same object. A replaced view is released after the submissions that used it complete (Metal 4 does not retain resources)
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++int nxnative_base_v0_layer_scaling_mode(void);
++#endif
+ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
+     MTLPixelFormat pf = src.pixelFormat == MTLPixelFormatRGBA8Unorm_sRGB ? MTLPixelFormatRGBA8Unorm : src.pixelFormat == MTLPixelFormatBGRA8Unorm_sRGB ? MTLPixelFormatBGRA8Unorm : MTLPixelFormatInvalid;
+     if (pf == MTLPixelFormatInvalid) return src;
+@@ -6415,9 +6418,17 @@
+     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+     // Keep the game picture's aspect ratio and center it, leaving black bars in the rest (no stretching when the screen ratio differs from the game's, e.g. iPhone about 19.5:9 versus the game's 16:9);
+     // when the ratio difference is < 1% (the remainder from the game width being a multiple of 8 in the full-screen setup, e.g. 1952x900 versus 2868x1320 differs by 0.17%) fill directly, leaving no few-pixel border
+-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    double dw = dst.width, dh = dst.height;
++    MTLViewport vp;
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++    if (nxnative_base_v0_layer_scaling_mode() == 2) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    else
++#endif
++    {
++        double s = fmin(dw / cw, dh / ch);
++        vp = (MTLViewport){floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
++        if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    }
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     static double last_vp[4];   // Log one line when the viewport changes (used by the real-device screen-level acceptance screen_check.py to check the aspect ratio)
+     if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
+@@ -6446,9 +6457,17 @@
+         cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3];
+     }
+     present_pipeline(dst.pixelFormat);
+-    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+-    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    double dw = dst.width, dh = dst.height;
++    MTLViewport vp;
++#if defined(NXNATIVE_BASE_V0_NORMAL_APIS) && NXNATIVE_BASE_V0_NORMAL_APIS
++    if (nxnative_base_v0_layer_scaling_mode() == 2) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    else
++#endif
++    {
++        double s = fmin(dw / cw, dh / ch);
++        vp = (MTLViewport){floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
++        if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    }
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     MTL4RenderPassDescriptor *rp = [MTL4RenderPassDescriptor new];
+     rp.colorAttachments[0].texture = dst;

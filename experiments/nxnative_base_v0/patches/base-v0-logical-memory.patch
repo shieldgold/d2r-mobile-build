@@ -1,0 +1,408 @@
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -11,6 +11,13 @@
+ #include <sched.h>
+ #include <time.h>
+ #include <stdatomic.h>
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++#include "base_v0_memory.h"
++static pthread_mutex_t g_memory_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_once_t g_memory_once = PTHREAD_ONCE_INIT;
++static size_t g_retained_size, g_logical_pool, g_alias_used;
++static size_t image_bytes(void);
++#endif
+ 
+ // Reserve one whole block of guest address space, partitioned the Horizon way (address values are the real addresses returned by the host's mmap).
+ // It only takes address space, not memory.
+@@ -22,13 +29,38 @@
+ static uint8_t *g_as;              // ASLR region base = the whole block
+ static uint8_t *g_heap; static size_t g_heap_cur, g_heap_cap;
+ // The address range lies entirely within the currently opened (readable and writable) part of the guest heap: such reads need no kernel trap to check, memcpy directly (used where guest memory is read every tick, such as diag.c tk_rd)
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++int dm_guest_heap_readable(uint64_t a, size_t n);
++#else
+ int dm_guest_heap_readable(uint64_t a, size_t n) { uint64_t b = (uint64_t)(uintptr_t)g_heap; size_t cur = g_heap_cur; return g_heap && a >= b && n <= cur && a - b <= cur - n; }
++#endif
+ static uint8_t *g_alias; static size_t g_alias_cap;
+ static _Atomic uint64_t *g_alias_bits;   // alias region page bitmap (alias_pages)
+ static uint8_t *g_stack; static size_t g_stack_cap;
+ // The address lies in the guest address block (every guest thread stack is here: the game's own heap or the stack region); the big-stack entry (hle_bigstack.c) uses it to decide whether to switch stacks
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++int dm_guest_as_contains(uintptr_t a) { pthread_mutex_lock(&g_memory_lock); uintptr_t b=(uintptr_t)g_as; int yes=g_as && a>=b && a-b<g_retained_size; pthread_mutex_unlock(&g_memory_lock); return yes; }
++#else
+ int dm_guest_as_contains(uintptr_t a) { uintptr_t b = (uintptr_t)g_as; return g_as && a >= b && a - b < RESERVE; }
+-
++#endif
++
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++static void normal_memory_initialize(void) {
++    nxnative_base_v0_memory chosen;
++    if (nxnative_base_v0_memory_reserve(image_bytes(), &chosen)) nxnative_base_v0_memory_failure();
++    _Atomic uint64_t *bits = calloc((chosen.alias_size >> 18) + 1, sizeof *bits);
++    if (!bits) nxnative_base_v0_memory_failure();
++    pthread_mutex_lock(&g_memory_lock);
++    g_alias=chosen.alias; g_alias_cap=chosen.alias_size; g_alias_bits=bits;
++    g_stack=chosen.stack; g_stack_cap=chosen.stack_size;
++    g_heap=chosen.heap; g_heap_cap=chosen.heap_size;
++    g_retained_size=chosen.size; g_logical_pool=chosen.pool; g_as=chosen.base;
++    pthread_mutex_unlock(&g_memory_lock);
++}
++static void mem_init(void) {
++    if (pthread_once(&g_memory_once, normal_memory_initialize)) nxnative_base_v0_memory_failure();
++}
++#else
+ static void mem_init(void) {
+     if (g_as) return;
+     g_as = mmap(NULL, RESERVE, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+@@ -45,20 +77,38 @@
+     if (!(g_alias_bits = calloc((g_alias_cap >> 18) + 1, sizeof *g_alias_bits))) die("别名区页位图 calloc");
+     LOG("guest AS %p +%#llx  heap %p alias %p stack %p", g_as, (unsigned long long)RESERVE, g_heap, g_alias, g_stack);
+ }
++#endif
+ 
+ // Application memory pool = the 3285 MB the Switch (4 GB model) gives applications. At startup (main+0x1b66160) the game sets the whole total reported by QueryMemoryInfo as the heap, retrying with 2 MB less on failure,
+ // and hands the whole block to its own StandardAllocator (main+0x32137a0) -- so heap size = pool − image footprint, it has only as much as the host reports.
+ // Previously 3 GB was reported here and SetHeapSize never failed: the heap was about 150 MB smaller than on the real device, at the run entry peak the main heap had only about 18 MB left, and under high local load a timing shift made a 128 KB request return null,
+ // which the guest writes to without a null check (CRASH main+0x1b36138, re-verified after merge with inv_tap).
+ #define APP_POOL DM_GAME_APP_POOL   // game profile app_pool (Mario 0xCD500000)
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++static size_t image_bytes(void) {
++    if(g_nmod!=6) nxnative_base_v0_memory_failure();
++    size_t n=0;
++    for (int i=0;i<g_nmod;i++) {
++        if (g_mod[i].size>SIZE_MAX-n) nxnative_base_v0_memory_failure();
++        n+=g_mod[i].size;
++    }
++    if (n>SIZE_MAX-0x1fffff) nxnative_base_v0_memory_failure();
++    return (n+0x1fffff)&~(size_t)0x1fffff;
++}
++#else
+ static size_t image_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) n += g_mod[i].size; return (n + 0x1fffff) & ~(size_t)0x1fffff; }
++#endif
+ // Giant bss (modules with the patch area before the base, patch_nso.py FAR): the image bytes beyond the file part. Used memory was reported as "heap + 64 MB", where the 64 MB covers ordinary modules' code and data (Mario's two modules are about 74 MB together,
+ // and the heap it opens = pool − 64 MB − 1.75 GB virtual address memory − 1 MB = 0x5be00000, as on hardware); Metroid Dread's main has about 1.8 GB of bss, the engine's static heap, which the Switch counts as used;
+ // without it the game asks for pool − 64 MB = 3.15 GB of heap
+ static size_t big_bss_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (g_mod[i].patch_off < 0) n += g_mod[i].size - g_mod[i].file_image_len; return n; }
+ 
+ // For memory accounting (memstat.m): the range of the whole guest address space block (base = NULL when not initialized)
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++void svc_guest_range(uint8_t **base,size_t *size) { pthread_mutex_lock(&g_memory_lock); *base=g_as; *size=g_retained_size; pthread_mutex_unlock(&g_memory_lock); }
++#else
+ void svc_guest_range(uint8_t **base, size_t *size) { *base = g_as; *size = RESERVE; }
++#endif
+ 
+ enum { I_CoreMask=0, I_PriorityMask=1, I_AliasAddr=2, I_AliasSize=3, I_HeapAddr=4, I_HeapSize=5,
+        I_TotalMem=6, I_UsedMem=7, I_DebuggerAttached=8, I_ResourceLimit=9, I_IdleTick=10, I_RandomEntropy=11,
+@@ -100,6 +150,57 @@
+     return map ? ch : -ch;
+ }
+ 
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++size_t dm_guest_heap_current(void) { pthread_mutex_lock(&g_memory_lock); size_t size=g_heap_cur; pthread_mutex_unlock(&g_memory_lock); return size; }
++static int normal_range(uint64_t base,size_t length,uint64_t a,size_t n) {
++    return a>=base && n<=length && a-base<=length-n;
++}
++static int normal_overlap(uint64_t a,size_t n,uint64_t b,size_t m) {
++    return n&&m&&(a<=b?b-a<n:a-b<m);
++}
++static int normal_borrowed(uint64_t a,size_t n) {
++    for(int i=0;i<g_nmap;i++) if(normal_overlap(a,n,g_map[i].src,g_map[i].size)||normal_overlap(a,n,g_map[i].base,g_map[i].size)) return 1;
++    return 0;
++}
++static int normal_heap_plain(uint64_t a,size_t n) {
++    return normal_range((uintptr_t)g_heap,g_heap_cur,a,n)&&!normal_borrowed(a,n);
++}
++int dm_guest_heap_readable(uint64_t a,size_t n) {
++    pthread_mutex_lock(&g_memory_lock); int valid=g_heap&&normal_heap_plain(a,n);
++    pthread_mutex_unlock(&g_memory_lock);return valid;
++}
++static int normal_alias_bit(size_t page);
++static int normal_output(uint64_t a,size_t n) {
++    if((a&7)||!a) return 0;
++    if(normal_heap_plain(a,n)) return 1;
++    if(n&&normal_range((uintptr_t)g_alias,g_alias_cap,a,n)) {
++        size_t offset=a-(uintptr_t)g_alias;
++        for(size_t page=offset>>12;page<=(offset+n-1)>>12;page++)if(!normal_alias_bit(page))return 0;
++        return 1;
++    }
++    for(int i=0;i<g_nmap;i++) if(normal_range(g_map[i].base,g_map[i].size,a,n)) return 1;
++    for(int i=0;i<g_nmod;i++) {
++        module_t *m=&g_mod[i]; uint64_t start=(uintptr_t)m->base;
++        if(normal_range(start,m->size,a,n) && a-start>=m->data_off && m->patch_off>0 &&
++           a-start<=(uint64_t)m->patch_off && n<=(uint64_t)m->patch_off-(a-start) &&
++           !normal_overlap(a-start,n,m->key_page_off,m->key_page_size)) return 1;
++    }
++    uintptr_t top=(uintptr_t)pthread_get_stackaddr_np(pthread_self());size_t size=pthread_get_stacksize_np(pthread_self());
++    return top>=size&&normal_range(top-size,size,a,n);
++}
++static int normal_alias_bit(size_t page) { return (atomic_load(&g_alias_bits[page>>6])>>(page&63))&1; }
++static int normal_alias_query(uint64_t a,uint64_t *base,uint64_t *size,uint64_t *state,uint64_t *perm) {
++    if(!normal_range((uintptr_t)g_alias,g_alias_cap,a,1)) return 0;
++    size_t page=(a-(uintptr_t)g_alias)>>12,first=page,last=page+1,count=g_alias_cap>>12;
++    int mapped=normal_alias_bit(page);
++    while(first&&normal_alias_bit(first-1)==mapped)first--;
++    while(last<count&&normal_alias_bit(last)==mapped)last++;
++    *base=(uintptr_t)g_alias+(first<<12);*size=(last-first)<<12;*state=mapped?5:0;*perm=mapped?3:0;return 1;
++}
++
++#else
++
++#endif
+ int svc_thread(int num, uint64_t *regs);   // hle_thread.c: thread and synchronization kind
+ 
+ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+@@ -111,7 +212,26 @@
+     if (svc_thread(num, regs)) return regs[0];
+     { uint64_t svc_host_call(int, uint64_t *); if (num >= 0x80 && svc_host_call(num, regs)) return regs[0]; }   // from 0x80: host calls by cut convention (hle_tact.c)
+     switch (num) {
+-    case 0x01: {  // SetHeapSize(out_addr*, size)  → x1 = heap base
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x01: {
++        size_t size=regs[1]; int initial;
++        pthread_mutex_lock(&g_memory_lock); initial=nxnative_base_v0_memory_initial_pending(); regs[0]=0xd001;
++        if(size&0x1fffffu) { regs[0]=0xca01; goto normal_heap_done; }
++        if(size>g_heap_cap || size>NXNATIVE_BASE_V0_MEMORY_HEAP-g_alias_used || nxnative_base_v0_memory_admit(size,g_heap_cur)) goto normal_heap_done;
++        if(size<g_heap_cur && normal_borrowed((uintptr_t)g_heap+size,g_heap_cur-size)) { regs[0]=0xd401; goto normal_heap_done; }
++        int rc=0;
++        if(size>g_heap_cur) rc=mprotect(g_heap+g_heap_cur,size-g_heap_cur,PROT_READ|PROT_WRITE);
++        else if(size<g_heap_cur) rc=mprotect(g_heap+size,g_heap_cur-size,PROT_NONE);
++        if(rc) goto normal_heap_done;
++        if(nxnative_base_v0_memory_record(size)) nxnative_base_v0_memory_failure();
++        g_heap_cur=size;regs[0]=0;regs[1]=(uintptr_t)g_heap;
++normal_heap_done:
++        pthread_mutex_unlock(&g_memory_lock);
++        if(initial&&regs[0]) nxnative_base_v0_memory_failure();
++        return 0;
++    }
++#else
++case 0x01: {  // SetHeapSize(out_addr*, size)  → x1 = heap base
+         size_t size = regs[1];
+         if (size > g_heap_cap) { LOG("SetHeapSize OOM: req %#zx > cap %#zx", size, g_heap_cap); regs[0] = 0xD401; return 0; }
+         if (size + image_bytes() > APP_POOL) { regs[0] = 0x10801; return 0; }   // exceeds the application memory pool: ResultLimitReached. At startup the game retries in 2 MB decrements until it fits (main+0x1b66184)
+@@ -123,9 +243,29 @@
+         g_heap_cur = size;
+         regs[0] = 0; regs[1] = (uint64_t)g_heap; return 0;
+     }
++#endif
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++    case 0x02: case 0x03: regs[0]=0xd401; return 0; /* Explicit unsupported permission/attribute mutation. */
++#else
+     case 0x02: regs[0] = 0; return 0;   // SetMemoryPermission
+     case 0x03: regs[0] = 0; return 0;   // SetMemoryAttribute
+-    case 0x04: {  // MapMemory(dst, src, size): when creating a thread the SDK moves the stack on the heap into the stack region
++#endif
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x04: {
++        uint64_t dst=regs[0],src=regs[1],n=regs[2];regs[0]=0xd401;
++        pthread_mutex_lock(&g_memory_lock);
++        if(!n||((dst|src|n)&0xfff)||!normal_range((uintptr_t)g_stack,g_stack_cap,dst,n)||
++           !normal_heap_plain(src,n)||normal_borrowed(dst,n)||g_nmap>=MAX_MAP)goto normal_map_done;
++        size_t pg=(size_t)getpagesize();uintptr_t lo=dst&~(pg-1),hi=(dst+n+pg-1)&~(pg-1);
++        if(!normal_range((uintptr_t)g_stack,g_stack_cap,lo,hi-lo))goto normal_map_done;
++        if(mprotect((void*)lo,hi-lo,PROT_READ|PROT_WRITE)) {regs[0]=0xd001;goto normal_map_done;}
++        memcpy((void*)(uintptr_t)dst,(void*)(uintptr_t)src,n);
++        g_map[g_nmap++]=(typeof(g_map[0])){dst,n,src,0xb};regs[0]=0;
++normal_map_done:
++        pthread_mutex_unlock(&g_memory_lock);return 0;
++    }
++#else
++case 0x04: {  // MapMemory(dst, src, size): when creating a thread the SDK moves the stack on the heap into the stack region
+         uint64_t dst = regs[0], src = regs[1], size = regs[2];
+         if ((uint8_t *)dst < g_stack || (uint8_t *)dst + size > g_stack + g_stack_cap || map_find(dst, size)) {
+             LOG("MapMemory 目标非法或已占用 %#llx+%#llx", dst, size); regs[0] = 0xDC01; return 0; }
+@@ -137,7 +277,19 @@
+         if (g_flag.svc) LOG("MapMemory %#llx <- %#llx +%#llx", dst, src, size);
+         regs[0] = 0; return 0;
+     }
+-    case 0x05: {  // UnmapMemory(dst, src, size): contents are moved back to the source region; a 16K page may be shared with an adjacent mapping, permissions are not revoked
++#endif
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x05: {
++        uint64_t dst=regs[0],src=regs[1],n=regs[2];regs[0]=0xd401;
++        pthread_mutex_lock(&g_memory_lock);
++        for(int i=0;i<g_nmap;i++)if(g_map[i].base==dst&&g_map[i].src==src&&g_map[i].size==n&&
++            normal_range((uintptr_t)g_heap,g_heap_cur,src,n)) {
++            memcpy((void*)(uintptr_t)src,(void*)(uintptr_t)dst,n);g_map[i]=g_map[--g_nmap];regs[0]=0;break;
++        }
++        pthread_mutex_unlock(&g_memory_lock);return 0;
++    }
++#else
++case 0x05: {  // UnmapMemory(dst, src, size): contents are moved back to the source region; a 16K page may be shared with an adjacent mapping, permissions are not revoked
+         uint64_t dst = regs[0], src = regs[1], size = regs[2];
+         int k = map_find(dst, size);
+         if (!k || g_map[k - 1].base != dst || g_map[k - 1].size != size || g_map[k - 1].src != src) {
+@@ -146,7 +298,69 @@
+         map_del(k - 1);
+         regs[0] = 0; return 0;
+     }
+-    case 0x06: {  // QueryMemory(MemoryInfo* out, PageInfo* pout, addr) → x1 = pageinfo
++#endif
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x06: {  // QueryMemory(MemoryInfo* out, PageInfo* pout, addr) → x1 = pageinfo
++        uint64_t mi = regs[0], addr = regs[2];
++        pthread_mutex_lock(&g_memory_lock);
++        if(mi&&!normal_output(mi,40)) {regs[0]=0xd401;pthread_mutex_unlock(&g_memory_lock);return 0;}
++        uint64_t attribute=0;
++        // MemoryInfo: base(0) size(8) state(0x10) attr(0x14) perm(0x18) ...
++        uint8_t *a = (uint8_t *)addr;
++        uint64_t base, size, state, perm;
++        int k;
++        if(normal_alias_query(addr,&base,&size,&state,&perm)) {}
++        else if((k=map_find(addr,1))) {base=g_map[k-1].base;size=g_map[k-1].size;state=g_map[k-1].state;perm=3;}
++        else if(normal_borrowed(addr,1)) {
++            for(int i=0;i<g_nmap;i++)if(normal_range(g_map[i].src,g_map[i].size,addr,1)) {base=g_map[i].src;size=g_map[i].size;break;}
++            state=5;perm=0;attribute=1;
++        }
++        else if (a >= g_heap && a < g_heap + g_heap_cur) { base=(uint64_t)g_heap; size=g_heap_cur; state=5/*Heap*/; perm=3; }
++        else if ((k = map_find(addr, 1))) { base=g_map[k-1].base; size=g_map[k-1].size; state=g_map[k-1].state; perm=3; }
++        else if (a >= g_as && a < g_as + g_retained_size) {   // free: up to the adjacent mapping/heap boundary
++            uint64_t lo = (uint64_t)g_as, hi = (uint64_t)g_as + g_retained_size;
++            if (a >= g_heap) lo = (uint64_t)g_heap + g_heap_cur;
++            else if (hi > (uint64_t)g_heap) hi = (uint64_t)g_heap;
++            for (int i = 0; i < g_nmap; i++) {
++                uint64_t e = g_map[i].base + g_map[i].size;
++                if (e <= addr && e > lo) lo = e;
++                if (g_map[i].base > addr && g_map[i].base < hi) hi = g_map[i].base;
++            }
++            base=lo; size=hi-lo; state=0; perm=0; }
++        else if (module_of(a)) {
++            // Loaded module: report the regions in Horizon's layout -- code [0, ro) Code+RX, read-only [ro, data) Code+R, data and bss [data, patch area) CodeData+RW.
++            // The SDK's C++ exception unwinding (nn::ro::detail::GetExceptionInfo) walks back from the PC over "Code+RX" regions to find the module start, forward over Code then CodeData to find its end, then reads MOD0 at the module start for .eh_frame_hdr.
++            // Previously "the 4 KiB page around it, Code+RX" was reported: the backward walk ran on into other memory, found no MOD0 and aborted (Engage's IL2CPP throws a C++ exception for every managed exception).
++            // The rewriter's patch area is reported as CodeData+RX: modules sit back to back in the host, and an executable patch area reported as Code+RX would merge the previous module into the backward walk
++            // Modules with the patch area before the base (patch_off < 0): the patch area is reported alone as CodeData+RX, and data and bss run to the end of the image
++            module_t *mm = module_of(a); uint64_t off = (uint64_t)(a - mm->base), mb = (uint64_t)mm->base;
++            uint64_t ro = mm->ro_off ? mm->ro_off : mm->text_end, da = mm->data_off ? mm->data_off : ro, pa = mm->patch_off > 0 ? (uint64_t)mm->patch_off : mm->size;
++            if (a < mm->base)  { base = mb + mm->patch_off; size = mm->patch_len; state = 4/*CodeData*/; perm = 5; }
++            else if (off < ro) { base = mb;      size = ro;            state = 3/*Code*/;     perm = 5; }
++            else if (off < da) { base = mb + ro; size = da - ro;       state = 3/*Code*/;     perm = 1; }
++            else if (off < pa) { base = mb + da; size = pa - da;       state = 4/*CodeData*/; perm = 3; }
++            else               { base = mb + pa; size = mm->size - pa; state = 4/*CodeData*/; perm = 5; }
++        }
++        else {
++            // The address lies in "the current host thread's stack": report the whole stack (state 0xB = stack). When the SDK initializes the main thread record it queries here with the sp at that moment and takes the reported range as the main thread stack;
++            // later nn::os::GetCurrentStackInfo asserts that sp is still inside that range and aborts if not. Previously every address outside the guest address space was reported as "the 4 KiB page containing it",
++            // so the main thread stack was recorded as one page. Whether the sp at init and a later sp share a page depends on the absolute position of the host stack top, which moves with the total length of environment variables / launch arguments (a different environment occasionally aborts at startup).
++            // This Diablo build does not call GetCurrentStackInfo (main / subsdk0 do not import it and the SDK has no internal call site; the host reaches the main menu with 12 different environment padding lengths), so it was never hit; reporting "one page" is wrong in itself, so fix it anyway.
++            uint64_t top = (uint64_t)pthread_get_stackaddr_np(pthread_self()), ssz = pthread_get_stacksize_np(pthread_self());
++            if (addr < top && addr >= top - ssz) { base = top - ssz; size = ssz; state = 0xB/*Stack*/; perm = 3; }
++            // Other host memory: report "free, no permissions" (the 4 KiB page around it) as Horizon does for unmapped addresses. It used to report Code+RX, and GetExceptionInfo walking back from main merged on through host memory down to 0
++            else { base=addr & ~0xFFFull; size=0x1000; state=0/*Free*/; perm=0; } }
++        if(base<=addr&&size&&base<=UINT64_MAX-size) {
++            uint64_t end=base+size;
++            for(int i=0;i<g_nmap;i++) {uint64_t boundaries[4]={g_map[i].base,g_map[i].base+g_map[i].size,g_map[i].src,g_map[i].src+g_map[i].size};
++                for(int j=0;j<4;j++){uint64_t b=boundaries[j];if(b>addr&&b<end)end=b;else if(b<=addr&&b>base)base=b;}}
++            size=end-base;
++        }
++        if (mi) { memset((void*)(uintptr_t)mi,0,40); uint64_t *m=(uint64_t*)mi; m[0]=base; m[1]=size; ((uint32_t*)mi)[4]=state; ((uint32_t*)mi)[5]=attribute; ((uint32_t*)mi)[6]=perm; ((uint32_t*)mi)[7]=0; ((uint32_t*)mi)[8]=0; }
++        regs[0] = 0; regs[1] = 0; pthread_mutex_unlock(&g_memory_lock); return 0;
++    }
++#else
++case 0x06: {  // QueryMemory(MemoryInfo* out, PageInfo* pout, addr) → x1 = pageinfo
+         uint64_t mi = regs[0], addr = regs[2];
+         // MemoryInfo: base(0) size(8) state(0x10) attr(0x14) perm(0x18) ...
+         uint8_t *a = (uint8_t *)addr;
+@@ -190,7 +404,31 @@
+         if (mi) { uint64_t *m=(uint64_t*)mi; m[0]=base; m[1]=size; ((uint32_t*)mi)[4]=state; ((uint32_t*)mi)[5]=0; ((uint32_t*)mi)[6]=perm; ((uint32_t*)mi)[7]=0; ((uint32_t*)mi)[8]=0; }
+         regs[0] = 0; regs[1] = 0; return 0;
+     }
+-    case 0x2C: case 0x2D: {  // MapPhysicalMemory / UnmapPhysicalMemory(addr, size): only allowed inside the alias region (used by the SDK's VammManager)
++#endif
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x2C: case 0x2D: {
++        uintptr_t a=regs[0];size_t n=regs[1];regs[0]=0xd401;
++        pthread_mutex_lock(&g_memory_lock);
++        if(!n||((a|n)&0xfff)||!normal_range((uintptr_t)g_alias,g_alias_cap,a,n))goto normal_alias_done;
++        size_t off=a-(uintptr_t)g_alias,pg=(size_t)getpagesize();
++        size_t prospective=0;
++        if(num==0x2c) {
++            for(size_t p=off>>12;p<(off+n)>>12;p++) if(!normal_alias_bit(p)) prospective+=0x1000;
++            if(g_heap_cur>NXNATIVE_BASE_V0_MEMORY_HEAP-g_alias_used||prospective>NXNATIVE_BASE_V0_MEMORY_HEAP-g_heap_cur-g_alias_used) {regs[0]=0x10801;goto normal_alias_done;}
++        }
++        if(prospective&&nxnative_base_v0_memory_guard(prospective)) {regs[0]=0xd001;goto normal_alias_done;}
++        uintptr_t end=a+n,lo=num==0x2c?a&~(pg-1):(a+pg-1)&~(pg-1),hi=num==0x2c?(end+pg-1)&~(pg-1):end&~(pg-1);
++        if(hi>lo && mprotect((void*)lo,hi-lo,num==0x2c?PROT_READ|PROT_WRITE:PROT_NONE)) {regs[0]=0xd001;goto normal_alias_done;}
++        if(num==0x2c)for(size_t p=off>>12;p<(off+n)>>12;p++)if(!normal_alias_bit(p))memset(g_alias+(p<<12),0,0x1000);
++        if(num==0x2d&&hi>lo)(void)madvise((void*)lo,hi-lo,MADV_FREE);
++        int64_t changed=alias_pages(off,n,num==0x2c)*4096;
++        if(changed>=0)g_alias_used+=(size_t)changed;else g_alias_used-=(size_t)-changed;
++        regs[0]=0;
++normal_alias_done:
++        pthread_mutex_unlock(&g_memory_lock);return 0;
++    }
++#else
++case 0x2C: case 0x2D: {  // MapPhysicalMemory / UnmapPhysicalMemory(addr, size): only allowed inside the alias region (used by the SDK's VammManager)
+         uint8_t *a = (uint8_t *)regs[0]; size_t size = regs[1];
+         if (a < g_alias || a + size > g_alias + g_alias_cap) { LOG("SVC %#x 越出 alias 区 %p+%#zx", num, a, size); regs[0] = 0xD401; return 0; }
+         // Host pages are 16 KB, Horizon pages 4 KB: a map is rounded out to host pages (the extra neighboring 4K pages are inside the alias region and merely become writable early, harmless);
+@@ -212,6 +450,7 @@
+           if (before >> 28 != after >> 28) LOG("[内存] 别名区已映射 %.2f GB（应用池 %.2f GB）", after / 1073741824.0, APP_POOL / 1073741824.0); }
+         regs[0] = 0; return 0;
+     }
++#endif
+     case 0x26: {  // Break(reason, ptr, size): SDK fatal abort
+ #if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
+         if (regs[0] & 0x80000000ull) return 0;   // Preserve notification-only Break.
+@@ -235,7 +474,31 @@
+ #endif
+         regs[0] = 0; return 0;
+     }
+-    case 0x29: {  // GetInfo(out*, id, handle, subid) → x1 = value
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++case 0x29: {  // GetInfo(out*, id, handle, subid) → x1 = value
++        uint64_t id = regs[1], v = 0;
++        pthread_mutex_lock(&g_memory_lock);
++        switch (id) {
++        case I_CoreMask: v = 7; break;
++        case I_PriorityMask: v = 0; break;
++        case I_AliasAddr: v = (uint64_t)g_alias; break;   case I_AliasSize: v = g_alias_cap; break;
++        case I_HeapAddr:  v = (uint64_t)g_heap;  break;   case I_HeapSize:  v = g_heap_cap;  break;
++        case I_AslrAddr:  v = (uint64_t)g_as;    break;   case I_AslrSize:  v = g_retained_size;     break;
++        case I_StackAddr: v = (uint64_t)g_stack; break;   case I_StackSize: v = g_stack_cap; break;
++        case I_TotalMem: case I_TotalNonSys: v = g_logical_pool; break;
++        case I_UsedMem:  case I_UsedNonSys:  v = g_heap_cur + image_bytes() + g_alias_used; break;
++        case I_SysResTotal: v = 0x2000000; break; case I_SysResUsed: v = 0x400000; break;
++        case I_DebuggerAttached: v = 0; break;
++        case I_RandomEntropy: { uint64_t dm_entropy64(void); v = dm_entropy64(); break; }   // a deterministic stream when DM_DETCLOCK is on (hle_os.c)
++        case I_ProgramId: { static uint64_t pid; if (!pid) { const char *e = getenv("DM_PROGRAM_ID"); pid = e ? strtoull(e, NULL, 16) : DM_GAME_PROGRAM_ID; } v = pid; break; }   // default from the game profile's program_id; DM_PROGRAM_ID=hex overrides
++        case I_IsApplication: v = 1; break;
++        case I_UserExcAddr: { static _Alignas(0x1000) uint8_t ctx[0x1000]; v = (uint64_t)ctx; break; }   // user exception context area: newer SDKs' SetDyingMessageRegion writes to +0x1c0 (0 would write through a null pointer)
++        case I_ResourceLimit: case I_IdleTick: case I_InitProcIdRange: regs[0]=0x4201; pthread_mutex_unlock(&g_memory_lock); return 0; /* Known, unimplemented: module1/description33. */ default: regs[0]=0xf001; pthread_mutex_unlock(&g_memory_lock); return 0; /* InvalidEnumValue: module1/description120. */
++        }
++        regs[0] = 0; regs[1] = v; pthread_mutex_unlock(&g_memory_lock); return 0;
++    }
++#else
++case 0x29: {  // GetInfo(out*, id, handle, subid) → x1 = value
+         uint64_t id = regs[1], v = 0;
+         switch (id) {
+         case I_CoreMask: v = 7; break;
+@@ -256,6 +519,7 @@
+         }
+         regs[0] = 0; regs[1] = v; return 0;
+     }
++#endif
+     default:
+ #if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
+         nxnative_normal_fail(NXNATIVE_NORMAL_UNIMPLEMENTED_SVC);
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -1,5 +1,9 @@
+ // Bootstrap: after loading the modules, initialize the SDK runtime in the real order of nn::init::Start (sdk+0x2b0470) in the SDK, then enter nnMain.
+ #include "dm.h"
++#if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++#include "base_v0_memory.h"
++size_t dm_guest_heap_current(void);
++#endif
+ #include "front.h"
+ #include <stdatomic.h>
+ #include <sys/sysctl.h>
+@@ -33,6 +37,9 @@
+     ((fnp)req("_ZN2nn2os11SetHostArgvEPPc"))(g_argv);
+     { void dm_guest_spawn_selftest(void); dm_guest_spawn_selftest(); }   // DM_GUEST_SPAWN_TEST self-test of host-created guest threads (hle_guestthread.c)
+     { void dm_padmode_boot(void); dm_padmode_boot(); }   // Touch overlay present: repoint the layout prefixes to the touch version (dm_padmode.c); must happen before the game builds its panels
++    #if defined(NXNATIVE_BASE_V0_MEMORY) && NXNATIVE_BASE_V0_MEMORY
++    if(nxnative_base_v0_memory_verify(dm_guest_heap_current())) nxnative_base_v0_memory_failure();
++    #endif
+     LOG(">>> nnMain"); ((fn0)req("nnMain"))();
+     LOG("nnMain returned");
+ }

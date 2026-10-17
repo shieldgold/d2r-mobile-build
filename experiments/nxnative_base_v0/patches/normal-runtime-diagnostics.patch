@@ -1,0 +1,1304 @@
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -10,6 +10,9 @@
+ // Semantics follow the public Horizon kernel behavior (KConditionVariable / KAddressArbiter / KSynchronization of Atmosphère mesosphère).
+ // All waits hang on one global lock G, with one condition variable per thread; correctness first, performance to be measured later.
+ #include "dm.h"
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#include "normal_failures.h"
++#endif
+ #include <errno.h>
+ #include <sched.h>
+ #include <signal.h>
+@@ -342,50 +345,74 @@
+ }
+ 
+ // Handle thread / synchronization SVCs; returns 1 = handled
+-static const char *thr_name(thr_t *t, char *nb, size_t n) {   // SDK ThreadType+0x1a0 = name pointer
++static const char *thr_name(thr_t *t, char *nb, size_t n) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)t; (void)nb; (void)n; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
++   // SDK ThreadType+0x1a0 = name pointer
+     if (!t->arg) return t->handle == 0x1001 ? "主线程" : "?";
+     uint64_t np = 0; vm_size_t got = 0;
+     if (vm_read_overwrite(mach_task_self(), t->arg + 0x1a0, 8, (vm_address_t)&np, &got) || !np ||
+         vm_read_overwrite(mach_task_self(), np, n - 1, (vm_address_t)nb, &got)) return "?";
+     nb[got] = 0; return nb;
++#endif
+ }
+ // All live guest threads (used by the sampler DM_SAMPLE=ms:*): fill the pthreads into out, return the count
+ int thr_list(pthread_t *out, int max) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)out; (void)max; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     int n = 0;
+     pthread_mutex_lock(&G);
+     for (thr_t *t = g_all; t && n < max; t = t->all) if (!t->exited && t->started) out[n++] = t->pt;
+     pthread_mutex_unlock(&G);
+     return n;
++#endif
+ }
+ // Soak readings (DM_SOAK): handle table usage, live guest threads, total thread objects (including exited but not yet freed)
+ void thr_counts(int *handles, int *live, int *objs) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)handles; (void)live; (void)objs; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     int nh = 0, nl = 0, no = 0;
+     pthread_mutex_lock(&G);
+     for (int i = 1; i < MAX_H; i++) nh += g_h[i].type != O_FREE;
+     for (thr_t *t = g_all; t; t = t->all) { no++; nl += t->started && !t->exited; }
+     pthread_mutex_unlock(&G);
+     *handles = nh; *live = nl; *objs = no;
++#endif
+ }
+ // Get the guest thread name by pthread (used by per-thread CPU sampling DM_THRCPU, memstat.m): returns 0 if not a guest thread
+ int thr_name_of(pthread_t pt, char *out, size_t n) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)pt; (void)out; (void)n; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     int ok = 0; char nb[64];
+     pthread_mutex_lock(&G);
+     for (thr_t *t = g_all; t; t = t->all) if (t->pt == pt && !t->exited) { snprintf(out, n, "%#x %s", t->handle, thr_name(t, nb, sizeof nb)); ok = 1; break; }
+     pthread_mutex_unlock(&G);
+     return ok;
++#endif
+ }
+ uint32_t thr_cur_handle(void) { thr_t *t = pthread_getspecific(g_keythr); return t ? t->handle : 0; }   // Only reads TSD, usable in a signal handler
+ // Find a live guest thread by thread name (used by the sampler); returns 0 if not found
+ int thr_find_by_name(const char *name, pthread_t *out) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)name; (void)out; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     char nb[32]; int ok = 0;
+     pthread_mutex_lock(&G);
+     for (thr_t *t = g_all; t; t = t->all) if (!t->exited && !strcmp(thr_name(t, nb, sizeof nb), name)) { *out = t->pt; ok = 1; break; }
+     pthread_mutex_unlock(&G);
+     return ok;
++#endif
+ }
+ // State dump (called from crash.c on watchdog / crash; read-only, takes no lock): what each guest thread is waiting on and where its most recent SVC was issued from
+ // During a state dump, take the backtrace of other guest threads: suspend → read registers → walk the frame pointer chain (both guest code and gate blocks keep the x29 chain) → resume; only main / sdk frames are printed
+ static void thr_bt(thr_t *t) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)t; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     if (!t->mport || t->exited || t->mport == mach_thread_self()) return;
+     if (thread_suspend(t->mport) != KERN_SUCCESS) return;
+     arm_thread_state64_t st; mach_msg_type_number_t n = ARM_THREAD_STATE64_COUNT;
+@@ -446,8 +473,12 @@
+         }
+     }
+     thread_resume(t->mport);
++#endif
+ }
+ void svc_thread_dump(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++ nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     static const char *kinds[] = {"运行/未在等", "锁", "条件变量", "地址", "同步对象"};
+     int nh = 0; for (int i = 1; i < MAX_H; i++) nh += g_h[i].type != O_FREE;
+     fprintf(stderr, "[dm] 句柄表占用 %d / %d，累计建线程 %llu\n", nh, MAX_H, g_next_id - 0x51);
+@@ -503,6 +534,7 @@
+         }
+         vm_deallocate(mach_task_self(), (vm_address_t)ths, nth * sizeof *ths);
+     }
++#endif
+ }
+ 
+ // An approximation of same-core preemption: when an SVC woke a higher-priority thread pinned to this core, wait before the SVC returns until those threads (and every other higher-priority thread of this core) block, for at most 5 ms.
+--- a/dm/host/memstat.m
++++ b/dm/host/memstat.m
+@@ -17,6 +17,9 @@
+ #endif
+ #include "dm.h"
+ 
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++/* VM-region and per-thread samplers are not part of normal runtime. */
++#else
+ void svc_guest_range(uint8_t **base, size_t *size);
+ enum { C_GUEST, C_CODE, C_MALLOC, C_GPU, C_STACK, C_FILE, C_OTHER, NC };
+ static const char *k_cls[NC] = {"guest", "code", "malloc", "gpu", "stack", "file", "other"};
+@@ -153,3 +156,4 @@
+ #endif
+     pthread_t th; pthread_create(&th, NULL, thrcpu_thread, spec); pthread_detach(th);
+ }
++#endif
+--- a/dm/host/probe.c
++++ b/dm/host/probe.c
+@@ -11,7 +11,7 @@
+ #include <stdlib.h>
+ #include <stdio.h>
+ void crash_set_trap_hook(int (*fn)(ucontext_t *uc));
+-#if !TARGET_OS_IPHONE
++#if !TARGET_OS_IPHONE && !(defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY)
+ // Syntax module:offset[@x0 offset]. Put a brk at the guest address; on hit print x0..x3 (and the readable strings they point to) and a backtrace, then execute the original instruction from a trampoline slot and jump back.
+ // The trampoline borrows x16: place probes only at function entries or at points where x16 is dead; the original instruction must not be PC-relative (adr/adrp/b/bl/ldr literal/cbz...).
+ #define MAX_PROBE 16
+@@ -125,7 +125,7 @@
+ #endif
+ 
+ void probe_install(void) {
+-#if !TARGET_OS_IPHONE
++#if !TARGET_OS_IPHONE && !(defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY)
+     crash_set_trap_hook(probe_hit);
+     const char *e = getenv("DM_PROBE");
+     if (e) {
+--- a/dm/host/hle_count.c
++++ b/dm/host/hle_count.c
+@@ -8,7 +8,7 @@
+ #include <sys/mman.h>
+ #include <unistd.h>
+ #include <libkern/OSCacheControl.h>
+-#if !TARGET_OS_IPHONE
++#if !TARGET_OS_IPHONE && !(defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY)
+ #define HC_MAX 8192
+ static struct { const char *kind, *name; void *fn; _Atomic uint64_t n; } g_hc[HC_MAX];
+ static unsigned g_nhc; static uint32_t *g_hcode; static int g_hon = -1, g_hsealed; static const char *g_hpath;
+--- a/dm/host/hle_fs.c
++++ b/dm/host/hle_fs.c
+@@ -56,7 +56,13 @@
+ __attribute__((weak)) void front_save_failed(int err) { LOG("front_save_failed(errno=%d)：前端未接（缺省弱实现）", err); }
+ // DM_FSLOG=<file>: each ReadFile logs one TSV line "seconds since boot\tguest path\toffset\tlength\tguest buffer address" (which bytes boot read, for offline reverse lookup against the manifest)
+ static FILE *g_fslog; static char *g_fdpath[4096]; static pthread_mutex_t g_fslog_lock = PTHREAD_MUTEX_INITIALIZER;
+-static void fslog_init(void) { static int done; if (done) return; done = 1; const char *e = getenv("DM_FSLOG"); if (e && !(g_fslog = fopen(e, "w"))) die("DM_FSLOG 打不开 %s", e); }
++static void fslog_init(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Normal file I/O does not create a read log. */
++#else
++ static int done; if (done) return; done = 1; const char *e = getenv("DM_FSLOG"); if (e && !(g_fslog = fopen(e, "w"))) die("DM_FSLOG 打不开 %s", e); 
++#endif
++}
+ 
+ static const char *envdir(const char *var, const char *rel, char *buf, size_t n) {
+     const char *v = getenv(var);
+@@ -598,7 +604,11 @@
+     { const char *c = strchr(path, ':'); size_t ln = c ? (size_t)(c - path) : 0; g_fsave[fd] = 0;
+       for (int i = 0; c && i < g_nmnt; i++) if (strlen(g_mnt[i].name) == ln && !strncmp(g_mnt[i].name, path, ln)) g_fsave[fd] = g_mnt[i].commit[0] != 0; }
+     fslog_init();
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Do not retain diagnostic copies of guest paths. */
++#else
+     if (g_fslog && fd < 4096) { pthread_mutex_lock(&g_fslog_lock); free(g_fdpath[fd]); g_fdpath[fd] = strdup(path); pthread_mutex_unlock(&g_fslog_lock); }
++#endif
+     if (g_flag.fs) LOG("fs open [%.2fs] %s mode=%d → fd %d", (now_ns() - g_t0_ns) / 1e9, path, mode, fd);
+     return RES_OK;
+ }
+@@ -614,12 +624,16 @@
+     }
+     *out = got;
+     if (g_flag.bootprof) dm_prof_add(PROF_FS_READ, now_ns() - t0, got);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No diagnostic hash or address recording of the returned file bytes. */
++#else
+     if (g_fslog) { pthread_mutex_lock(&g_fslog_lock);
+         static int hash_on = -1; if (hash_on < 0) hash_on = getenv("DM_FSLOG_HASH") != NULL;   // DM_FSLOG_HASH=1: append a column with the FNV-1a 64 of the content read (to compare whether the bytes read from two resource packs match)
+         uint64_t fh = 0xcbf29ce484222325ull; if (hash_on) for (size_t i = 0; i < got; i++) fh = (fh ^ ((uint8_t *)buf)[i]) * 0x100000001b3ull;
+         if (hash_on) fprintf(g_fslog, "%.4f\t%s\t%lld\t%zu\t%p\t%016llx\n", (now_ns() - g_t0_ns) / 1e9, (int)h < 4096 && g_fdpath[(int)h] ? g_fdpath[(int)h] : "?", (long long)off, got, buf, (unsigned long long)fh);
+         else fprintf(g_fslog, "%.4f\t%s\t%lld\t%zu\t%p\n", (now_ns() - g_t0_ns) / 1e9, (int)h < 4096 && g_fdpath[(int)h] ? g_fdpath[(int)h] : "?", (long long)off, got, buf);
+         pthread_mutex_unlock(&g_fslog_lock); }
++#endif
+     if (g_flag.fs) {   // Read metering: print a line every 64 MiB accumulated or every 1000 reads
+         static uint64_t n, bytes, next_b = 64 << 20; static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+         pthread_mutex_lock(&m); n++; bytes += got;
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -325,7 +325,11 @@
+     if (!dlopen(exe, RTLD_NOW)) die("这个安装包里还没有游戏程序（%s）：先用 dm/tools/d2rm_pack.py 把你自己的游戏文件做进安装包再装。系统的说法：%s", exe, dlerror());
+     for (uint32_t i = 0; i < _dyld_image_count(); i++) if (strstr(_dyld_get_image_name(i), "/Guest.framework/Guest")) mh = (const struct mach_header_64 *)_dyld_get_image_header(i);
+     if (!mh) die("Guest 动态库已加载但找不到它的映像头");
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return mh;
++#else
+     fprintf(stderr, "boot: 模块映像取自 Guest 动态库 %s\n", exe); return mh;
++#endif
+ }
+ #define IMAGE_MH image_mh()
+ #else
+--- a/dm/host/hle_audio.c
++++ b/dm/host/hle_audio.c
+@@ -3,6 +3,11 @@
+ //       iOS defaults to real audio output (the product must have sound), tests that want silence set DM_AUDIO=0 explicitly; Mac defaults to the silent sink (replay / gate checks are silent), DM_AUDIO=1 for real audio output.
+ // The contents of AudioOut / AudioOutBuffer / AudioOutParameter are read and written only through the interfaces below; the host defines its own internal layout and only writes the front part of the structs.
+ #include "hle.h"
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#define NXNATIVE_AUDIO_CALLSITE() NULL
++#else
++#define NXNATIVE_AUDIO_CALLSITE() __builtin_return_address(0)
++#endif
+ #include <AudioToolbox/AudioToolbox.h>
+ #include <TargetConditionals.h>
+ #include <dispatch/dispatch.h>
+@@ -40,14 +45,22 @@
+ static aout *ao(const void *g) { aout *a = objmap_get(g); if (!a) die("AudioOut %p 不是宿主建的", g); return a; }
+ // the call site as "module+offset"; "宿主" (host) when the host itself calls (in-process audio renderer)
+ static const char *site(void *lr, char *buf, size_t n) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)lr; (void)buf; (void)n; nxnative_normal_failure();
++#else
+     module_t *m = lr ? module_of(lr) : NULL;
+     if (m) snprintf(buf, n, "%s+%#llx", m->name, (unsigned long long)((uint8_t *)lr - m->base)); else snprintf(buf, n, "宿主");
+     return buf;
++#endif
+ }
+ // Start / Stop / Close: at most 32 lines per output; middleware calls them only at init, suspend and resume, more means it keeps toggling
+ static void au_note(aout *a, const char *what, void *lr) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)a; (void)what; (void)lr;
++#else
+     char b[64];
+     if (a->nlog < 32) { a->nlog++; LOG("audio #%d %s（调用点 %s）%s", a->id, what, site(lr, b, sizeof b), a->nlog == 32 ? "；此后不再记" : ""); }
++#endif
+ }
+ 
+ static void notify_release(aout *a) {
+@@ -189,12 +202,12 @@
+     return RES_OK;
+ }
+ HLE_FORCE("_ZN2nn5audio12OpenAudioOutEPNS0_8AudioOutEPNS_2os11SystemEventEPKcRKNS0_17AudioOutParameterE", "连 audout 服务；宿主 AudioUnit / 静音接收端",
+-          Result, h_au_Open, void *g, void *ev, const char *name, const uint8_t *param) { return au_open_at(g, ev, name, param, __builtin_return_address(0)); }
++          Result, h_au_Open, void *g, void *ev, const char *name, const uint8_t *param) { return au_open_at(g, ev, name, param, NXNATIVE_AUDIO_CALLSITE()); }
+ // The two default-device overloads (Engage, SDK 12): as OpenAudioOut with the default device name; the overload without an event binds no release event (the game polls GetReleasedAudioOutBuffer)
+ HLE_FORCE("_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutEPNS_2os11SystemEventERKNS0_17AudioOutParameterE", "连 audout 服务（缺省设备）；同 OpenAudioOut",
+-          Result, h_au_OpenDef, void *g, void *ev, const uint8_t *param) { return au_open_at(g, ev, NULL, param, __builtin_return_address(0)); }
++          Result, h_au_OpenDef, void *g, void *ev, const uint8_t *param) { return au_open_at(g, ev, NULL, param, NXNATIVE_AUDIO_CALLSITE()); }
+ HLE_FORCE("_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutERKNS0_17AudioOutParameterE", "连 audout 服务（缺省设备、无事件）；同 OpenAudioOut",
+-          Result, h_au_OpenDef0, void *g, const uint8_t *param) { return au_open_at(g, NULL, NULL, param, __builtin_return_address(0)); }
++          Result, h_au_OpenDef0, void *g, const uint8_t *param) { return au_open_at(g, NULL, NULL, param, NXNATIVE_AUDIO_CALLSITE()); }
+ static Result au_start_at(void *g, void *lr) {
+     aout *a = ao(g);
+     pthread_mutex_lock(&a->m); int was = atomic_load_explicit(&a->state, memory_order_relaxed); atomic_store_explicit(&a->state, STATE_STARTED, memory_order_release); pthread_mutex_unlock(&a->m);
+@@ -204,7 +217,7 @@
+     else { atomic_store_explicit(&a->null_run, 1, memory_order_release); pthread_create(&a->null_th, NULL, null_sink, a); }
+     return RES_OK;
+ }
+-HLE_FORCE("_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", "开始播放", Result, h_au_Start, void *g) { return au_start_at(g, __builtin_return_address(0)); }
++HLE_FORCE("_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", "开始播放", Result, h_au_Start, void *g) { return au_start_at(g, NXNATIVE_AUDIO_CALLSITE()); }
+ static void au_stop_at(void *g, void *lr) {   // lr NULL: the stop inside Close, not logged separately
+     aout *a = ao(g);
+     pthread_mutex_lock(&a->m); int was = atomic_load_explicit(&a->state, memory_order_relaxed); atomic_store_explicit(&a->state, STATE_STOPPED, memory_order_release); pthread_mutex_unlock(&a->m);
+@@ -214,9 +227,9 @@
+     if (a->au && !susp) AudioOutputUnitStop(a->au);
+     else { atomic_store_explicit(&a->null_run, 0, memory_order_release); pthread_join(a->null_th, NULL); }   // Silent sink (including one that took over during suspension)
+ }
+-HLE_FORCE("_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", "停止播放", void, h_au_Stop, void *g) { au_stop_at(g, __builtin_return_address(0)); }
++HLE_FORCE("_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", "停止播放", void, h_au_Stop, void *g) { au_stop_at(g, NXNATIVE_AUDIO_CALLSITE()); }
+ HLE_FORCE("_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", "关闭音频输出", void, h_au_Close, void *g) {
+-    au_note(ao(g), "Close", __builtin_return_address(0));
++    au_note(ao(g), "Close", NXNATIVE_AUDIO_CALLSITE());
+     au_stop_at(g, NULL);
+     aout *a = objmap_del(g);
+     atomic_store_explicit(&a->notify_run, 0, memory_order_release);
+@@ -242,10 +255,14 @@
+ HLE_FORCE("_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", "缓冲数据大小", uint64_t, h_au_BufSize, const gbuf *b) { return b->size; }
+ HLE_FORCE("_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", "追加待播缓冲", unsigned, h_au_Append, void *g, gbuf *b) {
+     aout *a = ao(g);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* PCM remains in the real playback queue; no diagnostic copy to a file. */
++#else
+     // Diagnostic switch DM_AUDIO_DUMP=<file>: every PCM block the game appends is written out as is (16-bit, 48 kHz, channel count per the OpenAudioOut log, usually 6). Used to judge "did a given sound play or not":
+     // cross-correlate the original game's audio against it (this is how the tier-one drop sound was verified). The file is opened only when the variable is set; when unset this costs only one extra cached check
+     { static FILE *df; static int on = -1; if (on < 0) { const char *e = getenv("DM_AUDIO_DUMP"); on = e != NULL; if (on && !(df = fopen(e, "wb"))) LOG("【红】DM_AUDIO_DUMP 打不开 %s", e); }
+       if (df && b && b->ptr && b->size) fwrite(b->ptr, 1, (size_t)b->size, df); }
++#endif
+     pthread_mutex_lock(&a->m);
+     uint32_t qt = atomic_load_explicit(&a->q_tail, memory_order_relaxed);
+     uint32_t qh = atomic_load_explicit(&a->q_head, memory_order_acquire);
+--- a/dm/host/hle_time.c
++++ b/dm/host/hle_time.c
+@@ -14,12 +14,27 @@
+ // This SDK's libc time() is uptime (clock_gettime(0) → __nnmusl_ClockGetTime → GetSystemTick), not wall clock;
+ // the other 17 time() call sites in main are left alone and forwarded unchanged to the SDK's own time().
+ static int64_t fixed_time(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return -1;
++#else
+     static int64_t v = -2;
+     if (v == -2) { const char *e = getenv("DM_FIXED_TIME"); v = e ? strtoll(e, 0, 0) : -1;
+                    if (v >= 0) LOG("DM_FIXED_TIME=%lld：用户时钟与建局 time()（main 0x3509a4）返回定值", (long long)v); }
+     return v;
++#endif
+ }
+ HLE_FORCE("time", "按返回点认出建局种子那一处（DM_FIXED_TIME）；其余原样转调 SDK 的 time()", int64_t, h_time_time, int64_t *t) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    static int64_t (*sdk_time)(int64_t *);
++    if (!sdk_time) {
++        module_t *ms = NULL;
++        for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "sdk")) ms = &g_mod[i];
++        void *f = ms ? module_sym(ms, "time") : NULL;
++        if (!f) die("SDK time is unavailable");
++        sdk_time = (int64_t (*)(int64_t *))f;
++    }
++    return sdk_time(t);
++#else
+     uint64_t lr = (uint64_t)__builtin_return_address(0);
+     static int64_t (*sdk_time)(int64_t *); static uint64_t seed_ret;
+     if (!sdk_time) {
+@@ -37,6 +52,7 @@
+         if (t) *t = ft; return ft;
+     }
+     return sdk_time(t);
++#endif
+ }
+ 
+ HLE_FORCE("_ZN2nn4time10InitializeEv", "连 time 服务；时钟改取宿主系统时间", Result, h_time_Initialize, void) { return RES_OK; }
+@@ -54,7 +70,11 @@
+ // Expiry: dm_bossrush renews it by 1 second every tick; once this run stops ticking (exit / crash) it no longer applies, and the next run gets the real clock when the game is created.
+ _Atomic int64_t g_dm_tz_time;
+ _Atomic uint64_t g_dm_tz_live_ns;
+-static int tz_site(uint64_t lr) {   // Checked only while forcing is active, reading the 8 instructions after the return point each time, no caching (several threads read the clock)
++static int tz_site(uint64_t lr) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)lr; return 0;
++#else
++   // Checked only while forcing is active, reading the 8 instructions after the return point each time, no caching (several threads read the clock)
+     static _Atomic uint64_t base; uint64_t b = atomic_load(&base);
+     if (!b) { for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) b = (uint64_t)g_mod[i].base; atomic_store(&base, b); }
+     if (!b || lr < b) return 0;
+@@ -62,11 +82,17 @@
+     for (int k = 0; k < 8; k++) { uint32_t w = *(const uint32_t *)(uintptr_t)(lr + 4 * k);
+         if ((w & 0xfc000000) == 0x94000000) { int64_t imm = w & 0x3ffffff; if (imm & 0x2000000) imm -= 1 << 26; if (off + 4 * k + imm * 4 == 0x58f310) return 1; } }
+     return 0;
++#endif
+ }
+ HLE_FORCE("_ZN2nn4time23StandardUserSystemClock3nowEv", "用户时钟 → 宿主 time()；首领连战强制地带时恐怖地带那几处另返回", int64_t, h_time_now, void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return time(NULL);
++#else
+     int64_t tz = atomic_load(&g_dm_tz_time);
+     if (tz && (uint64_t)clock_gettime_nsec_np(CLOCK_MONOTONIC) < atomic_load(&g_dm_tz_live_ns) && tz_site((uint64_t)__builtin_return_address(0))) return tz;
+-    int64_t ft = fixed_time(); return ft >= 0 ? ft : time(NULL); }
++    int64_t ft = fixed_time(); return ft >= 0 ? ft : time(NULL); 
++#endif
++}
+ HLE_FORCE("_ZN2nn4time23StandardUserSystemClock9to_time_tERKNSt3__16chrono10time_pointINS0_17SystemClockTraitsENS3_8durationIlNS2_5ratioILl1ELl1EEEEEEE",
+           "SDK 实现与 now() 配套，一并接管", int64_t, h_time_to_time_t, const int64_t *tp) { return *tp; }
+ HLE_FORCE("_ZN2nn4time14ToCalendarTimeEPNS0_12CalendarTimeEPNS0_22CalendarAdditionalInfoERKNS0_9PosixTimeE",
+--- a/dm/ios/Sources/main.m
++++ b/dm/ios/Sources/main.m
+@@ -102,7 +102,11 @@
+     (void)p;
+     static char alt[65536]; stack_t ss = {.ss_sp = alt, .ss_size = sizeof alt}; sigaltstack(&ss, 0);   // crash printing must work on the host thread too
+     int rc = dm_main(g_argc, g_argv);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)rc;
++#else
+     fprintf(stderr, "boot: dm_main 返回 %d\n", rc);
++#endif
+     return NULL;
+ }
+ void front_ios_boot(void) {   // Called by front_ios.m once the window and Metal view exist
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -9,6 +9,14 @@
+ // Every implementation gets a compile-time signature check against the prototypes in nvn_protos.h (NVNboolean parameters are received as uint32_t, only the low 8 bits are looked at).
+ // Environment switches: DM_NVN_FRAMES=N prints the call table per frame for the first N frames (default 3); DM_NVN_TSV=path writes the per-frame call table and timing to a TSV (DM_NVN_TSV_CALLS=0 writes timing only); DM_SLOWFRAME=1 writes only the per-frame breakdown of dropped frames to the log; DM_NVN_LOG=1 logs object creation.
+ #include "../../host/hle.h"
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#define NXNATIVE_NVN_CALLSITE() UINT64_C(0)
++#else
++#define NXNATIVE_NVN_CALLSITE() ((uint64_t)__builtin_return_address(0))
++#endif
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#include "normal_failures.h"
++#endif
+ #include "nvn_protos.h"
+ #include "nvn_count.h"
+ #include "nvn_tex.h"
+@@ -50,9 +58,14 @@
+ static uint8_t g_unimpl_seen[NVN_NFUNC];
+ 
+ uint64_t nvn_unimpl_c(nvn_slot_t *slot, uint64_t x0, uint64_t x1, uint64_t x2) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)slot; (void)x0; (void)x1; (void)x2;
++    nxnative_normal_fail(NXNATIVE_NORMAL_UNIMPLEMENTED_IMPORT);
++#else
+     unsigned i = (unsigned)(slot - nvn_slot);
+     if (!g_unimpl_seen[i]++) LOG("【红】NVN 未实现被调用：%s (x0=%#llx x1=%#llx x2=%#llx)", nvn_names[i], x0, x1, x2);
+     return 0;
++#endif
+ }
+ 
+ typedef struct { const char *name; void *fn; } nvn_impl;
+@@ -168,7 +181,11 @@
+     o->magic = MAGIC('P', 'O', 'O', 'L'); o->flags = s->flags; o->mem = s->mem; o->size = s->size;
+     if (o->mem) { mtl_pool_add(o->mem, o->size); nvn_dirty_add_range(o->mem, o->size); }
+     if (!o->mem && !(o->flags & 0x200)) LOG("【红】MemoryPoolInitialize 非虚拟池没有存储 flags=%#x size=%#llx", o->flags, o->size);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No pool call-site backtrace. */
++#else
+     if (getenv("DM_NVN_VLOG")) { LOG("[nvn] MemoryPool %p mem=%p size=%#llx flags=%#x", (void *)p, (void *)o->mem, (unsigned long long)o->size, o->flags); void dm_backtrace(uint64_t fp); dm_backtrace((uint64_t)__builtin_frame_address(0)); }
++#endif
+     OLOG("MemoryPool %p mem=%p size=%#llx flags=%#x", (void *)p, (void *)o->mem, o->size, o->flags);
+     return 1;
+ }
+@@ -384,7 +401,11 @@
+     if (n < 0 || n > 6) { LOG("【红】ProgramSetShaders 阶段数 %d", n); return 0; }
+     mtl_prog_release(o); o->nstage = n; memcpy(o->sd, sd, n * sizeof *sd); o->serial = nvn_new_serial();
+     // The keys are computed here (see prog_key in nvn_obj.h): the control section is only guaranteed valid during this call; the code area lives in a memory pool and stays valid while the program is in use
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    const int dump = 0;
++#else
+     static int dump = -1; if (dump < 0) dump = getenv("DM_NVN_SHDUMP") != NULL;
++#endif
+     prog_keys_t *k = pk_get(p, 1);
+     k->ok = 0;
+     for (int i = 0; i < n; i++) {
+@@ -470,9 +491,19 @@
+ static struct { int on; uint64_t bytes, recs, grants, grant_bytes, grant_min, grant_max, cbs, hostseg, op_n[64], op_b[64], frame0, waste; } g_cs = { .on = -1 };
+ static pthread_mutex_t g_cs_mu = PTHREAD_MUTEX_INITIALIZER;
+ uint64_t dm_nvn_frame_count(void);
+-static int cs_on(void) { if (g_cs.on < 0) g_cs.on = getenv("DM_NVN_CMDSTAT") != NULL; return g_cs.on; }
++static int cs_on(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ if (g_cs.on < 0) g_cs.on = getenv("DM_NVN_CMDSTAT") != NULL; return g_cs.on; 
++#endif
++}
+ static void cs_op(uint32_t op, uint32_t size) { if (!cs_on() || op >= 64) return; pthread_mutex_lock(&g_cs_mu); g_cs.op_n[op]++; g_cs.op_b[op] += size; pthread_mutex_unlock(&g_cs_mu); }
+-static void cs_dump(void) {   // Called once per frame (at present)
++static void cs_dump(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Per-command diagnostic accounting is disabled. */
++#else
++   // Called once per frame (at present)
+     if (!cs_on()) return; uint64_t f = dm_nvn_frame_count(); if (f - g_cs.frame0 < 300) return;
+     pthread_mutex_lock(&g_cs_mu); double n = (double)(f - g_cs.frame0); char top[700]; int k = 0; uint8_t used[64] = {0};
+     for (int r = 0; r < 8; r++) { int bi = -1; for (int i = 0; i < 64; i++) if (!used[i] && g_cs.op_b[i] && (bi < 0 || g_cs.op_b[i] > g_cs.op_b[bi])) bi = i; if (bi < 0) break; used[bi] = 1;
+@@ -480,6 +511,7 @@
+     LOG("[nvn] 命令内存 至帧 %llu：每帧录 %.1f KB / %.0f 条；游戏给段 每帧 %.2f 次，每段 均 %.1f KB（最小 %.1f / 最大 %.1f）；补内存回调 每帧 %.2f 次；宿主补段 每帧 %.3f 次；换段丢弃的段尾 每帧 %.1f KB｜每帧%s",
+         (unsigned long long)f, g_cs.bytes / n / 1024.0, g_cs.recs / n, g_cs.grants / n, g_cs.grants ? g_cs.grant_bytes / (double)g_cs.grants / 1024.0 : 0, g_cs.grant_min / 1024.0, g_cs.grant_max / 1024.0, g_cs.cbs / n, g_cs.hostseg / n, g_cs.waste / n / 1024.0, top);
+     int on = g_cs.on; memset(&g_cs, 0, sizeof g_cs); g_cs.on = on; g_cs.frame0 = f; pthread_mutex_unlock(&g_cs_mu);
++#endif
+ }
+ static void put_hdr(uint8_t *p, uint32_t op, uint32_t size) { op_hdr h = {op, size}; memcpy(p, &h, sizeof h); if (op) cs_op(op, size); }
+ // New segment: if recording is in progress, write a JUMP at the end of the old segment to link it
+@@ -622,6 +654,9 @@
+     memcpy(s, t, sizeof *s);
+     // The object is invalid at record time (Unity finalizes and re-initializes the same render target object between recording and submitting): keep the object pointer as before and read it at submit, when it is usually valid again; replay still checks the magic
+     if (s->magic != MAGIC('T', 'E', 'X', 0)) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++        /* Preserve the normal snapshot fallback without diagnostic object-prefix reads. */
++#else
+         static int red;
+         if (red++ < 4) {   // the first 4 log the call site and the start of the object, to tell what the game passed
+             module_t *m = module_of((void *)ra); const uint64_t *q = (const uint64_t *)t;
+@@ -629,6 +664,7 @@
+                 m ? m->name : "?", m ? (unsigned long long)(ra - (uint64_t)m->base) : (unsigned long long)ra,
+                 (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5]);
+         }
++#endif
+         return (const tex_t *)t;
+     }
+     return s;
+@@ -637,8 +673,8 @@
+     const NVNtexture *dt, const NVNtextureView *dv) {
+     if (n < 0 || n > 8) { LOG("【红】SetRenderTargets 数量 %d", n); n = n < 0 ? 0 : 8; }
+     p_set_rt *r = REC_SNAP(c, OP_SET_RT, p_set_rt, n + 1); r->n = n;
+-    for (int i = 0; i < n; i++) { r->color[i] = ct ? tex_snap(r, SNAP_OFF(p_set_rt), i, ct[i], (uint64_t)__builtin_return_address(0)) : NULL; copy_view(&r->cview[i], &r->has_cview[i], cv ? cv[i] : NULL); }
+-    r->depth = tex_snap(r, SNAP_OFF(p_set_rt), n, dt, (uint64_t)__builtin_return_address(0)); copy_view(&r->dview, &r->has_dview, dv);
++    for (int i = 0; i < n; i++) { r->color[i] = ct ? tex_snap(r, SNAP_OFF(p_set_rt), i, ct[i], NXNATIVE_NVN_CALLSITE()) : NULL; copy_view(&r->cview[i], &r->has_cview[i], cv ? cv[i] : NULL); }
++    r->depth = tex_snap(r, SNAP_OFF(p_set_rt), n, dt, NXNATIVE_NVN_CALLSITE()); copy_view(&r->dview, &r->has_dview, dv);
+ }
+ NVN(nvnCommandBufferClearColor, void, NVNcommandBuffer *c, int index, const float *rgba, int mask) {
+     p_clear_color *r = REC(c, OP_CLEAR_COLOR, p_clear_color); r->index = index; r->mask = mask; memcpy(r->rgba, rgba, 16);
+@@ -719,7 +755,7 @@
+ }
+ NVN(nvnCommandBufferDispatchCompute, void, NVNcommandBuffer *c, int x, int y, int z) {
+     // The thunk is a tail jump (br), so the return address here is the call site in the game
+-    *REC(c, OP_DISPATCH, p_dispatch) = (p_dispatch){x, y, z, (uint64_t)__builtin_return_address(0)};
++    *REC(c, OP_DISPATCH, p_dispatch) = (p_dispatch){x, y, z, NXNATIVE_NVN_CALLSITE()};
+ }
+ NVN(nvnCommandBufferBarrier, void, NVNcommandBuffer *c, int bits) { *(int32_t *)rec(c, OP_BARRIER, 8) = bits; }
+ NVN(nvnCommandBufferSetTexturePool, void, NVNcommandBuffer *c, const NVNtexturePool *p) { REC(c, OP_SET_TEX_POOL, p_set_pool)->pool = (const dpool_t *)p; }
+@@ -727,22 +763,22 @@
+ 
+ NVN(nvnCommandBufferCopyBufferToTexture, void, NVNcommandBuffer *c, NVNbufferAddress src, const NVNtexture *t, const NVNtextureView *v,
+     const NVNcopyRegion *r, int flags) {
+-    p_copy_b2t *o = REC_SNAP(c, OP_COPY_B2T, p_copy_b2t, 1); o->src = src; o->tex = tex_snap(o, SNAP_OFF(p_copy_b2t), 0, t, (uint64_t)__builtin_return_address(0)); copy_view(&o->view, &o->has_view, v); o->r = *r; o->flags = flags;
++    p_copy_b2t *o = REC_SNAP(c, OP_COPY_B2T, p_copy_b2t, 1); o->src = src; o->tex = tex_snap(o, SNAP_OFF(p_copy_b2t), 0, t, NXNATIVE_NVN_CALLSITE()); copy_view(&o->view, &o->has_view, v); o->r = *r; o->flags = flags;
+ }
+ NVN(nvnCommandBufferCopyTextureToBuffer, void, NVNcommandBuffer *c, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r,
+     NVNbufferAddress dst, int flags) {
+-    p_copy_b2t *o = REC_SNAP(c, OP_COPY_T2B, p_copy_b2t, 1); o->src = dst; o->tex = tex_snap(o, SNAP_OFF(p_copy_b2t), 0, t, (uint64_t)__builtin_return_address(0)); copy_view(&o->view, &o->has_view, v); o->r = *r; o->flags = flags;
++    p_copy_b2t *o = REC_SNAP(c, OP_COPY_T2B, p_copy_b2t, 1); o->src = dst; o->tex = tex_snap(o, SNAP_OFF(p_copy_b2t), 0, t, NXNATIVE_NVN_CALLSITE()); copy_view(&o->view, &o->has_view, v); o->r = *r; o->flags = flags;
+ }
+ // Clear a texture region with the given value (float / unsigned integer versions; mask = channel write mask)
+ NVN(nvnCommandBufferClearTexture, void, NVNcommandBuffer *c, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r, const float *rgba, int mask) {
+-    p_clear_tex *o = REC_SNAP(c, OP_CLEAR_TEX, p_clear_tex, 1); o->tex = tex_snap(o, SNAP_OFF(p_clear_tex), 0, t, (uint64_t)__builtin_return_address(0)); copy_view(&o->view, &o->has_view, v); o->r = *r; o->mask = mask; o->is_uint = 0; memcpy(o->c.f, rgba, 16);
++    p_clear_tex *o = REC_SNAP(c, OP_CLEAR_TEX, p_clear_tex, 1); o->tex = tex_snap(o, SNAP_OFF(p_clear_tex), 0, t, NXNATIVE_NVN_CALLSITE()); copy_view(&o->view, &o->has_view, v); o->r = *r; o->mask = mask; o->is_uint = 0; memcpy(o->c.f, rgba, 16);
+ }
+ NVN(nvnCommandBufferClearTextureui, void, NVNcommandBuffer *c, const NVNtexture *t, const NVNtextureView *v, const NVNcopyRegion *r, const uint32_t *rgba, int mask) {
+-    p_clear_tex *o = REC_SNAP(c, OP_CLEAR_TEX, p_clear_tex, 1); o->tex = tex_snap(o, SNAP_OFF(p_clear_tex), 0, t, (uint64_t)__builtin_return_address(0)); copy_view(&o->view, &o->has_view, v); o->r = *r; o->mask = mask; o->is_uint = 1; memcpy(o->c.u, rgba, 16);
++    p_clear_tex *o = REC_SNAP(c, OP_CLEAR_TEX, p_clear_tex, 1); o->tex = tex_snap(o, SNAP_OFF(p_clear_tex), 0, t, NXNATIVE_NVN_CALLSITE()); copy_view(&o->view, &o->has_view, v); o->r = *r; o->mask = mask; o->is_uint = 1; memcpy(o->c.u, rgba, 16);
+ }
+ NVN(nvnCommandBufferCopyTextureToTexture, void, NVNcommandBuffer *c, const NVNtexture *s, const NVNtextureView *sv, const NVNcopyRegion *sr,
+     const NVNtexture *d, const NVNtextureView *dv, const NVNcopyRegion *dr, int flags) {
+-    p_copy_t2t *o = REC_SNAP(c, OP_COPY_T2T, p_copy_t2t, 2); o->src = tex_snap(o, SNAP_OFF(p_copy_t2t), 0, s, (uint64_t)__builtin_return_address(0)); o->dst = tex_snap(o, SNAP_OFF(p_copy_t2t), 1, d, (uint64_t)__builtin_return_address(0));
++    p_copy_t2t *o = REC_SNAP(c, OP_COPY_T2T, p_copy_t2t, 2); o->src = tex_snap(o, SNAP_OFF(p_copy_t2t), 0, s, NXNATIVE_NVN_CALLSITE()); o->dst = tex_snap(o, SNAP_OFF(p_copy_t2t), 1, d, NXNATIVE_NVN_CALLSITE());
+     copy_view(&o->sv, &o->has_sv, sv); copy_view(&o->dv, &o->has_dv, dv); o->sr = *sr; o->dr = *dr; o->flags = flags;
+ }
+ NVN(nvnCommandBufferSetCopyRowStride, void, NVNcommandBuffer *c, ptrdiff_t st) { p_copy_stride *o = REC(c, OP_COPY_STRIDE, p_copy_stride); o->stride = st; o->image = 0; }
+@@ -810,14 +846,30 @@
+ static _Atomic uint64_t g_sub_wall_ns, g_sub_cpu_ns, g_sub_instr;   // Wall clock / this thread's CPU time / this thread's retired instruction count for submit (excluding present) (taken away per frame)
+ static _Atomic uint64_t g_cum_sub_instr, g_cum_sub_cpu_ns;   // Cumulative versions of the above (the 「翻译」(translation) summary row every 300 frames takes the difference; on a real device read through the log port: instructions per draw / submit CPU per frame)
+ extern int thread_selfcounts(int type, void *buf, size_t nbytes);   // This thread's cumulative {instructions, cycles} (libSystem private interface, present on both Mac and iOS)
+-static uint64_t thr_instr(void) { uint64_t c[2] = {0, 0}; thread_selfcounts(1, c, sizeof c); return c[0]; }
++static uint64_t thr_instr(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ uint64_t c[2] = {0, 0}; thread_selfcounts(1, c, sizeof c); return c[0]; 
++#endif
++}
+ // Supplementary readings for the submit path (on a real device Metal 4 instruction count is -18% while submit CPU time is +49%; need to tell apart kernel mode, execution efficiency, or frequency throttling):
+ // this thread's cycle count (the second item of the same interface), kernel-mode CPU time (THREAD_BASIC_INFO), wall clock
+-static void thr_counts(uint64_t *instr, uint64_t *cyc) { uint64_t c[2] = {0, 0}; thread_selfcounts(1, c, sizeof c); *instr = c[0]; *cyc = c[1]; }
++static void thr_counts(uint64_t *instr, uint64_t *cyc) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    *instr = 0; *cyc = 0;
++#else
++ uint64_t c[2] = {0, 0}; thread_selfcounts(1, c, sizeof c); *instr = c[0]; *cyc = c[1]; 
++#endif
++}
+ static uint64_t thr_sys_ns(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
+     thread_basic_info_data_t bi; mach_msg_type_number_t n = THREAD_BASIC_INFO_COUNT; mach_port_t me = mach_thread_self(); uint64_t r = 0;
+     if (thread_info(me, THREAD_BASIC_INFO, (thread_info_t)&bi, &n) == KERN_SUCCESS) r = (uint64_t)bi.system_time.seconds * 1000000000ull + (uint64_t)bi.system_time.microseconds * 1000ull;
+     mach_port_deallocate(mach_task_self(), me); return r;
++#endif
+ }
+ static _Atomic uint64_t g_cum_sub_cyc, g_cum_sub_sys_ns, g_cum_sub_wall_ns;
+ static int frame_rec(void);
+@@ -976,6 +1028,10 @@
+ static uint64_t g_prev[NVN_NFUNC];
+ static FILE *g_tsv;
+ static void dump_frame(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    g_frame++;
++    dm_guest_frame_tick();
++#else
+     static int inited, nframes = 3, calls = 1;
+     if (!inited) {
+         inited = 1;
+@@ -1005,6 +1061,7 @@
+             static long cap = -1; if (cap < 0) { const char *e = getenv("DM_MEM_CAP_GB"); cap = e ? atol(e) : DM_MEM_CAP_DEFAULT_GB; }
+             if (cap > 0 && mb > (unsigned long long)cap * 1024) { LOG("【红】内存看门狗：常驻 %llu MB 超过上限 %ld GB（帧 %llu），自行退出", mb, cap, (unsigned long long)g_frame); _exit(86); } } }
+     dm_guest_frame_tick();   // Deterministic guest clock (DM_DETCLOCK, host hle_os.c): each present advances a fixed step; a no-op when not enabled
++#endif
+ }
+ // ---------- Timing instrumentation (per-frame rows written to DM_NVN_TSV: frame / @metric / value; every 300 frames a summary of p50 / p95 / max) ----------
+ #define TWIN 300
+@@ -1034,6 +1091,9 @@
+ }
+ static int dcmp(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return (x > y) - (x < y); }
+ static void tsummary(uint64_t frame) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)frame;
++#else
+     char line[1024]; size_t o = 0;
+     for (int k = 0; k < 6; k++) {
+         unsigned n = g_tn[k] < TWIN ? g_tn[k] : TWIN; if (!n) continue;
+@@ -1069,17 +1129,28 @@
+     uint64_t up, re, fa, pr; mtl_pkg_stats(&up, &re); nvn_dirty_stats(&fa, &pr);
+     LOG("[nvn] 预排布贴图 首传 %llu 张、池内容变化重传 %llu 次；写保护缺页 %llu 次、宿主写前解保护 %llu 页；漏检 %llu（累计）", up, re, fa, pr, mtl_pkg_miss());
+     memset(g_tn, 0, sizeof g_tn);
++#endif
+ }
+ // DM_SLOWFRAME=1 (test switch, read over the log port on a real device): per-frame timings are first stored in a ring of the last 16 frames; dropped frames are judged 8 frames late (GPU / on-screen present times are back by then),
+ // and only for dropped frames is one line "[slowframe]\t<frame number>\t@<name>=<value>..." written to the log, plus one denominator line every 300 frames. No per-frame file is written: the log tee fsyncs every line, and writing line by line would disturb the readings
+ #define SRN 16
+ static struct { uint64_t f; int n; const char *k[64]; double v[64]; } g_sr[SRN];
+ static int g_slow = -1;
+-static int slow_on(void) { if (g_slow < 0) g_slow = getenv("DM_SLOWFRAME") != NULL; return g_slow; }
++static int slow_on(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ if (g_slow < 0) g_slow = getenv("DM_SLOWFRAME") != NULL; return g_slow; 
++#endif
++}
+ static int frame_rec(void) { return g_tsv || slow_on(); }
+ static void trow(uint64_t f, const char *name, double v) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)f; (void)name; (void)v;
++#else
+     if (g_tsv) fprintf(g_tsv, "%llu\t%s\t%.3f\n", f, name, v);
+     if (slow_on()) { __typeof__(g_sr[0]) *r = &g_sr[f % SRN]; if (r->f != f) { r->f = f; r->n = 0; } if (r->n < 64) { r->k[r->n] = name; r->v[r->n++] = v; } }
++#endif
+ }
+ static double srow(uint64_t f, const char *name, double dflt) {
+     __typeof__(g_sr[0]) *r = &g_sr[f % SRN];
+@@ -1088,6 +1159,9 @@
+ }
+ // Dropped-frame definition: on-screen present interval > one frame period (16.7 ms at 60 fps, 33.3 ms at 30) ×1.5 or −1; without a window (no on-screen present time) fall back to the present call interval
+ static void slow_emit(uint64_t f) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)f;
++#else
+     static uint64_t judged, slow;
+     double pm = srow(f, "@presented_ms", 0), fr = srow(f, "@frame_ms", 0), lim = 1000.0 / mtl_fps_target() * 1.5;
+     int has = mtl_has_window(), bad = has ? (pm > lim || pm < 0) : fr > lim;
+@@ -1102,6 +1176,7 @@
+         fprintf(stderr, "%s\n", b);
+     }
+     if (f % 300 == 0) fprintf(stderr, "[slowframe]\t#\t至帧 %llu\tjudged=%llu\tslow=%llu\t判据=%s\n", f, judged, slow, has ? "上屏间隔" : "出图调用间隔（无窗口）");
++#endif
+ }
+ // Declaration for the time-constraint (real-time) thread: period = present period, constraint = period, computation = the CPU time this thread actually needs per frame.
+ // The computation used to be hard-coded at 2 ms, while the game main thread (game logic + recording + submit replay) takes about 10 ms per frame when hot - a 5× gap between declared and actual:
+@@ -1252,6 +1327,9 @@
+     } else atomic_store(&g_nvn_ns, 0);
+     g_acq_wait_ns = g_pq_wait_ns = 0;
+     if (f >= 8) { double g = mtl_gpu_ms(f - 8); if (g >= 0) { tpush(3, g); trow(f - 8, "@gpu_ms", g); g_hr[g_hn++ % HRN] = g; }   // GPU time is taken 8 frames late (already completed)
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++        /* Do not construct or forward diagnostic long-frame scene notes. */
++#else
+         { lf_rec *r = &g_lf[(f - 8) % LFN];   // long-frame log (on by default, DM_LONGFRAME=0 turns it off): a line is printed only when the whole frame > 20 ms or GPU > 16.7 ms, and it is clearly above recent conditions
+           static int on = -1; if (on < 0) { const char *e = getenv("DM_LONGFRAME"); on = !(e && !strcmp(e, "0")); }
+           // "Long" is relative to recent conditions: when running steadily at 30 fps (menus / windowless host) or under sustained overload, every frame is > 20 ms; those are not long frames and must not flood the log - a frame has to be 40% above the sliding mean of the last 16 frames to count
+@@ -1264,6 +1342,7 @@
+               const lf_rec *pv = &g_lf[(f - 9) % LFN]; int hidden = r->ls || (f >= 9 && pv->f == f - 9 && pv->ls);
+               if (hidden) strlcat(b, "；接读取画面，不可见", sizeof b);
+               dm_longframe_note(b); } }
++#endif
+         uint64_t g0, g1; if (frame_rec() && mtl_gpu_span(f - 8, &g0, &g1)) { trow(f - 8, "@gpu_beg_ms", (g0 - g_t0_ns) / 1e6); trow(f - 8, "@gpu_end_ms", (g1 - g_t0_ns) / 1e6); } }
+     prev_in = t0; prev_pass = ps; prev_draw = dr;
+     dump_frame();
+@@ -1500,9 +1579,9 @@
+     if (o->dst) o->dr = (NVNcopyRegion){0, 0, 0, (int)o->dst->d.width, (int)o->dst->d.height, 1};
+     o->flags = DM_COPY_RESOLVE;
+ }
+-NVN(nvnCommandBufferDownsample, void, NVNcommandBuffer *c, const NVNtexture *s, const NVNtexture *d) { rec_downsample(c, s, NULL, d, NULL, (uint64_t)__builtin_return_address(0)); }
++NVN(nvnCommandBufferDownsample, void, NVNcommandBuffer *c, const NVNtexture *s, const NVNtexture *d) { rec_downsample(c, s, NULL, d, NULL, NXNATIVE_NVN_CALLSITE()); }
+ NVN(nvnCommandBufferDownsampleTextureView, void, NVNcommandBuffer *c, const NVNtexture *s, const NVNtextureView *sv, const NVNtexture *d, const NVNtextureView *dv) {
+-    rec_downsample(c, s, sv, d, dv, (uint64_t)__builtin_return_address(0));
++    rec_downsample(c, s, sv, d, dv, NXNATIVE_NVN_CALLSITE());
+ }
+ 
+ // CPU texture write (NVN WriteTexels): texture storage lives in pool memory in Tegra block-linear layout; decode the whole level → patch the region → re-encode.
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -44,8 +44,16 @@
+ // Function parameters in this file are never retained again in the callee (the caller / global tables already hold them, and lifetime is guaranteed by defer_obj_release): saves a retain / release pair per call on the hot path
+ #pragma clang attribute push(__attribute__((objc_externally_retained)), apply_to = function)
+ 
++/* NXNATIVE_NORMAL_GPU_LOG_BEGIN */
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#include "normal_failures.h"
++#define MLOG(...) do { } while (0)
++#define MDIE(...) do { nxnative_normal_failure(); } while (0)
++#else
+ #define MLOG(...) do { fprintf(stderr, "[dm] [nvn-mtl] " __VA_ARGS__); fputc('\n', stderr); } while (0)
+ #define MDIE(...) do { MLOG("FATAL " __VA_ARGS__); abort(); } while (0)
++#endif
++/* NXNATIVE_NORMAL_GPU_LOG_END */
+ 
+ static void warm_start(void);
+ static void warm_claim(void);
+@@ -124,6 +132,9 @@
+ // DM_RES_CHECK=1 (diagnostic): if textures / buffers the shader accesses through the argument block are not in the residency set, print the first 40 (textures are attributed to the actual allocation via parent texture / underlying buffer)
+ static int g_res_check_on;
+ static void res_check(id r, const char *what, int reg) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)r; (void)what; (void)reg;
++#else
+     static int nbad;
+     if (!g_res_check_on || !r || nbad >= 40) return;
+     int is_tex = [r conformsToProtocol:@protocol(MTLTexture)], is_buf = [r conformsToProtocol:@protocol(MTLBuffer)];
+@@ -134,6 +145,7 @@
+     if (!ok) { nbad++; id<MTLTexture> t = is_tex ? (id<MTLTexture>)r : nil;
+         MLOG("【红】驻留缺失 #%d：%s 槽 %d %s %p（父链 %d 层）分配 %lu B 存储 %lu%s", nbad, what, reg, is_tex ? "贴图" : "缓冲", (__bridge void *)a, hops, (unsigned long)a.allocatedSize, (unsigned long)a.storageMode,
+              t ? [NSString stringWithFormat:@" 格式 %lu %lux%lu 类型 %lu 用途 %#lx", (unsigned long)t.pixelFormat, (unsigned long)t.width, (unsigned long)t.height, (unsigned long)t.textureType, (unsigned long)t.usage].UTF8String : ""); }
++#endif
+ }
+ static void res_commit(void) {
+     pthread_mutex_lock(&g_res_mu);
+@@ -183,6 +195,9 @@
+ static pthread_mutex_t g_bf_want_mu = PTHREAD_MUTEX_INITIALIZER;
+ static char **g_bf_want_keys; static size_t g_bf_want_n, g_bf_want_cap; static int g_bf_want_loaded;
+ void bf_want_note(const char *key) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)key;
++#else
+     const char *path = getenv("DM_NVN_BF_WANT");
+     if (!path || !key || strlen(key) != 16) return;
+     for (int i = 0; i < 16; i++) if (!((key[i] >= '0' && key[i] <= '9') || (key[i] >= 'a' && key[i] <= 'f') || (key[i] >= 'A' && key[i] <= 'F'))) return;
+@@ -199,6 +214,7 @@
+     g_bf_want_keys[g_bf_want_n++] = strdup(key);
+     FILE *f = fopen(path, "a"); if (f) { fprintf(f, "%s\n", key); fclose(f); }
+     pthread_mutex_unlock(&g_bf_want_mu);
++#endif
+ }
+ 
+ // ---------- Memory pools ----------
+@@ -221,6 +237,9 @@
+ // DM_UDC_SELFTEST=1 (diagnostic, checks DontCare behavior on a real A19 device): private-storage Depth32Float_Stencil8 / RGBA8 (1952x900) are first cleared to write known values,
+ // then Load + DontCare without drawing, read back and compared pixel by pixel, printing one result line
+ static void udc_selftest(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No diagnostic GPU self-test. */
++#else
+     if (!getenv("DM_UDC_SELFTEST")) return;
+     id<MTLCommandQueue> q = [g_dev newCommandQueue];
+     for (int depth = 1; depth >= 0; depth--) {
+@@ -245,6 +264,7 @@
+         const uint32_t *px = out.contents; NSUInteger bad = 0; for (NSUInteger i = 0; i < w * h; i++) if (px[i] != px[0]) bad++;
+         MLOG("UDC自检 %s %s %lux%lu 首值 %08x 与首值不同 %lu / %lu", g_dev.name.UTF8String, depth ? "Depth32F_S8" : "RGBA8", (unsigned long)w, (unsigned long)h, px[0], (unsigned long)bad, (unsigned long)(w * h));
+     }
++#endif
+ }
+ void mtl_init(void) {
+     if (g_dev) return;
+@@ -447,11 +467,17 @@
+ static pthread_t g_sub_thread; static _Atomic int g_sub_thread_set;
+ static int on_sub_thread(void) { return atomic_load(&g_sub_thread_set) && pthread_equal(pthread_self(), g_sub_thread); }
+ static void up_owner_check(const char *where) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)where;
++    if (!atomic_load(&g_sub_thread_set) || on_sub_thread()) return;
++    nxnative_normal_failure();
++#else
+     if (!atomic_load(&g_sub_thread_set) || on_sub_thread()) return;
+     char name[64] = ""; pthread_getname_np(pthread_self(), name, sizeof name);
+     MLOG("【红】上传批只属于提交线程：%s 在线程「%s」上被调用", where, name);
+     void *bt[32]; int n = backtrace(bt, 32); backtrace_symbols_fd(bt, n, 2);
+     abort();
++#endif
+ }
+ // Every command buffer created outside the replay / upload batch goes through this. On the submit thread: flush this batch's uploads first, so that commands that then read or write these textures are ordered after the uploads;
+ // other threads (the present thread etc.) creating a command buffer do not touch the batch: they do not read or write textures uploaded in this batch; commands that need these textures all come after this replay submission (the batch is flushed before it)
+@@ -510,10 +536,14 @@
+ // DM_NVN_PASSGPU_SERIAL=1 (for measurement): before creating each encoder on the main command buffer, encode 'signal n+1 → wait for signal n+1' - the signal is only raised once all prior work has completed,
+ // so the following encoder starts only after the previous one has fully finished; on TBDR passes no longer overlap in the pipeline, and the per-pass start-to-end span of DM_NVN_PASSGPU is that pass's exclusive time (the whole-frame total is inflated; look only at relative cost)
+ static void ser_gate(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Normal command ordering is retained; no measurement-only serialization. */
++#else
+     static int on = -1; static id<MTLEvent> ev; static uint64_t n;
+     if (on < 0) { on = getenv("DM_NVN_PASSGPU_SERIAL") != NULL; if (on) { ev = [g_dev newEvent]; MLOG("DM_NVN_PASSGPU_SERIAL：通道串行化（测量用，耗时偏大）"); } }
+     if (!on) return;
+     (void)ev; (void)n;
++#endif
+ }
+ // Metal 4 conservative barriers (first version): a consumer barrier at the start of an encoder (all prior work → this encoder) and a producer barrier at the end (this encoder and earlier → later encoders).
+ // Only the one at the start is not enough: t_rt_range 'pass 1 → pass 2 → copy' read back black, and after adding the end barrier it is 19/19. Old-queue encoders (upload / diagnostics / present) do not go through these barriers.
+@@ -641,7 +671,13 @@
+ static uint64_t bp_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000000ull + t.tv_nsec; }
+ static uint64_t g_bp_t0;   // Time of process start (when this module is loaded)
+ __attribute__((constructor)) static void bp_t0(void) { g_bp_t0 = bp_now(); }
+-static int bootprof(void) { static int v = -1; if (v < 0) v = getenv("DM_BOOTPROF") != NULL; return v; }
++static int bootprof(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ static int v = -1; if (v < 0) v = getenv("DM_BOOTPROF") != NULL; return v; 
++#endif
++}
+ static uint64_t g_bp_lib_n, g_bp_lib_ns, g_bp_pso_n, g_bp_pso_ns, g_bp_up_bytes, g_bp_first_present;
+ static uint64_t g_up_total_ns;   // Cumulative upload time (same source as the per-frame @upload_ms)
+ // ---------- Per-frame GPU time aggregation ----------
+@@ -655,6 +691,12 @@
+ //   <fragment shader key prefix> or *   the phase drops all draws of these fragment shaders (the picture will be wrong; it only measures 'how much this kind of draw is worth'; a nearly idle category needs a round of its own)
+ // Readings: each phase discards its first 45 frames (transition + present lag); for the remaining frames, the mean of the actual present interval (same source as perf.txt) and the frame counts in the three buckets 16.7 / 25 / ≥33 ms, one log line 「UB 上屏」(UB present).
+ // Table output: $DM_ROOT/run/ruler/ub_table.py; real-device script: $DM_ROOT/run/ruler/ub_alt.sh.
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++static int g_ub_n;
++void mtl_ub_present(double iv) { (void)iv; }
++static void ub_frame(uint64_t f) { (void)f; }
++static int ub_skip(const char *key) { (void)key; return 0; }
++#else
+ static int g_ub_n = -1, g_ub_N = 180; static _Atomic int g_ub_cur = -1; static char g_ub_name[16][16], g_ub_keys[16][16][48]; static int g_ub_nk[16];
+ static _Atomic int g_ubp_on, g_ubp_c[4]; static _Atomic uint64_t g_ubp_sum_us;
+ void mtl_ub_present(double iv) {   // Called once per frame by the present thread: actual present interval in ms (−1 = dropped, 0 = no reading)
+@@ -699,6 +741,7 @@
+     for (int i = 0; i < g_ub_nk[uc]; i++) { const char *k = g_ub_keys[uc][i]; if (k[0] == '@') continue; if (k[0] == '*' || !strncmp(key, k, strlen(k))) return 1; }
+     return 0;
+ }
++#endif
+ void mtl_set_frame(uint64_t f) { atomic_store(&g_cur_frame, f); if (g_ub_n) ub_frame(f); }
+ // GPU timing registration: gpu_tag_begin(frame) before commit, gpu_tag_done(frame, GPU start, GPU end) on completion (seconds on the CACurrentMediaTime base).
+ // Old-queue command buffers go through gpu_tag_f; the Metal 4 main submission backfills in the feedback of mtl_sub_commit (when switching to Metal 4 all the call sites were lost and the GPU column of the 「计时」(timing) line became empty)
+@@ -882,7 +925,13 @@
+ static uint64_t g_pkg_uploads, g_pkg_reuploads, g_pkg_miss;
+ static uint64_t g_pfv_upgrades;
+ // DM_NVN_DIRTYCHECK=1 (diagnostic, compared against ground truth): fully hash the pool content on every use; changed but not detected by dirty-page tracking = a missed detection
+-static int dirtycheck(void) { static int v = -1; if (v < 0) v = getenv("DM_NVN_DIRTYCHECK") != NULL; return v; }
++static int dirtycheck(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ static int v = -1; if (v < 0) v = getenv("DM_NVN_DIRTYCHECK") != NULL; return v; 
++#endif
++}
+ static uint64_t full_hash(const uint8_t *m, uint64_t n) { uint64_t h = 1469598103934665603ull; for (uint64_t i = 0; i < n; i++) h = (h ^ m[i]) * 1099511628211ull; return h; }
+ // The GPU does not support BC compressed formats (A15 / A16 etc.): BC textures are created in the decompressed format and decompressed on the CPU at upload / buffer→texture copy time (nvn_bcdec.c).
+ // BC3 among the game textures was converted to ASTC offline by the Legacy Device Pack (dm/tools/astc_pack.py); what reaches here is the small remainder of BC. The test switch DM_TEST_NO_BC=1 forces this path on any machine
+@@ -1421,6 +1470,9 @@
+ // Purpose: pin down "crashes with no log". The system gives no notice before killing a process for memory, so only readouts left beforehand can show which number kept climbing.
+ // Called by the frame hook every 300 frames; printed only when resident or GPU allocated changed by ≥ 64 MB since the last line, otherwise one line every 3000 frames; capped at 400 lines per game. All integers (the frame hook runs on the guest thread's small stack, so no floating-point formatting)
+ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)frame; (void)rss_mb;
++#else
+     static unsigned long long last_rss, last_gpu, last_frame; static int lines; unsigned long long gpu = (unsigned long long)(g_dev.currentAllocatedSize >> 20);
+     unsigned long long dr = rss_mb > last_rss ? rss_mb - last_rss : last_rss - rss_mb, dg = gpu > last_gpu ? gpu - last_gpu : last_gpu - gpu;
+     if (lines >= 400 || (lines && dr < 64 && dg < 64 && frame - last_frame < 3000)) return; lines++; last_rss = rss_mb; last_gpu = gpu; last_frame = frame;
+@@ -1443,6 +1495,7 @@
+         MLOG("显卡分配增长按函数：结束通道 %llu MB，开通道 %llu MB，取管线 %llu MB，参数缓冲 %llu MB，取贴图 %llu MB", g_ap_fn[0] >> 20, g_ap_fn[1] >> 20, g_ap_fn[2] >> 20, g_ap_fn[3] >> 20, g_ap_fn[4] >> 20); }
+     if (g_allocprof > 0) { int top[4] = {-1, -1, -1, -1}; for (int o = 0; o < 64; o++) for (int k = 0; k < 4; k++) if (top[k] < 0 || g_ap_bytes[o] > g_ap_bytes[top[k]]) { for (int j = 3; j > k; j--) top[j] = top[j - 1]; top[k] = o; break; }
+         MLOG("显卡分配增长按操作：op%d %llu MB，op%d %llu MB，op%d %llu MB，op%d %llu MB", top[0], g_ap_bytes[top[0]] >> 20, top[1], g_ap_bytes[top[1]] >> 20, top[2], g_ap_bytes[top[2]] >> 20, top[3], g_ap_bytes[top[3]] >> 20); }
++#endif
+ }
+ void mtl_pkg_stats(uint64_t *uploads, uint64_t *reuploads) { *uploads = g_pkg_uploads; *reuploads = g_pkg_reuploads; }
+ uint64_t mtl_pkg_miss(void) { return g_pkg_miss; }
+@@ -1496,14 +1549,24 @@
+ // DM_NVN_PASSDUMP=frame number, or start-end (inclusive at both ends)
+ static int g_kd_force;   // the draw DM_NVN_KEYDUMP matched: force the per-binding records on (see kd_draw)
+ static int passdump(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
+     if (g_kd_force) return 1;
+ #ifdef NVN_RT_RANGE_TEST
+     if (g_rr_checking) return 0;
+ #endif
+     static long a0 = -2, a1; if (a0 == -2) { const char *e = getenv("DM_NVN_PASSDUMP"); a0 = e ? atol(e) : -1; a1 = e && strchr(e, '-') ? atol(strchr(e, '-') + 1) : a0; }
+     long f = (long)atomic_load(&g_cur_frame); return a0 >= 0 && f >= a0 && f <= a1;
+-}
++#endif
++}
++/* NXNATIVE_NORMAL_PASS_LOG_BEGIN */
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#define PD(...) do { } while (0)
++#else
+ #define PD(...) do { if (passdump()) { fprintf(stderr, "[pass] F%llu ", (unsigned long long)atomic_load(&g_cur_frame)); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
++#endif
++/* NXNATIVE_NORMAL_PASS_LOG_END */
+ static void blit_note(void) { if (g_enc) PD("E %llu 拷贝 / 缓冲更新结束渲染通道", g_stat_pass); }
+ // DM_GFXUSE=<file>: once the character select screen is stable (starting 1 second after the first OpenPanel MainMenuButtonRibbon, requires DM_BOOTPROF=1), over 30 consecutive frames,
+ // the ranges in guest memory of the resources the GPU actually reads (texture storage, UBO / SSBO, vertex / index buffers), deduplicated by (kind, address, length), one line recorded on first sight.
+@@ -1513,6 +1576,13 @@
+ __attribute__((weak)) void dm_guest_frame_tick(void) {}   // hle_os.c provides the strong definition (DM_DETCLOCK deterministic guest clock); a no-op when graphics unit tests do not link the host   // diag.c provides the strong definition (DM_TICK_HOLD=E:SHOT unfreeze); a no-op when graphics unit tests do not link the host
+ __attribute__((weak)) int dm_detclock_enabled(void) { return 0; }   // Same as above: the host's hle_os.c provides the strong definition; when graphics unit tests do not link the host, the deterministic clock is treated as off
+ __attribute__((weak)) uint64_t guest_ns(void) { return 0; }          // Same as above: read only when the deterministic clock is on; never reached in graphics unit tests
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++enum { USE_OFF, USE_WAIT, USE_REC, USE_DONE };
++static int g_use = USE_OFF;
++static void use_exit(void) {}
++static void use_tick(void) {}
++static __attribute__((always_inline)) inline void use_rec(const char *kind, uint64_t addr, uint64_t len, int tid, const tex_t *t) { (void)kind; (void)addr; (void)len; (void)tid; (void)t; }
++#else
+ enum { USE_OFF, USE_WAIT, USE_REC, USE_DONE };
+ static int g_use = -1; static FILE *g_use_f; static long g_use_f0, g_use_rows; static nvn_hmap g_use_seen = {.klen = 24};
+ #define USE_FRAMES 30
+@@ -1544,6 +1614,7 @@
+     if (t) fprintf(g_use_f, "%s\t%#llx\t%llu\t%lld\t%d\t%#x\t%ux%u\n", kind, (unsigned long long)addr, (unsigned long long)len, (long long)atomic_load(&g_cur_frame), tid, t->d.format, t->d.width, t->d.height);
+     else fprintf(g_use_f, "%s\t%#llx\t%llu\t%lld\t\t\t\n", kind, (unsigned long long)addr, (unsigned long long)len, (long long)atomic_load(&g_cur_frame));
+ }
++#endif
+ static uint64_t att_bytes(id<MTLTexture> t, NSUInteger level) {
+     if (!t) return 0;
+     NSUInteger w = MAX(t.width >> level, 1), h = MAX(t.height >> level, 1);
+@@ -1572,6 +1643,15 @@
+ // Each line: frame idx kind gpu_ms inc_ms w h fmt0 dfmt load draws t0_ns t1_ns (kind: R render / C compute; load: L load / C clear for each color attachment + depth)
+ // On TBDR passes overlap in the pipeline (the later pass's vertex stage is earlier than the end of the earlier pass's fragment stage): gpu_ms = this pass's start-to-end span (including queueing) and cannot be summed;
+ // attribution uses the timeline increment inc_ms = t1 − max(t0, latest t1 of the passes completed so far); the sum of the increments of all passes = total time the GPU is busy (command buffers complete in submission order)
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++static inline void args_dirty_all(void);
++static int pg_on(void) { return 0; }
++static void pg_sub_begin(uint64_t fence) { (void)fence; }
++static void pg_render(MTL4RenderPassDescriptor *pd, NSUInteger nc) { (void)pd; (void)nc; }
++static id<MTLComputeCommandEncoder> pg_compute(void) { ser_gate(); args_dirty_all(); return enc_c_begin(NULL); }
++static void pg_end_render(void) {}
++static void pg_commit(id<MTLCommandBuffer> cb) { (void)cb; }
++#else
+ typedef struct { uint64_t frame, pass; int idx, kind, w, h, draws, slot; uint32_t cfmt0, dfmt; char load[12]; } pg_pass;   // pass: global pass number (same as the pass number in the DM_NVN_PASSDUMP lines, for joining the two records)
+ #define PG_SLOTS 4096   // Counter sample buffer limit 32768 bytes = 4096 timestamps (measured from the error on this machine)
+ #define PG_RING 8
+@@ -1681,6 +1761,7 @@
+         free(ps);
+     }];
+ }
++#endif
+ void ts_after(void);
+ void ms_after(void);
+ // ---------- Store lookahead: at pass end, decide from the later commands of the same submission whether each attachment's write-back is redundant ----------
+@@ -1730,12 +1811,16 @@
+ // Stable key (unchanged across launches, does not use the texture serial): format / width / height / level, then mixed with the formats of the color attachments of the pass where the write-back is skipped and this attachment's index - textures of the same format and size but different purpose (e.g. transmittance 27 and upscale target 36) do not share a key
+ static uint64_t xv_tag_pass(const tex_t *t, uint32_t lv, int idx, const p_set_rt *rt) { uint64_t h = xv_tag(t, lv) ^ ((uint64_t)(idx + 1) << 60); for (int i = 0; i < rt->n && i < 8; i++) h = (h ^ (rt->color[i] ? (uint64_t)rt->color[i]->d.format + 1 : 0)) * 0x100000001b3ull; return h; }
+ static void xv_init(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    g_xv_init = 1;
++#else
+     if (g_xv_init) return; g_xv_init = 1;
+     const char *p = getenv("DM_XV_FILE"); if (!p || !*p) return;
+     FILE *f = fopen(p, "r"); if (!f) return;
+     char line[256], why[160]; unsigned long long tag; int ch, n = 0;
+     while (fgets(line, sizeof line, f) && g_xv_ndis < 128) if (sscanf(line, "%llx\t%159[^\t]\t%d", &tag, why, &ch) >= 1) g_xv_disabled[g_xv_ndis++] = tag, n++;
+     fclose(f); MLOG("读到 %d 条禁用记录", n);
++#endif
+ }
+ static int xv_disabled(uint64_t tag) { xv_init(); for (int i = 0; i < g_xv_ndis; i++) if (g_xv_disabled[i] == tag) return 1; return 0; }
+ static xv_ent *xv_find(uint64_t ser, uint32_t lv, uint32_t sl) { for (int i = 0; i < g_xv_n; i++) if (g_xv[i].ser == ser && g_xv[i].lv == lv && g_xv[i].sl == sl) return &g_xv[i]; return NULL; }
+@@ -1755,7 +1840,11 @@
+     g_xv_viol++;
+     int seen = xv_disabled(e->tag); if (!seen && g_xv_ndis < 128) g_xv_disabled[g_xv_ndis++] = e->tag;
+     MLOG("【红】xv 标签=%016llx 贴图=%llu 级=%u 层=%u 原因=%s 通道=%llu", (unsigned long long)e->tag, (unsigned long long)e->ser, e->lv, e->sl, why, (unsigned long long)g_stat_pass);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Keep the in-memory validity decision, without a diagnostic file. */
++#else
+     const char *p = getenv("DM_XV_FILE"); if (p && *p) { FILE *f = fopen(p, "a"); if (f) { fprintf(f, "%016llx\t%s\t%llu\n", (unsigned long long)e->tag, why, (unsigned long long)g_stat_pass); fclose(f); } }
++#endif
+     xv_drop_all_of(e->ser);
+ }
+ static void xv_check(uint64_t ser, uint32_t lv, uint32_t sl, const char *why) { xv_ent *e = xv_find(ser, lv, sl); if (e && (e->state == XV_INVALID || e->state == XV_PROBE)) { xv_ent copy = *e; xv_violation(&copy, why); } }
+@@ -1796,7 +1885,13 @@
+ // DM_NVN_ENC_LABEL=1: label every render encoder with 'p<index of the render pass within the frame> <width>x<height> <first 8 digits of the first draw's fragment key> d<draw count>'; in Instruments (xctrace Game Performance / Metal System Trace)
+ // the encoder track and the GPU interval table carry this name directly, and shader_map.tsv maps it back to the shader; off by default (one string allocation per pass)
+ static int g_el_w, g_el_h, g_el_draws; static char g_el_key[12];
+-static int enc_label_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_ENC_LABEL"); v = e && atoi(e); } return v; }
++static int enc_label_on(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_ENC_LABEL"); v = e && atoi(e); } return v; 
++#endif
++}
+ static void ghost_flush(void);
+ static void rp_end(void) { if (g_enc) { AP_B;
+     ghost_flush();
+@@ -1894,12 +1989,16 @@
+         int cov = tbdr_on() && !R.clear_c[i] && (g_fd_dw || g_fd_di) && fz_load_covers(i, pd.colorAttachments[i].texture, pd.colorAttachments[i].level);
+         if (!R.clear_c[i] && (g_fd_dw || g_fd_di) && !cov) PD("Q %llu c%d 读入不可省 why=%d", g_stat_pass + 1, i, g_fd_why);
+         if (cov) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++            pd.colorAttachments[i].loadAction = MTLLoadActionDontCare;
++#else
+             static int probe = -1; if (probe < 0) { probe = getenv("DM_NVN_LOADPROBE") ? atoi(getenv("DM_NVN_LOADPROBE")) : 0; if (probe) MLOG("DM_NVN_LOADPROBE：读入可省的附件改清成哨兵色并回读核对"); }
+             if (probe) { pd.colorAttachments[i].loadAction = MTLLoadActionClear; int pm = probe == 1 && pf_is_float(pd.colorAttachments[i].texture.pixelFormat) ? 3 : probe;   // Float formats use a NaN sentinel by default: a fixed sentinel value can be hit by real output (it has been hit in practice)
+                 pd.colorAttachments[i].clearColor = pm == 3 ? MTLClearColorMake(NAN, NAN, NAN, NAN) : probe == 2 ? MTLClearColorMake(0.777, 0.222, 0.555, 0.888) : MTLClearColorMake(0.123, 0.456, 0.789, 0.321);
+                 if (!g_lp) g_lp = [NSMutableArray array];
+                 [g_lp addObject:@[pd.colorAttachments[i].texture, @(pd.colorAttachments[i].level), @(pd.colorAttachments[i].slice), @(g_stat_pass + 1), @(i), @(R.rt.color[i]->serial), @(pm)]]; }
+             else pd.colorAttachments[i].loadAction = MTLLoadActionDontCare;
++#endif
+             g_fd_n++;
+         }
+         xv_touch_add(R.rt.color[i]->serial, (uint32_t)pd.colorAttachments[i].level, (uint32_t)pd.colorAttachments[i].slice,
+@@ -2157,6 +2256,9 @@
+ static uint64_t g_warm_claim_shaders, g_warm_claim_rps, g_warm_claim_cps;
+ static id<MTLFunction> bf_fn(NvShader *fs, const int *fx, uint8_t fbmask, const uint8_t *lmap);
+ static int rt_range_bindings_ro(NSDictionary *j);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++#define pso_record(...) do { } while (0)
++#else
+ static FILE *g_pso_record; static int g_pso_record_checked;
+ static FILE *pso_record_file(void) {
+     if (g_pso_record_checked) return g_pso_record;
+@@ -2170,6 +2272,7 @@
+     if (!f) return;
+     va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap); fflush(f);
+ }
++#endif
+ // User manifest: shaders / pipelines created synchronously on the submit thread while running on this machine, warmed up at the next launch together with the seed manifest.
+ // Path = DM_PSO_USER, or pso_user.tsv under the parent of the save directory (DM_SAVE, Documents/save on iOS); tests use a fresh save copy per run, so they do not pollute each other
+ static NSString *pso_user_path(void) {
+@@ -2323,12 +2426,16 @@
+             NvShader *b = builtin_get(k.UTF8String);
+             if (b) { o->sh[5] = b; continue; }
+             MLOG("【红】着色器 %s 不在映射表里（DM_NVN_SHDUMP=目录 可把控制段与代码区存盘）", k.UTF8String);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++            /* No shader-control or code-area diagnostic export. */
++#else
+             // DM_NVN_SHDUMP=directory: shaders missing from the map are saved as <key>.ctl (0x880-byte control section) and <key>.code (code area, length from control +0x704), to trace their source / add them to the map offline
+             static const char *shd; static int shd_init; if (!shd_init) { shd = getenv("DM_NVN_SHDUMP"); shd_init = 1; }
+             if (shd) { char path[1024]; FILE *f; uint32_t ncode; memcpy(&ncode, (const uint8_t *)p->sd[i].control + 0x704, 4);   // with SHDUMP set the control section is the host's copy
+                 snprintf(path, sizeof path, "%s/%s.ctl", shd, k.UTF8String); if ((f = fopen(path, "wb"))) { fwrite(p->sd[i].control, 1, 0x880, f); fclose(f); }
+                 snprintf(path, sizeof path, "%s/%s.code", shd, k.UTF8String);
+                 if (p->sd[i].data && ncode && ncode < (1u << 24) && (f = fopen(path, "wb"))) { fwrite((const void *)(uintptr_t)p->sd[i].data, 1, ncode, f); fclose(f); } }
++#endif
+             continue;
+         }
+         int st = stage_of(zh);
+@@ -3078,6 +3185,9 @@
+             if (bl) {
+                 PD("B %llu st%d cb reg%d addr=%#llx size=%llu pool=%#llx+%#llx f=%g,%g,%g,%g", g_stat_pass, nvn_stage, reg, (unsigned long long)u->addr, (unsigned long long)u->size,
+                    (unsigned long long)(u->addr - mo), (unsigned long long)mo, ((float *)u->addr)[0], ((float *)u->addr)[1], ((float *)u->addr)[2], ((float *)u->addr)[3]);
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++                /* No diagnostic export of uniform contents. */
++#else
+                 // DM_NVN_CBDUMP=directory: also saves the whole uniform block to disk as-is (F<frame>_p<pass>_st<stage>_cb<slot>_<address>.bin), for the ground-truth side to compare byte by byte by guest address
+                 // DM_NVN_CBDUMP_KEY=shader key: only save for draws using that shader (any stage)
+                 static const char *cbd, *cbk; static int cbd_init; if (!cbd_init) { cbd = getenv("DM_NVN_CBDUMP"); cbk = getenv("DM_NVN_CBDUMP_KEY"); cbd_init = 1; }
+@@ -3085,6 +3195,7 @@
+                     char p[1024]; snprintf(p, sizeof p, "%s/F%llu_p%llu_st%d_cb%d_%llx.bin", cbd, (unsigned long long)atomic_load(&g_cur_frame), g_stat_pass, nvn_stage, reg, (unsigned long long)u->addr);
+                     FILE *f = fopen(p, "wb"); if (f) { fwrite((const void *)u->addr, 1, u->size, f); fclose(f); } else RED_ONCE(41, "CBDUMP 写不出 %s", p);
+                 }
++#endif
+             }
+             slots[aid] = gpu;
+             USE((__bridge id<MTLBuffer>)mb, MTLResourceUsageRead);
+@@ -3497,6 +3608,9 @@
+ 
+ // Probe wrap-up: for every attachment changed to clear to the sentinel color, read back that level / layer, compare pixel by pixel with a same-format 1x1 sentinel pixel, and count what remains (> 0 means the coverage proof is wrong, report a failure)
+ static void lp_finish(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No diagnostic sentinel readback. */
++#else
+     id<MTLCommandBuffer> dcb = q_cb();
+     NSArray *ps = g_lp; g_lp = nil;
+     for (NSArray *e in ps) {
+@@ -3523,6 +3637,7 @@
+         }];
+     }
+     [dcb commit];
++#endif
+ }
+ static int rt_same(const p_set_rt *a, const p_set_rt *b) {   // Same set of targets: compare by texture serial and view (not by object pointer: the game may copy texture objects by value)
+     if (a->n != b->n || !a->depth != !b->depth || (a->depth && a->depth->serial != b->depth->serial) || a->has_dview != b->has_dview) return 0;
+@@ -3823,16 +3938,29 @@
+ static int fz_reuse_op(const uint8_t *p) { for (int i = 0; i < g_fz.nreuse; i++) if (g_fz.reuse[i] == p) return 1; return 0; }
+ // Diagnostic DM_NVN_FUSE_CHECK=1: in-run double rendering. For the later pass's draws that can be proven, keep a state snapshot per draw; after the merged render pass ends, make a copy of the attachments the later pass wrote (the merge path's result),
+ // then turn off all lookahead and redraw one by one through the normal path with the later pass's original targets and original clears, and compare the two byte by byte (same frame, same input, no dependence on cross-run determinism). The redraw result is left on the attachment (no effect if identical)
+-static int fz_check_on(void) { static int v = -1; if (v < 0) v = getenv("DM_NVN_FUSE_CHECK") != NULL; return v; }
++static int fz_check_on(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    return 0;
++#else
++ static int v = -1; if (v < 0) v = getenv("DM_NVN_FUSE_CHECK") != NULL; return v; 
++#endif
++}
+ typedef struct { int idx; p_draw dw; p_draw_idx di; p_scissor sc; int has_sc; void *S_; } fz_snap;
+ static fz_snap g_fzs[8]; static int g_nfzs, g_fzs_bad, g_fz_checking; static uint64_t g_fzc_same, g_fzc_diff;
+ static void draw(const p_draw *dw, const p_draw_idx *di);
+ static void fz_snap_take(const p_draw *dw, const p_draw_idx *di) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)dw; (void)di;
++#else
+     if (g_nfzs >= 8) { g_fzs_bad = 1; return; }
+     fz_snap *z = &g_fzs[g_nfzs++]; z->idx = di != NULL; if (dw) z->dw = *dw; if (di) z->di = *di; z->sc = R.sc; z->has_sc = R.has_sc;
+     z->S_ = malloc(sizeof S); memcpy(z->S_, &S, sizeof S);
++#endif
+ }
+ static void fz_check_run(const fuse_t *fz) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)fz;
++#else
+     if (!g_nfzs || g_fzs_bad) { if (g_fzs_bad) MLOG("【红】局内双渲染：后一个通道绘制超过 8 次，未比"); goto out; }
+     {
+     id<MTLTexture> att[8], scr[8]; uint64_t sers[8]; int na = 0;
+@@ -3871,6 +3999,7 @@
+ out:
+     for (int i = 0; i < g_nfzs; i++) free(g_fzs[i].S_);
+     g_nfzs = 0; g_fzs_bad = 0;
++#endif
+ }
+ static void fz_end(void) {   // End of a merged render pass (called by rp_end): interrupted before entering the later pass -> retract the skip entries and restore the targets to the earlier pass's; otherwise restore to the later pass's
+     if (!g_fz.active) return;
+@@ -4521,6 +4650,10 @@
+ // textures with format / view / channel swizzle, samplers with LOD clamps), plus [kd] lines: vertex attribute formats, each vertex stream (first 4 vertices of per-vertex streams, all instances of per-instance streams) and every value of each uniform buffer of both stages.
+ // Run the same switch once on the Mac and once on the device and compare item by item to see which input differs on the device (Super Mario 3D World + Bowser's Fury's magenta squares in 1-1: particle 5e4de7561c670fee, iPhone only, not reproducible on the Mac)
+ static void kd_floats(const char *what, int reg, uint64_t addr, uint64_t size, uint64_t cap) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)what; (void)reg; (void)addr; (void)size; (void)cap;
++    nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     void *mb; uint64_t mo; const uint8_t *base;
+     if (!addr || !size) { fprintf(stderr, "[kd]   %s r%d 未绑\n", what, reg); return; }
+     if (!mtl_addr(addr, 1, &mb, &mo) || !(base = [(__bridge id<MTLBuffer>)mb contents])) { fprintf(stderr, "[kd]   %s r%d addr=%#llx 不在内存池\n", what, reg, (unsigned long long)addr); return; }
+@@ -4531,8 +4664,12 @@
+         for (uint64_t k = i; k < n && k < i + 16 && o < sizeof line - 24; k++) o += snprintf(line + o, sizeof line - o, " %.6g", v[k]);
+         fprintf(stderr, "[kd]     +%#06llx%s\n", (unsigned long long)(i * 4), line);
+     }
++#endif
+ }
+ static int kd_draw(NvProg *pr, const p_draw *dw, const p_draw_idx *di) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)pr; (void)dw; (void)di; return 0;
++#else
+     static char key[24]; static int left = -1, every; static uint64_t last = ~0ull;
+     if (left < 0) { left = 0; const char *e = getenv("DM_NVN_KEYDUMP");
+         if (e && *e) { size_t n = strcspn(e, ":"); if (n > 23) n = 23; memcpy(key, e, n); key[n] = 0; const char *c = strchr(e, ':'); left = c ? atoi(c + 1) : 6; every = c && strchr(c + 1, ':') ? atoi(strchr(c + 1, ':') + 1) : 0;
+@@ -4556,12 +4693,21 @@
+         for (int i = 0; i < sh->rf.nb; i++) if (sh->rf.b[i].kind == NVN_RB_CBUF && sh->rf.b[i].reg < 16) {
+             const p_bind_buf *u = &S.ubo[stg][sh->rf.b[i].reg]; kd_floats(stg ? "片元 uniform" : "顶点 uniform", sh->rf.b[i].reg, u->addr, u->size, 4096); } }
+     return 1;
++#endif
+ }
+ // Diagnostic DM_NVN_MAGSCAN=<fragment key>:<scan every N frames, default 30>:<frames per phase, default 600>: on-device self-check for the magenta squares (Super Mario 3D World + Bowser's Fury 1-1, iPhone only, not reproducible on the Mac).
+ // In a scan frame, as soon as each render pass ends, a compute kernel reads its color attachments (read goes through the same format decode as the game's shader samples) and gathers per 16x16 block: the magenta pixel count (R and B both >= 0.8 of the largest channel, G <= 0.1 of it),
+ // the non-finite pixel count and each channel's min / max. An attachment with a block holding one single magenta value throughout (exactly what the squares in the iPhone screenshot are, aligned to the 16-pixel grid) or with non-finite values gets a [mag] line (index of the pass within the frame, distance from the pass holding this particle, attachment serial / format / size, block position and value).
+ // Four phases rotate: phase 0 draws as usual, phase 1 drops every draw of this fragment shader, phases 2 / 3 keep the geometry and replace the fragment output with a constant (grey / bright magenta). Comparing the phases tells whether this draw causes it
+ // and whether its fragment output (texture reads, value range) matters; the first pass where the magenta blocks show tells which step goes wrong
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++static int ms_on(void) { return 0; }
++static id<MTLFunction> ms_fs_override(NvShader *fs) { (void)fs; return nil; }
++static int ms_draw(NvProg *pr) { (void)pr; return 0; }
++static void ms_poll(void) {}
++void ms_note(MTL4RenderPassDescriptor *pd, NSUInteger nc) { (void)pd; (void)nc; }
++void ms_after(void) {}
++#else
+ static char g_ms_key[24]; static int g_ms_every, g_ms_plen, g_ms_init;
+ static int ms_on(void);
+ static const char *const k_ms_phase[4] = {"照常画", "丢掉该着色器", "该着色器改出常量灰", "该着色器改出常量高亮品红"};
+@@ -4689,6 +4835,7 @@
+         if (v != t) defer_obj_unref(v);
+     }
+ }
++#endif
+ // Same-pass feedback sampling: a texture view this draw's fragment stage samples is exactly the level and layer of a color attachment of the current render pass (Super Mario 3D World + Bowser's Fury:
+ // 66a71a3081b91b9a writes the tone-mapped 1920x1080 RGB10A2 image as an attachment while sampling it as a texture). On the Switch (Maxwell, immediate-mode) the read returns the content from before this draw;
+ // on Metal, writing and sampling the same attachment within one render pass is undefined: the Mac happens to read correctly, while the iPhone (A20 Pro) now and then reads whole 16x16 blocks as (1,0,1) and FXAA carries them into the picture - the magenta squares in 1-1
+@@ -4941,6 +5088,9 @@
+         if (e && sscanf(e, "%f,%f,%f,%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) == 8) mtl_ui_ghost(1, v[0], v[1], &v[2], v[6], v[7]); } }
+     if (dw && atomic_load(&g_ghost_on)) ghost_note(dw);
+     if (enc_label_on() && !g_el_draws++ && pr->sh[1]) { memcpy(g_el_key, pr->sh[1]->key, 8); g_el_key[8] = 0; }
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No per-draw diagnostic hashing or vertex/index export. */
++#else
+     if (passdump()) {   // Characteristics of a render pass's first draw (to judge whether the load can be omitted: full screen, no blending, writes all channels, does not depend on depth); with DM_NVN_PASSDUMP_ALL every draw is recorded
+         static uint64_t last_pass = ~0ull; static int all = -1; if (all < 0) all = getenv("DM_NVN_PASSDUMP_ALL") != NULL;
+         if (all || g_kd_force) PD("d %llu bv=%d bi=%d first=%d vs=%s fs=%s vc=%d inst=%d blend=%#x b0=%#llx dt=%d dw=%d df=%d cull=%d st=%d sf=%d,%d sop=%d,%d,%d/%d,%d,%d smask=%#x,%#x/%#x,%#x sref=%#x,%#x ib=%#llx it=%d cmask=%#x b1=%#llx b2=%#llx b3=%#llx", g_stat_pass, di ? di->base_vertex : 0, di ? di->base_instance : 0, dw ? dw->first : 0, pr->sh[0] ? pr->sh[0]->key : "-", pr->sh[1] ? pr->sh[1]->key : "-",
+@@ -4983,6 +5133,8 @@
+                S.has_vp ? S.vp[0][0] : 0, S.has_vp ? S.vp[0][1] : 0, S.has_vp ? S.vp[0][2] : (float)tw, S.has_vp ? S.vp[0][3] : (float)th);
+         }
+     }
++#endif
++
+     g_kd_force = 0;
+     if (rt_range_on() && !rt_range_pr_ro(pr)) g_pass.range_external=1;
+     rt_range_note_depth();
+@@ -5140,11 +5292,15 @@
+         const p_bind_buf *u = &S.ubo[5][0], *a0 = &S.ssbo[5][0], *a1 = &S.ssbo[5][1];
+         void *ub, *sb, *db; uint64_t uo, so, dof;
+         if (!mtl_addr(u->addr, 4, &ub, &uo) || !mtl_addr(a0->addr, 8, &sb, &so) || !mtl_addr(a1->addr, 8, &db, &dof)) { RED_ONCE(30, "内嵌计算核 %s 的缓冲没绑全", cs->builtin); return; }
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++        /* Built-in dispatch keeps its real operands without caller diagnostics. */
++#else
+         if (!cs->logged++) {
+             module_t *m = module_of((void *)dp->caller);
+             MLOG("内嵌计算核 %s 首次派发：调用点 %s+%#llx，线程组 %dx%dx%d，元素数（CPU 侧当前值）%u", cs->builtin, m ? m->name : "?",
+                  m ? (unsigned long long)(dp->caller - (uint64_t)m->base) : (unsigned long long)dp->caller, dp->x, dp->y, dp->z, *(uint32_t *)u->addr);
+         }
++#endif
+         rp_end(); if (g_blit) { enc_b_end(g_blit); g_blit = nil; }
+         id<MTLComputeCommandEncoder> ce = pg_compute();
+         enc_c_pso(ce, ps);
+@@ -5417,6 +5573,9 @@
+     else
+         for (int z = 0; z < nz; z++)
+             enc_b_copy_texture(b, s, sz0 + c->sr.zoffset + z, sl, MTLOriginMake(c->sr.xoffset, c->sr.yoffset, 0), MTLSizeMake(c->sr.width, c->sr.height, 1), d, dz0 + c->dr.zoffset + z, dl, MTLOriginMake(c->dr.xoffset, c->dr.yoffset, 0));
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No diagnostic duplicate readback of the normal texture copy. */
++#else
+     // Diagnostic DM_NVN_T2T_TRACE=WxH:file: after each copy into an RGBA16F texture of that size, copy the result once more into a trace buffer on the GPU timeline (frame numbers kept on the CPU side); after 240 copies write the file
+     { static int on = -1; static uint32_t tw, th; static const char *tf; static id<MTLBuffer> tb; static int tn; static uint64_t tfr[240], from;
+       if (on < 0) { const char *e = getenv("DM_NVN_T2T_TRACE"), *fe = getenv("DM_NVN_T2T_FROM"); on = e && sscanf(e, "%ux%u", &tw, &th) == 2 && (tf = strchr(e, ':')) && *++tf; from = fe ? strtoull(fe, NULL, 10) : 0; }
+@@ -5433,6 +5592,7 @@
+           }
+       }
+     }
++#endif
+ }
+ 
+ // GPU: clear a texture region with the given value (previously mislisted as a no-op, called 5 times at initialization; the initial value of a Metal private texture is undefined, and the game relies on the cleared initial value).
+@@ -5822,6 +5982,9 @@
+ static uint64_t g_present_n;
+ uint64_t mtl_present_count(void) { return g_present_n; }   // Actual present count (heat attribution DM_HEAT computes the present frame rate)
+ void mtl_res_snapshot(mtl_res_count *out) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)out; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     memset(out, 0, sizeof *out);
+     out->pso = g_pso.n;
+     out->cps = g_cps.n;
+@@ -5842,18 +6005,33 @@
+     for (int i = 0; i < g_ntreg; i++) if (g_treg[i].view) out->view_nonnull++;
+     for (int i = 0; i < g_nsreg; i++) if (g_sview[i]) out->sview_nonnull++;
+     pthread_mutex_unlock(&g_rmu);
++#endif
+ }
+ // Resource counts (read by long-run stability L3): the host calls it per game tick / event (every 250 ticks, loading screen dismissed, exit), not sampled by wall clock / present count.
+ // Line format: [nvn] 资源计数 拍 <拍号> <触发>：<名> <数值> … ([nvn] resource counts tick <tick number> <trigger>: <name> <value> ...) (names contain no spaces, single-space separated); new fields are appended to the end of this line
+ void mtl_res_counts(uint32_t tick, const char *why) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    (void)tick; (void)why;
++#else
+     mtl_res_count c;
+     mtl_res_snapshot(&c);
+     int dl, du; uint64_t da; nvn_dirty_slot_stats(&dl, &du, &da);
+     LOG("[nvn] 资源计数 拍 %u %s：渲染管线 %u 计算管线 %u 着色器 %u 深度模板 %u view非空 %u view槽 %u 存活贴图 %u 内存池存活 %u 内存池累计 %llu 采样器view非空 %u 脏页区间存活 %d 脏页区间累计 %llu c1缓冲 %u c1字节 %llu c1实际 %llu",
+         tick, why, c.pso, c.cps, c.shaders, c.dss, c.view_nonnull, c.view_slots, c.live_tex,
+         c.pools, (unsigned long long)c.pool_adds, c.sview_nonnull, dl, (unsigned long long)da, c.c1_bufs, (unsigned long long)c.c1_alloc, (unsigned long long)c.c1_data);
++#endif
+ }
+ // Screenshot on request (used by DM_NVN_SHOT_UI): dm_gfx_shot_at(k, path) = take a screenshot at the kth frame after the current present frame; due requests are checked at every frame's present
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]);
++static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], int uv_i);
++void mtl_grab_next_present(void (^cb)(CGImageRef img)) { (void)cb; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED); }
++void dm_gfx_shot_at(long k, const char *path) { (void)k; (void)path; nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED); }
++static void td_dump(void) {}
++void td_note(MTL4RenderPassDescriptor *pd, NSUInteger nc) { (void)pd; (void)nc; }
++void ts_note(MTL4RenderPassDescriptor *pd, NSUInteger nc) { (void)pd; (void)nc; }
++void ts_after(void) {}
++#else
+ #define SHOTQ_MAX 8
+ static struct { uint64_t frame; char path[1024]; } g_shotq[SHOTQ_MAX]; static int g_nshotq;
+ static pthread_mutex_t g_shotq_mu = PTHREAD_MUTEX_INITIALIZER;
+@@ -6064,6 +6242,7 @@
+     g_ts_on = 0;
+     [dcb commit];
+ }
++#endif
+ // Ring of actual presentation times: present sequence number -> presentedTime (seconds; -1 = dropped by the system, not presented)
+ #define PRING 1024
+ typedef struct { uint64_t n; double t; } pres_ent;
+@@ -6213,6 +6392,9 @@
+     PD("X ser=%llu", t->serial);
+     id<MTLTexture> src = tex_mtl(t);
+     if (!src) { RED_ONCE(8, "出图贴图建不出 MTLTexture"); return 0; }
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* Present the real source normally, without screenshot/luminance readback. */
++#else
+     // DM_NVN_REGLUM=x0,y0,x1,y1:file (normalized coordinates): read back this region on every present and record "present sequence number, present time ns, region mean luminance, subsampled grayscale thumbnail (hex)" (diagnostic: verify that animation speed is independent of frame rate).
+     // A separate command buffer is queued after this frame's rendering (the same queue executes in submit order); does not wait for the GPU and does not disturb frame pacing
+     static int rl = -1; static float rr[4]; static FILE *rlf; static pthread_mutex_t rlmu = PTHREAD_MUTEX_INITIALIZER;
+@@ -6246,6 +6428,7 @@
+     for (int i = 0; i < g_nshotq;) if (g_present_n >= g_shotq[i].frame) { mtl_finish_gpu(); shot(src, g_shotq[i].path, 1, crop); g_shotq[i] = g_shotq[--g_nshotq]; } else i++;
+     pthread_mutex_unlock(&g_shotq_mu);
+ 
++#endif
+     CAMetalLayer *layer = (__bridge CAMetalLayer *)front_metal_layer();
+     if (!layer) return 0;
+     if (g_present_layer_resident != layer) { [g_q4 addResidencySet:layer.residencySet]; g_present_layer_resident = layer; }
+@@ -6253,7 +6436,11 @@
+     if (!layer.displaySyncEnabled) layer.displaySyncEnabled = YES;   // Windowed mode follows the display's vsync to prevent tearing
+ #endif
+     present_pipeline(layer.pixelFormat);   // Same as the original path: the first frame compiles the pipeline before taking the drawable
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    /* No diagnostic whole-window capture callback. */
++#else
+     if (g_grab_cb) grab_present(src, crop, layer.drawableSize);   // Game picture needed by the whole-window screenshot (peek without the lock first; the real take locks inside the function)
++#endif
+     uint64_t dt0 = now_ns();
+     id<CAMetalDrawable> dr = supplied ? supplied : [layer nextDrawable];
+     if (!supplied) g_drawable_ns += now_ns() - dt0;
+@@ -6544,10 +6731,14 @@
+ 
+ // Called by the watchdog (no progress): writes the state of all blocking wait points on the graphics side to the log -- who is waiting for whom is visible at a glance (after switching to the Metal 4 submit model there was once a case of "ran to 900 frames then stopped, no failure line")
+ void mtl_wait_state_dump(void) {
++#if defined(NXNATIVE_NORMAL_POLICY) && NXNATIVE_NORMAL_POLICY
++    nxnative_normal_fail(NXNATIVE_NORMAL_DIAGNOSTIC_DISABLED);
++#else
+     MLOG("等待点状态：主栅栏 已提交 %llu / 已完成 %llu；主分配器栅栏 [%llu %llu %llu]；上传 未完成 %d、分配器占用 [%d %d %d]、序号 %u、有未冲刷批次 %d；出图队列 入 %llu / 完成 %llu；主命令缓冲在编 %d、提交线程已设 %d",
+          (unsigned long long)g_fence, (unsigned long long)g_done, (unsigned long long)g_alloc_fence[0], (unsigned long long)g_alloc_fence[1], (unsigned long long)g_alloc_fence[2],
+          atomic_load(&g_up_pending), atomic_load(&g_up_alloc_busy[0]), atomic_load(&g_up_alloc_busy[1]), atomic_load(&g_up_alloc_busy[2]), g_up_seq, g_up_cb != nil,
+          (unsigned long long)g_pq_in, (unsigned long long)g_pq_done, g_cb != nil, atomic_load(&g_sub_thread_set));
++#endif
+ }
+ void mtl_alloc_stats(uint64_t *waits, uint64_t *grown, int *n) { *waits = g_alloc_waits; *grown = g_alloc_grown; *n = g_alloc_n; }   // Main submit allocator pool: how many times it waited, how many times it grew, how many exist now
+ #pragma clang attribute pop

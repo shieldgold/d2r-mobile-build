@@ -33,7 +33,9 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 
 完整 126 个上游编译单元加独立入口已在 iPhoneOS SDK 26.5 中编译、强链接通过，见[固定提交的 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39012668489)。该结果只确认原始宿主的编译基线。
 
-`tools/build_adapted_link_only.py --sdk iphoneos --adapters-only --output <新目录>` 进一步在私有源码副本应用正常入口、NVN52 TextureView、HLE／异常处理和地址唤醒四个补丁。130 个单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39014320818) 编译、强链接通过。本地重新核对了全部 983 件来源文件、544 份构建日志及下载的宿主摘要。它仍使用原 1.9 元数据，仅用于编译验证；GPU、线程及 memstat 的诊断路径尚未全部封闭，不能据此运行游戏。
+`tools/build_adapted_link_only.py --sdk iphoneos --adapters-only --output <新目录>` 在私有源码副本应用薄适配。原四补丁的 130 个单元已在 [iPhoneOS SDK 26.5 CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39014320818) 编译、强链接通过，本地也核对了全部来源和下载产物。源码打包与静态装载合同这一批的 [CI](https://github.com/shieldgold/d2r-mobile-build/actions/runs/39015312170) 同样通过。
+
+下一批构建增加正常运行诊断封闭和完整条件着色器模块，共 136 个单元。诊断封闭保留正常线程、脏页、纹理上传、反馈快照和 PCM 输出；条件模块在实际绘制时选择模式、核对完整着色器身份并提交。独立复核发现的窗口原点切换竞争已修复：最终检查与锁定前移至 viewport 编码之前，保持到 draw；实际代码回归覆盖切换、并发 setter 与提前返回。这些构建仍使用原 1.9 元数据与仅返回的独立入口，只用于编译验证，不能安装或启动游戏。
 
 着色器身份桥 `tools/shader_key_bridge.py` 已核对现有导出的 7908 个捕获，并保留其中 3173 个的四模式条件合同引用。它不生成着色器事实，也不声明整个游戏的目录完整。六模块框架由 `tools/pack_guest.py --rewrite <离线重写目录> --output <新目录>` 复用现有完整 Mach-O 生成器构建；本地框架已逐节还原验证，未签名或执行。
 
@@ -41,4 +43,10 @@ python3 experiments/nxnative_base_v0/tools/preflight_profile.py \
 
 正常资源目录已用既有 `RomFSImage.export` 从本地镜像完整导出，39678 个文件的每份 payload 均与固定 manifest 摘要一致。这项导出和核验不执行游戏。
 
-正常游戏入口、base-v0 ABI、六模块完整重写、新着色器包和资源装载仍须逐项接通。编译、输入校验、安装和进程存活均不代表可玩。最终验收要求真实游戏画面、按键与双摇杆、声音、保存及重开。
+`tools/generate_base_v0_contract.py` 核对六模块的 MOD0、动态符号与两类重定位，绑定实际宿主的完整 force registry。原 130 单元宿主有 614 个登记项，六模块实际选用 236 项、283 处按名引用；这不是后续正常运行宿主的固定条数。新增接口或更换音频接法后必须重新生成合同。六模块正常门共 230 个，其中 main 93、sdk 137；不能把 sdk 的 137 当成总数。
+
+专属内存适配完整复用既有逻辑内存与地址空间模块，保留原 H/R，失败时不发布虚假的分配成功。账户选择、显示层缩放和 NVN52 同步返回也有独立的正常 API 适配。它们尚须与专属 1.0 元数据、真实 UIKit 入口和完整音频服务一起进入正常宿主。
+
+音频的版本差异已有静态证据：1.0 SDK 没有新上游 CPU renderer 所需的完整导出，现有参数转换还会覆盖 REV1。正在接入项目既有完整 Eden renderer 服务端，并复用当前宿主的消息、事件和映射；不以静音或空返回冒充正常输出。
+
+编译、输入校验、安装和进程存活均不代表可玩。最终验收要求真实游戏画面、按键与双摇杆、声音、保存及重开。

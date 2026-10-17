@@ -1,8 +1,24 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 5363,
-      "sha256": "7b036d86c26ba61fe8c820740ec9896f744a819c42a3c40c22d610f5f83b0a45"
+      "bytes": 6793,
+      "sha256": "6107cc1443dc7c30bf025ef991441f0542df0e0ed2c2532ae23fc610e4ec5f33"
+    },
+    "adapter/base_v0_memory.c": {
+      "bytes": 5001,
+      "sha256": "95c4fda3d0bf11360d7516c4281b46b274e04bfdbbb2b2411c4753992f348390"
+    },
+    "adapter/base_v0_memory.h": {
+      "bytes": 1827,
+      "sha256": "2a7829e46c37d842baabc37b72092cf2afb53515082b386e275155b4cd347f77"
+    },
+    "adapter/base_v0_shader_provider.h": {
+      "bytes": 1568,
+      "sha256": "bfd2a62de0f1acd093218f691d2d54e8adca343fa702e04a94d9ece8e68f8b6d"
+    },
+    "adapter/base_v0_shader_provider.m": {
+      "bytes": 9745,
+      "sha256": "d353e19c3f211eb1e7d0f3328ac6ca358392ad7c7f79158c59c4b9f3bb033aeb"
     },
     "adapter/link_only_main.c": {
       "bytes": 313,
@@ -28,6 +44,18 @@
       "bytes": 28143,
       "sha256": "7977e6dfba24e57f21ad04b2bdb9445122bd26864bbb5bdbff8add84601bf6c8"
     },
+    "patches/base-v0-conditional-shader-provider.patch": {
+      "bytes": 31662,
+      "sha256": "75572ea8dc5e6e9bb1c8cc7b2d07e2abb5320e049822caebc5675677bc1c903d"
+    },
+    "patches/base-v0-logical-memory.patch": {
+      "bytes": 27553,
+      "sha256": "edd66af190a0f620b2bf7b1885e3db0af100dabd2e785a998acf20bb19945ec6"
+    },
+    "patches/base-v0-normal-api-contracts.patch": {
+      "bytes": 7215,
+      "sha256": "f443d5d0ce382a52963c66302e8508fc00266ef5561bbf0b54b0327fc6b7913b"
+    },
     "patches/base-v0-signed-jump-table.patch": {
       "bytes": 2583,
       "sha256": "4bcb82fb7385e9105e8d42fb090dace02bcbed02679a7176c00ffa5ce5481f21"
@@ -48,13 +76,21 @@
       "bytes": 18519,
       "sha256": "1e32b05f734da15a8b7ca32338a5ce18570297694ae520a7ded07c308f470e61"
     },
+    "patches/normal-runtime-diagnostics.patch": {
+      "bytes": 91767,
+      "sha256": "1b05284b518c043bbb5f6449b321d7e10e58cdf45a4bce02841d0a55346fc2aa"
+    },
     "profile/base_v0.json": {
       "bytes": 4392,
       "sha256": "1269ab1df53a1a19852cb7c65dcd5da1baa49b23e96e5d691b005fc4bbf26312"
     },
+    "tests/shader_provider_probe.m": {
+      "bytes": 14908,
+      "sha256": "26891d8b2309a521f8e2235ba8204433b8d3b6692d9e6ca86c59a7bc3e513d8e"
+    },
     "tools/build_adapted_link_only.py": {
-      "bytes": 22053,
-      "sha256": "90236ebb4b2d6ed5f1f9564276733d2515dd6dd981b9c9a7d27ef240aa27cc7c"
+      "bytes": 28569,
+      "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,
@@ -107,9 +143,21 @@
       "bytes": 4969,
       "sha256": "480e8ed95dc002acc574d90294234e11aaf99caf2afa647c8950ccffe9abe8a3"
     },
+    "experiments/botw_upstream_host/adapter/base_v0_graphics_format_identity.h": {
+      "bytes": 308,
+      "sha256": "e1845d1a8fdfbd5c44f9c53e55c25e18c0ae77bf6224b1cfe705b805eeaf77eb"
+    },
     "experiments/botw_upstream_host/adapter/base_v0_graphics_formats.json": {
       "bytes": 20374,
       "sha256": "3f46576221f48db69abb5b553529fea2dd5f9a2ac1d14a50d5e7c57a499a2865"
+    },
+    "experiments/botw_upstream_host/adapter/base_v0_heap.c": {
+      "bytes": 8228,
+      "sha256": "6e817db47bad22a3df6d00c908fa9b94bbfb76d4540c62296996c09657b42946"
+    },
+    "experiments/botw_upstream_host/adapter/base_v0_heap.h": {
+      "bytes": 2492,
+      "sha256": "af73487defc4d80a106b64a74a753ac5c30fcd0329d9631dd87e5f9db3b201d8"
     },
     "experiments/botw_upstream_host/adapter/shader_conditional_build.py": {
       "bytes": 33099,
@@ -123,6 +171,58 @@
       "bytes": 4821,
       "sha256": "90c6fe0d77ae2fc684959ce255029d9210a76565774a5ff90c8cf887bb5ad30f"
     },
+    "experiments/botw_upstream_host/adapter/whole_address_space.c": {
+      "bytes": 975,
+      "sha256": "f967b0906e2c4422554e382145fa0a2d3b2fb9cb5a3b3780a2cee942f2a2cb27"
+    },
+    "experiments/botw_upstream_host/adapter/whole_address_space.h": {
+      "bytes": 462,
+      "sha256": "8bcd2054345722ea6783de1b0c419a359d1a1509aef40411d55de73d9a4f2cfa"
+    },
+    "experiments/botw_upstream_host/adapter/whole_policy.c": {
+      "bytes": 8137,
+      "sha256": "a2e056c8c3e54e74f9030bddcb102dd5ad0f175cfa7ece7c15fdfa30f5f07e8e"
+    },
+    "experiments/botw_upstream_host/adapter/whole_policy.h": {
+      "bytes": 2939,
+      "sha256": "68c74045727d97526dfa229ea5565c6febfc072b496493de6426fdd7a15c9756"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_bundle_publication.h": {
+      "bytes": 522,
+      "sha256": "8a5297a64810a049d02982e5ef6d51fc15d1132c6d2e6ac7dad0e188ceb01e5b"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_bundle_publication.m": {
+      "bytes": 14237,
+      "sha256": "15f4a84cf0daad8facfc46c637d69df13d546125b3b7fafce293090afeb98fa9"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_conditional.h": {
+      "bytes": 2084,
+      "sha256": "295f21d6690db49a6df532e3d4eb22d2cfa7dfdc43f4273f6b22cea85c10e15d"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_conditional.m": {
+      "bytes": 20960,
+      "sha256": "a4d5bf334682a1b733424cbf1bbfa15fd9f582d8957e23e4e87f03d26b548a7c"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_publication.h": {
+      "bytes": 682,
+      "sha256": "172b9e41632973c6c05826af95c8c2f481b1faafa599e085ae368b0357827959"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_publication.m": {
+      "bytes": 8662,
+      "sha256": "954cb6b447af0ba9b9068d7328e0347bc6da179fd54aca379b2abdd4a70b750b"
+    },
+    "experiments/botw_upstream_host/adapter/whole_shader_publication_files.h": {
+      "bytes": 3125,
+      "sha256": "2cec4f2386331ba224544d52e9d30c18aab33841f6a50dcdf0169da8fe88eab1"
+    },
+    "experiments/botw_upstream_host/patches/conditional-shader-runtime.patch": {
+      "bytes": 19251,
+      "sha256": "d1dfbab2dcf8352ec7e853b1225951b6eea8b9980888134a45bae5f0ce4c1364"
+    },
+    "experiments/botw_upstream_host/patches/portable-shader-source.patch": {
+      "bytes": 13660,
+      "sha256": "3931eff1a22910ab30096de451617740326a55e074d463e634484cf7c8771a12"
+    },
     "experiments/botw_upstream_host/scripts/package_conditional.py": {
       "bytes": 22027,
       "sha256": "b31cadabff5fdea65b95ac432d671fa4b64744ee6a7bf8be6349509ff24d49a7"
@@ -130,6 +230,26 @@
     "experiments/botw_upstream_host/scripts/read_swforce_registry.py": {
       "bytes": 12881,
       "sha256": "fb741c7f4aefec893096af7c213560a3035001e21f8e2bfe49dfab95ffdd3e86"
+    },
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/botw_shader.h": {
+      "bytes": 1569,
+      "sha256": "825df5cfd9bb10c627e0495833882ffd13942bb0027af744150e318805ec475d"
+    },
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/botw_shader_manifest.h": {
+      "bytes": 1995,
+      "sha256": "5291c3056392d112098e86db0453a1a3007503e12c2d198d16f1e9cae2dcaad0"
+    },
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/botw_shader_manifest.m": {
+      "bytes": 16074,
+      "sha256": "155e3fe8fedfa1691cd40d1cd5521a1a4738ca9b5995a14033f751723de289a1"
+    },
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/botw_shader_runtime.h": {
+      "bytes": 3177,
+      "sha256": "fd6f29eb431c19d0339207d025ad60ef2a28af33d739e91b5680a7ba515b99d6"
+    },
+    "experiments/botw_upstream_host/upstream/dm/gfx/nvn/botw_shader_runtime.m": {
+      "bytes": 7436,
+      "sha256": "81acb10d4251e248d975e9339447bf26d8376f51445e1a30f817471ff25deb7b"
     },
     "native/botw_resources/shader_toolchain/UPSTREAM.json": {
       "bytes": 105718,

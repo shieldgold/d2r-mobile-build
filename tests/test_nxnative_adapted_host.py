@@ -94,19 +94,64 @@ class AdaptedHost(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('regular', result.stdout)
 
-    def test_fixed_patch_inventory_is_exact_and_disjoint(self):
+    def test_fixed_patch_inventory_has_exact_ordered_overlap(self):
         tool = self.tool()
         base = self.base_tool()
         paths = set()
         for name, allowed in tool.PATCHES:
             touched = tool.patch_members(COMPONENT / name)
             self.assertEqual(touched, set(allowed))
-            self.assertFalse(paths & touched)
             paths |= touched
-        self.assertEqual(len(tool.PATCHES), 4)
-        self.assertEqual(len(paths), 11)
+        self.assertEqual([name for name, _ in tool.PATCHES], [
+            'patches/normal-entry.patch','patches/base-v0-texture-view.patch',
+            'patches/normal-hle-crash.patch','patches/horizon-address-signal.patch',
+            'patches/normal-runtime-diagnostics.patch','patches/base-v0-conditional-shader-provider.patch'])
+        self.assertEqual(len(paths), 18)
         lock = base.read_json(COMPONENT / 'SOURCE.lock.json')
         self.assertTrue(paths <= set(lock['upstream_files']))
+
+    def test_provider_six_units_are_explicit_and_have_native_header_precedence(self):
+        tool = self.tool()
+        base = self.base_tool()
+        manifest = base.read_json(COMPONENT / 'compile_sources.json')
+        private = self.directory / 'inputs'
+        commands = tool.compile_commands(private, self.directory, manifest['translation_units'],
+            {'clang': '/owned/clang', 'sdk_path': '/owned/iPhoneOS26.5.sdk'}, base)
+        self.assertEqual(len(commands), 136)
+        expected = {
+            'shader_provider/adapter/whole_shader_conditional.m',
+            'shader_provider/adapter/whole_shader_publication.m',
+            'shader_provider/adapter/whole_shader_bundle_publication.m',
+            'shader_provider/dm/gfx/nvn/botw_shader_manifest.m',
+            'shader_provider/dm/gfx/nvn/botw_shader_runtime.m',
+            'adapter/base_v0_shader_provider.m',
+        }
+        actual = {str(Path(row['source']).relative_to(private)) for row in commands}
+        self.assertTrue(expected <= actual)
+        self.assertFalse(any(name.endswith('botw_shader.c') for name in actual))
+        self.assertEqual(sum(name.endswith('/nvn_refl.m') for name in actual), 1)
+        for row in commands:
+            includes = [row['argv'][i+1] for i, arg in enumerate(row['argv'][:-1]) if arg == '-I']
+            self.assertIn(str(private / 'shader_provider/adapter'), includes)
+            self.assertIn(str(private / 'shader_provider/dm/gfx/nvn'), includes)
+            self.assertLess(includes.index(str(private / 'upstream/dm/gfx/nvn/include')),
+                            includes.index(str(private / 'shader_provider/dm/gfx/nvn')))
+            if str(Path(row['source']).relative_to(private)) in expected:
+                self.assertIn('-fobjc-arc', row['argv'])
+                self.assertIn('-fblocks', row['argv'])
+
+    def test_provider_required_symbols_cannot_be_satisfied_by_a_partial_link(self):
+        tool = self.tool()
+        required = {'_nx_base_shader_provider', '_nx_base_shader_info', '_nx_base_program_info',
+                    '_nx_base_program_device', '_whole_runtime_shader_bundle_publication',
+                    '_botw_shader_runtime_function', '_botw_conditional_modes_lock'}
+        self.assertTrue(required <= tool.STRONG_SYMBOLS)
+        complete = '\n'.join('0000000000000000 T ' + symbol for symbol in tool.STRONG_SYMBOLS)
+        self.assertEqual(tool.verify_strong_symbols(complete), tool.STRONG_SYMBOLS)
+        for symbol in required:
+            with self.subTest(symbol=symbol), self.assertRaisesRegex(ValueError, 'strong symbols absent'):
+                tool.verify_strong_symbols(complete.replace(' T ' + symbol + '\n', ' U ' + symbol + '\n')
+                    if complete.endswith(symbol) is False else complete.rsplit(' T ' + symbol, 1)[0])
 
     def owned_patch(self, filename='owned.txt', old='before', new='after'):
         path = self.directory / ('change-' + filename.replace('/', '-') + '.patch')
@@ -144,7 +189,7 @@ class AdaptedHost(unittest.TestCase):
         lock = {'upstream_files': {'owned.txt': record(source)}}
         output = self.directory / 'ordered'; output.mkdir()
         receipt = tool.new_receipt(base)
-        with patch.object(tool, 'PATCHES', inventory), patch.object(tool, 'COPIED_ADAPTERS', ()), patch.object(tool, 'ABI_FILES', ()):
+        with patch.object(tool, 'PATCHES', inventory), patch.object(tool, 'COPIED_ADAPTERS', ()), patch.object(tool, 'ABI_FILES', ()), patch.object(tool, 'SHADER_FILES', ()), patch.object(tool, 'SHADER_PATCHES', ()):
             private, snapshot = tool.copy_private_inputs(component, output, lock, base, receipt)
         self.assertEqual((private / 'upstream/owned.txt').read_text(), 'after\n')
         self.assertEqual(source.read_text(), 'before\n')
@@ -215,7 +260,8 @@ class AdaptedHost(unittest.TestCase):
         lock = base.read_json(COMPONENT / 'SOURCE.lock.json')
         for name in tool.REQUIRED_ADAPTERS:
             lock['adapter_files'][name] = record(COMPONENT / name)
-        for name in tool.ABI_FILES:
+        for name in (*tool.ABI_FILES, *(source for source, _ in tool.SHADER_FILES),
+                     *(source for source, _, _ in tool.SHADER_PATCHES)):
             lock.setdefault('external_code_files', {})[name] = record(ROOT / name)
         return lock
 
@@ -226,7 +272,7 @@ class AdaptedHost(unittest.TestCase):
         vendor_before = base.snapshot_files(COMPONENT / 'upstream', lock['upstream_files'])
         receipt = tool.new_receipt(base)
         private, snapshot = tool.copy_private_inputs(COMPONENT, self.directory, lock, base, receipt)
-        self.assertEqual(len(snapshot), 961)
+        self.assertEqual(len(snapshot), 978)
         changed = set()
         for name, original in lock['upstream_files'].items():
             if snapshot['upstream/' + name] != {k: original[k] for k in ('bytes', 'sha256')}:
@@ -235,16 +281,16 @@ class AdaptedHost(unittest.TestCase):
         self.assertEqual(vendor_before, base.snapshot_files(COMPONENT / 'upstream', lock['upstream_files']))
         tool.verify_private(private, snapshot, base)
 
-    def test_commands_compile_130_actual_units_with_macro_and_private_includes(self):
+    def test_commands_compile_136_actual_units_with_macro_and_private_includes(self):
         tool = self.tool()
         base = self.base_tool()
         manifest = base.read_json(COMPONENT / 'compile_sources.json')
         private = self.directory / 'inputs'
         sdk = {'clang': '/owned/clang', 'sdk_path': '/owned/iPhoneOS26.5.sdk'}
         commands = tool.compile_commands(private, self.directory, manifest['translation_units'], sdk, base)
-        self.assertEqual(len(commands), 130)
+        self.assertEqual(len(commands), 136)
         self.assertEqual(sum(row['role'] == 'vpx_decoder' for row in commands), 71)
-        self.assertEqual(len({row['object'] for row in commands}), 130)
+        self.assertEqual(len({row['object'] for row in commands}), 136)
         for row in commands:
             self.assertTrue(Path(row['source']).is_relative_to(private))
             self.assertIn('-DNXNATIVE_NORMAL_POLICY=1', row['argv'])
@@ -253,9 +299,71 @@ class AdaptedHost(unittest.TestCase):
             self.assertIn(str(private / 'external_abi'), row['argv'])
             self.assertIn('arm64-apple-ios26.0', row['argv'])
             self.assertIn('-march=armv8.2-a', row['argv'])
+            self.assertIn('-MMD', row['argv'])
+            self.assertEqual(row['argv'][row['argv'].index('-MF') + 1], row['depfile'])
+            self.assertEqual(row['argv'][row['argv'].index('-MT') + 1], row['object'])
         roles = {row['role'] for row in commands}
         self.assertTrue({'owned_normal_policy', 'owned_normal_failures', 'reused_base_v0_abi', 'owned_link_only_entry'} <= roles)
         self.assertTrue({'_nxnative_normal_fail', '_nxnative_normal_signal_failure'} <= tool.STRONG_SYMBOLS)
+
+    def test_complete_provider_staging_uses_original_modules_and_only_selected_patch_sections(self):
+        tool = self.tool()
+        base = self.base_tool()
+        lock = self.fixture_lock(base, tool)
+        receipt = tool.new_receipt(base)
+        private, snapshot = tool.copy_private_inputs(COMPONENT, self.directory, lock, base, receipt)
+        shader = private / 'shader_provider'
+        self.assertEqual(len(tool.SHADER_FILES), 13)
+        self.assertEqual(len(tool.SHADER_PATCHES), 2)
+        self.assertEqual(set(tool.private_snapshot(shader, base)), {target for _, target in tool.SHADER_FILES})
+        self.assertFalse((shader / 'dm/gfx/nvn/include/nvn.h').exists())
+        self.assertFalse((shader / 'dm/gfx/nvn/botw_shader.c').exists())
+        self.assertIn('NxBaseOpaqueShaderDataExt', (private / 'upstream/dm/gfx/nvn/include/nvn.h').read_text())
+        changed = {name for patch_record in receipt['shader_provider_patches'] for name in patch_record['changed_members']}
+        self.assertEqual(changed, {'dm/gfx/nvn/botw_shader_manifest.h','dm/gfx/nvn/botw_shader_manifest.m','dm/gfx/nvn/botw_shader_runtime.m'})
+        self.assertEqual(receipt['shader_provider_patches'][1]['changed_members'], ['dm/gfx/nvn/botw_shader_manifest.m'])
+        self.assertEqual(set(receipt['shader_provider_patches'][1]['original_patch']['all_members']),
+            {'dm/gfx/nvn/botw_shader_manifest.m','dm/gfx/nvn/hle_nvn.c','dm/gfx/nvn/nvn_mtl.m'})
+        for source, target in tool.SHADER_FILES:
+            if target not in changed:
+                self.assertEqual((shader / target).read_bytes(), (ROOT / source).read_bytes())
+        for source, _, _ in tool.SHADER_PATCHES:
+            self.assertEqual((private / 'shader_provider_patches' / Path(source).name).read_bytes(), (ROOT / source).read_bytes())
+        tool.verify_private(private, snapshot, base)
+
+    def test_provider_missing_or_wrong_source_hash_is_rejected_before_patch(self):
+        tool = self.tool()
+        base = self.base_tool()
+        for index, name in enumerate((tool.SHADER_FILES[0][0], tool.SHADER_PATCHES[0][0])):
+            for broken in ('missing', 'changed'):
+                with self.subTest(source=name, broken=broken):
+                    lock = self.fixture_lock(base, tool)
+                    if broken == 'missing':
+                        del lock['external_code_files'][name]
+                    else:
+                        lock['external_code_files'][name] = {'bytes': (ROOT / name).stat().st_size, 'sha256': '0' * 64}
+                    private = self.directory / ('%d-%s' % (index, broken))
+                    private.mkdir()
+                    with patch.object(base, 'run_command') as command, self.assertRaises(ValueError):
+                        tool.copy_shader_provider(COMPONENT, private, self.directory, lock, base, tool.new_receipt(base))
+                    command.assert_not_called()
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('clang'), 'Foundation compile-only objects')
+    def test_all_six_provider_translation_units_compile_without_host_execution(self):
+        tool = self.tool()
+        base = self.base_tool()
+        private, _ = tool.copy_private_inputs(COMPONENT, self.directory, self.fixture_lock(base, tool), base, tool.new_receipt(base))
+        names = ['shader_provider/' + name for name in tool.SHADER_UNITS] + ['adapter/base_v0_shader_provider.m']
+        for index, name in enumerate(names):
+            obj = self.directory / ('owned-provider-%d.o' % index)
+            command = ['clang','--no-default-config','-fobjc-arc','-fblocks','-Wall','-Wextra','-Werror',
+                       '-Wno-deprecated-declarations','-Wno-unused-function','-DNXNATIVE_NORMAL_POLICY=1',
+                       '-I',str(private / 'adapter'),'-I',str(private / 'upstream/dm/gfx/nvn'),
+                       '-I',str(private / 'upstream/dm/gfx/nvn/include'),'-I',str(private / 'shader_provider/adapter'),
+                       '-I',str(private / 'shader_provider/dm/gfx/nvn'),'-c',str(private / name),'-o',str(obj)]
+            result = subprocess.run(command,env=base.command_environment(),capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertGreater(obj.stat().st_size,0)
 
     def test_actual_adapters_compile_to_objects_without_execution(self):
         tool = self.tool()
