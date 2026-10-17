@@ -1,8 +1,8 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 6793,
-      "sha256": "6107cc1443dc7c30bf025ef991441f0542df0e0ed2c2532ae23fc610e4ec5f33"
+      "bytes": 7551,
+      "sha256": "5a42c91c327207b5abe3c862deddd3106385fe5b2b955325733b718c673b54e2"
     },
     "adapter/base_v0_memory.c": {
       "bytes": 5001,
@@ -84,6 +84,10 @@
       "bytes": 4392,
       "sha256": "1269ab1df53a1a19852cb7c65dcd5da1baa49b23e96e5d691b005fc4bbf26312"
     },
+    "profile/base_v0_runtime.tsv": {
+      "bytes": 951,
+      "sha256": "9e459e40d3627aa45e49e3f9c6470ea4a114e432c0ca64b5418e668266eb5065"
+    },
     "tests/shader_provider_probe.m": {
       "bytes": 14908,
       "sha256": "26891d8b2309a521f8e2235ba8204433b8d3b6692d9e6ca86c59a7bc3e513d8e"
@@ -91,6 +95,10 @@
     "tools/build_adapted_link_only.py": {
       "bytes": 28569,
       "sha256": "9e73f6b064f23a09710cb77dc620179f65fbb45a199ddd4213de5d3884dfd7a5"
+    },
+    "tools/build_base_v0_runtime.py": {
+      "bytes": 24035,
+      "sha256": "ee1a81ad132def61a3d05f817579af6428f20d8253117c2de10f385c19241f3f"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,

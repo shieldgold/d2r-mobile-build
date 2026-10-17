@@ -88,6 +88,8 @@ jobs:
         run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/build_link_only.py --sdk iphoneos --output outputs/nxnative-host-iphoneos --baseline-only
       - name: Compile adapted host without game content or execution
         run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/build_adapted_link_only.py --sdk iphoneos --output outputs/nxnative-adapted-iphoneos --adapters-only
+      - name: Compile base-v0 UIKit host without game content or execution
+        run: .tools/nxnative-ci-venv/bin/python experiments/nxnative_base_v0/tools/build_base_v0_runtime.py --sdk iphoneos --output outputs/nxnative-base-v0-UIKit-iphoneos --host-only
       - name: Preserve link-only baseline receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -112,5 +114,18 @@ jobs:
             outputs/nxnative-adapted-iphoneos/logs/*.stderr
             outputs/nxnative-adapted-iphoneos/link.map
             outputs/nxnative-adapted-iphoneos/*LINK-ONLY-DO-NOT-RUN*
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve base-v0 UIKit compile-only receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nxnative-base-v0-UIKit-iphoneos-compile-only
+          path: |
+            outputs/nxnative-base-v0-UIKit-iphoneos/*.json
+            outputs/nxnative-base-v0-UIKit-iphoneos/logs/*.stdout
+            outputs/nxnative-base-v0-UIKit-iphoneos/logs/*.stderr
+            outputs/nxnative-base-v0-UIKit-iphoneos/link.map
+            outputs/nxnative-base-v0-UIKit-iphoneos/*RUNTIME-DO-NOT-RUN*
           if-no-files-found: warn
           retention-days: 7
