@@ -1,0 +1,15 @@
+--- a/dm/host/hle_thread.c
++++ b/dm/host/hle_thread.c
+@@ -685,9 +685,9 @@
+         if (type != 0) {
+             int32_t nv = val + 1;
+             if (type == 2) {
+-                // Waking all (count <= 0) with waiters subtracts 2, not 1 (mesosphere KAddressArbiter::SignalAndModifyByWaitingCountIfEqual; Ryujinx and yuzu agree).
+-                // It used to subtract 1: Unity's (Engage) job fences decide from this value whether jobs are done, waiters were let through early, and the particle geometry job disagreed with the main thread's counts and wrote out of bounds (indices into texture objects, writes to a null pointer).
+-                if (cnt <= 0) nv = nw > 0 ? val - 2 : val + 1;
++                // Horizon-compatible wake-all modifies the value by minus one when waiters exist.
++                // Primary: https://github.com/Atmosphere-NX/Atmosphere/blob/6b0c077b4c608a3a2ee712b8dc35fee87ceb62e8/libraries/libmesosphere/source/kern_k_address_arbiter.cpp#L118-L123
++                if (cnt <= 0) nv = nw > 0 ? val - 1 : val + 1;
+                 else nv = nw == 0 ? val + 1 : nw <= cnt ? val - 1 : val;
+             }
+             uint32_t e = (uint32_t)val;

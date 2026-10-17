@@ -1,12 +1,28 @@
 {
   "adapter_files": {
     "README.zh-CN.md": {
-      "bytes": 2836,
-      "sha256": "f59d8f57c391dddb1dfa2b52cb27b8b15b5e0cc49703775f1004374a441392a9"
+      "bytes": 4316,
+      "sha256": "6a3ebefa89129ad0faf30fdb4d44e545596c1f05cdccad2ab69163e660689560"
     },
     "adapter/link_only_main.c": {
       "bytes": 313,
       "sha256": "da68ff5f8e5e42f157eea25dfe4fdc42922a75b6ecd0c377a48d4b8d059dd0e3"
+    },
+    "adapter/normal_failures.c": {
+      "bytes": 1482,
+      "sha256": "5039165d7b05ea08709fb1f77434767dfdc0aedaeaf3231b11ac292df88b4942"
+    },
+    "adapter/normal_failures.h": {
+      "bytes": 558,
+      "sha256": "f989c905f186d8c270b3d10470b213d56ed4f0292f6e5ff63e375b1458450b9b"
+    },
+    "adapter/normal_policy.c": {
+      "bytes": 3176,
+      "sha256": "7f2ae6ae58fd020855a5ae807954586d5b308cad31a4fb8a4dcfbb0edd4a5630"
+    },
+    "adapter/normal_policy.h": {
+      "bytes": 1086,
+      "sha256": "4b6456cb97e1d552a9986053e9ff6fce9d70b4eb9c1536cc61f8142a8a08e266"
     },
     "compile_sources.json": {
       "bytes": 28143,
@@ -16,17 +32,49 @@
       "bytes": 2583,
       "sha256": "4bcb82fb7385e9105e8d42fb090dace02bcbed02679a7176c00ffa5ce5481f21"
     },
+    "patches/base-v0-texture-view.patch": {
+      "bytes": 10098,
+      "sha256": "5b06e6ac0d0af1071740a77e796f06ff2447c85c077a5b6ab655257ef492b0d4"
+    },
+    "patches/horizon-address-signal.patch": {
+      "bytes": 1179,
+      "sha256": "0e5e260198f7a2d5e4c823082eafe97c3ec5b30a3ef0a2a6950d851704fd9094"
+    },
+    "patches/normal-entry.patch": {
+      "bytes": 5407,
+      "sha256": "3f1b20610b376f49300df6732756ed503c960121019dffb82a5a5ccf7379d7fd"
+    },
+    "patches/normal-hle-crash.patch": {
+      "bytes": 18519,
+      "sha256": "1e32b05f734da15a8b7ca32338a5ce18570297694ae520a7ded07c308f470e61"
+    },
     "profile/base_v0.json": {
       "bytes": 4392,
       "sha256": "1269ab1df53a1a19852cb7c65dcd5da1baa49b23e96e5d691b005fc4bbf26312"
+    },
+    "tools/build_adapted_link_only.py": {
+      "bytes": 21888,
+      "sha256": "63d856977f5e015f7fd844891c760b662b8194b408f431e9718d18a8d6840852"
     },
     "tools/build_link_only.py": {
       "bytes": 25115,
       "sha256": "981d18933452df66af6dd3eda69689d0a0cb331dc6818861e9314800631cce7e"
     },
+    "tools/pack_guest.py": {
+      "bytes": 8102,
+      "sha256": "03c8994dcf252ad1fe14769a34623d15df2d1dad2c4d71015fa8ec77ba6ab40b"
+    },
     "tools/preflight_profile.py": {
       "bytes": 13582,
       "sha256": "f3f44bb41c94a1d07c3819c49458f713237e7e657e204d964ee1bb4b324ec096"
+    },
+    "tools/rewrite_base_v0.py": {
+      "bytes": 16530,
+      "sha256": "e781867a076d49a79169c86689f2d6fb203b9ee4a9a08a122809f8daba39ac2e"
+    },
+    "tools/shader_key_bridge.py": {
+      "bytes": 17966,
+      "sha256": "7e4898fabe2ab289e4d35ecc3f5d089d387acf420c2e410edc46a70e3aa368b7"
     },
     "tools/verify_source.py": {
       "bytes": 7879,
@@ -35,6 +83,18 @@
   },
   "admission": "base-v0-preflight-only",
   "external_code_files": {
+    "experiments/botw_upstream_host/adapter/base_v0_abi.c": {
+      "bytes": 4869,
+      "sha256": "5a5a77442cdf91825bb3bb75560166365245508e8e53738a84cdb509c3101364"
+    },
+    "experiments/botw_upstream_host/adapter/base_v0_abi.h": {
+      "bytes": 3023,
+      "sha256": "ba980a0597fcc86c14119419e95b59613a7995d8fe6bd12ee317d400c474b213"
+    },
+    "experiments/botw_upstream_host/adapter/base_v0_abi.json": {
+      "bytes": 4447,
+      "sha256": "850080d27627d6091cd0146eb24d2640fb31f6dd1630599aff76452699dee217"
+    },
     "scripts/botw_native/__init__.py": {
       "bytes": 75,
       "sha256": "5029578e70eaf1233a549057e4323eb38e527963de0257d9658736f2fa2c3c8a"
@@ -46,6 +106,14 @@
     "scripts/botw_native/branch_tables.py": {
       "bytes": 4643,
       "sha256": "a935a62f2640763ec2f11569a8ffcbcb794cb63efd69409bb21fc4d23dd8b9fa"
+    },
+    "scripts/botw_native/guest_framework.py": {
+      "bytes": 28981,
+      "sha256": "fe6fef1ede112aa567dd39e1d285da3fc9c59403438386297c81a30f57dfb495"
+    },
+    "scripts/botw_native/nso.py": {
+      "bytes": 5174,
+      "sha256": "8f5b491b1718d88b96ac24892c4816512e71f173e07718ade49399e698f6a272"
     },
     "scripts/botw_native/romfs.py": {
       "bytes": 20878,

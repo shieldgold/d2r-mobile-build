@@ -1,0 +1,109 @@
+--- a/dm/gfx/nvn/include/nvn.h
++++ b/dm/gfx/nvn/include/nvn.h
+@@ -123,7 +123,7 @@
+ } NVNtexture;
+ 
+ typedef struct {
+-    char reserved[0x28];
++    char reserved[0x24];
+ } NVNtextureView;
+ 
+ typedef struct {
+--- a/dm/gfx/nvn/nvn_obj.h
++++ b/dm/gfx/nvn/nvn_obj.h
+@@ -37,12 +37,11 @@
+     uint64_t serial;                     // Initialization serial: the replay layer uses it to find the MTLTexture in the host table (the game may copy the object by value, so object pointers cannot be stored)
+ } tex_t;                                                                                     FITS(tex_t, NVNtexture);
+ _Static_assert(sizeof(tex_t) <= 0x80, "tex_t 超出较新 SDK 的 NVNtexture（0x80）");
+-// The newer SDK's (NVN 55, SMBW) NVNtextureView is only 16 bytes: the game keeps it in a 16-byte stack slot (main +0x5796c), and the former 28-byte record wrote out of bounds over the saved fp / lr,
+-//   so the function returned to 0x100000000 and crashed. Packed into 16 bytes: levels / layers / format / target + swizzle and depth-stencil mode (the last two only recorded for now)
+-typedef struct { uint8_t set_levels : 1, set_layers : 1, set_format : 1, set_target : 1, set_swizzle : 1, set_dsmode : 1, dsmode : 2;
+-                 uint8_t target, base_level, nlevels; uint16_t format, min_layer, nlayers; uint8_t swz[4]; uint16_t _rsv; } view_t;
++// Fixed base-v0 NVN52 schema shared by HLE, copied records and Metal replay.
++#include "base_v0_abi.h"
++typedef botw_base_v0_texture_view view_t;
+ FITS(view_t, NVNtextureView);
+-_Static_assert(sizeof(view_t) <= 16, "view_t 超出较新 SDK 的 NVNtextureView（16 字节）");
++_Static_assert(sizeof(view_t) == 36 && sizeof(NVNtextureView) == 36, "base-v0 view ABI");
+ 
+ // Sampler parameters (one copy shared by builder and object)
+ typedef struct { uint8_t minf, magf, ws, wt, wr, cmp_mode, cmp_func; float lod_min, lod_max, lod_bias, aniso, border[4]; } samp_par;   // Enum values are all < 256
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -270,14 +270,16 @@
+ // No prototype in the header; call sites such as main 0x174899c compare the return value with 1 and set some status bit 0x100 if not equal. Meaning unverified; return 1 for now
+ NVN_NOPROTO(nvnTextureGetRawStorageClass, int, const NVNtexture *t) { (void)t; return 1; }
+ #define VW(v) ((view_t *)(v))
+-NVN(nvnTextureViewSetDefaults, void, NVNtextureView *v) { memset(v, 0, sizeof(view_t)); }
+-NVN(nvnTextureViewSetLevels, void, NVNtextureView *v, int base, int n) { VW(v)->set_levels = 1; VW(v)->base_level = base; VW(v)->nlevels = n; }
+-NVN(nvnTextureViewSetLayers, void, NVNtextureView *v, int min, int n) { VW(v)->set_layers = 1; VW(v)->min_layer = min; VW(v)->nlayers = n; }
+-NVN(nvnTextureViewSetFormat, void, NVNtextureView *v, NVNformat f) { VW(v)->set_format = 1; VW(v)->format = f; }
+-NVN(nvnTextureViewSetTarget, void, NVNtextureView *v, NVNtextureTarget t) { VW(v)->set_target = 1; VW(v)->target = t; }
+-NVN(nvnTextureViewGetLayers, NVNboolean, const NVNtextureView *v, int *min, int *n) {
+-    const view_t *o = (const view_t *)v; *min = o->min_layer; *n = o->nlayers; return o->set_layers;
+-}
++NVN(nvnTextureViewSetDefaults, void, NVNtextureView *v) { botw_base_v0_nvnTextureViewSetDefaults(v); }
++NVN(nvnTextureViewSetLevels, void, NVNtextureView *v, int base, int n) { botw_base_v0_nvnTextureViewSetLevels(v, base, n); }
++NVN(nvnTextureViewSetLayers, void, NVNtextureView *v, int min, int n) { botw_base_v0_nvnTextureViewSetLayers(v, min, n); }
++NVN(nvnTextureViewSetFormat, void, NVNtextureView *v, NVNformat f) { botw_base_v0_nvnTextureViewSetFormat(v, f); }
++NVN(nvnTextureViewSetTarget, void, NVNtextureView *v, NVNtextureTarget t) { botw_base_v0_nvnTextureViewSetTarget(v, t); }
++NVN(nvnTextureViewGetLayers, NVNboolean, const NVNtextureView *v, int *min, int *n) { return botw_base_v0_nvnTextureViewGetLayers(v, min, n); }
++NVN(nvnTextureViewGetFormat, NVNboolean, const NVNtextureView *v, NVNformat *f) { return botw_base_v0_nvnTextureViewGetFormat(v, f); }
++NVN(nvnTextureViewGetSwizzle, NVNboolean, const NVNtextureView *v, NVNtextureSwizzle *r, NVNtextureSwizzle *g, NVNtextureSwizzle *b, NVNtextureSwizzle *a) { return botw_base_v0_nvnTextureViewGetSwizzle(v, r, g, b, a); }
++NVN(nvnTextureViewGetDepthStencilMode, NVNboolean, const NVNtextureView *v, NVNtextureDepthStencilMode *mode) { return botw_base_v0_nvnTextureViewGetDepthStencilMode(v, mode); }
++NVN(nvnTextureViewCompare, NVNboolean, const NVNtextureView *a, const NVNtextureView *b) { return botw_base_v0_nvnTextureViewCompare(a, b); }
+ NVN(nvnTextureGetViewOffset, ptrdiff_t, const NVNtexture *t, const NVNtextureView *v) {
+     const tex_t *o = CTX(t); const view_t *w = (const view_t *)v;
+     if (!w) return 0;
+@@ -1388,13 +1390,10 @@
+ NVN(nvnTextureGetFormat, NVNformat, const NVNtexture *t) { return (NVNformat)CTX(t)->d.format; }
+ NVN(nvnTextureGetTarget, NVNtextureTarget, const NVNtexture *t) { return (NVNtextureTarget)CTX(t)->d.target; }
+ NVN(nvnTextureSetDebugLabel, void, NVNtexture *t, const char *s) { (void)t; (void)s; }
+-NVN(nvnTextureViewGetLevels, NVNboolean, const NVNtextureView *v, int *base, int *n) { const view_t *w = (const view_t *)v; *base = w->base_level; *n = w->nlevels; return w->set_levels; }
+-NVN(nvnTextureViewGetTarget, NVNboolean, const NVNtextureView *v, NVNtextureTarget *t) { const view_t *w = (const view_t *)v; *t = (NVNtextureTarget)w->target; return w->set_target; }
+-NVN(nvnTextureViewSetDepthStencilMode, void, NVNtextureView *v, NVNtextureDepthStencilMode m) { VW(v)->set_dsmode = 1; VW(v)->dsmode = (uint8_t)m; if (m) ONCE_LOG("TextureViewSetDepthStencilMode %d：宿主按深度读", (int)m); }
+-NVN(nvnTextureViewSetSwizzle, void, NVNtextureView *v, NVNtextureSwizzle r, NVNtextureSwizzle g, NVNtextureSwizzle bl, NVNtextureSwizzle a) {
+-    view_t *w = VW(v); w->set_swizzle = 1; w->swz[0] = (uint8_t)r; w->swz[1] = (uint8_t)g; w->swz[2] = (uint8_t)bl; w->swz[3] = (uint8_t)a;
+-    if (r != NVN_TEXTURE_SWIZZLE_R || g != NVN_TEXTURE_SWIZZLE_G || bl != NVN_TEXTURE_SWIZZLE_B || a != NVN_TEXTURE_SWIZZLE_A) ONCE_LOG("TextureViewSetSwizzle 非恒等（%d %d %d %d）：采样时用 Metal 视图重排", (int)r, (int)g, (int)bl, (int)a);
+-}
++NVN(nvnTextureViewGetLevels, NVNboolean, const NVNtextureView *v, int *min, int *n) { return botw_base_v0_nvnTextureViewGetLevels(v, min, n); }
++NVN(nvnTextureViewGetTarget, NVNboolean, const NVNtextureView *v, NVNtextureTarget *t) { return botw_base_v0_nvnTextureViewGetTarget(v, t); }
++NVN(nvnTextureViewSetDepthStencilMode, void, NVNtextureView *v, NVNtextureDepthStencilMode mode) { botw_base_v0_nvnTextureViewSetDepthStencilMode(v, mode); }
++NVN(nvnTextureViewSetSwizzle, void, NVNtextureView *v, NVNtextureSwizzle r, NVNtextureSwizzle g, NVNtextureSwizzle b, NVNtextureSwizzle a) { botw_base_v0_nvnTextureViewSetSwizzle(v, r, g, b, a); }
+ 
+ // Color state: alpha test function, logic op (the fields already exist in color_st)
+ NVN(nvnColorStateSetAlphaTest, void, NVNcolorState *s, NVNalphaFunc f) { ST(color_st, s)->alpha_func = (uint32_t)f; }
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -2375,8 +2375,8 @@
+         static int ti = -1; static uint32_t tw, th; static uint64_t n;
+         if (ti < 0) { const char *e = getenv("DM_NVN_TEXINFO"); ti = e && sscanf(e, "%ux%u", &tw, &th) == 2; }
+         if (ti && t && t->d.width == tw && t->d.height == th && (n++ < 40 || n % 600 == 0))
+-            MLOG("TEXINFO 登记 id %d ser=%llu 格式=%#x 建时重排 %d:%d%d%d%d 视图 %d 视图重排 %d:%d%d%d%d 视图格式 %d:%#x", tid, (unsigned long long)t->serial, t->d.format,
+-                 t->set_swz, t->swz & 7, t->swz >> 3 & 7, t->swz >> 6 & 7, t->swz >> 9 & 7, v != NULL, v ? v->set_swizzle : 0, v ? v->swz[0] : 0, v ? v->swz[1] : 0, v ? v->swz[2] : 0, v ? v->swz[3] : 0,
++            MLOG("TEXINFO 登记 id %d ser=%llu 格式=%#x 建时重排 %d:%d%d%d%d 视图 %d 视图重排 %d:%u%u%u%u 视图格式 %d:%#x", tid, (unsigned long long)t->serial, t->d.format,
++                 t->set_swz, t->swz & 7, t->swz >> 3 & 7, t->swz >> 6 & 7, t->swz >> 9 & 7, v != NULL, v ? v->set_swizzle : 0, v ? v->swizzle[0] : 0, v ? v->swizzle[1] : 0, v ? v->swizzle[2] : 0, v ? v->swizzle[3] : 0,
+                  v ? v->set_format : 0, v ? v->format : 0);
+     }
+ }
+@@ -2411,6 +2411,11 @@
+ static _Atomic int g_origin_ll;
+ void mtl_set_origin_lower_left(int on) { if (atomic_exchange(&g_origin_ll, on) != on) MLOG("窗口原点：%s", on ? "左下（GL，视口倒向、绕向反、出图翻转）" : "左上"); }
+ void mtl_set_tex_pool_n(int n) { g_tpool_n = n; }
++static void base_v0_texture_view_swizzle(const view_t *view, uint8_t selectors[4]) {
++    for (int i = 0; i < 4; i++)
++        if (view->swizzle[i] > 5) die("base-v0 texture view swizzle is unsupported");
++    for (int i = 0; i < 4; i++) selectors[i] = (uint8_t)view->swizzle[i];
++}
+ static id<MTLTexture> tex_by_id(int tid) {   // Caller holds g_rmu
+     if (g_tpool_n && tid >= g_tpool_n) { if (!g_stat_tex_oob++) MLOG("池外贴图号 %d（池容量 %d）按空槽处理：读出 0", tid, g_tpool_n); return nil; }
+     if (tid < 0 || tid >= g_ntreg || !g_treg[tid].ok) { RED_ONCE(10, "贴图号 %d 未登记", tid); return nil; }
+@@ -2429,7 +2434,7 @@
+     v = base;
+     // Channel swizzle: the view's if set, otherwise the one from texture building; identity builds no view (SMBW's font cache is (1 1 1 R): without the swizzle glyphs become white blocks)
+     uint8_t sw[4] = {MTLTextureSwizzleRed, MTLTextureSwizzleGreen, MTLTextureSwizzleBlue, MTLTextureSwizzleAlpha}; int need_sw = 0;
+-    if (r.has_v && r.v.set_swizzle) memcpy(sw, r.v.swz, 4);
++    if (r.has_v && r.v.set_swizzle) base_v0_texture_view_swizzle(&r.v, sw);
+     else if (r.t.set_swz) for (int c = 0; c < 4; c++) sw[c] = (uint8_t)(r.t.swz >> (3 * c) & 7);
+     for (int c = 0; c < 4; c++) { if (sw[c] > MTLTextureSwizzleAlpha) sw[c] = (uint8_t)(MTLTextureSwizzleRed + c); if (sw[c] != MTLTextureSwizzleRed + c) need_sw = 1; }
+     if ((r.has_v && (r.v.set_format || r.v.set_levels || r.v.set_layers || r.v.set_target)) || need_sw) {
