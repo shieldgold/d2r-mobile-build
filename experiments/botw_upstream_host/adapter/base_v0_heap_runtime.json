@@ -1,0 +1,28 @@
+{
+  "schema": "botw-whole-base-v0-host-memory-runtime-policy-v1",
+  "runtime_policy": "original-logical-v1",
+  "implementation": "reviewed-whole-port-os-proc-only-v1",
+  "guest_parameter_carrier": "botw-switch-base-v0-bounded-heap-v1",
+  "guest_bytes_changed": false,
+  "heap_bytes": 3261071360,
+  "root_bytes": 3227516928,
+  "startup_bytes": 33554432,
+  "unit_bytes": 2097152,
+  "live_guard_bytes": 268435456,
+  "live_query": "os_proc_available_memory",
+  "growth_bytes_compared_to_live": false,
+  "image_accounting": "sum-module-size-round-up-2MiB",
+  "application_pool": "min-configured-retained-and-heap-plus-image",
+  "resident_guaranteed": false,
+  "original_native_task_vm_info_reused": false,
+  "game_playable": false,
+  "four_gib_layout": {
+    "prefix_bytes": 201326592,
+    "alias_bytes": 536870912,
+    "stack_bytes": 268435456,
+    "heap_offset_bytes": 1006632960,
+    "heap_capacity_bytes": 3288334336
+  },
+  "five_gib_original_layout_preserved": true,
+  "insufficient_capacity_bounded_fallback": false
+}

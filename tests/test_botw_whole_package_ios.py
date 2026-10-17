@@ -17,6 +17,19 @@ import test_botw_whole_shader_source_build as shader_fixtures
 ROOT=Path(__file__).resolve().parents[1]
 SCRIPT=ROOT/'experiments/botw_upstream_host/scripts/package_ios.py'
 H=lambda data:hashlib.sha256(data).hexdigest()
+HOST_POLICY_PATH='adapter/base_v0_heap_runtime.json'
+HOST_POLICY_PATCH='patches/original-logical-heap.patch'
+HOST_POLICY={
+    'schema':'botw-whole-base-v0-host-memory-runtime-policy-v1',
+    'runtime_policy':'original-logical-v1','implementation':'reviewed-whole-port-os-proc-only-v1',
+    'guest_parameter_carrier':'botw-switch-base-v0-bounded-heap-v1','guest_bytes_changed':False,
+    'heap_bytes':3261071360,'root_bytes':3227516928,'startup_bytes':33554432,'unit_bytes':2097152,
+    'live_guard_bytes':268435456,'live_query':'os_proc_available_memory','growth_bytes_compared_to_live':False,
+    'image_accounting':'sum-module-size-round-up-2MiB','application_pool':'min-configured-retained-and-heap-plus-image',
+    'resident_guaranteed':False,'original_native_task_vm_info_reused':False,'game_playable':False,
+    'four_gib_layout':{'prefix_bytes':201326592,'alias_bytes':536870912,'stack_bytes':268435456,
+                       'heap_offset_bytes':1006632960,'heap_capacity_bytes':3288334336},
+    'five_gib_original_layout_preserved':True,'insufficient_capacity_bounded_fallback':False}
 
 
 def owned_executable():
@@ -55,8 +68,11 @@ class WholePackageIOS(unittest.TestCase):
         profile={'schema':1,'title_id':'owned fixture only','modules':{n:{'sha256':'ab'*32,'build_id':'12'*32} for n in self.package.NAMES}}
         (self.repository/'profiles').mkdir();self.profile=self.repository/'profiles/botw-switch-base-v0.json';self.json(self.profile,profile)
         self.pins()
-        for name in ('frontend/whole_runtime_configuration.m','frontend/whole_main.m','frontend/whole_frontend.m','frontend/whole_front_state.c','upstream/dm/owned.c'):
+        for name in ('frontend/whole_runtime_configuration.m','frontend/whole_main.m','frontend/whole_frontend.m','frontend/whole_front_state.c','upstream/dm/owned.c',
+                     'adapter/base_v0_heap.c','adapter/base_v0_heap.h',HOST_POLICY_PATCH):
             path=self.component/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('/* owned receipt fixture, never compiled or executed */\n')
+        self.host_policy=self.component/HOST_POLICY_PATH;self.json(self.host_policy,HOST_POLICY)
+        self.policy_unit=True;self.policy_patch=True
         self.json(self.component/'UPSTREAM_UNITS.json',{'ios_translation_units':['dm/owned.c']})
         self.binary=self.root/'owned-MachO';self.binary.write_bytes(owned_executable())
         self.receipt=self.root/'receipt.json';self.commands=self.root/'commands.json'
@@ -78,11 +94,14 @@ class WholePackageIOS(unittest.TestCase):
     def write_receipt(self):
         sources={str(p.relative_to(self.component)):{'sha256':H(p.read_bytes())} for p in self.component.rglob('*') if p.is_file() and p.name!='SOURCE.lock.json'}
         metadata=self.package.registry_reader.read_registry(self.binary)
-        self.lock={'files':sources,'external_files':{},'patched_source_sha256':{},'adapter_translation_units':[],
+        self.lock={'files':sources,'external_files':{},'patched_source_sha256':{},
+                   'patches':[HOST_POLICY_PATCH] if self.policy_patch else [],
+                   'adapter_translation_units':['adapter/base_v0_heap.c'] if self.policy_unit else [],
                    'runtime_configuration_translation_units':['frontend/whole_runtime_configuration.m'],
                    'swforce_metadata_sha256':metadata['canonical_metadata_sha256'],'swforce_record_count':1}
         self.json(self.component/'SOURCE.lock.json',self.lock)
         self.units=['dm/owned.c','frontend/whole_runtime_configuration.m','frontend/whole_main.m','frontend/whole_frontend.m','frontend/whole_front_state.c']
+        if self.policy_unit:self.units.append('adapter/base_v0_heap.c')
         common=['clang','-target','arm64-apple-ios18.0','-DDM_SHELL=1','-DBOTW_WHOLE_RUNTIME_CONFIGURED=1','-DBOTW_WHOLE_SHADER_PUBLICATION=1',
                 '-Werror=unguarded-availability','-Werror=unguarded-availability-new']
         commands=[{'label':name.replace('/','__'),'argv':common+['-c','owned/'+name,'-o',name.replace('/','__')+'.o'],'exit':0} for name in self.units]
@@ -92,7 +111,7 @@ class WholePackageIOS(unittest.TestCase):
                     'source_stable':True,'host_or_guest_or_GPU_executed':False,'compile_exit':0,'link_exit':0,
                     'link_executable_sha256':H(self.binary.read_bytes()),'source_lock_sha256':H((self.component/'SOURCE.lock.json').read_bytes()),
                     'source_sha256':{p:r['sha256'] for p,r in sources.items()},'external_source_sha256':{},'patched_source_sha256':{},
-                    'compiled_translation_units':5,'expected_total_translation_units':5,'expected_upstream_translation_units':1,'compiler_dependency_manifest':dependencies,
+                    'compiled_translation_units':len(self.units),'expected_total_translation_units':len(self.units),'expected_upstream_translation_units':1,'compiler_dependency_manifest':dependencies,
                     'actual_compiler_dependency_count':len(dependencies),'commands_sha256':H(self.commands.read_bytes()),'fixture_only':True}
         self.json(self.receipt,self.build)
 
@@ -130,6 +149,13 @@ class WholePackageIOS(unittest.TestCase):
     def test_owned_end_to_end_unsigned_precise_runtime_bundle_and_bytes(self):
         originals={str(p):H(p.read_bytes()) for d in (self.source,self.guest,self.rewrite) for p in d.rglob('*') if p.is_file()}
         result=self.prepare();self.assertTrue(result['unsigned']);self.assertFalse(result['phone_ready']);self.assertFalse(result['game_playable'])
+        self.assertIn('host_memory_runtime_policy',result)
+        policy=result['host_memory_runtime_policy']
+        self.assertEqual(policy['contract'],HOST_POLICY)
+        self.assertEqual((policy['source'],policy['source_sha256']),(HOST_POLICY_PATH,H(self.host_policy.read_bytes())))
+        self.assertEqual(policy['provider_sha256'],H((self.component/'adapter/base_v0_heap.c').read_bytes()))
+        self.assertEqual(policy['patch_sha256'],H((self.component/HOST_POLICY_PATCH).read_bytes()))
+        self.assertEqual(json.loads((self.output/'package-manifest.json').read_bytes())['host_memory_runtime_policy'],policy)
         self.assertEqual((self.output/'BOTWNative').read_bytes(),self.binary.read_bytes())
         info=plistlib.loads((self.output/'Info.plist').read_bytes());self.assertEqual((info['CFBundleIdentifier'],info['CFBundleVersion']),('local.botw.native','42'))
         self.assertEqual(info['UIDeviceFamily'],[1,2]);self.assertTrue(info['UIFileSharingEnabled'])
@@ -142,6 +168,39 @@ class WholePackageIOS(unittest.TestCase):
         self.assertFalse((self.output/'_CodeSignature').exists())
         if os.environ.get('BOTW_WHOLE_PACKAGE_SMOKE_RECEIPT'):
             self.json(Path(os.environ['BOTW_WHOLE_PACKAGE_SMOKE_RECEIPT']),dict(result,fixture_only=True,owned_bundle_files=sorted(result['files'])))
+
+    def test_locked_runtime_policy_rejects_missing_or_contradictory_contract_before_publication(self):
+        changes=[('heap_bytes',1),('live_guard_bytes',0),('growth_bytes_compared_to_live',True),
+                 ('guest_bytes_changed',True),('resident_guaranteed',True),('original_native_task_vm_info_reused',True),
+                 ('game_playable',0),('runtime_policy','bounded-v1'),('unexpected',True),
+                 ('four_gib_layout',dict(HOST_POLICY['four_gib_layout'],heap_capacity_bytes=0))]
+        for field,value in changes:
+            with self.subTest(field=field):
+                self.json(self.host_policy,dict(HOST_POLICY,**{field:value}));self.write_receipt()
+                try:
+                    with self.assertRaises(ValueError):self.prepare()
+                    self.assertFalse(self.output.exists())
+                finally:shutil.rmtree(self.output,ignore_errors=True)
+        self.host_policy.unlink();self.write_receipt()
+        with self.assertRaises(ValueError):self.prepare()
+        self.assertFalse(self.output.exists())
+
+    def test_runtime_contract_requires_the_compiled_provider_and_locked_after_patch(self):
+        for field in ('policy_unit','policy_patch'):
+            with self.subTest(field=field):
+                setattr(self,field,False);self.write_receipt()
+                try:
+                    with self.assertRaises(ValueError):self.prepare()
+                    self.assertFalse(self.output.exists())
+                finally:
+                    shutil.rmtree(self.output,ignore_errors=True);setattr(self,field,True)
+
+    def test_legacy_shell_plist_key_remains_inert_template_metadata(self):
+        info=plistlib.loads(self.info.read_bytes());info['BOTWHostMemoryPolicy']='bounded-v1'
+        self.info.write_bytes(plistlib.dumps(info))
+        result=self.prepare()
+        self.assertEqual(plistlib.loads((self.output/'Info.plist').read_bytes())['BOTWHostMemoryPolicy'],'bounded-v1')
+        self.assertEqual(result['host_memory_runtime_policy']['contract']['runtime_policy'],'original-logical-v1')
 
     def test_generic_or_failed_wrong_target_and_hash_receipts_never_publish(self):
         for field,value in (('runtime_configured',False),('compile_exit',1),('compile_exit',False),('link_exit',1),('source_stable',False),('sdk','macosx'),('target','arm64-apple-ios18.0-simulator'),('link_executable_sha256','0'*64)):

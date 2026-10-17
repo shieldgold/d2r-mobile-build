@@ -1,0 +1,40 @@
+--- a/dm/host/thread.c
++++ b/dm/host/thread.c
+@@ -17,6 +17,8 @@
+ void botw_base_v0_heap_enable(void) {
+     if (g_guest_thread_params && g_guest_thread_params != base_v0_thread_params)
+         die("base-v0 heap: another title owns thread parameters");
++    char error[256];
++    if (botw_base_v0_heap_select_original_logical(error, sizeof error)) die("%s", error);
+     g_guest_thread_params = base_v0_thread_params;
+ }
+ static pthread_key_t g_keyown;   // Raw pointers of the TLS block / thread-local region allocated by this thread (see the end of the function)
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -42,9 +42,11 @@
+     // metadata consumers already hold this same resize lock.
+     pthread_mutex_lock(&g_heap_resize_lock);
+     g_as_size=chosen.size;
+-    g_alias=(uint8_t*)chosen.base+0x10000000; g_alias_cap=0x20000000;
+-    g_stack=(uint8_t*)chosen.base+0x30000000; g_stack_cap=0x10000000;
+-    g_heap=(uint8_t*)chosen.base+0x40000000; g_heap_cap=chosen.size-0x40000000;
++    size_t prefix=botw_base_v0_heap_original_logical_enabled() && chosen.size==(UINT64_C(4)<<30) ?
++        (size_t)192<<20 : (size_t)256<<20;
++    g_alias=(uint8_t*)chosen.base+prefix; g_alias_cap=0x20000000;
++    g_stack=g_alias+g_alias_cap; g_stack_cap=0x10000000;
++    g_heap=g_stack+g_stack_cap; g_heap_cap=chosen.size-(prefix+g_alias_cap+g_stack_cap);
+     g_as=chosen.base;
+     pthread_mutex_unlock(&g_heap_resize_lock);
+     LOG("guest AS capacity bytes=%zu heap_capacity=%zu fallback=%u",
+@@ -78,6 +80,11 @@
+     size_t image=image_bytes();
+     if(image>UINT64_MAX-g_heap_cap)die("guest AS pool accounting overflow");
+     uint64_t retained=g_heap_cap+image;
++    if (botw_base_v0_heap_original_logical_enabled()) {
++        if(image>UINT64_MAX-BOTW_BASE_V0_ORIGINAL_HEAP_BYTES)die("guest AS pool accounting overflow");
++        uint64_t logical=BOTW_BASE_V0_ORIGINAL_HEAP_BYTES+image;
++        if(retained>logical)retained=logical;
++    }
+     return g_pool_configured<retained?g_pool_configured:retained;
+ }
+ 

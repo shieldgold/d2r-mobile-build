@@ -46,9 +46,9 @@
     "Memory availability is advisory and may change; this is not a residency or gameplay guarantee."
   ],
   "limits": [
-    "single upstream SVC allocator capacity and pool minus exact existing image accounting",
-    "fresh iOS os_proc_available_memory; unsupported query fails",
-    "256 MiB host reserve; 2 MiB alignment; root minimum 512 MiB is an experimental guard"
+    "single upstream SVC allocator retained capacity and min(configured pool, retained heap+rounded image, original H+rounded image)",
+    "whole original-logical mode: fixed H0xc2600000/R0xc0600000, live os_proc_available_memory >=256MiB; not growth bytes or residency guarantee",
+    "legacy bounded pure function and direct-provider default retain the original two-limit algorithm and minimum-root guard"
   ],
   "planner_body_sha256": "b651fd9839e9dc9433e90203f92e285ea5195719da18bbd90413c3a5e0743a3c",
   "planner_source": "native/botw_host/runtime.c:470",
@@ -60,5 +60,8 @@
     "KRES0": "initial SDK heap capacity in bytes",
     "KRES1": "root arena capacity in bytes; heap minus 32 MiB"
   },
-  "allocation_guard_profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1"
+  "allocation_guard_profile": "botw-switch-base-v0-pthread-stack-v4-normal-allocation-guard-v1",
+  "runtime_policy_contract": "adapter/base_v0_heap_runtime.json",
+  "policy_tag_semantics": "Unchanged bounded-heap-v1 Guest parameter carrier and direct-provider legacy default; actual whole BOTW title explicitly selects the separate original-logical host runtime policy.",
+  "runtime_selection": "botw_base_v0_heap_enable selects original-logical-v1 before first actual guest_thread_init; immutable H/R, normal allocator/image checks and fresh os_proc_available_memory guard remain enforced."
 }

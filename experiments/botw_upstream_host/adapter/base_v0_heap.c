@@ -5,6 +5,7 @@
 #include "whole_policy.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
@@ -34,6 +35,7 @@ int botw_base_v0_heap_plan(size_t kernel_available, size_t live_available,
 }
 /* Provider state contains normal host metadata only, never a guest object. */
 static pthread_mutex_t plan_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int original_logical_mode;
 static int selected, initial_accepted;
 static pthread_key_t selected_heap_key, selected_root_key;
 static botw_base_v0_heap_inputs initial_inputs;
@@ -42,6 +44,29 @@ static botw_base_v0_heap_query input_query;
 static int fail(char *error, size_t capacity, const char *message) {
     if (error && capacity) snprintf(error, capacity, "%s", message);
     return -1;
+}
+int botw_base_v0_heap_plan_original_logical(size_t kernel_available, size_t live_available,
+        size_t *heap, size_t *root, char *error, size_t capacity) {
+    if (!heap || !root || heap == root || kernel_available < HEAP_POLICY_ORIGINAL ||
+            live_available < HEAP_POLICY_RESERVE) {
+        if (error && capacity) snprintf(error, capacity, "original logical heap: retained capacity or fresh host guard is insufficient");
+        return 1;
+    }
+    *heap = HEAP_POLICY_ORIGINAL;
+    *root = HEAP_POLICY_ORIGINAL - HEAP_POLICY_STARTUP;
+    return 0;
+}
+int botw_base_v0_heap_original_logical_enabled(void) {
+    return atomic_load_explicit(&original_logical_mode, memory_order_acquire);
+}
+int botw_base_v0_heap_select_original_logical(char *error, size_t capacity) {
+    pthread_mutex_lock(&plan_lock);
+    int result = 0;
+    if (selected && !botw_base_v0_heap_original_logical_enabled())
+        result = fail(error, capacity, "base-v0 heap: immutable bounded plan already selected");
+    if (!result) atomic_store_explicit(&original_logical_mode, 1, memory_order_release);
+    pthread_mutex_unlock(&plan_lock);
+    return result;
 }
 int botw_base_v0_heap_live_available(size_t *out, char *error, size_t capacity) {
     if (!out) return fail(error, capacity, "base-v0 heap: missing live-memory output");
@@ -65,8 +90,9 @@ int botw_base_v0_heap_thread_init(pthread_key_t heap_key, pthread_key_t root_key
         result = fail(error, capacity, "base-v0 heap: immutable provider or TSD key pair changed");
     if (!result && !selected) {
         result = query(&inputs, error, capacity);
-        if (!result) result = botw_base_v0_heap_plan(inputs.kernel_available, inputs.live_available,
-            &heap, &root, error, capacity);
+        if (!result) result = (botw_base_v0_heap_original_logical_enabled() ?
+            botw_base_v0_heap_plan_original_logical : botw_base_v0_heap_plan)(
+                inputs.kernel_available, inputs.live_available, &heap, &root, error, capacity);
         if (result && error && capacity && !error[0]) fail(error, capacity, "base-v0 heap: actual memory inputs unavailable");
     }
     if (!result) {
@@ -105,7 +131,8 @@ int botw_base_v0_heap_admit(size_t requested, size_t previous, char *error, size
         if (input_query(&fresh, error, capacity))
             result = fail(error, capacity, "base-v0 heap: fresh live-memory query failed");
         else if (fresh.image_bytes != initial_inputs.image_bytes || requested > fresh.kernel_available ||
-                fresh.live_available < HEAP_POLICY_RESERVE || requested - previous > fresh.live_available - HEAP_POLICY_RESERVE)
+                fresh.live_available < HEAP_POLICY_RESERVE ||
+                (!botw_base_v0_heap_original_logical_enabled() && requested - previous > fresh.live_available - HEAP_POLICY_RESERVE))
             result = fail(error, capacity, "base-v0 heap: fresh host memory cannot retain the reserve for this growth");
     }
     if (error && capacity) error[capacity - 1] = 0;

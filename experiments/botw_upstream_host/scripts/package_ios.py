@@ -30,6 +30,21 @@ COMPONENT=Path(__file__).resolve().parents[1]
 NAMES=('main','sdk','subsdk0','subsdk1','subsdk2','subsdk3')
 META=64*1024**2
 BINARY=512*1024**2
+HOST_MEMORY_POLICY_PATH='adapter/base_v0_heap_runtime.json'
+HOST_MEMORY_POLICY_PATCH='patches/original-logical-heap.patch'
+# Separate from the unchanged Guest bounded-thunk byte identity. These are
+# logical sparse capacities and a fresh admission guard, not resident RAM.
+HOST_MEMORY_POLICY={
+    'schema':'botw-whole-base-v0-host-memory-runtime-policy-v1',
+    'runtime_policy':'original-logical-v1','implementation':'reviewed-whole-port-os-proc-only-v1',
+    'guest_parameter_carrier':'botw-switch-base-v0-bounded-heap-v1','guest_bytes_changed':False,
+    'heap_bytes':3261071360,'root_bytes':3227516928,'startup_bytes':33554432,'unit_bytes':2097152,
+    'live_guard_bytes':268435456,'live_query':'os_proc_available_memory','growth_bytes_compared_to_live':False,
+    'image_accounting':'sum-module-size-round-up-2MiB','application_pool':'min-configured-retained-and-heap-plus-image',
+    'resident_guaranteed':False,'original_native_task_vm_info_reused':False,'game_playable':False,
+    'four_gib_layout':{'prefix_bytes':201326592,'alias_bytes':536870912,'stack_bytes':268435456,
+                       'heap_offset_bytes':1006632960,'heap_capacity_bytes':3288334336},
+    'five_gib_original_layout_preserved':True,'insufficient_capacity_bounded_fallback':False}
 
 
 def load(path,name):
@@ -240,6 +255,31 @@ def verify_guest(guest,report,rewrite,profile,repository,temporary):
                                 'framework_sha256':generated['framework']['sha256'],'modules':names}
 
 
+def host_memory_runtime_policy(lock,repository):
+    """Bind the reviewed whole provider; no old shell plist selector is read."""
+    component=repository/'experiments/botw_upstream_host'
+    provider='adapter/base_v0_heap.c';header='adapter/base_v0_heap.h'
+    required=(HOST_MEMORY_POLICY_PATH,provider,header,HOST_MEMORY_POLICY_PATCH)
+    if (any(name not in lock['files'] for name in required) or
+            provider not in lock['adapter_translation_units'] or
+            HOST_MEMORY_POLICY_PATCH not in lock.get('patches',[])):
+        raise ValueError('whole host memory policy requires its locked compiled provider and after-patch')
+    raw={name:read(component/name) for name in required}
+    if any(digest(value)!=lock['files'][name]['sha256'] for name,value in raw.items()):
+        raise ValueError('whole host memory policy source changed after build verification')
+    contract=ios._json(raw[HOST_MEMORY_POLICY_PATH])
+    # Canonical JSON comparison also distinguishes bool/int and nested numeric
+    # types; normal Python dict equality would accept False in place of zero.
+    canonical=lambda value:json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False)
+    if canonical(contract)!=canonical(HOST_MEMORY_POLICY):
+        raise ValueError('unsupported or contradictory whole host memory runtime policy')
+    return {'source':HOST_MEMORY_POLICY_PATH,'source_sha256':digest(raw[HOST_MEMORY_POLICY_PATH]),
+            'provider_sha256':digest(raw[provider]),'provider_header_sha256':digest(raw[header]),
+            'patch_sha256':digest(raw[HOST_MEMORY_POLICY_PATCH]),'contract':contract,
+            'capacity_semantics':'sparse-virtual-capacity',
+            'live_guard_semantics':'fresh-available-memory-admission-only'}
+
+
 def shader_files(source,*,conditional_supported=False):
     source=checked_path(source);ios._tree(source)
     if os.path.lexists(source/'conditional-publication.json'):
@@ -329,6 +369,7 @@ def prepare(binary,receipt,commands,guest,preflight_report,rewrite,source_public
     if not re.fullmatch(r'[0-9]+(?:\.[0-9]+){0,2}',build_version):raise ValueError('explicit numeric debug build version required')
     raw=read(binary,BINARY);layout=executable_layout(raw)
     lock,build=verify_build(raw,receipt,commands,ROOT)
+    memory_policy=host_memory_runtime_policy(lock,ROOT)
     conditional_supported={'adapter/whole_shader_conditional.m','adapter/whole_shader_bundle_publication.m'}<=set(lock['adapter_translation_units']) and \
         'patches/conditional-shader-runtime.patch' in lock.get('patches',[])
     shaders,shader_index=shader_files(source_publication,conditional_supported=conditional_supported)
@@ -360,7 +401,8 @@ def prepare(binary,receipt,commands,guest,preflight_report,rewrite,source_public
                'unsigned':True,'installed':False,'executed':False,'phone_ready':False,'game_playable':False,
                'runtime_configured':True,'runtime_shader_compilation_required':True,'executable':layout,
                'conditional_shader_predicates_required':shader_index['schema']=='botw-whole-conditional-shader-package-v1',
-               'build':build,'guest':guest_identity,'shader':shader_index,'files':files,
+               'build':build,'guest':guest_identity,'host_memory_runtime_policy':memory_policy,
+               'shader':shader_index,'files':files,
                'scope':'exact admitted shader batch only; unsigned owned preparation is not device or gameplay acceptance'}
         write_json(app/'package-manifest.json',audit)
         if os.path.lexists(output):raise FileExistsError('output appeared during packaging')

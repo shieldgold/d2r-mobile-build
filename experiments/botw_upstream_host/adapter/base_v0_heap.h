@@ -4,6 +4,7 @@
 #pragma once
 #include <stddef.h>
 #include <pthread.h>
+#define BOTW_BASE_V0_ORIGINAL_HEAP_BYTES ((size_t)0xc2600000)
 
 typedef struct {
     size_t kernel_available, live_available, image_bytes;
@@ -12,6 +13,13 @@ typedef int (*botw_base_v0_heap_query)(botw_base_v0_heap_inputs *, char *, size_
 
 int botw_base_v0_heap_plan(size_t kernel_available, size_t live_available,
     size_t *heap, size_t *root, char *error, size_t capacity);
+/* Separate sparse logical capacity from current physical headroom. The old
+ * bounded planner and direct-provider default remain compatible. */
+int botw_base_v0_heap_plan_original_logical(size_t kernel_available, size_t live_available,
+    size_t *heap, size_t *root, char *error, size_t capacity);
+int botw_base_v0_heap_select_original_logical(char *error, size_t capacity);
+/* Lock-free: allocator input queries may call this while plan_lock is held. */
+int botw_base_v0_heap_original_logical_enabled(void);
 /* Native iOS app-limit query. Unknown/unsupported sources fail; no physical
  * memory total is passed off as a current app limit. */
 int botw_base_v0_heap_live_available(size_t *out, char *error, size_t capacity);
@@ -21,8 +29,8 @@ int botw_base_v0_heap_live_available(size_t *out, char *error, size_t capacity);
  * The module lock serializes plan selection and TSD publication. */
 int botw_base_v0_heap_thread_init(pthread_key_t heap_key, pthread_key_t root_key,
     botw_base_v0_heap_query query, char *error, size_t capacity);
-/* The existing SVC resize lock may call these. Admission rechecks the live
- * growth budget; a permission failure must never be recorded as accepted. */
+/* The existing SVC resize lock may call these. Admission rechecks the bounded
+ * growth budget or logical-mode fresh headroom; VM failure is never accepted. */
 int botw_base_v0_heap_admit(size_t requested, size_t previous, char *error, size_t capacity);
 int botw_base_v0_heap_record(size_t accepted, char *error, size_t capacity);
 int botw_base_v0_heap_initial_pending(void);

@@ -69,18 +69,23 @@
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.c": {
-      "sha256": "8e41db1134df1156964cd35e28632fd52e5bdf05d905553474922705fcbb2113",
-      "bytes": 6841,
+      "sha256": "6e817db47bad22a3df6d00c908fa9b94bbfb76d4540c62296996c09657b42946",
+      "bytes": 8228,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.h": {
-      "sha256": "c3e10e178bc2d826f0e4573b08256ec8c5c6a4afd10f151a2b9a8db2bc1b405a",
-      "bytes": 1912,
+      "sha256": "af73487defc4d80a106b64a74a753ac5c30fcd0329d9631dd87e5f9db3b201d8",
+      "bytes": 2492,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_heap.json": {
-      "sha256": "851578186f96d68249066dd16f0939dd190acfc0f445223ac6bcb226131fe129",
-      "bytes": 2619,
+      "sha256": "7b37be0df6d4003a504dd85adb43536576249c482eaf1f873e038d4e37c245a5",
+      "bytes": 3272,
+      "role": "thin-adapter-or-verification"
+    },
+    "adapter/base_v0_heap_runtime.json": {
+      "sha256": "e535e51c21b7d88d7f26bd3f744b53029260baf69d894bdabe431747c10f0687",
+      "bytes": 1019,
       "role": "thin-adapter-or-verification"
     },
     "adapter/base_v0_hid_single.json": {
@@ -678,6 +683,11 @@
       "bytes": 849,
       "role": "thin-adapter-or-verification"
     },
+    "patches/original-logical-heap.patch": {
+      "sha256": "4482449593c083684dc4c53f19e80f5e11e73df58f90b5bf03615dd48342bcd1",
+      "bytes": 2016,
+      "role": "thin-adapter-or-verification"
+    },
     "patches/pcm-stress-frontier.patch": {
       "sha256": "cb9a96f442cfa44ff85c7085bb8119cf9123d4fa81a69afa3e0578e1a73922ff",
       "bytes": 2216,
@@ -739,8 +749,8 @@
       "role": "thin-adapter-or-verification"
     },
     "scripts/package_ios.py": {
-      "sha256": "869b6f501028b0f11996b31f7b75b164f6c035e74e29636aeac7305b47d3cced",
-      "bytes": 26312,
+      "sha256": "004ed292554617ccbb80cdf7704893262dd2fc1a92c6666c38acbaa5120da500",
+      "bytes": 29450,
       "role": "thin-adapter-or-verification"
     },
     "scripts/read_swforce_registry.py": {
@@ -921,6 +931,11 @@
     "tests/whole_nvn_version_probe.c": {
       "sha256": "1cd2a7edfbb3d5350d3249970dfa223f0c25c645a5dd8ebd42b38df24f39b7e4",
       "bytes": 2387,
+      "role": "thin-adapter-or-verification"
+    },
+    "tests/whole_original_logical_heap_probe.c": {
+      "sha256": "58cbdd7eb69ade3d3e5be0244e499b8cc7397a6fa4a9bf6f8330746c0e5a9052",
+      "bytes": 6567,
       "role": "thin-adapter-or-verification"
     },
     "tests/whole_pcm_stress_frontier_probe.c": {
@@ -1794,7 +1809,8 @@
     "patches/base-v0-account-open.patch",
     "patches/normal-account-result-status.patch",
     "patches/normal-signal-kind.patch",
-    "patches/base-v0-allocation-failure.patch"
+    "patches/base-v0-allocation-failure.patch",
+    "patches/original-logical-heap.patch"
   ],
   "patched_source_sha256": {
     "dm/gfx/nvn/botw_buffer.c": "ae7abf8844e648f912e4acf4fc1b2517121286148482c29ac3d23b7745587b85",
@@ -1830,12 +1846,12 @@
     "dm/host/hle_count.c": "259d9ae8cb970a82673123b831c20084a73c1b675132cb456ef4f2e549a72477",
     "dm/host/hle_os.c": "a1aff3b2fade3c1e27be46666098dc59457c6070c2619e2b029b4c03a458097f",
     "dm/host/hle_sdkinit.c": "c1b4397123b9228d315c04a918c840d25c81b7251e44bc2df13eee7994c80385",
-    "dm/host/hle_svc.c": "92a18e39a1a5753d2a3f6fe826691fec3fd9f54aa369fbc8190b14a3a434f866",
+    "dm/host/hle_svc.c": "2a5689b087548986c85de08df0f3592c5932a38f8ef26d3ef259642978250b5c",
     "dm/host/hle_thread.c": "fb4af85438760fb05a8560acc7e436e853fa9257b0a255904b240308c22a1ff8",
     "dm/host/loader.c": "42e7e7eb2a0d67b860b02a74e11af0ca395951e9219da7bdbc2dedb4a1104ab5",
     "dm/host/main.c": "1bc268acd58963dc902dd9f01f308a9960c61a6f7273e1a2ecf65a8f952aac64",
     "dm/host/tests/t_botw_pcm.c": "eedde76aead52c05888f3541a7529e30d6febdb16e2683bb56bff254ef7f09c6",
-    "dm/host/thread.c": "554d07f4f1028fa771a00080c741bfaf5646ed3a8aa46304846f82922dc1828a",
+    "dm/host/thread.c": "e242154340ee62fbdc80061910447b33297c3cc7f1020b91d4bf0b8c5a95f7e3",
     "dm/host/title_botw.c": "2feb2dbc45bc3534f81392999f2177d8ea41ec5632f1b8670f3dd37f6dc133bf"
   },
   "targets": {
