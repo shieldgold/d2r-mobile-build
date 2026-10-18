@@ -67,3 +67,23 @@ Further work must address the render backend's fixed pass/submission costs
 and validate image equivalence. The backend's opt-in TBDR batch of changes
 has known incomplete inference of bindless texture dependencies; enabling it
 wholesale is not a verified way to preserve image correctness.
+
+## Native-quality follow-up and final device state
+
+After the rollback, crop logging confirmed 1280x720. Native-quality windows
+ending at frames 1800/2100/2400 had frame p50 34.05/34.31/34.62 ms and GPU
+p50 29.75/29.25/29.90 ms. A second runtime-only test used `DM_NVN_CUT=256`
+instead of the upstream default 64, without changing the app or resolution.
+Its first gameplay window ended at frame 1200 with frame p50 39.78 ms and GPU
+p50 34.04 ms; the app then entered the background. This is not a complete
+controlled A/B comparison and establishes no performance improvement.
+The earlier 540p screenshot also has a different camera orientation from the
+native screenshot, so no exact percentage gain/loss is claimed between them.
+
+The experiment was ended by a clean launch of signed build 1018.3 without
+`DM_NVN_CUT`, `DM_KEYS`, or screenshot overrides. `Documents/env.txt` is
+byte-identical to its pre-test backup. Read-back hashes confirm that the main
+game save, caption and tracker files are unchanged in both `save` and
+`save.work`; only `option.sav` differs. Both pre-test and post-test versions
+were backed up, and no newer settings were overwritten. This work did not
+achieve stable 60 fps at native quality.
