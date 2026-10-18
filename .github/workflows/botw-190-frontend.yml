@@ -68,12 +68,15 @@ jobs:
           envfile.write_text('DM_IOS_STRETCH=1\n')
           env = dict(os.environ, GAME='01007EF00011E000', W=str(work/'ipa'),
               PATCHED=str(work/'patched_v1114112'), ROMFS=str(work/'extract/v1114112/RomFS'),
-              MSL_IOS=str(libs), FONT_PY=str(Path('.venv/bin/python').resolve()),
+              MSL_IOS=str(libs), FONT_PY=str(Path('.venv/bin/python').absolute()),
               STD_FONT=str(work/'standard.ttf'), DM_DISPLAY_NAME='Zelda Breath of the Wild',
               DM_BUNDLE_ID='local.botw.native', AOC='', DM_ENV_FILE=str(envfile),
               DM_ICON=str(work/'extract/v1114112/icon.jpg'))
           with (work/'logs/frontend-build.log').open('w') as log:
-              subprocess.run(['bash', str(repo/'dm/ios/tools/build_ipa.sh'), str(Path('runtime.ipa').resolve())], env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+              result = subprocess.run(['bash', str(repo/'dm/ios/tools/build_ipa.sh'), str(Path('runtime.ipa').resolve())], env=env, stdout=log, stderr=subprocess.STDOUT)
+          if result.returncode:
+              print((work/'logs/frontend-build.log').read_text()[-16000:])
+              raise SystemExit(result.returncode)
           (work/'logs/frontend-receipt.json').write_text(json.dumps({'upstream_commit':'d1d68e80f8331ab85465f763d2cb457c3e2450d5','shader_source_run':39047604473,'shader_chain':chain,'normal_shader_count':len(normal),'shader_translation_rebuilt':False,'frontend_setting':'DM_IOS_STRETCH=1','patch_sha256':hashlib.sha256(Path('patches/nxnative-ios-stretch.patch').read_bytes()).hexdigest()},indent=2)+'\n')
           PY
       - name: Encrypt runtime for local signing
