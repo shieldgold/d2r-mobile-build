@@ -1,3 +1,68 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index 75b8b17..e5969e0 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -6159,7 +6159,8 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
+     // when the ratio difference is < 1% (the remainder from the game width being a multiple of 8 in the full-screen setup, e.g. 1952x900 versus 2868x1320 differs by 0.17%) fill directly, leaving no few-pixel border
+     double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+     MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    const char *stretch = getenv("DM_IOS_STRETCH");
++    if ((stretch && atoi(stretch)) || fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     static double last_vp[4];   // Log one line when the viewport changes (used by the real-device screen-level acceptance screen_check.py to check the aspect ratio)
+     if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
+@@ -6190,7 +6191,8 @@ static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MT
+     present_pipeline(dst.pixelFormat);
+     double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+     MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+-    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
++    const char *stretch = getenv("DM_IOS_STRETCH");
++    if ((stretch && atoi(stretch)) || fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     MTL4RenderPassDescriptor *rp = [MTL4RenderPassDescriptor new];
+     rp.colorAttachments[0].texture = dst;
+diff --git a/dm/gfx/tests/Makefile b/dm/gfx/tests/Makefile
+index 41be22b..fdb5c9f 100644
+--- a/dm/gfx/tests/Makefile
++++ b/dm/gfx/tests/Makefile
+@@ -36,8 +36,8 @@ t_pace: t_pace.c ../nvn/nvn_pace.h
+ 	clang -O1 -Wall -o $@ t_pace.c
+ t_fuse_check: t_fuse_check.m ../../host/crash.c $(GFX) $(GFX_H)
+ 	clang $(CFLAGS) -fobjc-arc -o $@ t_fuse_check.m ../../host/crash.c $(filter-out ../nvn/nvn_mtl.m ../nvn/nvn_entry.S ../nvn/nvn_thunks.S,$(GFX)) $(FW)
+-t_present_crop: t_present_crop.m ../nvn/hle_nvn.c ../../host/crash.c $(GFX) $(GFX_H)
+-	clang $(CFLAGS) -fobjc-arc -o $@ t_present_crop.m ../../host/crash.c $(filter-out ../nvn/nvn_mtl.m,$(GFX)) $(FW)
++t_present_crop: t_present_crop.m ../nvn/hle_nvn.c ../../host/crash.c ../../host/hle_bigstack.c $(GFX) $(GFX_H)
++	clang $(CFLAGS) -fobjc-arc -o $@ t_present_crop.m ../../host/crash.c ../../host/hle_bigstack.c $(filter-out ../nvn/nvn_mtl.m,$(GFX)) $(FW)
+ t_reorder_chain: t_reorder_chain.m ../../host/crash.c $(GFX) $(GFX_H)
+ 	clang $(CFLAGS) -fobjc-arc -o $@ t_reorder_chain.m ../../host/crash.c $(filter-out ../nvn/nvn_mtl.m ../nvn/nvn_entry.S ../nvn/nvn_thunks.S,$(GFX)) $(FW)
+ t_defer_chain: t_defer_chain.m ../../host/crash.c $(GFX) $(GFX_H)
+diff --git a/dm/gfx/tests/t_present_crop.m b/dm/gfx/tests/t_present_crop.m
+index 1314f02..5639c4e 100644
+--- a/dm/gfx/tests/t_present_crop.m
++++ b/dm/gfx/tests/t_present_crop.m
+@@ -6,6 +6,7 @@
+ #include "../nvn/hle_nvn.c"
+ uint64_t g_t0_ns;   // process start time from host main.c (used by hle_nvn's per-frame @t_s); unit test stub
+ void *front_metal_layer(void) { return NULL; }
++int dm_guest_as_contains(uintptr_t address) { (void)address; return 0; }   // this GPU test has no guest address space
+ module_t *module_of(const void *p) { (void)p; return NULL; }
+ module_t g_mod[MAX_MOD]; int g_nmod;
+ void svc_thread_dump(void) {}
+@@ -60,6 +61,11 @@ int main(void) { @autoreleasepool {
+     check(src,"单纹素放大不跨边界256像素全红",one,16,16,0);
+     check(src,"非零双偏移16像素逐字节等手写子矩形",inset,4,4,-2);
+     check(src,"有效区比例保留，128像素中间红/两侧黑",tl,16,8,4);
++    setenv("DM_IOS_STRETCH", "1", 1);
++    check(src,"Opt-in stretch fills all 128 pixels without black bars",tl,16,8,0);
++    setenv("DM_IOS_STRETCH", "0", 1);
++    check(src,"Explicit zero restores the aspect-fit viewport",tl,16,8,4);
++    unsetenv("DM_IOS_STRETCH");
+ #ifndef CROP_LEGACY_HEADER
+     {
+         // sRGB swapchain: present sends the raw bytes (as the Switch's scan-out does) without decoding first; unfixed, 128/64/200 decode to about 55/13/148
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+index b068d8d..be498a7 100644
 --- a/dm/ios/Sources/front_ios.m
 +++ b/dm/ios/Sources/front_ios.m
 @@ -4,6 +4,7 @@
@@ -8,7 +73,7 @@
  #include <errno.h>
  #include "front.h"
  #include "hle.h"
-@@ -61,8 +62,12 @@
+@@ -61,8 +62,12 @@ - (void)viewDidLoad {
  - (void)viewDidLayoutSubviews {
      [super viewDidLayoutSubviews];
      CGRect b = self.view.bounds; if (!self.game) return;
