@@ -1,5 +1,7 @@
 .prepared-downloads/
 .prepared-input/
+.runtime-inputs/
+.interface-cache/
 .native-module-cache/
 native-build/
 upstream/
