@@ -1,0 +1,88 @@
+name: Build BOTW 1.9 fullscreen frontend with verified shaders
+on:
+  push:
+    branches: [codex/botw-190-official-ci]
+    paths:
+      - .github/workflows/botw-190-frontend.yml
+      - patches/nxnative-ios-stretch.patch
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: botw-190-frontend
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILD_TRANSPORT_PASSWORD: ${{ secrets.BOTW190_TRANSPORT_PASSWORD }}
+      INPUT_SHA256: ${{ vars.BOTW190_INPUT_SHA256 }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select Xcode and install host build dependencies
+        run: |
+          python3 scripts/source/select_xcode.py
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          python3 -m venv .venv
+          .venv/bin/pip install lz4 capstone fonttools
+      - name: Restore verified private inputs and shader artifact
+        run: |
+          git clone --quiet https://github.com/seedds/nxnative.git upstream-official
+          git -C upstream-official checkout --quiet d1d68e80f8331ab85465f763d2cb457c3e2450d5
+          gh release download botw-190-private-input-20261017 --repo "$GITHUB_REPOSITORY" --pattern input.tar.enc
+          printf '%s  input.tar.enc\n' "$INPUT_SHA256" | shasum -a 256 -c -
+          openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -in input.tar.enc -out input.tar.gz -pass env:BUILD_TRANSPORT_PASSWORD
+          tar -xzf input.tar.gz
+          gh run download 39047604473 --repo "$GITHUB_REPOSITORY" --name botw-190-encrypted-runtime --dir reused-artifact
+          openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -in reused-artifact/result.tar.enc -out reused-result.tar.gz -pass env:BUILD_TRANSPORT_PASSWORD
+          mkdir reused
+          tar -xzf reused-result.tar.gz -C reused
+          unzip -q reused/runtime.ipa -d reused
+          cp reused/build/logs/effective_chain.h upstream-official/dm/games/01007EF00011E000/dmsh_chain.h
+          cp reused/build/logs/effective_chain.lock upstream-official/dm/gfx/tools/dmsh_chain.lock
+          cp reused/Payload/DmIOS.app/dm/c1_full.tsv upstream-official/dm/games/01007EF00011E000/c1_full.tsv
+          git -C upstream-official apply --check ../patches/nxnative-ios-stretch.patch
+          git -C upstream-official apply ../patches/nxnative-ios-stretch.patch
+      - name: Verify reused shader chain and rebuild only the host
+        run: |
+          .venv/bin/python - <<'PY'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          repo = Path('upstream-official').resolve()
+          work = Path('build').resolve()
+          libs = Path('reused/Payload/DmIOS.app/msl').resolve()
+          chain = re.search(r'#define DMSH_CHAIN "(.*)"', (repo/'dm/games/01007EF00011E000/dmsh_chain.h').read_text()).group(1)
+          assert chain == 'df19b235128f'
+          normal = list((libs/f'b-{chain}').glob('*_b.metallib'))
+          assert len(normal) == 19592, len(normal)
+          for f in (libs/f'b-{chain}').rglob('*.metallib'):
+              with f.open('rb') as stream:
+                  assert stream.read(4) == b'MTLB', str(f)
+          work.joinpath('logs').mkdir(exist_ok=True)
+          envfile = work/'fullscreen.env'
+          envfile.write_text('DM_IOS_STRETCH=1\n')
+          env = dict(os.environ, GAME='01007EF00011E000', W=str(work/'ipa'),
+              PATCHED=str(work/'patched_v1114112'), ROMFS=str(work/'extract/v1114112/RomFS'),
+              MSL_IOS=str(libs), FONT_PY=str(Path('.venv/bin/python').resolve()),
+              STD_FONT=str(work/'standard.ttf'), DM_DISPLAY_NAME='Zelda Breath of the Wild',
+              DM_BUNDLE_ID='local.botw.native', AOC='', DM_ENV_FILE=str(envfile),
+              DM_ICON=str(work/'extract/v1114112/icon.jpg'))
+          with (work/'logs/frontend-build.log').open('w') as log:
+              subprocess.run(['bash', str(repo/'dm/ios/tools/build_ipa.sh'), str(Path('runtime.ipa').resolve())], env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+          (work/'logs/frontend-receipt.json').write_text(json.dumps({'upstream_commit':'d1d68e80f8331ab85465f763d2cb457c3e2450d5','shader_source_run':39047604473,'shader_chain':chain,'normal_shader_count':len(normal),'shader_translation_rebuilt':False,'frontend_setting':'DM_IOS_STRETCH=1','patch_sha256':hashlib.sha256(Path('patches/nxnative-ios-stretch.patch').read_bytes()).hexdigest()},indent=2)+'\n')
+          PY
+      - name: Encrypt runtime for local signing
+        run: |
+          tar -czf result.tar.gz runtime.ipa build/logs
+          openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -salt -in result.tar.gz -out result.tar.enc -pass env:BUILD_TRANSPORT_PASSWORD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: botw-190-fullscreen-encrypted-runtime
+          path: result.tar.enc
+          retention-days: 1
+          compression-level: 0

@@ -1,0 +1,25 @@
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -4,6 +4,7 @@
+ #import <QuartzCore/CAMetalLayer.h>
+ #import <Metal/Metal.h>
+ #import <AVFAudio/AVFAudio.h>
++#include <stdlib.h>
+ #include <errno.h>
+ #include "front.h"
+ #include "hle.h"
+@@ -61,8 +62,12 @@
+ - (void)viewDidLayoutSubviews {
+     [super viewDidLayoutSubviews];
+     CGRect b = self.view.bounds; if (!self.game) return;
+-    CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
+-    if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
++    CGFloat w = b.size.width, h = b.size.height;
++    // Opt-in presentation stretch; the game resolution and gamepad bounds stay unchanged.
++    const char *stretch = getenv("DM_IOS_STRETCH");
++    if (!(stretch && atoi(stretch))) {
++        if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
++    }
+     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
+ }
+ - (void)viewDidAppear:(BOOL)a { [super viewDidAppear:a]; front_ios_boot(); }
